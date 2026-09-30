@@ -1,0 +1,15 @@
+[package]
+name = "unity_yaml_viewer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.31"
+rfd = "0.15"
+regex = "1.11"
+encoding_rs = "0.8"
+
+[build-dependencies]
+ico = "0.4"
+image = "0.25"
+winres = "0.1"
