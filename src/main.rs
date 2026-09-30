@@ -11,6 +11,8 @@ use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use encoding_rs::{GBK, UTF_8};
 use regex::Regex;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone)]
 struct Document {
     file_id: String,
@@ -76,6 +78,7 @@ struct ViewerApp {
     freeze_table_header: bool,
     tabs: Vec<ViewerTab>,
     active_tab: usize,
+    show_about: bool,
 }
 
 #[derive(Clone)]
@@ -442,6 +445,9 @@ impl eframe::App for ViewerApp {
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                if ui.button("关于").clicked() {
+                    self.show_about = true;
+                }
                 ui.menu_button("主题", |ui| {
                     if ui.button("跟随系统").clicked() {
                         ctx.set_theme(egui::ThemePreference::System);
@@ -705,6 +711,29 @@ impl eframe::App for ViewerApp {
 			ui.separator();
 			ui.small(format!("{}　·　文件编码：{}", self.status, if self.encoding.is_empty() { "尚未读取" } else { &self.encoding }));
 		});
+
+        if self.show_about {
+            egui::Window::new("关于 Unity YAML Viewer")
+                .open(&mut self.show_about)
+                .resizable(true)
+                .default_width(460.0)
+                .show(ctx, |ui| {
+                    ui.heading("Unity YAML Viewer");
+                    ui.label(format!("版本 {APP_VERSION}"));
+                    ui.small("用于安全查看 Unity 文本序列化资源的只读工具");
+                    ui.separator();
+                    ui.heading("更新历史");
+                    ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.0.0").strong());
+                        ui.label("首个正式版本。");
+                        ui.add_space(4.0);
+                        ui.label("• 支持 Unity YAML 资源的层级与 Inspector 浏览");
+                        ui.label("• 支持搜索、多标签页、GUID / FileID 复制和编码识别");
+                        ui.label("• 提供动画、材质、动画控制器等常见资源的结构化展示");
+                        ui.label("• 所有资源以只读方式打开，不会写回或修改原文件");
+                    });
+                });
+        }
     }
 }
 
