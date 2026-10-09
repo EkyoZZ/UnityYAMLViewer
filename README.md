@@ -8,11 +8,11 @@
 
 **Unity YAML Viewer** 是一个面向 Unity 文本序列化资源的桌面工具。它将 `.prefab`、`.unity`、`.asset` 等 YAML 文件解析为更易理解的层级和 Inspector 视图，帮助你在不打开 Unity 编辑器时检查资源内容。
 
-项目的目标不止于“阅读 YAML”：它希望逐步提供**可安全编辑的字段面板**，让用户直接修改可识别的值，同时通过结构化写回、校验和预览来避免手动编辑 YAML 时常见的缩进、引用或格式损坏问题。
+项目现已支持**属性编辑**：通过 Inspector 控件修改已识别的值，确认保存后写回原文件。类型校验、引用保护和精确片段写回帮助减少手动编辑 YAML 时的缩进、引用或格式损坏问题。
 
 ### 当前状态
 
-当前版本是**只读浏览器**：不会写回、保存或修改任何打开的资源文件。安全编辑面板属于后续开发方向，尚未实现。
+当前版本 **1.1.0** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
 
 ### 已有功能
 
@@ -20,30 +20,35 @@
 - 按 `GameObject` / `Transform` 关系重建 Prefab 和场景层级，并列出组件
 - 搜索对象名称、组件、字段值、`fileID` 或 GUID，并高亮匹配项
 - 多标签页浏览，并记住上一次打开的文件夹
+- 自动保存未关闭的文件标签与当前标签，下次启动恢复；手动关闭的标签和已删除的文件不会恢复
 - 复制对象 `fileID` 及资源引用的 GUID
 - 自动识别 UTF-8；遇到无效 UTF-8 字节时尝试按 GBK 读取
 - 为 `AnimationClip`、`AnimatorController`、`AnimatorOverrideController`、`Material` 和 `SpriteAtlas` 提供结构化导航
 - 按路径 / 组件 / 属性查看动画曲线，显示时长、采样率、关键帧，并定位回原始 YAML
+- Animator Controller 提供只读状态关系图：Layer 切换、默认状态、Entry / Any State / Exit、过渡连线、子状态机、画布拖动缩放和参数默认值；点击状态查看 Motion 引用，点击连线查看过渡条件，支持切回 YAML
 - 将规则 YAML 列表显示为表格，并支持冻结表头
+- Transform / RectTransform 支持属性与 YAML 切换，可在编辑模式中修改已识别属性
+- MonoBehaviour 根据 `m_Script.guid` 在 Unity 工程中定位脚本，按字段声明显示属性（整数、浮点数、布尔值、字符串、颜色、向量和简单枚举），支持编辑已识别字段，并折叠组件公共信息
 - 跟随系统、浅色与深色主题
 
-### 计划中的安全编辑
+MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/PackageCache` 中的 `.cs.meta`，并缓存 GUID 索引；修改脚本后可点击“重新扫描脚本”。支持可唯一定位的父类和嵌套类型，以及 `SerializeField`、`FormerlySerializedAs` 等常见声明。该解析器不是 C# 编译器：条件编译区域、泛型或 partial 类、歧义类型及无法读取的脚本不保证识别，未知字段保留原值；已识别的列表和数组通过表格查看与编辑，不支持的复杂结构可展开查看原文。文件脱离 Unity 工程或脚本来自 DLL 时，可能无法确定字段类型。未知类型及原始复杂结构保持只读。
 
-未来的编辑功能会优先围绕“避免破坏 YAML”设计，而不是把原始文本编辑器直接搬进应用：
+### 属性编辑与设置
 
-- 为可识别的标量、列表和常见 Unity 字段提供表单式编辑
-- 保留未知字段、注释和对象引用，尽量缩小写入范围
-- 在保存前显示变更预览，并检查 YAML 结构、`fileID` / GUID 引用和类型格式
-- 仅在校验通过后写入；失败时保留原文件，并提供清晰的错误信息
-- 提供显式保存与备份策略，避免无意覆盖资源
-
-这些是项目方向，不代表当前版本已经具备上述能力。
+- 支持编辑已识别的标量、字符串、布尔值、枚举、向量、颜色、Transform / RectTransform、材质字段、Gradient 关键点和列表 / 数组元素；具体字段须能唯一定位到原文。
+- 点击“编辑模式”暂存修改，修改的属性、表格行和层级节点高亮；点击“还原”恢复该属性或整行最近保存的值。
+- “放弃编辑”恢复最近保存的值，“保存编辑”写入 UTF-8 文件；两者均退出编辑模式。
+- Ctrl+Z 按文件分别撤销。默认保留 200 步，设置范围 50～1000；超过上限淘汰最早记录。保存后退出编辑模式，但保留撤销记录；Ctrl+Z 自动进入编辑模式并恢复之前的值，再次保存才写入磁盘。关闭文件或点击“放弃编辑”清空记录；放弃恢复最近保存的内容。
+- 确认输入（Enter 或失去焦点）时验证整数范围、有限浮点数、向量分量和已识别枚举；无效值警告并回退。未知类型、原始 YAML、fileID 引用保持只读。
+- 切换标签页保留各文件的暂存修改；处于编辑模式时，关闭标签或退出应用前须先保存或放弃。未保存修改和撤销记录不会跨启动恢复。
+- 未确认输入或警告会阻止保存；保存前检查外部改动，通过同目录临时文件替换原文件，写入失败保留原文件。
+- “设置”弹窗依次包含“关于”按钮、主题下拉菜单和单个文件缓存撤销步骤；主题与步数在下次启动时恢复。
 
 ### 使用方法
 
 1. 启动应用。
 2. 点击“打开”，或将 Unity YAML 文件拖进窗口。
-3. 在左侧层级中选择对象或组件，在右侧只读 Inspector 查看对应 YAML。
+3. 在左侧层级中选择对象或组件，在右侧 Inspector 查看属性或原始 YAML。
 4. 用顶部搜索框查找名称、字段值、`fileID` 或 GUID。
 
 ### 构建与运行
@@ -66,7 +71,7 @@ target\release\unity_yaml_viewer.exe
 
 - 工具仅面向 Unity 的**文本序列化** YAML 资源，无法读取二进制序列化资源。
 - 解析逻辑针对常见 Unity YAML 结构；不保证覆盖全部 Unity 版本、内置类型或自定义序列化格式。
-- 当前内容均为只读展示。修改资源请使用 Unity 编辑器或其他适合版本控制的文本编辑器。
+- 默认只读；通过“编辑模式”修改已识别属性。带 fileID 的引用保持锁定，点击会提示风险。
 
 ### 技术栈
 
@@ -90,11 +95,11 @@ cargo check
 
 **Unity YAML Viewer** is a desktop tool for Unity text-serialized assets. It parses YAML files such as `.prefab`, `.unity`, and `.asset` into a more approachable hierarchy and Inspector view, making it easier to inspect assets without opening the Unity Editor.
 
-The project is intended to grow beyond YAML viewing. Its longer-term goal is a **safe, value-editing Inspector**: users should be able to edit recognized values through controls while structured writes, validation, and previews help prevent the indentation, reference, and formatting damage that can result from hand-editing YAML.
+The project now supports **property editing**: change recognized values through Inspector controls and save them back to the original file. Type validation, reference protection, and targeted text updates help reduce indentation, reference, and formatting errors from manual YAML editing.
 
 ### Current status
 
-The current release is a **read-only viewer**. It never writes, saves, or modifies an opened asset. The safe editing Inspector is planned work and is not available yet.
+Version **1.1.0** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
 
 ### Available features
 
@@ -102,30 +107,33 @@ The current release is a **read-only viewer**. It never writes, saves, or modifi
 - Rebuild Prefab and scene hierarchies from `GameObject` / `Transform` relationships and list components
 - Search object names, components, field values, `fileID`s, or GUIDs, with highlighted matches
 - Browse several files in tabs and remember the last opened directory
+- Restore open tabs and the active tab on startup; closed tabs and deleted files are omitted
 - Copy object `fileID`s and referenced GUIDs
 - Detect UTF-8 automatically and fall back to GBK when invalid UTF-8 bytes are found
 - Structured navigation for `AnimationClip`, `AnimatorController`, `AnimatorOverrideController`, `Material`, and `SpriteAtlas`
 - Browse animation curves by path, component, and property; inspect duration, sample rate, and keyframes; jump back to the original YAML
+- Read-only Animator Controller graphs with layers, default states, Entry / Any State / Exit, transitions, nested state machines, pan/zoom, parameter types and defaults, Motion references, and transition conditions; switch back to YAML at any time
 - Display regular YAML lists as tables, with an optional frozen header
+- Switch between properties and YAML for Transform / RectTransform; edit recognized properties in Edit Mode
+- Resolve MonoBehaviour scripts through `m_Script.guid` and display declared field types with editable controls for recognized numbers, booleans, strings, colors, vectors, and simple enums; collapse common component metadata
 - System, light, and dark themes
 
-### Planned safe editing
+The MonoBehaviour inspector indexes `.cs.meta` files in `Assets`, `Packages`, and `Library/PackageCache` in the background. Use the rescan button after changing scripts. Unambiguous inheritance, nested types, and common attributes such as `SerializeField` and `FormerlySerializedAs` are supported. This source parser is not a C# compiler: conditional sections, generic or partial classes, ambiguous types, and unavailable scripts may remain unresolved. Unknown values are preserved. Recognized lists and arrays can be viewed and edited in tables; unsupported complex structures can be expanded as raw text. Assets outside a Unity project and scripts from DLLs may have unknown field types. Unknown types and unsupported raw structures remain read-only.
 
-Editing will be designed around preserving asset integrity rather than exposing a raw text editor:
+### Property editing and settings
 
-- Form controls for recognized scalar values, lists, and common Unity fields
-- Preserve unknown fields, comments, and object references while limiting the write scope
-- Show a change preview and validate YAML structure, `fileID` / GUID references, and value formats before saving
-- Write only after validation succeeds; keep the original file intact and report actionable errors on failure
-- Require an explicit save and provide a backup strategy to prevent accidental overwrites
-
-These items describe the project direction, not functionality already present in this release.
+- Editable fields include recognized scalars, strings, booleans, enums, vectors, colors, Transform / RectTransform properties, material fields, Gradient keys, and list / array elements. Each field must map unambiguously to its source text. Modified rows are highlighted; Restore reverts one property or table row independently.
+- Discard Edits returns to the latest saved values. Save Edits writes UTF-8 and exits Edit Mode.
+- Ctrl+Z keeps separate histories per file. Default: 200 steps; configurable range: 50–1000. The oldest entries expire beyond the limit. Saving exits Edit Mode and retains undo history. Ctrl+Z re-enters Edit Mode and restores a previous value; save again to write it to disk. Closing the file or choosing Discard Edits clears its history. Discard restores the latest saved contents.
+- Committed input validates numeric widths, finite floats, vector components and recognized enums. Invalid input warns and reverts. Unknown types, raw YAML and fileID references remain locked.
+- Switching tabs preserves staged edits for each file. Save or discard before closing an editing tab or exiting the application. Unsaved edits and undo histories are not restored after restarting. and replaces the asset using a temporary file in the same directory. Failed writes preserve the original.
+- Settings contains About, a theme selector and undo history capacity. Theme and undo settings persist across restarts.
 
 ### Usage
 
 1. Start the application.
 2. Click **Open**, or drag a Unity YAML file into the window.
-3. Select an object or component in the hierarchy to view its YAML in the read-only Inspector.
+3. Select an object or component in the hierarchy to view its properties or raw YAML in the Inspector.
 4. Use the search field to find names, field values, `fileID`s, or GUIDs.
 
 ### Build and run
@@ -146,9 +154,12 @@ During Windows builds, `assets/app_icon.png` is converted and embedded as the ap
 
 ### Scope and limitations
 
+- Quoted YAML strings are decoded for property and table display, including Unicode escapes such as `\u7070` → `灰`. Raw YAML remains unchanged.
+- Edits keep decoded display values separate from serialized text, save as UTF-8, preserve quoting and Unicode escape style where possible, and escape quotes, backslashes, and control characters. Unchanged text, line endings, and existing UTF-8 BOMs are preserved.
+
 - The viewer targets **text-serialized** Unity YAML assets only; it cannot read binary-serialized assets.
 - Parsing targets common Unity YAML layouts and does not guarantee coverage of every Unity version, built-in type, or custom serialization format.
-- All displayed content is currently read-only. Use the Unity Editor or a version-control-friendly text editor to modify assets.
+- Recognized properties are editable in Edit Mode. fileID references, raw YAML, unknown types, and fields without an unambiguous source location remain read-only.
 
 ### Technology
 
