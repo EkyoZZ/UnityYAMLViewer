@@ -76,6 +76,8 @@ struct ViewerApp {
     selected_animation_track: Option<AnimationTrackSelection>,
     show_custom_table: bool,
     freeze_table_header: bool,
+    table_column_widths: HashMap<String, Vec<f32>>,
+    table_horizontal_offsets: HashMap<String, f32>,
     tabs: Vec<ViewerTab>,
     active_tab: usize,
     show_about: bool,
@@ -662,9 +664,23 @@ impl eframe::App for ViewerApp {
 							ui.separator();
 						}
 					});
-					if ui.button("复制 FileID").clicked() {
-						ctx.copy_text(doc.file_id.clone());
-					}
+					ui.menu_button("复制 FileID", |ui| {
+						ui.set_min_width(320.0);
+						if ui.button("自身 FileID").clicked() {
+							ctx.copy_text(doc.file_id.clone());
+							ui.close_menu();
+						}
+						ui.monospace(&doc.file_id);
+						ui.separator();
+						for (field_name, file_id) in file_id_entries_from_text(&doc.text) {
+							if ui.button(format!("复制 {field_name}")).clicked() {
+								ctx.copy_text(file_id.clone());
+								ui.close_menu();
+							}
+							ui.monospace(file_id);
+							ui.separator();
+						}
+					});
 					if is_animation_clip {
 						ui.add_space(8.0);
 						let duration = animation_duration(&doc.text);
@@ -690,7 +706,27 @@ impl eframe::App for ViewerApp {
 					ui.small("原始 YAML（点击关键帧后自动定位并高亮对应的 time / value）");
 					show_animation_yaml(ui, &doc.text, self.selected_keyframe.as_ref(), &self.query);
 				} else if let Some(table) = custom_table.filter(|_| self.show_custom_table) {
-					show_yaml_table(ui, &table, self.freeze_table_header);
+					let table_key = format!("{}:{}", doc.file_id, table.title);
+					let horizontal_offset = self
+						.table_horizontal_offsets
+						.get(&table_key)
+						.copied()
+						.unwrap_or_default();
+					let new_horizontal_offset = {
+						let widths = self
+							.table_column_widths
+							.entry(table_key.clone())
+							.or_insert_with(|| table_column_widths(&table));
+						show_yaml_table(
+							ui,
+							&table,
+							self.freeze_table_header,
+							widths,
+							horizontal_offset,
+						)
+					};
+					self.table_horizontal_offsets
+						.insert(table_key, new_horizontal_offset);
 				} else {
 				ScrollArea::vertical().show(ui, |ui| {
 					let mut view = doc.text.clone();
@@ -1481,6 +1517,20 @@ fn guid_entries_from_text(text: &str) -> Vec<(String, String)> {
     entries
 }
 
+fn file_id_entries_from_text(text: &str) -> Vec<(String, String)> {
+    let inline_reference = Regex::new(r"([A-Za-z0-9_]+):\s*\{fileID:\s*(-?\d+)").unwrap();
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        for capture in inline_reference.captures_iter(line) {
+            let file_id = capture[2].to_string();
+            if file_id != "0" {
+                entries.push((capture[1].trim_start_matches("m_").to_string(), file_id));
+            }
+        }
+    }
+    entries
+}
+
 fn warning_color(ui: &egui::Ui) -> Color32 {
     if ui.visuals().dark_mode {
         Color32::YELLOW
@@ -1634,47 +1684,123 @@ fn table_column_widths(table: &YamlTable) -> Vec<f32> {
 fn show_table_row(
     ui: &mut egui::Ui,
     table: &YamlTable,
-    widths: &[f32],
+    widths: &mut [f32],
     row: Option<&BTreeMap<String, String>>,
+    allow_resize: bool,
 ) {
-    ui.horizontal(|ui| {
-        for (column, header) in table.headers.iter().enumerate() {
-            let text = row
-                .and_then(|values| values.get(header))
-                .map_or(header.as_str(), String::as_str);
-            let label = if row.is_some() {
-                egui::Label::new(RichText::new(text).monospace()).truncate()
-            } else {
-                egui::Label::new(RichText::new(text).strong())
-            };
-            let alignment = if row.is_some() && text.parse::<f64>().is_err() {
-                egui::Align::Min
-            } else {
-                egui::Align::Center
-            };
-            ui.add_sized([widths[column], 20.0], label.halign(alignment));
-        }
+    const CELL_HEIGHT: f32 = 24.0;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        ui.horizontal(|ui| {
+            for (column, header) in table.headers.iter().enumerate() {
+                let text = row
+                    .and_then(|values| values.get(header))
+                    .map_or(header.as_str(), String::as_str);
+                let is_header = row.is_none();
+                let alignment = if is_header || text.parse::<f64>().is_ok() {
+                    egui::Align::Center
+                } else {
+                    egui::Align::Min
+                };
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(widths[column], CELL_HEIGHT),
+                    egui::Sense::hover(),
+                );
+                let clipped_painter = ui
+                    .painter()
+                    .with_clip_rect(rect.shrink2(egui::vec2(6.0, 0.0)));
+                let text_position = if alignment == egui::Align::Min {
+                    egui::pos2(rect.left() + 6.0, rect.center().y)
+                } else {
+                    rect.center()
+                };
+                clipped_painter.text(
+                    text_position,
+                    if alignment == egui::Align::Min {
+                        egui::Align2::LEFT_CENTER
+                    } else {
+                        egui::Align2::CENTER_CENTER
+                    },
+                    text,
+                    if is_header {
+                        egui::FontId::proportional(14.0)
+                    } else {
+                        egui::FontId::monospace(14.0)
+                    },
+                    ui.visuals().text_color(),
+                );
+                response.on_hover_text(text);
+                ui.painter().rect_stroke(
+                    rect,
+                    0.0,
+                    ui.visuals().widgets.noninteractive.bg_stroke,
+                    egui::StrokeKind::Inside,
+                );
+
+                if allow_resize {
+                    let handle_rect = egui::Rect::from_center_size(
+                        egui::pos2(rect.right(), rect.center().y),
+                        egui::vec2(8.0, CELL_HEIGHT),
+                    );
+                    let handle = ui.interact(
+                        handle_rect,
+                        ui.id().with(("table-column-resize", header)),
+                        egui::Sense::drag(),
+                    );
+                    if handle.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+                    if handle.dragged() {
+                        let delta = ui.input(|input| input.pointer.delta().x);
+                        widths[column] = (widths[column] + delta).clamp(72.0, 640.0);
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+        });
     });
 }
 
-fn show_yaml_table(ui: &mut egui::Ui, table: &YamlTable, freeze_header: bool) {
+fn show_yaml_table(
+    ui: &mut egui::Ui,
+    table: &YamlTable,
+    freeze_header: bool,
+    widths: &mut [f32],
+    horizontal_offset: f32,
+) -> f32 {
     ui.label(RichText::new(format!("{}（{} 条）", table.title, table.rows.len())).strong());
-    let widths = table_column_widths(table);
-    if freeze_header {
-        show_table_row(ui, table, &widths, None);
-        ui.separator();
-    }
-    ScrollArea::both()
-        .auto_shrink([false, false])
-        .max_height(520.0)
-        .show(ui, |ui| {
-            if !freeze_header {
-                show_table_row(ui, table, &widths, None);
-            }
-            for row in &table.rows {
-                show_table_row(ui, table, &widths, Some(row));
-            }
-        });
+    let table_width = widths.iter().sum::<f32>();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if freeze_header {
+            ScrollArea::horizontal()
+                .id_salt(("yaml-table-header", &table.title))
+                .horizontal_scroll_offset(horizontal_offset)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.set_min_width(table_width);
+                    show_table_row(ui, table, widths, None, true);
+                });
+        }
+        let output = ScrollArea::both()
+            .id_salt(("yaml-table-body", &table.title))
+            .auto_shrink([false, false])
+            .max_height(520.0)
+            .show(ui, |ui| {
+                ui.set_min_width(table_width);
+                if !freeze_header {
+                    show_table_row(ui, table, widths, None, true);
+                }
+                for row in &table.rows {
+                    show_table_row(ui, table, widths, Some(row), false);
+                }
+            });
+        if freeze_header && output.state.offset.x != horizontal_offset {
+            ui.ctx().request_repaint();
+        }
+        output.state.offset.x
+    })
+    .inner
 }
 
 fn custom_list_fields(text: &str) -> Vec<(String, Vec<String>)> {
@@ -1850,7 +1976,10 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) 
 fn main() -> eframe::Result {
     eframe::run_native(
         "Unity YAML Viewer",
-        eframe::NativeOptions::default(),
+        eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default().with_icon(application_icon()),
+            ..Default::default()
+        },
         Box::new(|creation_context| {
             configure_system_fonts(&creation_context.egui_ctx);
             Ok(Box::new(ViewerApp {
@@ -1858,6 +1987,13 @@ fn main() -> eframe::Result {
                 ..Default::default()
             }))
         }),
+    )
+}
+
+fn application_icon() -> Arc<egui::IconData> {
+    Arc::new(
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/app_icon_256.png"))
+            .expect("无法读取窗口图标"),
     )
 }
 
