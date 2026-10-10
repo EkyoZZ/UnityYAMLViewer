@@ -133,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
     });
     let Some(machine) = documents.iter().find(|doc| doc.file_id == view.machine) else { ui.label(crate::localization::tr("未找到状态机")); return };
     let mut machine = machine.clone();
-    if let Some(text) = crate::editing::controller_machine_text(ui, &machine.file_id) { machine.text = text; }
+    if let Some(text) = crate::editing::controller_machine_text(ui, &machine.file_id) { machine.text = text.into(); }
     let mut data = graph(documents, &machine);
     for node in &mut data.nodes {
         if node.index.is_some() {
@@ -254,7 +254,7 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
     if let Some(document) = selected.and_then(|index| documents.get(index)) {
         if matches!(document.type_name.as_str(), "AnimatorStateTransition" | "AnimatorTransition") { transition_details(ui, document); }
         else if document.type_name == "AnimatorState" {
-            let text = crate::editing::document_text(ui, &document.file_id).unwrap_or_else(|| document.text.clone());
+            let text = crate::editing::document_text(ui, &document.file_id).unwrap_or_else(|| document.text.to_string());
             ui.label(crate::lf!("状态：{0}", name_from_text(&text).unwrap_or_default()));
             crate::script_properties::show_graph_reference(ui, "Motion", scalar(&document.text, "m_Motion").unwrap_or("{fileID: 0}"));
         }

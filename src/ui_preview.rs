@@ -6,7 +6,14 @@ use crate::{Document, static_preview::{Matrix, local, field, number, reference, 
 pub enum Graphic { Image, RawImage, Text, Tmp }
 pub fn graphic(doc: &Document) -> Option<Graphic> {
     if doc.type_name != "MonoBehaviour" { return None; }
-    let guid = field(&doc.text,"m_Script").and_then(|value|reference(value,"guid"));
+    // Inspector classification must be bounded even for a one-line IsoMap array.
+    let mut end=doc.text.len().min(64*1024);
+    while !doc.text.is_char_boundary(end) {end-=1;}
+    let prefix=&doc.text[..end];
+    let header_end=prefix.match_indices('\n').nth(127).map_or(prefix.len(),|(offset,_)|offset+1);
+    let text=&prefix[..header_end];
+    let header_field=|key|field(text,key);
+    let guid = header_field("m_Script").and_then(|value|reference(value,"guid"));
     match guid.as_deref() {
         Some("fe87c0e1cc204ed48ad3b37840f39efc") => return Some(Graphic::Image),
         Some("1344c3c82d62a2a41a3576d8abb8e3ea") => return Some(Graphic::RawImage),
@@ -15,10 +22,10 @@ pub fn graphic(doc: &Document) -> Option<Graphic> {
         _ => {},
     }
     // Also recognize serialized Image/Text layouts in derived components.
-    if field(&doc.text,"m_Sprite").is_some() && field(&doc.text,"m_FillCenter").is_some() && field(&doc.text,"m_Type").is_some() {Some(Graphic::Image)}
-    else if field(&doc.text,"m_Texture").is_some() && field(&doc.text,"m_UVRect").is_some() {Some(Graphic::RawImage)}
-    else if field(&doc.text,"m_Text").is_some() && field(&doc.text,"m_FontData").is_some() {Some(Graphic::Text)}
-    else if field(&doc.text,"m_text").is_some() && field(&doc.text,"m_fontSize").is_some() {Some(Graphic::Tmp)}
+    if header_field("m_Sprite").is_some() && header_field("m_FillCenter").is_some() && header_field("m_Type").is_some() {Some(Graphic::Image)}
+    else if header_field("m_Texture").is_some() && header_field("m_UVRect").is_some() {Some(Graphic::RawImage)}
+    else if header_field("m_Text").is_some() && header_field("m_FontData").is_some() {Some(Graphic::Text)}
+    else if header_field("m_text").is_some() && header_field("m_fontSize").is_some() {Some(Graphic::Tmp)}
     else {None}
 }
 #[derive(Clone, Copy)]
@@ -35,7 +42,7 @@ pub fn seed_screen_canvases(documents: &[Document], viewport: [f64;2], cache: &m
         let mut normalized = root.clone();
         normalized.text = root.text.lines().map(|line| {
             if line.starts_with("  m_LocalScale:") { "  m_LocalScale: {x: 1, y: 1, z: 1}" } else { line }
-        }).collect::<Vec<_>>().join("\n");
+        }).collect::<Vec<_>>().join("\n").into();
         let pivot = vector(&root.text,"m_Pivot",&["x","y"],&[0.5,0.5]);
         cache.insert(root.file_id.clone(), Layout { matrix: local(&normalized,true), size: viewport, pivot: [pivot[0],pivot[1]] });
     }
@@ -77,7 +84,7 @@ pub fn text_content(doc: &Document, kind: Graphic) -> String {
     if let Some(raw)=field(&doc.text,key).filter(|v|matches!(*v,"|"|"|-"|"|+"|">"|">-")) {
         let marker=format!("  {key}: {raw}");
         let mut lines=doc.text.lines().skip_while(|line|*line!=marker).skip(1);
-        value=lines.by_ref().take_while(|line|line.starts_with("    ")||line.trim().is_empty()).map(|line|line.strip_prefix("    ").unwrap_or("")).collect::<Vec<_>>().join("\n");
+        value=lines.by_ref().take_while(|line|line.starts_with("    ")||line.trim().is_empty()).map(|line|line.strip_prefix("    ").unwrap_or("")).collect::<Vec<_>>().join("\n").into();
     }
     let rich=if kind==Graphic::Tmp {number(&doc.text,"m_isRichText",1.0)} else {nested_number(&doc.text,"m_RichText",1.0)};
     if rich!=0.0 {
@@ -91,11 +98,19 @@ pub fn text_content(doc: &Document, kind: Graphic) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn custom_large_arrays_do_not_trigger_ui_header_detection() {
+        let text=format!("  m_Script: {{fileID: 11500000, guid: custom}}\n  data: {}\n  m_Sprite: {{fileID: 0}}\n  m_FillCenter: 1\n  m_Type: 0\n","0".repeat(70*1024));
+        let mut doc=Document {file_id:"1".into(),type_name:"MonoBehaviour".into(),start_line:1,start_offset:0,text:text.into(),game_object:None,parent_transform:None};
+        assert_eq!(graphic(&doc),None);
+        doc.text="  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc}".into();
+        assert_eq!(graphic(&doc),Some(Graphic::Image));
+    }
+    #[test]
     fn screen_canvas_zero_serialized_scale_uses_reference_layout() {
-        let root=Document { file_id:"1".into(), type_name:"RectTransform".into(), start_line:1,
+        let root=Document { file_id:"1".into(), type_name:"RectTransform".into(), start_line:1,start_offset:0,
             text:"  m_LocalScale: {x: 0, y: 0, z: 0}\n  m_SizeDelta: {x: 0, y: 0}\n  m_Pivot: {x: 0, y: 0}\n".into(),
             game_object:Some("10".into()), parent_transform:Some("0".into()) };
-        let canvas=Document { file_id:"2".into(), type_name:"Canvas".into(), start_line:1,
+        let canvas=Document { file_id:"2".into(), type_name:"Canvas".into(), start_line:1,start_offset:0,
             text:"  m_RenderMode: 1\n  m_Enabled: 1\n".into(), game_object:Some("10".into()), parent_transform:None };
         let original=root.text.clone();
         let mut cache=HashMap::new();
@@ -109,14 +124,14 @@ mod tests {
     }
     #[test]
     fn text_uses_decoded_content_and_ignores_basic_rich_text_tags() {
-        let doc=Document{file_id:"10".into(),type_name:"MonoBehaviour".into(),start_line:1,text:"  m_Text: \"<b>hello</b>\\nworld\"\n  m_FontData:\n    m_RichText: 1\n".into(),game_object:None,parent_transform:None};
+        let doc=Document{file_id:"10".into(),type_name:"MonoBehaviour".into(),start_line:1,start_offset:0,text:"  m_Text: \"<b>hello</b>\\nworld\"\n  m_FontData:\n    m_RichText: 1\n".into(),game_object:None,parent_transform:None};
         assert_eq!(graphic(&doc),Some(Graphic::Text));
         assert_eq!(text_content(&doc,Graphic::Text),"hello\nworld");
     }
     #[test]
     fn stretched_child_uses_anchors_parent_pivot_and_size_delta() {
-        let root=Document{file_id:"1".into(),type_name:"RectTransform".into(),start_line:1,text:"  m_SizeDelta: {x: 800, y: 600}\n  m_Pivot: {x: 0.5, y: 0.5}\n".into(),game_object:None,parent_transform:None};
-        let child=Document{file_id:"2".into(),type_name:"RectTransform".into(),start_line:1,text:"  m_AnchorMin: {x: 0, y: 0}\n  m_AnchorMax: {x: 1, y: 1}\n  m_SizeDelta: {x: -40, y: -60}\n  m_AnchoredPosition: {x: 10, y: 20}\n  m_Pivot: {x: 0.5, y: 0.5}\n".into(),game_object:None,parent_transform:Some("1".into())};
+        let root=Document{file_id:"1".into(),type_name:"RectTransform".into(),start_line:1,start_offset:0,text:"  m_SizeDelta: {x: 800, y: 600}\n  m_Pivot: {x: 0.5, y: 0.5}\n".into(),game_object:None,parent_transform:None};
+        let child=Document{file_id:"2".into(),type_name:"RectTransform".into(),start_line:1,start_offset:0,text:"  m_AnchorMin: {x: 0, y: 0}\n  m_AnchorMax: {x: 1, y: 1}\n  m_SizeDelta: {x: -40, y: -60}\n  m_AnchoredPosition: {x: 10, y: 20}\n  m_Pivot: {x: 0.5, y: 0.5}\n".into(),game_object:None,parent_transform:Some("1".into())};
         let result=layout("2",&HashMap::from([("1",&root),("2",&child)]),&HashMap::new(),[1280.0,720.0],&mut HashMap::new(),&mut HashSet::new()).unwrap();
         assert_eq!(result.size,[760.0,540.0]);assert_eq!(result.matrix.point(0.0,0.0),[10.0,20.0]);
     }

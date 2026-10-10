@@ -280,3 +280,26 @@ UI 内置 Sprite 暂用颜色矩形近似显示。	UI 內建 Sprite 暫用顏色
 打开图片	開啟圖片	Open image	画像を開く	이미지 열기	Bild öffnen	Ouvrir l’image
 确认	確認	Confirm	確認	확인	Bestätigen	Confirmer
 打开发布页面，手动更新	開啟發佈頁面，手動更新	Open release page to update manually	リリースページから手動更新	릴리스 페이지에서 수동 업데이트	Release-Seite für manuelles Update öffnen	Ouvrir la page de publication pour mettre à jour manuellement
+
+文件	檔案	File	ファイル	파일	Datei	Fichier
+打开文件	開啟檔案	Open File	ファイルを開く	파일 열기	Datei öffnen	Ouvrir un fichier
+最近打开	最近開啟	Open Recent	最近開いたファイル	최근 파일	Zuletzt geöffnet	Fichiers récents
+暂无最近文件	暫無最近檔案	No recent files	最近開いたファイルはありません	최근 파일 없음	Keine zuletzt geöffneten Dateien	Aucun fichier récent
+背景色	背景色	Background	背景色	배경색	Hintergrund	Fond
+棋盘格	棋盤格	Checkerboard	市松模様	체커보드	Schachbrett	Damier
+灰色	灰色	Gray	グレー	회색	Grau	Gris
+自定义	自訂	Custom	カスタム	사용자 지정	Benutzerdefiniert	Personnalisé
+正在加载文件	正在載入檔案	Loading file	ファイルを読み込み中	파일 로드 중	Datei wird geladen	Chargement du fichier
+正在读取文件…	正在讀取檔案…	Reading file…	ファイルを読み込み中…	파일 읽는 중…	Datei wird gelesen…	Lecture du fichier…
+正在解析 YAML…	正在解析 YAML…	Parsing YAML…	YAML を解析中…	YAML 분석 중…	YAML wird analysiert…	Analyse du YAML…
+取消	取消	Cancel	キャンセル	취소	Abbrechen	Annuler
+正在取消…	正在取消…	Cancelling…	キャンセル中…	취소 중…	Wird abgebrochen…	Annulation…
+读取中…	讀取中…	Reading…	読み込み中…	읽는 중…	Wird gelesen…	Lecture…
+解析中…	解析中…	Parsing…	解析中…	분석 중…	Wird analysiert…	Analyse…
+排序轴	排序軸	Sort axis	ソート軸	정렬 축	Sortierachse	Axe de tri
+正在准备预览…	正在準備預覽…	Preparing preview…	プレビューを準備中…	미리보기 준비 중…	Vorschau wird vorbereitet…	Préparation de l’aperçu…
+暂停	暫停	Pause	一時停止	일시 정지	Pause	Pause
+继续	繼續	Resume	再開	계속	Fortsetzen	Reprendre
+退出预览	退出預覽	Exit preview	プレビューを閉じる	미리보기 종료	Vorschau schließen	Fermer l’aperçu
+预览已暂停	預覽已暫停	Preview paused	プレビューを一時停止中	미리보기 일시 정지됨	Vorschau pausiert	Aperçu en pause
+正在合成预览…	正在合成預覽…	Composing preview…	プレビューを描画中…	미리보기 합성 중…	Vorschau wird gerendert…	Composition de l’aperçu…

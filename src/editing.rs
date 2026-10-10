@@ -370,7 +370,7 @@ pub fn change_animation_document(ui: &egui::Ui, transform: impl FnOnce(&str) -> 
     let Some(index) = docs.iter().position(|doc| doc.file_id == owner) else { return false };
     let start = text.find("--- !u!").unwrap_or(0) + docs[..index].iter().map(|doc| doc.text.len()).sum::<usize>();
     let Some(replacement) = transform(&docs[index].text) else { return false };
-    if replacement == docs[index].text { return false; }
+    if replacement == docs[index].text.as_ref() { return false; }
     text.replace_range(start..start + docs[index].text.len(), &replacement);
     let after = crate::parse_unity_yaml(&text);
     if after.len() != docs.len() || after.iter().zip(&docs).any(|(a,b)| a.file_id != b.file_id || a.type_name != b.type_name) { return false; }

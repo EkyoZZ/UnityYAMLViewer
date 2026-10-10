@@ -48,23 +48,16 @@ impl NodeControls {
     }
 }
 
-/// Draw small monochrome icons rather than relying on emoji/font coverage.
+/// Shared SVG icons retain local and inherited switch appearance.
 pub fn icon(ui: &mut egui::Ui, eye: bool, enabled: bool, inherited: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(15.0, 20.0), egui::Sense::click());
     let painter = ui.painter_at(rect);
     if response.hovered() { painter.rect_filled(rect, 3.0, ui.visuals().widgets.hovered.bg_fill); }
     let color = if inherited { ui.visuals().weak_text_color() }
         else if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-    let stroke = egui::Stroke::new(1.3_f32, color);
     let p = |x: f32, y: f32| rect.min + egui::vec2(x * 0.75 + 0.4, y * 0.75 + 2.5);
-    if eye {
-        let points = vec![p(2.0,10.0),p(5.0,6.5),p(9.5,5.5),p(14.0,6.5),p(17.0,10.0),p(14.0,13.5),p(9.5,14.5),p(5.0,13.5)];
-        painter.add(egui::Shape::closed_line(points, stroke));
-        painter.circle_filled(p(9.5,10.0),1.9,color);
-    } else {
-        let points = vec![p(6.0,17.0),p(3.0,11.0),p(3.0,9.5),p(4.5,9.0),p(6.0,11.0),p(6.0,4.5),p(7.0,3.5),p(8.0,4.5),p(8.0,9.0),p(8.0,2.5),p(9.0,2.0),p(10.0,2.5),p(10.0,9.0),p(10.0,3.5),p(11.0,3.0),p(12.0,3.5),p(12.0,9.5),p(12.0,5.0),p(13.0,4.5),p(14.0,5.0),p(14.0,12.5),p(12.0,17.0)];
-        painter.add(egui::Shape::closed_line(points,stroke));
-    }
+    crate::icons::paint(ui, if eye { crate::icons::Icon::Eye } else { crate::icons::Icon::Hand },
+        egui::Rect::from_center_size(rect.center(), egui::vec2(15.0, 15.0)), color);
     if !enabled { painter.line_segment([p(2.0,17.0),p(17.0,3.0)],egui::Stroke::new(1.6_f32,if inherited {color} else {Color32::from_rgb(220,100,100)})); }
     let label = if inherited {
         if eye { "父节点已关闭渲染；本节点开关在父节点恢复后生效。" } else { "父节点已禁止选中；本节点开关在父节点恢复后生效。" }
@@ -80,7 +73,7 @@ mod tests {
     fn documents() -> Vec<Document> {
         [("1","GameObject",None,None),("2","GameObject",None,None),
          ("10","Transform",Some("1"),Some("0")),("20","RectTransform",Some("2"),Some("10"))]
-        .into_iter().map(|(id,kind,object,parent)| Document { file_id:id.into(), type_name:kind.into(), start_line:1,text:String::new(),game_object:object.map(str::to_owned),parent_transform:parent.map(str::to_owned) }).collect()
+        .into_iter().map(|(id,kind,object,parent)| Document { file_id:id.into(), type_name:kind.into(), start_line:1,start_offset:0,text:"".into(),game_object:object.map(str::to_owned),parent_transform:parent.map(str::to_owned) }).collect()
     }
     #[test]
     fn parent_switches_propagate_independently_and_child_preferences_survive() {

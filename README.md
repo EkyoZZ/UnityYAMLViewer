@@ -12,7 +12,11 @@
 
 ### 当前状态
 
-当前版本 **1.1.3** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前开发版本 **1.1.4** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+
+### 1.1.4 更新（开发中）
+
+新增组件折叠 Inspector、脚本语法高亮、图片通道与缩放查看、工程字体预览、最近文件菜单及 SVG 图标。完整更新日志草稿见 [CHANGELOG.md](CHANGELOG.md)，正式版尚未发布。
 
 ### 1.1.3 更新
 
@@ -134,7 +138,11 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Version **1.1.3** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Development version **1.1.4** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+
+### 1.1.4 release notes (in development)
+
+Adds collapsible component inspectors, script syntax highlighting, image channels and zoom, project font previews, recent files, and SVG icons. See [CHANGELOG.md](CHANGELOG.md) for the draft release notes. The final release has not been published.
 
 ### 1.1.3 release notes
 

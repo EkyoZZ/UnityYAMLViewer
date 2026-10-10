@@ -13,7 +13,7 @@ pub fn set_language(code: &str) {
 pub fn language_index() -> usize { LANGUAGE.load(Ordering::Relaxed) }
 fn catalog() -> &'static HashMap<&'static str, [&'static str; 7]> {
     static CATALOG: OnceLock<HashMap<&'static str, [&'static str; 7]>> = OnceLock::new();
-    CATALOG.get_or_init(|| include_str!("translations.tsv").lines().map(|line| {
+    CATALOG.get_or_init(|| include_str!("translations.tsv").lines().filter(|line| !line.trim().is_empty()).map(|line| {
         let row: [&str; 7] = line.split('\t').collect::<Vec<_>>().try_into().expect("translation must contain seven languages");
         (row[0], row)
     }).collect())
@@ -80,6 +80,16 @@ macro_rules! lf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_catalog_ignores_blank_lines_and_has_all_languages() {
+        let rows: Vec<_> = include_str!("translations.tsv").lines()
+            .filter(|line| !line.trim().is_empty()).collect();
+        for row in &rows {
+            assert_eq!(row.split('\t').count(), LANGUAGES.len(), "Invalid translation row: {row}");
+        }
+        assert_eq!(catalog().len(), rows.len(), "Duplicate translation keys");
+    }
 
     #[test]
     fn translations_preserve_user_content_and_survive_switching() {

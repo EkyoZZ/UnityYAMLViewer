@@ -1,6 +1,7 @@
 use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, mpsc}, time::SystemTime};
 use eframe::egui::{self, Color32, Pos2, Vec2};
 use crate::{Document, localization::tr};
+mod world;
 
 #[derive(Default)]
 pub struct Preview {
@@ -12,7 +13,121 @@ pub struct Preview {
     next_asset_check: Option<std::time::Instant>,
     ui_viewport: Option<[f64;2]>,
     focus_request: Option<(HashSet<String>, std::time::Instant)>,
+    fonts: crate::preview_fonts::Fonts,
+    background: String,
+    background_rgb: Option<[u8;3]>,
+    preparation: Option<Preparation>,
+    prepared: Arc<Prepared>,
+    sort_axis: Option<usize>,
+    preparation_pending: bool,
+    paused: Arc<std::sync::atomic::AtomicBool>,
+    world: world::World,
+    ui_presence: Option<(usize,usize,usize,bool)>,
 }
+
+#[derive(Default)]
+struct Prepared { sprites: Vec<Sprite>, missing: usize, issues: Vec<String> }
+struct Preparation {
+    key: u64, receiver: Option<mpsc::Receiver<Prepared>>, cancelled: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Drop for Preparation {fn drop(&mut self) {
+    self.cancelled.store(true,std::sync::atomic::Ordering::Relaxed);
+    if let Some(receiver)=self.receiver.take() {std::thread::spawn(move || drop(receiver));}
+}}
+fn coordinate_key(value:f64) -> i64 {
+    let value=if value.is_finite() {-value} else {0.0};
+    let bits=value.to_bits() as i64;
+    if bits<0 {bits ^ i64::MAX} else {bits}
+}
+fn renderer_order(doc:&Document, matrix:Matrix, axis:usize) -> (i64,i64,i64) {
+    (number(&doc.text,"m_SortingLayer",0.0) as i64 as i16 as i64,
+     number(&doc.text,"m_SortingOrder",0.0) as i64 as i16 as i64,
+     coordinate_key(matrix.0[axis.min(2)][3]))
+}
+fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_controls::Flags>, catalog: Option<&Arc<HashMap<String,PathBuf>>>, cancelled: &std::sync::atomic::AtomicBool, axis:usize, paused:Option<&std::sync::atomic::AtomicBool>) -> Prepared {
+    let objects:HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
+    let transforms:HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
+    let by_object:HashMap<_,_>=transforms.values().filter_map(|d|Some((d.game_object.as_deref()?,d.file_id.as_str()))).collect();
+    let mut sprites=Vec::new();let mut missing=0;let mut issues=Vec::new();
+    let mut tile_assets:HashMap<(PathBuf,String),Option<String>>=HashMap::new();
+        for doc in documents.iter().filter(|d|d.type_name=="SpriteRenderer") {
+            if !checkpoint(cancelled,paused) {return Prepared::default();}
+            if doc.game_object.as_deref().and_then(|id| flags.get(id)).is_some_and(|flags| !flags.visible) { continue; }
+            if number(&doc.text,"m_Enabled",1.0)==0.0 {continue}
+            let Some(reference_text)=field(&doc.text,"m_Sprite") else {continue};
+            let Some(id)=reference(reference_text,"fileID").filter(|id|id!="0") else {continue};
+            let matrix=doc.game_object.as_deref().and_then(|go|by_object.get(go)).and_then(|id|world(id,&transforms,&objects,&mut HashSet::new()));
+            let Some(matrix)=matrix else {continue};
+            let path=reference(reference_text,"guid").and_then(|guid|catalog.as_ref()?.get(&guid.to_lowercase()).cloned());
+            let Some(path)=path else {missing+=1;issues.push(format!("{} · {}: {}\n{}", crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_ref()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()), tr("资源 GUID 未找到"), reference_text, tr("GUID 索引尚未完成，或资源不存在、属于内置资源。")));continue};
+            if number(&doc.text,"m_DrawMode",0.0)!=0.0 {missing+=1;issues.push(format!("{} · fileID {} · {}: {}",path.display(),doc.file_id,tr("暂不支持此 Sprite 绘制模式"),field(&doc.text,"m_DrawMode").unwrap_or("")));continue}
+            let c=vector(&doc.text,"m_Color",&["r","g","b","a"],&[1.0;4]);
+            let byte=|v:f64|(v.clamp(0.0,1.0)*255.0).round() as u8;
+            sprites.push(Sprite{ui:None,component: doc.file_id.clone(), selectable: doc.game_object.as_deref().and_then(|id|flags.get(id)).is_none_or(|flags|flags.selectable),name: crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_ref()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color([byte(c[0]),byte(c[1]),byte(c[2]),byte(c[3])]),flip:[number(&doc.text,"m_FlipX",0.0)!=0.0,number(&doc.text,"m_FlipY",0.0)!=0.0],order:renderer_order(doc,matrix,axis)});
+        }
+        for doc in documents.iter().filter(|d|d.type_name=="Tilemap") {
+            let Some(object)=doc.game_object.as_deref() else {continue};
+            if flags.get(object).is_some_and(|f|!f.visible) || number(&doc.text,"m_Enabled",1.0)==0.0 {continue;}
+            let Some(transform)=by_object.get(object) else {continue};
+            let Some(base)=world(transform,&transforms,&objects,&mut HashSet::new()) else {continue};
+            let renderer=documents.iter().find(|d|d.type_name=="TilemapRenderer" && d.game_object==doc.game_object);
+            if renderer.is_none_or(|r|number(&r.text,"m_Enabled",1.0)==0.0) {continue;}
+            let renderer=renderer.unwrap();
+            let mut ancestor=Some(*transform);
+            let mut grid=None;
+            let mut visited=HashSet::new();
+            while let Some(id)=ancestor {
+                if !visited.insert(id) {break;}
+                let Some(t)=transforms.get(id) else {break};
+                grid=documents.iter().find(|d|d.type_name=="Grid" && d.game_object==t.game_object);
+                if grid.is_some() {break;}
+                ancestor=t.parent_transform.as_deref().filter(|id|*id!="0");
+            }
+            let Some(grid)=grid else {missing+=1;issues.push(format!("{}: Grid not found",doc.file_id));continue};
+            let size=vector(&grid.text,"m_CellSize",&["x","y","z"],&[1.0;3]);
+            let gap=vector(&grid.text,"m_CellGap",&["x","y","z"],&[0.0;3]);
+            let layout=number(&grid.text,"m_CellLayout",0.0) as i32;
+            let swizzle=number(&grid.text,"m_CellSwizzle",0.0) as usize;
+            if !matches!(layout,0|2|3) || swizzle>5 {
+                missing+=1;issues.push(format!("{}: unsupported Grid CellLayout {layout} / CellSwizzle {swizzle}",doc.file_id));continue;
+            }
+            let Some(data)=crate::tilemap::preview_data(&doc.text,cancelled,paused) else {return Prepared::default()};
+
+            let selectable=flags.get(object).is_none_or(|f|f.selectable);
+            let mut references:HashMap<usize,Option<(PathBuf,String)>>=HashMap::new();
+            let mut failed=0;
+            for cell in &data.cells {
+                if !checkpoint(cancelled,paused) {return Prepared::default();}
+                let resolved=references.entry(cell.sprite).or_insert_with(|| {
+                    data.sprites.get(cell.sprite).and_then(|value|crate::tilemap::sprite_reference(value))
+                        .and_then(|(guid,id)|Some((catalog.as_ref()?.get(&guid)?.clone(),id)))
+                }).clone();
+                let resolved=resolved.or_else(|| {
+                    let (guid,id)=crate::tilemap::sprite_reference(data.assets.get(cell.tile)?)?;
+                    let path=catalog.as_ref()?.get(&guid)?.clone();
+                    let sprite=tile_assets.entry((path.clone(),id.clone())).or_insert_with(|| {
+                        if std::fs::metadata(&path).ok()?.len()>4*1024*1024 {return None;}
+                        let text=std::fs::read_to_string(&path).ok()?;
+                        let docs=crate::parse_unity_yaml(&text);
+                        field(&docs.iter().find(|d|d.file_id==id)?.text,"m_Sprite").map(str::to_owned)
+                    });
+                    let (guid,id)=crate::tilemap::sprite_reference(sprite.as_deref()?)?;
+                    Some((catalog.as_ref()?.get(&guid)?.clone(),id))
+                });
+                let Some((path,id))=resolved else {failed+=1;continue};
+                let Some(position)=crate::tilemap::cell_position(cell.position,data.anchor,[size[0],size[1],size[2]],[gap[0],gap[1],gap[2]],layout,swizzle) else {continue};
+                let mut translation=Matrix::identity();for axis in 0..3 {translation.0[axis][3]=position[axis];}
+                let matrix=base.mul(translation).mul(data.orientation).mul(data.matrices.get(cell.matrix).copied().unwrap_or_else(Matrix::identity));
+                let color=data.colors.get(cell.color).copied().unwrap_or([1.0;4]);
+                let rgba=std::array::from_fn(|i|(color[i]*data.tint[i]).clamp(0.0,1.0).mul_add(255.0,0.0).round() as u8);
+                sprites.push(Sprite{ui:None,component:doc.file_id.clone(),selectable,name:doc.file_id.clone(),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color(rgba),flip:[false;2],order:renderer_order(renderer,base,axis)});
+            }
+            if failed>0 {missing+=failed;issues.push(format!("{}: {failed} unresolved Tile/Sprite references (indexing or loading may still be in progress)",doc.file_id));}
+        }
+    sprites.sort_by_key(|s|s.order);
+    Prepared {sprites,missing,issues}
+}
+
 struct Texture {
     stamp: (Option<SystemTime>, Option<SystemTime>),
     receiver: Option<mpsc::Receiver<Result<(egui::ColorImage, String), String>>>,
@@ -20,11 +135,12 @@ struct Texture {
     meta: String,
     alpha: Vec<u8>,
     error: Option<String>,
+    regions: HashMap<String,Option<Region>>,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct Matrix(pub(crate) [[f64; 4]; 4]);
 impl Matrix {
-    fn identity() -> Self { Self(std::array::from_fn(|row| std::array::from_fn(|column| if row == column { 1.0 } else { 0.0 }))) }
+    pub(crate) fn identity() -> Self { Self(std::array::from_fn(|row| std::array::from_fn(|column| if row == column { 1.0 } else { 0.0 }))) }
     pub(crate) fn mul(self, rhs: Self) -> Self { Self(std::array::from_fn(|i| std::array::from_fn(|j| (0..4).map(|k| self.0[i][k]*rhs.0[k][j]).sum()))) }
     pub(crate) fn point(self, x: f64, y: f64) -> [f64; 2] { [self.0[0][0]*x+self.0[0][1]*y+self.0[0][3], self.0[1][0]*x+self.0[1][1]*y+self.0[1][3]] }
 }
@@ -52,18 +168,29 @@ pub(crate) fn local(doc: &Document, root: bool) -> Matrix {
         [0.0,0.0,0.0,1.0],
     ])
 }
-fn world(id: &str, transforms: &HashMap<&str,&Document>, objects: &HashMap<&str,&Document>, seen: &mut HashSet<String>) -> Option<Matrix> {
+pub(crate) fn world(id: &str, transforms: &HashMap<&str,&Document>, objects: &HashMap<&str,&Document>, seen: &mut HashSet<String>) -> Option<Matrix> {
     if !seen.insert(id.into()) {return None}
     let doc=transforms.get(id)?;
     if doc.game_object.as_deref().and_then(|id| objects.get(id)).is_some_and(|go| number(&go.text,"m_IsActive",1.0)==0.0) {return None}
     let parent=doc.parent_transform.as_deref().filter(|id| *id!="0");
     if let Some(parent)=parent {Some(world(parent,transforms,objects,seen)?.mul(local(doc,false)))} else {Some(local(doc,true))}
 }
-struct Sprite { ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Matrix, tint: Color32, flip: [bool;2], order: (i64,i64), }
-struct Region { rect: [f64;4], pivot: [f64;2], ppu: f64, border: [f64;4] }
+// Only the six XY affine coefficients are needed by a prepared sprite.
+#[derive(Clone,Copy)]
+struct Projection([[f64;3];2]);
+impl From<Matrix> for Projection {
+    fn from(m:Matrix) -> Self {Self([[m.0[0][0],m.0[0][1],m.0[0][3]],[m.0[1][0],m.0[1][1],m.0[1][3]]])}
+}
+impl Projection {
+    fn point(self,x:f64,y:f64) -> [f64;2] {self.0.map(|r|r[0]*x+r[1]*y+r[2])}
+    fn full(self) -> Matrix {let mut m=Matrix::identity();for i in 0..2 {m.0[i][0]=self.0[i][0];m.0[i][1]=self.0[i][1];m.0[i][3]=self.0[i][2];}m}
+}
+struct Sprite { ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Projection, tint: Color32, flip: [bool;2], order: (i64,i64,i64), }
+#[derive(Clone, Copy)]
+pub(crate) struct Region { pub(crate) rect: [f64;4], pub(crate) pivot: [f64;2], pub(crate) ppu: f64, border: [f64;4] }
 struct Quad {
     texture: egui::TextureId, points: [[f64;2];4], outline: [[f64;2];4], uv: [Pos2;4], tint: Color32,
-    path: Option<PathBuf>, component: String, selectable: bool, order: (i64,i64),
+    path: Option<PathBuf>, component: String, selectable: bool, order: (i64,i64,i64),
 }
 // Invert the projected affine rectangle, including rotation and negative scale.
 fn quad_coordinates(points: [Pos2;4], point: Pos2) -> Option<[f32;2]> {
@@ -75,7 +202,7 @@ fn quad_coordinates(points: [Pos2;4], point: Pos2) -> Option<[f32;2]> {
     (a>=0.0 && a<=1.0 && b>=0.0 && b<=1.0).then_some([a,b])
 }
 fn meta_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {text.lines().find_map(|l| l.trim().strip_prefix(key)?.strip_prefix(':').map(str::trim))}
-fn region(meta: &str, id: &str, size: [usize;2]) -> Option<Region> {
+pub(crate) fn region(meta: &str, id: &str, size: [usize;2]) -> Option<Region> {
     let pivot_for = |block: &str, alignment_key: &str, pivot_key: &str| {
         let alignment = meta_value(block, alignment_key).unwrap_or("0");
         match alignment {
@@ -118,12 +245,16 @@ struct UiImage {
 struct UiText {
     component: String, content: String, layout: crate::ui_preview::Layout, color: Color32,
     font_size: f64, horizontal: f64, vertical: f64, wrap: bool,
-    selectable: bool, order: (i64,i64),
+    selectable: bool, order: (i64,i64,i64),
+    family: egui::FontFamily,
+    best_fit: Option<[f64;2]>,
+    visible_center: bool,
+    align_by_geometry: bool,
 }
 fn tint(text: &str, key: &str) -> Color32 {
     let c=vector(text,key,&["r","g","b","a"],&[1.0;4]);
     let b=|v:f64|(v.clamp(0.0,1.0)*255.0).round() as u8;
-    Color32::from_rgba_unmultiplied(b(c[0]),b(c[1]),b(c[2]),b(c[3]))
+    crate::asset_viewer::preview_color([b(c[0]),b(c[1]),b(c[2]),b(c[3])])
 }
 fn adjusted_slices(size: f64, first: f64, last: f64) -> [f64;4] {
     let total=first+last;
@@ -164,12 +295,54 @@ fn ui_quads(sprite: &Sprite, image: &UiImage, region: &Region, texture: egui::Te
             if image.raw {egui::pos2((image.uv_rect[0]+image.uv_rect[2]*a as f64) as f32,(1.0-image.uv_rect[1]-image.uv_rect[3]*b as f64) as f32)}
             else {egui::pos2((sx[i+a]/texture_size[0] as f64) as f32,(1.0-sy[j+b]/texture_size[1] as f64) as f32)}
         });
-        result.push(Quad{texture,points,outline:ui_rect_points(crate::ui_preview::Layout{matrix:sprite.matrix,size:image.size,pivot:image.pivot}),uv,tint:sprite.tint,path:Some(sprite.path.clone()),component:sprite.component.clone(),selectable:sprite.selectable,order:sprite.order});
+        result.push(Quad{texture,points,outline:ui_rect_points(crate::ui_preview::Layout{matrix:sprite.matrix.full(),size:image.size,pivot:image.pivot}),uv,tint:sprite.tint,path:Some(sprite.path.clone()),component:sprite.component.clone(),selectable:sprite.selectable,order:sprite.order});
     }}
     result
 }
 fn ui_rect_points(layout: crate::ui_preview::Layout) -> [[f64;2];4] {
     [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]].map(|[x,y]|layout.matrix.point((x-layout.pivot[0])*layout.size[0],(y-layout.pivot[1])*layout.size[1]))
+}
+fn text_origin(points:[Pos2;4],bounds:egui::Rect,alignment:[f32;2]) -> Pos2 {
+    let right=points[1]-points[0];let down=points[0]-points[3];
+    let x=(right.length()-bounds.width())*alignment[0]-bounds.min.x;
+    let y=(down.length()-bounds.height())*alignment[1]-bounds.min.y;
+    points[3]+right.normalized()*x+down.normalized()*y
+}
+fn text_alignment_bounds(layout:egui::Rect,glyphs:egui::Rect,visible_center:bool,geometry:bool) -> egui::Rect {
+    if !glyphs.is_positive() || !glyphs.is_finite() {return layout;}
+    if geometry {glyphs}
+    else if visible_center {egui::Rect::from_min_max(Pos2::new(layout.min.x,glyphs.min.y),Pos2::new(layout.max.x,glyphs.max.y))}
+    else {layout}
+}
+fn fit_text(min:f64,max:f64,size:Vec2,mut layout:impl FnMut(f32)->Arc<egui::Galley>) -> Arc<egui::Galley> {
+    let mut low=min.min(max).clamp(1.0,512.0).ceil() as i32;
+    let mut high=max.max(min).clamp(1.0,512.0).floor() as i32;
+    let mut fitted=layout(low as f32);
+    while low<=high {
+        let font_size=low+(high-low)/2;let candidate=layout(font_size as f32);
+        if candidate.size().x<=size.x+0.5 && candidate.size().y<=size.y+0.5 {fitted=candidate;low=font_size+1;} else {high=font_size-1;}
+    }
+    fitted
+}
+pub(crate) fn checkpoint(cancelled:&std::sync::atomic::AtomicBool,paused:Option<&std::sync::atomic::AtomicBool>) -> bool {
+    while paused.is_some_and(|p|p.load(std::sync::atomic::Ordering::Relaxed)) {
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {return false;}
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    !cancelled.load(std::sync::atomic::Ordering::Relaxed)
+}
+fn paint_background(painter:&egui::Painter,rect:egui::Rect,background:&str,rgb:[u8;3]) {
+    if background=="gray" || background=="custom" {
+        let [r,g,b]=if background=="gray" {[128,128,128]} else {rgb};painter.rect_filled(rect,0.0,Color32::from_rgb(r,g,b));
+    } else {
+        let cell=12.0;
+        let mut mesh=egui::Mesh::default();
+        for y in 0..(rect.height()/cell).ceil() as usize {for x in 0..(rect.width()/cell).ceil() as usize {
+            let tile=egui::Rect::from_min_size(rect.min+egui::vec2(x as f32*cell,y as f32*cell),Vec2::splat(cell)).intersect(rect);
+            mesh.add_colored_rect(tile,Color32::from_gray(if (x+y)%2==0 {190} else {230}));
+        }}
+        painter.add(egui::Shape::mesh(mesh));
+    }
 }
 impl Preview {
     pub fn focus(&mut self, components: HashSet<String>) {
@@ -177,13 +350,68 @@ impl Preview {
         self.focus_request = Some((components, std::time::Instant::now()));
     }
     pub fn available(documents: &[Document], path: Option<&std::path::Path>) -> bool {
-        path.is_some_and(|p|p.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab"))) && documents.iter().any(|d|
-            crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
+        path.is_some_and(|p|p.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab") || e.eq_ignore_ascii_case("unity"))) && documents.iter().any(|d|
+            d.type_name=="Tilemap" || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
+    }
+    pub fn release(&mut self) {
+        self.preparation=None;self.preparation_pending=false;self.world.release();
+        let prepared=std::mem::take(&mut self.prepared);let textures=std::mem::take(&mut self.textures);
+        if !prepared.sprites.is_empty() || !textures.is_empty() {std::thread::spawn(move || {drop(prepared);drop(textures);});}
+        self.paused.store(false,std::sync::atomic::Ordering::Relaxed);self.focus_request=None;
+    }
+    fn prepare_background(&mut self, ctx:&egui::Context, documents:&[Document], flags:&HashMap<String,crate::hierarchy_controls::Flags>, catalog:Option<Arc<HashMap<String,PathBuf>>>) -> Arc<Prepared> {
+        use std::hash::{Hash,Hasher};
+        let mut hash=std::collections::hash_map::DefaultHasher::new();
+        for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
+        let mut keys:Vec<_>=flags.iter().collect();keys.sort_by_key(|(id,_)|*id);
+        for (id,f) in keys {id.hash(&mut hash);f.visible.hash(&mut hash);f.selectable.hash(&mut hash);}
+        catalog.as_ref().map(|c|Arc::as_ptr(c) as usize).hash(&mut hash);
+        let axis=self.sort_axis.unwrap_or(1);axis.hash(&mut hash);
+        let key=hash.finish();
+        if self.preparation.as_ref().is_none_or(|job|job.key!=key) {
+            self.preparation=None;self.prepared=Arc::default();self.preparation_pending=true;
+            let (sender,receiver)=mpsc::channel();let cancelled=Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop=cancelled.clone();let paused=self.paused.clone();let docs=documents.to_vec();let flags=flags.clone();let repaint=ctx.clone();
+            std::thread::spawn(move||{let result=prepare(&docs,&flags,catalog.as_ref(),&stop,axis,Some(&paused));if !stop.load(std::sync::atomic::Ordering::Relaxed) {let _=sender.send(result);repaint.request_repaint();}});
+            self.preparation=Some(Preparation{key,receiver:Some(receiver),cancelled});
+        }
+        if let Some(job)=&self.preparation {
+            if let Some(Ok(result))=job.receiver.as_ref().map(|receiver|receiver.try_recv()) {self.prepared=Arc::new(result);self.preparation_pending=false;}
+        }
+        if self.preparation_pending {ctx.request_repaint_after(std::time::Duration::from_millis(100));}
+        self.prepared.clone()
     }
     pub fn show(&mut self, ui: &mut egui::Ui, documents: &[Document], identity: &str, flags: &HashMap<String, crate::hierarchy_controls::Flags>, selected: Option<&str>) -> Option<String> {
-        if self.identity!=identity {self.identity=identity.into();self.textures.clear();self.zoom=1.0;self.pan=Vec2::ZERO;self.next_asset_check=None;self.ui_viewport=None;}
-        ui.horizontal(|ui| {ui.label(tr("静态预览")); if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;} });
+        if self.identity!=identity {self.identity=identity.into();self.release();self.ui_presence=None;self.zoom=1.0;self.pan=Vec2::ZERO;self.next_asset_check=None;self.ui_viewport=None;}
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("静态预览"));
+            if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;self.world.fit();}
+            ui.label(tr("背景色"));
+            ui.push_id("preview_background", |ui| crate::theme::background_selector(ui, &mut self.background));
+            let rgb = self.background_rgb.get_or_insert([190,190,190]);
+            ui.color_edit_button_srgb(rgb);
+            ui.label(tr("排序轴"));
+            let axis=self.sort_axis.get_or_insert(1);
+            ui.selectable_value(axis,0,"X");ui.selectable_value(axis,1,"Y");ui.selectable_value(axis,2,"Z");
+        });
+        let mut exit=false;
+        ui.horizontal(|ui| {
+            let paused=self.paused.load(std::sync::atomic::Ordering::Relaxed);
+            if ui.button(tr(if paused {"继续"} else {"暂停"})).clicked() {self.paused.store(!paused,std::sync::atomic::Ordering::Relaxed);}
+            if paused {ui.label(tr("预览已暂停"));}
+            exit=ui.button(tr("退出预览")).clicked();
+        });
+        if exit {self.open=false;self.release();ui.ctx().request_repaint();return None;}
         let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
+        let first=documents.first().map_or(0,|d|d.text.as_ptr() as usize);
+        let last=documents.last().map_or(0,|d|d.text.as_ptr() as usize);
+        let has_ui=match self.ui_presence {
+            Some((a,b,n,value)) if a==first && b==last && n==documents.len()=>value,
+            _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some());self.ui_presence=Some((first,last,documents.len(),value));value},
+        };
+        if !has_ui {
+            return self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),selected,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]));
+        }
         let objects: HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
         let transforms: HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
         let by_object: HashMap<_,_>=transforms.values().filter_map(|d|Some((d.game_object.as_deref()?,d.file_id.as_str()))).collect();
@@ -193,8 +421,7 @@ impl Preview {
         let mut sprites=Vec::new();
         let mut quads=Vec::new();
         let mut texts=Vec::new();
-        let has_ui=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some());
-        let reference_viewport=documents.iter().find_map(|doc|field(&doc.text,"m_ReferenceResolution").and_then(|value|crate::inline_vector(value,&["x","y"]))).unwrap_or(vec![1280.0,720.0]);
+        let reference_viewport=documents.iter().filter(|doc|doc.type_name=="MonoBehaviour" && doc.text.len()<128*1024).find_map(|doc|field(&doc.text,"m_ReferenceResolution").and_then(|value|crate::inline_vector(value,&["x","y"]))).unwrap_or(vec![1280.0,720.0]);
         let viewport=self.ui_viewport.get_or_insert([reference_viewport[0].max(1.0),reference_viewport[1].max(1.0)]);
         if has_ui {
             ui.horizontal(|ui| {
@@ -208,20 +435,8 @@ impl Preview {
         let mut layout_cache=HashMap::new();
         crate::ui_preview::seed_screen_canvases(documents, viewport, &mut layout_cache);
 
-        for doc in documents.iter().filter(|d|d.type_name=="SpriteRenderer") {
-            if doc.game_object.as_deref().and_then(|id| flags.get(id)).is_some_and(|flags| !flags.visible) { continue; }
-            if number(&doc.text,"m_Enabled",1.0)==0.0 {continue}
-            let Some(reference_text)=field(&doc.text,"m_Sprite") else {continue};
-            let Some(id)=reference(reference_text,"fileID").filter(|id|id!="0") else {continue};
-            let matrix=doc.game_object.as_deref().and_then(|go|by_object.get(go)).and_then(|id|world(id,&transforms,&objects,&mut HashSet::new()));
-            let Some(matrix)=matrix else {continue};
-            let path=reference(reference_text,"guid").and_then(|guid|catalog.as_ref()?.get(&guid.to_lowercase()).cloned());
-            let Some(path)=path else {missing+=1;issues.push(format!("{} · {}: {}\n{}", crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_str()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()), tr("资源 GUID 未找到"), reference_text, tr("GUID 索引尚未完成，或资源不存在、属于内置资源。")));continue};
-            if number(&doc.text,"m_DrawMode",0.0)!=0.0 {missing+=1;issues.push(format!("{} · fileID {} · {}: {}",path.display(),doc.file_id,tr("暂不支持此 Sprite 绘制模式"),field(&doc.text,"m_DrawMode").unwrap_or("")));continue}
-            let c=vector(&doc.text,"m_Color",&["r","g","b","a"],&[1.0;4]);
-            let byte=|v:f64|(v.clamp(0.0,1.0)*255.0).round() as u8;
-            sprites.push(Sprite{ui:None,component: doc.file_id.clone(), selectable: doc.game_object.as_deref().and_then(|id|flags.get(id)).is_none_or(|flags|flags.selectable),name: crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_str()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()),path,id,matrix,tint:Color32::from_rgba_unmultiplied(byte(c[0]),byte(c[1]),byte(c[2]),byte(c[3])),flip:[number(&doc.text,"m_FlipX",0.0)!=0.0,number(&doc.text,"m_FlipY",0.0)!=0.0],order:(number(&doc.text,"m_SortingLayer",0.0) as i64,number(&doc.text,"m_SortingOrder",0.0) as i64)});
-        }
+        let prepared=self.prepare_background(ui.ctx(),documents,flags,catalog.clone());
+        missing+=prepared.missing;issues.extend(prepared.issues.iter().cloned());
         for doc in documents {
             use crate::ui_preview::Graphic;
             let Some(kind)=crate::ui_preview::graphic(doc) else {continue};
@@ -241,11 +456,11 @@ impl Preview {
                 missing+=1; issues.push(format!("{} · {}", doc.file_id, tr("节点或父节点缩放为零，UI 图形没有可见面积"))); continue;
             }
             let selectable=flags.get(object).is_none_or(|flags|flags.selectable);
-            let order=(1_000_000_000,*ui_order.get(object).unwrap_or(&0));
+            let order=(1_000_000_000,*ui_order.get(object).unwrap_or(&0),0);
             let color=tint(&doc.text,if kind==Graphic::Tmp {"m_fontColor"} else {"m_Color"});
             let alpha=crate::ui_preview::opacity(transform,documents,&transforms);
             let rgba=color.to_srgba_unmultiplied();
-            let color=Color32::from_rgba_unmultiplied(rgba[0],rgba[1],rgba[2],(rgba[3] as f64*alpha).round() as u8);
+            let color=crate::asset_viewer::preview_color([rgba[0],rgba[1],rgba[2],(rgba[3] as f64*alpha).round() as u8]);
             if color.a()==0 {
                 missing+=1; issues.push(format!("{} · {}", doc.file_id, tr("UI 颜色或 CanvasGroup 透明度为零"))); continue;
             }
@@ -260,7 +475,11 @@ impl Preview {
                     (if h==2 {0.5}else if h==4 {1.0}else{0.0},if v==512 {0.5}else if v==1024 {1.0}else{0.0})
                 } else {let align=crate::ui_preview::nested_number(&doc.text,"m_Alignment",0.0) as i64;((align%3) as f64*0.5,(align/3) as f64*0.5)};
                 texts.push(UiText{component:doc.file_id.clone(),content,layout,color,
+                    family:self.fonts.family(ui.ctx(), crate::preview_fonts::reference(&doc.text, kind==Graphic::Tmp), catalog.as_ref()),
                     font_size:crate::ui_preview::nested_number(&doc.text,if kind==Graphic::Tmp {"m_fontSize"}else{"m_FontSize"},14.0).clamp(1.0,512.0),
+                    best_fit:if kind==Graphic::Text && crate::ui_preview::nested_number(&doc.text,"m_BestFit",0.0)!=0.0 {Some([crate::ui_preview::nested_number(&doc.text,"m_MinSize",10.0).clamp(1.0,512.0),crate::ui_preview::nested_number(&doc.text,"m_MaxSize",40.0).clamp(1.0,512.0)])} else {None},
+                    visible_center:kind==Graphic::Text && vertical==0.5,
+                    align_by_geometry:kind==Graphic::Text && crate::ui_preview::nested_number(&doc.text,"m_AlignByGeometry",0.0)!=0.0,
                     horizontal,vertical,wrap:if kind==Graphic::Tmp {number(&doc.text,"m_enableWordWrapping",1.0)!=0.0} else {crate::ui_preview::nested_number(&doc.text,"m_HorizontalOverflow",0.0)==0.0},
                     selectable,order});continue;
             }
@@ -286,23 +505,28 @@ impl Preview {
             }
             let path=reference(reference_text,"guid").and_then(|guid|catalog.as_ref()?.get(&guid.to_lowercase()).cloned());
             let Some(path)=path else {missing+=1;issues.push(format!("{} · {} · {}",doc.file_id,tr("资源 GUID 未找到"),reference_text));continue};
-            sprites.push(Sprite{ui:Some(image),component:doc.file_id.clone(),selectable,name:crate::name_from_text(&objects.get(object).map(|doc|doc.text.as_str()).unwrap_or("")).unwrap_or_else(||doc.file_id.clone()),path,id,matrix:layout.matrix,tint:color,flip:[false;2],order});
+            sprites.push(Sprite{ui:Some(image),component:doc.file_id.clone(),selectable,name:crate::name_from_text(&objects.get(object).map(|doc|doc.text.as_ref()).unwrap_or("")).unwrap_or_else(||doc.file_id.clone()),path,id,matrix:layout.matrix.into(),tint:color,flip:[false;2],order});
         }
         sprites.sort_by_key(|s|s.order);
-        let used: HashSet<_>=sprites.iter().map(|s|s.path.clone()).collect();
+        let used: HashSet<_>=sprites.iter().chain(prepared.sprites.iter()).map(|s|s.path.clone()).collect();
         self.textures.retain(|path,_|used.contains(path));
         let mut loading=false;
         let now = std::time::Instant::now();
         let check_assets = self.next_asset_check.is_none_or(|next| now >= next);
         if check_assets { self.next_asset_check = Some(now + std::time::Duration::from_secs(1)); }
-        for sprite in sprites {
+        let mut checked_paths=HashSet::new();
+        let mut reported_errors=HashSet::new();
+        let resource_budget=std::time::Instant::now();let mut uploaded=false;
+        for sprite in sprites.iter().chain(prepared.sprites.iter()) {
+            if self.paused.load(std::sync::atomic::Ordering::Relaxed) && self.textures.get(&sprite.path).is_none_or(|t|t.handle.is_none()) {continue;}
+            if checked_paths.contains(&sprite.path) && !self.textures.contains_key(&sprite.path) {continue;}
             let meta_path=PathBuf::from(format!("{}.meta",sprite.path.display()));
-            let stamp = if check_assets || !self.textures.contains_key(&sprite.path) {
+            let stamp = if checked_paths.insert(sprite.path.clone()) && (check_assets || !self.textures.contains_key(&sprite.path)) {
                 (std::fs::metadata(&sprite.path).and_then(|m|m.modified()).ok(),
                  std::fs::metadata(&meta_path).and_then(|m|m.modified()).ok())
             } else { self.textures[&sprite.path].stamp };
             if self.textures.get(&sprite.path).is_none_or(|t|t.stamp!=stamp) {
-                if self.textures.values().filter(|t|t.receiver.is_some()).count() >= 2 { loading=true; continue; }
+                if self.paused.load(std::sync::atomic::Ordering::Relaxed) || resource_budget.elapsed().as_millis()>=4 || self.textures.values().filter(|t|t.receiver.is_some()).count() >= 2 { loading=true; continue; }
                 let (sender,receiver)=mpsc::channel(); let path=sprite.path.clone();let ctx=ui.ctx().clone();
                 std::thread::spawn(move||{
                     let result=(||{
@@ -310,24 +534,28 @@ impl Preview {
                         let mut limits=image::Limits::default();limits.max_image_width=Some(8192);limits.max_image_height=Some(8192);limits.max_alloc=Some(256*1024*1024);reader.limits(limits);
                         let image=reader.decode().map_err(|e|e.to_string())?.into_rgba8();
                         let meta=std::fs::read_to_string(meta_path).unwrap_or_default();
-                        Ok((egui::ColorImage::from_rgba_unmultiplied([image.width() as usize,image.height() as usize],image.as_raw()),meta))
+                        let display = egui::ColorImage {
+                            size: [image.width() as usize,image.height() as usize],
+                            pixels: image.pixels().map(|pixel|crate::asset_viewer::preview_color(pixel.0)).collect(),
+                        };
+                        Ok((display,meta))
                     })();let _=sender.send(result);ctx.request_repaint();
                 });
-                self.textures.insert(sprite.path.clone(),Texture{stamp,receiver:Some(receiver),handle:None,meta:String::new(),alpha:Vec::new(),error:None});
+                self.textures.insert(sprite.path.clone(),Texture{stamp,receiver:Some(receiver),handle:None,meta:String::new(),alpha:Vec::new(),error:None,regions:HashMap::new()});
             }
             let cache_bytes: usize=self.textures.values().filter_map(|t| t.handle.as_ref()).map(|h|h.size()[0]*h.size()[1]*5).sum();
             let texture=self.textures.get_mut(&sprite.path).unwrap();
-            if let Some(receiver)=&texture.receiver {
+            if let Some(receiver)=texture.receiver.as_ref().filter(|_|!uploaded && !self.paused.load(std::sync::atomic::Ordering::Relaxed)) {
                 match receiver.try_recv() {
-                    Ok(Ok((image,meta)))=>{if cache_bytes + image.size[0]*image.size[1]*5 > 256*1024*1024 {texture.error=Some("Preview texture cache exceeds 256 MiB".into());texture.receiver=None;missing+=1;continue;} texture.alpha=image.pixels.iter().map(|pixel|pixel.a()).collect(); texture.handle=Some(ui.ctx().load_texture(sprite.path.display().to_string(),image,egui::TextureOptions::LINEAR));texture.meta=meta;texture.receiver=None;},
+                    Ok(Ok((image,meta)))=>{uploaded=true;if cache_bytes + image.size[0]*image.size[1]*5 > 256*1024*1024 {texture.error=Some("Preview texture cache exceeds 256 MiB".into());texture.receiver=None;missing+=1;continue;} texture.alpha=image.pixels.iter().map(|pixel|pixel.a()).collect(); texture.handle=Some(ui.ctx().load_texture(sprite.path.display().to_string(),image,egui::TextureOptions::LINEAR));texture.meta=meta;texture.receiver=None;},
                     Ok(Err(e))=>{texture.error=Some(e);texture.receiver=None;},
                     Err(mpsc::TryRecvError::Disconnected)=>{texture.error=Some("decode worker stopped".into());texture.receiver=None;},
                     Err(mpsc::TryRecvError::Empty)=>{loading=true;},
                 }
             }
-            let Some(handle)=&texture.handle else {if let Some(error)=&texture.error {missing+=1;issues.push(format!("{} · {} · {}",sprite.name,sprite.path.display(),error));} continue};
-            let region_result=if sprite.ui.as_ref().is_some_and(|image|image.raw) {Some(Region{rect:[0.0,0.0,handle.size()[0] as f64,handle.size()[1] as f64],pivot:[0.5,0.5],ppu:100.0,border:[0.0;4]})} else {region(&texture.meta,&sprite.id,handle.size())};
-            let Some(region)=region_result else {missing+=1;issues.push(format!("{} · {} · fileID {} · {}",sprite.name,sprite.path.display(),sprite.id,tr("无法定位 Sprite 切片，或切片数据无效")));continue};
+            let Some(handle)=&texture.handle else {if let Some(error)=&texture.error {missing+=1;if reported_errors.insert((sprite.path.clone(),sprite.id.clone())) {issues.push(format!("{} · {} · {}",sprite.name,sprite.path.display(),error));}} continue};
+            let region_result=if sprite.ui.as_ref().is_some_and(|image|image.raw) {Some(Region{rect:[0.0,0.0,handle.size()[0] as f64,handle.size()[1] as f64],pivot:[0.5,0.5],ppu:100.0,border:[0.0;4]})} else {*texture.regions.entry(sprite.id.clone()).or_insert_with(||region(&texture.meta,&sprite.id,handle.size()))};
+            let Some(region)=region_result else {missing+=1;if reported_errors.insert((sprite.path.clone(),sprite.id.clone())) {issues.push(format!("{} · {} · fileID {} · {}",sprite.name,sprite.path.display(),sprite.id,tr("无法定位 Sprite 切片，或切片数据无效")));}continue};
             if let Some(image)=&sprite.ui {
                 quads.extend(ui_quads(&sprite,image,&region,handle.id(),handle.size()));continue;
             }
@@ -335,8 +563,9 @@ impl Preview {
             let corners=[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]];
             let points=corners.map(|[a,b]|sprite.matrix.point((a-region.pivot[0])*w/region.ppu*if sprite.flip[0]{-1.0}else{1.0},(b-region.pivot[1])*h/region.ppu*if sprite.flip[1]{-1.0}else{1.0}));
             let uv=corners.map(|[a,b]|egui::pos2(((x+a*w)/iw) as f32,(1.0-(y+b*h)/ih) as f32));
-            quads.push(Quad{texture:handle.id(),points,outline:points,uv,tint:sprite.tint,path:Some(sprite.path),component:sprite.component,selectable:sprite.selectable,order:sprite.order});
+            quads.push(Quad{texture:handle.id(),points,outline:points,uv,tint:sprite.tint,path:Some(sprite.path.clone()),component:sprite.component.clone(),selectable:sprite.selectable,order:sprite.order});
         }
+        if self.preparation_pending {ui.label(tr("正在准备预览…"));}
         if loading {ui.label(tr("正在加载预览资源…"));}
         if missing>0 {
             ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {missing}",tr("部分资源缺失或暂不支持"))).on_hover_text(issues.join("\n"));
@@ -347,14 +576,27 @@ impl Preview {
             });
         }
         if builtin_ui_approximation {ui.small(tr("UI 内置 Sprite 暂用颜色矩形近似显示。"));}
-        if has_ui && documents.iter().any(|doc|field(&doc.text,"m_HorizontalFit").is_some() || field(&doc.text,"m_ChildControlWidth").is_some() || field(&doc.text,"m_ShowMaskGraphic").is_some() || field(&doc.text,"m_Softness").is_some()) {
+        if has_ui && documents.iter().filter(|doc|doc.type_name=="MonoBehaviour" && doc.text.len()<128*1024).any(|doc|field(&doc.text,"m_HorizontalFit").is_some() || field(&doc.text,"m_ChildControlWidth").is_some() || field(&doc.text,"m_ShowMaskGraphic").is_some() || field(&doc.text,"m_Softness").is_some()) {
             ui.small(tr("UI 布局驱动与遮罩暂按静态属性近似显示。"));
         }
         if documents.iter().any(|d|d.type_name=="PrefabInstance") {ui.colored_label(ui.visuals().warn_fg_color,tr("嵌套 Prefab 暂未展开，预览可能不完整。"));}
         ui.small(tr("XY 正交视图 · 滚轮缩放 · 拖动平移"));
         let (rect,response)=ui.allocate_exact_size(ui.available_size().max(Vec2::splat(1.0)),egui::Sense::click_and_drag());
         let painter=ui.painter_at(rect);
-        painter.rect_filled(rect,0.0,ui.visuals().extreme_bg_color);
+        if self.background == "gray" || self.background == "custom" {
+            let [r,g,b] = if self.background == "gray" {[128,128,128]} else {self.background_rgb.unwrap_or([190,190,190])};
+            painter.rect_filled(rect, 0.0, Color32::from_rgb(r,g,b));
+        } else {
+        let cell = 12.0;
+        for y in 0..(rect.height() / cell).ceil() as usize {
+            for x in 0..(rect.width() / cell).ceil() as usize {
+                let tile = egui::Rect::from_min_size(
+                    rect.min + egui::vec2(x as f32 * cell, y as f32 * cell), Vec2::splat(cell),
+                ).intersect(rect);
+                painter.rect_filled(tile, 0.0, Color32::from_gray(if (x+y)%2==0 {190} else {230}));
+            }
+        }
+        }
         if response.dragged(){self.pan+=response.drag_delta();}
         if response.hovered(){let scroll=ui.input(|i|i.smooth_scroll_delta.y);self.zoom=(self.zoom*(scroll*0.002).exp()).clamp(0.05,50.0);}
         let reference_frame = if has_ui {
@@ -397,7 +639,10 @@ impl Preview {
         }
         let screen=|p:[f64;2]|rect.center()+self.pan+egui::vec2((p[0]-center[0]) as f32*scale,-(p[1]-center[1]) as f32*scale);
         let origin=screen(reference_frame.as_ref().map_or([0.0,0.0], |points| points[0]));
-        let axis=egui::Stroke::new(1.0_f32,Color32::from_rgba_unmultiplied(128,128,128,100));
+        let axis_color=if self.background!="gray" && self.background!="custom" {
+            Color32::from_rgba_unmultiplied(35,110,210,210)
+        } else {Color32::from_rgba_unmultiplied(128,128,128,100)};
+        let axis=egui::Stroke::new(1.0_f32,axis_color);
         painter.line_segment([Pos2::new(rect.left(),origin.y),Pos2::new(rect.right(),origin.y)],axis);
         painter.line_segment([Pos2::new(origin.x,rect.top()),Pos2::new(origin.x,rect.bottom())],axis);
         if let Some(points) = reference_frame {
@@ -436,31 +681,53 @@ impl Preview {
             }
         }
         let highlighted=picked.as_deref().or(selected);
+        let mut batch: Option<egui::Mesh> = None;
         for (_,item) in drawing {
             match item {
                 DrawItem::Quad(index)=>{
-                    let quad=&quads[index];let mut mesh=egui::Mesh::with_texture(quad.texture);
-                    for i in 0..4 {mesh.vertices.push(egui::epaint::Vertex{pos:screen(quad.points[i]),uv:quad.uv[i],color:quad.tint});}
-                    mesh.indices.extend([0,1,2,0,2,3]);painter.add(egui::Shape::mesh(mesh));
+                    let quad=&quads[index];
+                    let points=quad.points.map(screen);
+                    if !egui::Rect::from_points(&points).intersects(rect) {continue;}
+                    if batch.as_ref().is_some_and(|mesh|mesh.texture_id!=quad.texture) {
+                        painter.add(egui::Shape::mesh(batch.take().unwrap()));
+                    }
+                    let mesh=batch.get_or_insert_with(||egui::Mesh::with_texture(quad.texture));
+                    let base=mesh.vertices.len() as u32;
+                    for i in 0..4 {mesh.vertices.push(egui::epaint::Vertex{pos:points[i],uv:quad.uv[i],color:quad.tint});}
+                    mesh.indices.extend([base,base+1,base+2,base,base+2,base+3]);
                 }
                 DrawItem::Text(index)=>{
+                    if let Some(mesh)=batch.take() {painter.add(egui::Shape::mesh(mesh));}
                     let text=&texts[index];let points=ui_rect_points(text.layout).map(screen);
                     let right=points[1]-points[0];let down=points[0]-points[3];
                     let width=right.length().max(1.0);let height=down.length().max(1.0);
                     let font_scale=height/text.layout.size[1].max(0.001) as f32;
-                    let mut job=egui::text::LayoutJob::simple(text.content.clone(),egui::FontId::proportional((text.font_size as f32*font_scale).clamp(1.0,512.0)),text.color,if text.wrap {width}else{f32::INFINITY});
-                    job.halign=if text.horizontal==0.5 {egui::Align::Center}else if text.horizontal==1.0 {egui::Align::Max}else{egui::Align::Min};
-                    job.wrap.max_rows=512;
-                    let galley=ui.fonts(|fonts|fonts.layout_job(job));
-                    let top_left=points[3]+right*(text.horizontal as f32)+down.normalized()*((height-galley.size().y).max(0.0)*text.vertical as f32);
+                    let layout=|size:f32| {
+                        let mut job=egui::text::LayoutJob::simple(text.content.clone(),egui::FontId::new((size*font_scale).clamp(1.0,512.0),text.family.clone()),text.color,if text.wrap {width}else{f32::INFINITY});
+                        job.halign=if text.horizontal==0.5 {egui::Align::Center}else if text.horizontal==1.0 {egui::Align::Max}else{egui::Align::Min};
+                        job.wrap.max_rows=512;
+                        ui.fonts(|fonts|fonts.layout_job(job))
+                    };
+                    let galley=if let Some([min,max])=text.best_fit {
+                        fit_text(min,max,Vec2::new(width,height),layout)
+                    } else {layout(text.font_size as f32)};
+                    let alignment_bounds=text_alignment_bounds(galley.rect,galley.mesh_bounds,text.visible_center,text.align_by_geometry);
+                    let top_left=text_origin(points,alignment_bounds,[text.horizontal as f32,text.vertical as f32]);
                     let clip=egui::Rect::from_points(&points).intersect(rect);
                     painter.with_clip_rect(clip).add(egui::epaint::TextShape::new(top_left,galley,text.color).with_angle(right.y.atan2(right.x)));
                 }
             }
         }
+        if let Some(mesh)=batch {painter.add(egui::Shape::mesh(mesh));}
         let mut outlined=HashSet::new();
-        for quad in quads.iter().filter(|quad|Some(quad.component.as_str())==highlighted) {
-            if outlined.insert(&quad.component) {painter.add(egui::Shape::closed_line(quad.outline.map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));}
+        let highlighted_quads: Vec<_>=quads.iter().filter(|quad|Some(quad.component.as_str())==highlighted).collect();
+        if highlighted_quads.len()>64 {
+            let bounds=highlighted_quads.iter().fold(egui::Rect::NOTHING,|bounds,quad|bounds.union(egui::Rect::from_points(&quad.outline.map(screen))));
+            painter.rect_stroke(bounds,0.0,egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235)),egui::StrokeKind::Inside);
+        } else {
+            for quad in highlighted_quads {
+                if outlined.insert(&quad.component) {painter.add(egui::Shape::closed_line(quad.outline.map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));}
+            }
         }
         for text in texts.iter().filter(|text|Some(text.component.as_str())==highlighted) {
             painter.add(egui::Shape::closed_line(ui_rect_points(text.layout).map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));
@@ -473,8 +740,65 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn middle_center_uses_visible_glyph_height_without_font_padding() {
+        let points=[Pos2::new(0.0,60.0),Pos2::new(240.0,60.0),Pos2::new(240.0,0.0),Pos2::new(0.0,0.0)];
+        let layout=egui::Rect::from_min_max(Pos2::new(-90.0,0.0),Pos2::new(90.0,50.0));
+        let glyphs=egui::Rect::from_min_max(Pos2::new(-85.0,6.0),Pos2::new(88.0,26.0));
+        let bounds=text_alignment_bounds(layout,glyphs,true,false);
+        let origin=text_origin(points,bounds,[0.5,0.5]);
+        assert_eq!(origin.y+glyphs.center().y,30.0);
+        assert_eq!(bounds.min.x,layout.min.x);
+        assert_eq!(text_alignment_bounds(layout,glyphs,false,false),layout);
+        assert_eq!(text_alignment_bounds(layout,glyphs,true,true),glyphs);
+    }
+    #[test]
+    fn best_fit_keeps_complete_long_title_inside_text_box() {
+        let ctx=egui::Context::default();
+        let _=ctx.run(egui::RawInput::default(),|ctx| {
+            let galley=fit_text(28.0,45.0,Vec2::new(450.0,70.0),|size| {
+                let mut job=egui::text::LayoutJob::simple("Grotte des Chauves-souris".into(),egui::FontId::proportional(size),Color32::WHITE,450.0);
+                job.halign=egui::Align::Center;
+                ctx.fonts(|fonts|fonts.layout_job(job))
+            });
+            assert_eq!(galley.job.text,"Grotte des Chauves-souris");
+            assert!(galley.size().x<=450.5 && galley.size().y<=70.5);
+            assert!(!galley.elided);
+            let drawn:String=galley.rows.iter().flat_map(|row|row.glyphs.iter()).map(|glyph|glyph.chr).filter(|c|!c.is_whitespace()).collect();
+            assert_eq!(drawn,"GrottedesChauves-souris");
+        });
+    }
+    #[test]
+    fn text_anchor_positions_center_right_and_oversized_text() {
+        let points=[Pos2::new(0.0,60.0),Pos2::new(240.0,60.0),Pos2::new(240.0,0.0),Pos2::new(0.0,0.0)];
+        let centered=egui::Rect::from_min_max(Pos2::new(-50.0,0.0),Pos2::new(50.0,20.0));
+        assert_eq!(text_origin(points,centered,[0.5,0.5]),Pos2::new(120.0,20.0));
+        let right=egui::Rect::from_min_max(Pos2::new(-100.0,0.0),Pos2::new(0.0,20.0));
+        assert_eq!(text_origin(points,right,[1.0,1.0]),Pos2::new(240.0,40.0));
+        let oversized=egui::Rect::from_min_max(Pos2::new(-150.0,0.0),Pos2::new(150.0,80.0));
+        assert_eq!(text_origin(points,oversized,[0.5,0.5]),Pos2::new(120.0,-10.0));
+    }
     fn transform(id: &str, parent: Option<&str>, position: &str, rotation: &str, scale: &str) -> Document {
-        Document { file_id: id.into(), type_name: "Transform".into(), start_line: 1, game_object: None, parent_transform: parent.map(str::to_owned), text: format!("Transform:\n  m_LocalPosition: {position}\n  m_LocalRotation: {rotation}\n  m_LocalScale: {scale}\n") }
+        Document { file_id: id.into(), type_name: "Transform".into(), start_line: 1, start_offset: 0, game_object: None, parent_transform: parent.map(str::to_owned), text: format!("Transform:\n  m_LocalPosition: {position}\n  m_LocalRotation: {rotation}\n  m_LocalScale: {scale}\n").into() }
+    }
+    #[test]
+    fn equal_orders_draw_smaller_y_last_and_order_has_priority() {
+        let docs=crate::parse_unity_yaml("--- !u!212 &1\nSpriteRenderer:\n  m_SortingLayer: 0\n  m_SortingOrder: 20\n--- !u!212 &2\nSpriteRenderer:\n  m_SortingLayer: 0\n  m_SortingOrder: 21\n");
+        let mut high=Matrix::identity();high.0[1][3]=10.0;
+        let mut low=Matrix::identity();low.0[1][3]=-5.0;
+        assert!(renderer_order(&docs[0],high,1)<renderer_order(&docs[0],low,1));
+        assert!(renderer_order(&docs[0],low,1)<renderer_order(&docs[1],high,1));
+        high.0[0][3]=-9.0;
+        assert!(renderer_order(&docs[0],high,0)>renderer_order(&docs[0],low,0));
+        assert_eq!(renderer_order(&docs[0],high,2),renderer_order(&docs[0],low,2));
+    }
+    #[test]
+    fn compact_projection_preserves_world_points() {
+        let mut matrix=Matrix::identity();matrix.0[0]=[2.0,-3.0,4.0,8.0];matrix.0[1]=[-1.0,5.0,9.0,-6.0];
+        let compact=Projection::from(matrix);
+        assert_eq!(compact.point(-7.0,11.0),matrix.point(-7.0,11.0));
+        assert_eq!(compact.full().point(-7.0,11.0),matrix.point(-7.0,11.0));
+        assert!(std::mem::size_of::<Projection>()<std::mem::size_of::<Matrix>());
     }
     #[test]
     fn zero_root_scale_is_visible_but_zero_child_scale_is_preserved() {
@@ -521,7 +845,7 @@ mod tests {
     #[test]
     fn sliced_image_preserves_corners_and_skips_center() {
         let doc=transform("1",None,"{x: 0, y: 0, z: 0}","{x: 0, y: 0, z: 0, w: 1}","{x: 1, y: 1, z: 1}");
-        let sprite=Sprite{ui:None,component:"20".into(),selectable:true,name:"panel".into(),path:"panel.png".into(),id:"21300000".into(),matrix:local(&doc,true),tint:Color32::WHITE,flip:[false;2],order:(0,0)};
+        let sprite=Sprite{ui:None,component:"20".into(),selectable:true,name:"panel".into(),path:"panel.png".into(),id:"21300000".into(),matrix:local(&doc,true).into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
         let image=UiImage{size:[200.0,100.0],pivot:[0.5,0.5],mode:1,fill_center:false,preserve_aspect:false,ppu_multiplier:1.0,reference_ppu:100.0,raw:false,uv_rect:[0.0,0.0,1.0,1.0],fill:1.0,fill_method:0,fill_origin:0};
         let region=Region{rect:[0.0,0.0,100.0,100.0],pivot:[0.5,0.5],ppu:100.0,border:[10.0;4]};
         let quads=ui_quads(&sprite,&image,&region,egui::TextureId::default(),[100,100]);

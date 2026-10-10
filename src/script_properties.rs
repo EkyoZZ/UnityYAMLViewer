@@ -130,7 +130,7 @@ impl ScriptProperties {
         let known_fields = resolved.map(|(index, class)| index.inherited_fields(class, &mut HashSet::new()));
         let ranges = resolved.map(|(index, class)| index.inherited_ranges(class, &mut HashSet::new()));
         let search = query.trim().to_lowercase();
-        ScrollArea::both().id_salt("script_properties").auto_shrink([false, false]).show(ui, |ui| {
+        property_scroll(ui, "script_properties", |ui| {
             publish_property_columns(ui);
             ui.collapsing(crate::localization::tr("组件信息"), |ui| {
                 for field in fields.iter().filter(|field| is_component_field(&field.name)) {
@@ -153,6 +153,15 @@ impl ScriptProperties {
                 });
             }
         });
+    }
+}
+
+// Component sections share the enclosing Inspector scroll area.
+fn property_scroll(ui: &mut egui::Ui, id: &str, contents: impl FnOnce(&mut egui::Ui)) {
+    if ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("inspector_component_sections")).unwrap_or(false)) {
+        contents(ui);
+    } else {
+        ScrollArea::both().id_salt(id).auto_shrink([false, false]).show(ui, contents);
     }
 }
 
@@ -244,22 +253,29 @@ impl ProjectIndex {
 }
 
 // Strings and comments are tokenized separately so braces in them cannot be
-// mistaken for class/method scopes. Conditional sections are omitted because
-// this viewer does not know Unity's active compile symbols.
+// mistaken for class/method scopes. UNITY_EDITOR is evaluated in editor context;
+// other conditional symbols remain unknown and their branches are omitted.
 fn parse_source(source: &str, path: &Path) -> (Vec<ClassInfo>, Vec<(String, Vec<(String, i64)>)>) {
     let token_re = Regex::new(r#"(?s)//[^\r\n]*|/\*.*?\*/|@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z_][A-Za-z_0-9]*|-?\d+|[^\s]"#).unwrap();
-    let mut conditional_depth = 0usize;
+    let mut conditions: Vec<(bool, Option<bool>)> = Vec::new();
+    let mut active = true;
     let source: String = source.lines().filter_map(|line| {
         let trimmed = line.trim_start();
         if trimmed.starts_with('#') {
             let directive = trimmed.trim_start_matches('#').trim_start().split_whitespace().next().unwrap_or("");
             match directive {
-                "if" => conditional_depth += 1,
-                "endif" => conditional_depth = conditional_depth.saturating_sub(1),
+                "if" => {
+                    let expression=trimmed.trim_start_matches('#').trim_start().strip_prefix("if").unwrap_or("").trim();
+                    let known=match expression {"UNITY_EDITOR"=>Some(true),"!UNITY_EDITOR"=>Some(false),_=>None};
+                    conditions.push((active,known));active=active && known==Some(true);
+                },
+                "else" => {if let Some((parent,known))=conditions.last() {active=*parent && *known==Some(false);}},
+                "elif" => {if let Some((_,known))=conditions.last_mut() {*known=None;} active=false;},
+                "endif" => {if let Some((parent,_))=conditions.pop() {active=parent;}},
                 _ => {}
             }
             None
-        } else if conditional_depth == 0 {
+        } else if active {
             Some(format!("{line}\n"))
         } else { None }
     }).collect();
@@ -495,6 +511,103 @@ fn sprite_metadata(name: &str) -> bool {
     is_component_field(name) && name != "m_Enabled"
 }
 
+pub fn show_sprite_atlas_properties(ui: &mut egui::Ui, text: &str, query: &str) {
+    let index = ProjectIndex::default();
+    ScrollArea::both().id_salt("sprite_atlas_properties").auto_shrink([false,false]).show(ui, |ui| {
+        publish_property_columns(ui);
+        atlas_fields(ui, &yaml_fields(text), &index, &query.trim().to_lowercase(), 0);
+    });
+}
+
+fn atlas_fields(ui: &mut egui::Ui, fields: &[YamlField], index: &ProjectIndex, search: &str, depth: usize) {
+    for field in fields {
+        if !search.is_empty() && !format!("{} {}", field.name, field.value).to_lowercase().contains(search) { continue; }
+        ui.push_id(&field.name, |ui| {
+            if let Some(kind) = atlas_field_type(&field.name) {
+                typed_field(ui, field, kind, index);
+            } else if field.value.contains('\n') && depth < 12 && !field.value.lines().find(|line| !line.trim().is_empty()).is_some_and(|line| line.trim_start().starts_with('-')) {
+                let nested = field.value.lines().map(|line| line.strip_prefix("  ").unwrap_or(line)).collect::<Vec<_>>().join("\n");
+                let children = yaml_fields(&nested);
+                if children.is_empty() { raw_field(ui, field, crate::localization::tr("原始值")); }
+                else {
+                    crate::editing::with_field(ui, &field.name, |ui| {
+                        egui::CollapsingHeader::new(&field.name).default_open(true).show(ui, |ui| atlas_fields(ui, &children, index, search, depth + 1));
+                    });
+                }
+            } else { raw_field(ui, field, crate::localization::tr("原始值")); }
+        });
+    }
+}
+
+fn atlas_field_type(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "m_Name" | "buildTarget" => "string",
+        "packables" => "UnityEngine.Object[]",
+        "m_PackedSprites" => "Sprite[]",
+        "m_PackedSpriteNamesToIndex" => "string[]",
+        "platformSettings" | "m_PlatformSettings" => "TextureImporterPlatformSettings[]",
+        "m_MasterAtlas" => "SpriteAtlas",
+        "enableRotation" | "enableTightPacking" | "bindAsDefault" | "isReadable" | "generateMipMaps" | "sRGB" | "enableAlphaDilation" |
+        "overridden" | "crunchedCompression" | "allowsAlphaSplitting" | "isVariant" | "m_IsVariant" | "m_IncludeInBuild" => "bool",
+        "variantMultiplier" => "float",
+        "padding" | "blockOffset" | "maxTextureSize" | "textureCompression" | "compressionQuality" | "filterMode" | "anisoLevel" | "textureFormat" |
+        "format" | "serializedVersion" | "m_ObjectHideFlags" | "resizeAlgorithm" | "androidETC2FallbackOverride" => "int",
+        _ => return None,
+    })
+}
+
+pub fn show_mesh_renderer_properties_content(ui: &mut egui::Ui, text: &str, query: &str) {
+    let fields = yaml_fields(text);
+    let search = query.trim().to_lowercase();
+    let mut index = ProjectIndex::default();
+    for (name, values) in [
+        ("ShadowCastingMode", vec![("Off",0),("On",1),("Two Sided",2),("Shadows Only",3)]),
+        ("MotionVectorGenerationMode", vec![("Camera",0),("Object",1),("Force No Motion",2)]),
+        ("LightProbeUsage", vec![("Off",0),("Blend Probes",1),("Use Proxy Volume",2),("Custom Provided",4)]),
+        ("ReflectionProbeUsage", vec![("Off",0),("Blend Probes",1),("Blend Probes And Skybox",2),("Simple",3)]),
+        ("RayTracingMode", vec![("Off",0),("Static",1),("Dynamic Transform",2),("Dynamic Geometry",3)]),
+        ("ReceiveGI", vec![("Lightmaps",1),("Light Probes",2)]),
+    ] {
+        index.enums.insert(name.into(), vec![values.into_iter().map(|(label,value)| (label.into(),value)).collect()]);
+    }
+    publish_property_columns(ui);
+    ui.collapsing(crate::localization::tr("组件信息"), |ui| {
+        for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
+            raw_field(ui, field, crate::localization::tr("组件信息"));
+        }
+    });
+    for field in fields.iter().filter(|field| !sprite_metadata(&field.name)) {
+        let (label, kind) = mesh_renderer_field_info(&field.name);
+        if !search.is_empty() && !format!("{} {label} {kind} {}",field.name,field.value).to_lowercase().contains(&search) { continue; }
+        ui.push_id(&field.name, |ui| {
+            let display = YamlField { name: label.into(), value: field.value.clone() };
+            if kind == crate::localization::tr("原始值") { raw_field(ui, &display, kind); }
+            else { typed_field(ui, &display, kind, &index); }
+        });
+    }
+}
+
+fn mesh_renderer_field_info(name: &str) -> (&str, &str) {
+    match name {
+        "m_MotionVectors" => ("Motion Vectors", "MotionVectorGenerationMode"),
+        "m_LightProbeUsage" => ("Light Probes", "LightProbeUsage"),
+        "m_ReflectionProbeUsage" => ("Reflection Probes", "ReflectionProbeUsage"),
+        "m_RayTracingMode" => ("Ray Tracing Mode", "RayTracingMode"),
+        "m_ReceiveGI" => ("Receive GI", "ReceiveGI"),
+        "m_StaticBatchRoot" => ("Static Batch Root", "Transform"),
+        "m_LightmapParameters" => ("Lightmap Parameters", "LightmapParameters"),
+        "m_PreserveUVs" => ("Preserve UVs", "bool"),
+        "m_IgnoreNormalsForChartDetection" => ("Ignore Normals For Chart Detection", "bool"),
+        "m_StitchLightmapSeams" => ("Stitch Lightmap Seams", "bool"),
+        "m_ImportantGI" => ("Important GI", "bool"),
+        "m_MinimumChartSize" => ("Minimum Chart Size", "int"),
+        "m_SelectedEditorRenderState" => ("Selected Editor Render State", "int"),
+        "m_AutoUVMaxDistance" => ("Auto UV Max Distance", "float"),
+        "m_AutoUVMaxAngle" => ("Auto UV Max Angle", "float"),
+        _ => sprite_field_info(name),
+    }
+}
+
 fn material_groups(text: &str) -> Vec<(String, Vec<YamlField>)> {
     let mut groups: Vec<(String, Vec<YamlField>)> = Vec::new();
     for line in text.lines() {
@@ -636,7 +749,7 @@ pub fn show_animator_properties(ui: &mut egui::Ui, text: &str, query: &str) {
         index.enums.insert(name.to_string(), vec![entries.into_iter().map(|(name, value)| (name.to_string(), value)).collect()]);
     }
     ui.small(crate::localization::tr("Animator 属性；引用资源可打开，本文件对象可定位。"));
-    ScrollArea::both().id_salt("animator_properties").auto_shrink([false, false]).show(ui, |ui| {
+    property_scroll(ui, "animator_properties", |ui| {
             publish_property_columns(ui);
         ui.collapsing(crate::localization::tr("组件信息"), |ui| {
             for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
@@ -717,7 +830,7 @@ pub fn show_collider_properties(ui: &mut egui::Ui, type_name: &str, text: &str, 
     let search = query.trim().to_lowercase();
     let is_2d = type_name.ends_with("2D");
     ui.small(crate::localization::tr("碰撞体属性；进入编辑模式后可修改已确认类型的属性。"));
-    ScrollArea::both().id_salt("collider_properties").auto_shrink([false, false]).show(ui, |ui| {
+    property_scroll(ui, "collider_properties", |ui| {
             publish_property_columns(ui);
         ui.collapsing(crate::localization::tr("组件信息"), |ui| {
             for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
@@ -951,17 +1064,23 @@ pub fn show_prefab_reference(ui: &mut egui::Ui, text: &str, documents: &[crate::
 }
 
 fn prefab_source_reference(text: &str, documents: &[crate::Document]) -> Option<String> {
-    let fields = yaml_fields(text);
+    let fields: Vec<_> = text.lines().filter_map(|line| {
+        let top = line.strip_prefix("  ")?;
+        if top.starts_with([' ', '-']) { return None; }
+        let (name, value) = top.split_once(':')?;
+        matches!(name, "m_CorrespondingSourceObject" | "m_SourcePrefab" | "m_PrefabInstance")
+            .then(|| (name, value.trim()))
+    }).collect();
     // Stripped components can point straight to their corresponding source
     // object. Its fileID lets the viewer select that object after opening.
     for name in ["m_CorrespondingSourceObject", "m_SourcePrefab"] {
-        if let Some(field) = fields.iter().find(|field| field.name == name && guid_from_meta(&field.value).is_some()) {
-            return Some(field.value.clone());
+        if let Some((_, value)) = fields.iter().find(|(field, value)| *field == name && guid_from_meta(value).is_some()) {
+            return Some((*value).to_owned());
         }
     }
-    let instance = fields.iter().find(|field| field.name == "m_PrefabInstance")?;
+    let (_, instance) = fields.iter().find(|(field, _)| *field == "m_PrefabInstance")?;
     let pattern = Regex::new(r"fileID:\s*(-?\d+)").unwrap();
-    let id = pattern.captures(&instance.value)?.get(1)?.as_str();
+    let id = pattern.captures(instance)?.get(1)?.as_str();
     if id == "0" { return None; }
     let instance = documents.iter().find(|document| document.file_id == id)?;
     yaml_fields(&instance.text).into_iter()
@@ -1302,6 +1421,9 @@ fn builtin_enum_values(field_type: &str) -> Option<Vec<(String, i64)>> {
     match field_type {
         "TextAnchor" | "UnityEngine.TextAnchor" => Some(["UpperLeft", "UpperCenter", "UpperRight", "MiddleLeft", "MiddleCenter", "MiddleRight", "LowerLeft", "LowerCenter", "LowerRight"]
             .into_iter().enumerate().map(|(value, label)| (label.to_string(), value as i64)).collect()),
+        "FontStyle" | "UnityEngine.FontStyle" => Some(["Normal","Bold","Italic","BoldAndItalic"].into_iter().enumerate().map(|(value,label)|(label.to_owned(),value as i64)).collect()),
+        "HorizontalWrapMode" | "UnityEngine.HorizontalWrapMode" => Some(vec![("Wrap".into(),0),("Overflow".into(),1)]),
+        "VerticalWrapMode" | "UnityEngine.VerticalWrapMode" => Some(vec![("Truncate".into(),0),("Overflow".into(),1)]),
         _ => None,
     }
 }
@@ -1329,6 +1451,17 @@ fn property_label(ui: &mut egui::Ui, name: &str, field_type: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn editor_only_classes_and_fields_are_recognized() {
+        let source="\n#if UNITY_EDITOR\npublic class TiledMapGrid : MonoBehaviour { public int MAP_WIDTH; public Color Color;\n#if CUSTOM_SYMBOL\npublic int unknown;\n#endif\n}\n#else\npublic class RuntimeGrid {}\n#endif\n";
+        let (classes,_)=super::parse_source(source,std::path::Path::new("TiledMapGrid.cs"));
+        assert_eq!(classes.len(),1);
+        assert_eq!(classes[0].name,"TiledMapGrid");
+        assert_eq!(classes[0].fields.get("MAP_WIDTH").map(String::as_str),Some("int"));
+        assert_eq!(classes[0].fields.get("Color").map(String::as_str),Some("Color"));
+        assert!(!classes[0].fields.contains_key("unknown"));
+    }
+
     #[test]
     fn shader_properties_distinguish_colors_and_vectors_without_name_guesses() {
         let source = r#"Shader "Test" {
@@ -1499,7 +1632,7 @@ mod tests {
 
     #[test]
     fn conditional_fields_are_unknown_but_regions_are_supported() {
-        let source = "public class Water {\n#region Fields\npublic float speed;\n#if UNITY_EDITOR\npublic int editorField;\n#else\npublic bool editorField;\n#endif\n#endregion\n}";
+        let source = "public class Water {\n#region Fields\npublic float speed;\n#if CUSTOM_SYMBOL\npublic int editorField;\n#else\npublic bool editorField;\n#endif\n#endregion\n}";
         let (classes, _) = parse_source(source, Path::new("Water.cs"));
         assert_eq!(classes[0].fields.get("speed").map(String::as_str), Some("float"));
         assert!(!classes[0].fields.contains_key("editorField"));
@@ -1554,7 +1687,7 @@ pub fn show_ui_graphic_properties_content(ui: &mut egui::Ui, text: &str, query: 
             ui.collapsing("Font",|ui|crate::editing::with_field(ui,"m_FontData",|ui| {
                 let nested=field.value.lines().map(|line|line.strip_prefix("  ").unwrap_or(line)).collect::<Vec<_>>().join("\n");
                 for child in yaml_fields(&nested) {
-                    let kind=match child.name.as_str() {"m_FontSize"|"m_FontStyle"|"m_Alignment"|"m_HorizontalOverflow"|"m_VerticalOverflow"=>Some("int"),"m_RichText"|"m_BestFit"=>Some("bool"),"m_LineSpacing"=>Some("float"),_=>None};
+                    let kind=match child.name.as_str() {"m_FontSize"|"m_MinSize"|"m_MaxSize"=>Some("int"),"m_FontStyle"=>Some("FontStyle"),"m_Alignment"=>Some("TextAnchor"),"m_HorizontalOverflow"=>Some("HorizontalWrapMode"),"m_VerticalOverflow"=>Some("VerticalWrapMode"),"m_RichText"|"m_BestFit"|"m_AlignByGeometry"=>Some("bool"),"m_LineSpacing"=>Some("float"),_=>None};
                     if let Some(kind)=kind {typed_field(ui,&child,kind,&index);} else {raw_field(ui,&child,crate::localization::tr("原始值"));}
                 }
             }));

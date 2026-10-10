@@ -81,9 +81,38 @@ pub fn set_preference(ctx: &egui::Context, preference: &str) {
 
 /// Joined tabs with a solid blue active segment, matching the reference.
 pub fn selector(ui: &mut egui::Ui, preference: &mut String) {
-    ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    selector_inner(ui, preference, false, [("light", "浅色"), ("dark", "深色"), ("system", "系统")]);
+}
+
+pub fn toolbar_selector(ui: &mut egui::Ui, preference: &mut String) {
+    selector_inner(ui, preference, true, [("light", "浅色"), ("dark", "深色"), ("system", "系统")]);
+}
+
+pub fn background_selector(ui: &mut egui::Ui, preference: &mut String) {
+    selector_inner(ui, preference, true, [("", "棋盘格"), ("gray", "灰色"), ("custom", "自定义")]);
+}
+
+/// Filled toolbar actions use the same height and text padding as theme tabs.
+pub fn toolbar_button(ui: &egui::Ui, label: &str, update: bool) -> egui::Button<'static> {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let width = ui.painter().layout_no_wrap(label.to_owned(), font, Color32::WHITE).size().x.ceil() + 12.0;
+    let fill = if update { rgb(210,40,40) } else { BLUE };
+    egui::Button::new(RichText::new(label.to_owned()).color(Color32::WHITE))
+        .fill(fill).stroke(Stroke::new(1.0_f32, fill))
+        .corner_radius(egui::CornerRadius::same(4))
+        .min_size(egui::vec2(width, 24.0))
+}
+
+fn selector_inner(ui: &mut egui::Ui, preference: &mut String, compact: bool, labels: [(&str, &str); 3]) {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let widths = labels.map(|(_, label)| if compact {
+        ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 12.0
+    } else { 208.0 / 3.0 });
+    let height = if compact { 24.0 } else { 30.0 };
+    ui.allocate_ui_with_layout(egui::vec2(widths.iter().sum(), height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        for (index, (value, label)) in [("light", "浅色"), ("dark", "深色"), ("system", "系统")].into_iter().enumerate() {
+        if compact { ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0); }
+        for (index, (value, label)) in labels.into_iter().enumerate() {
             let selected = preference == value;
             let rounding = egui::CornerRadius {
                 nw: if index == 0 { 4 } else { 0 }, sw: if index == 0 { 4 } else { 0 },
@@ -92,11 +121,24 @@ pub fn selector(ui: &mut egui::Ui, preference: &mut String) {
             let button = egui::Button::new(RichText::new(crate::localization::tr(label)).color(if selected { Color32::WHITE } else { BLUE }))
                 .fill(if selected { BLUE } else { ui.visuals().window_fill })
                 .stroke(Stroke::new(1.0_f32, BLUE)).corner_radius(rounding);
-            let response = ui.add_sized([208.0 / 3.0, 30.0], button.wrap());
+            let response = ui.add_sized([widths[index], height], button.wrap());
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, crate::localization::tr(label)));
             if response.clicked() { *preference = value.into(); }
         }
     });
+}
+
+/// Settings button using the shared, theme-tinted SVG asset.
+pub fn settings_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::localization::tr("设置")));
+    let visuals = ui.style().interact(&response);
+    if response.hovered() || response.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
+    }
+    crate::icons::paint(ui, crate::icons::Icon::Gear,
+        egui::Rect::from_center_size(rect.center(), egui::vec2(22.0, 22.0)), visuals.fg_stroke.color);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::localization::tr("设置"))
 }
 
 /// Lightweight preview toggle, aligned with the Inspector heading.
