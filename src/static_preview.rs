@@ -2,6 +2,9 @@ use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, mpsc}, tim
 use eframe::egui::{self, Color32, Pos2, Vec2};
 use crate::{Document, localization::tr};
 mod world;
+mod sdf;
+pub(crate) mod prefab;
+const AUTO_PREFAB_LIMIT:usize=20;
 
 #[derive(Default)]
 pub struct Preview {
@@ -16,6 +19,11 @@ pub struct Preview {
     fonts: crate::preview_fonts::Fonts,
     background: String,
     background_rgb: Option<[u8;3]>,
+    show_guides: bool,
+    sdf: sdf::Atlas,
+    prefabs: prefab::Cache,
+    expand_prefabs: bool,
+    prefab_count: Option<(usize,usize,usize,usize)>,
     preparation: Option<Preparation>,
     prepared: Arc<Prepared>,
     sort_axis: Option<usize>,
@@ -222,11 +230,10 @@ pub(crate) fn region(meta: &str, id: &str, size: [usize;2]) -> Option<Region> {
         return Some(Region {rect:[0.0,0.0,size[0] as f64,size[1] as f64],pivot:[pivot[0],pivot[1]],ppu,border:meta_value(meta,"spriteBorder").and_then(|v|crate::inline_vector(v,&["x","y","z","w"])).map(|v|[v[0],v[1],v[2],v[3]]).unwrap_or([0.0;4])})
     }
     if mode!="2" {return None}
-    let blocks: Vec<_>=meta.split("    - serializedVersion:").skip(1).collect();
-    for block in blocks {
+    let legacy_name=meta.lines().find_map(|line|line.trim().split_once(':').filter(|(key,_)|key.trim()==id).map(|(_,value)|value.trim()));
+    for block in meta.split("    - serializedVersion:").skip(1) {
         let internal=meta_value(block,"internalID");
-        let legacy_name = meta_value(block,"name").filter(|name| meta.lines().any(|line| line.trim().split_once(':').is_some_and(|(key,value)| key.trim()==id && value.trim()==*name)));
-        if internal!=Some(id) && legacy_name.is_none() {continue}
+        if internal!=Some(id) && !legacy_name.is_some_and(|name|meta_value(block,"name")==Some(name)) {continue}
         let rect=block.split_once("      rect:")?.1;
         let scalar=|key: &str| meta_value(rect,key)?.parse::<f64>().ok().filter(|v|v.is_finite());
         let rect=[scalar("x")?,scalar("y")?,scalar("width")?,scalar("height")?];
@@ -235,6 +242,29 @@ pub(crate) fn region(meta: &str, id: &str, size: [usize;2]) -> Option<Region> {
         return Some(Region{rect,pivot:[pivot[0],pivot[1]],ppu,border:meta_value(block,"border").and_then(|v|crate::inline_vector(v,&["x","y","z","w"])).map(|v|[v[0],v[1],v[2],v[3]]).unwrap_or([0.0;4])})
     }
     None
+}
+// Build all known slice IDs once instead of rescanning the whole metadata per sprite.
+fn region_index(meta:&str,size:[usize;2]) -> HashMap<String,Option<Region>> {
+    let mut result=HashMap::new();
+    if meta_value(meta,"spriteMode")!=Some("2") {
+        result.insert("21300000".into(),region(meta,"21300000",size));return result;
+    }
+    let header=format!("spriteMode: 2\nspritePixelsToUnits: {}\n",meta_value(meta,"spritePixelsToUnits").unwrap_or("0"));
+    let mut legacy:HashMap<&str,Vec<&str>>=HashMap::new();
+    for line in meta.lines() {if let Some((key,value))=line.trim().split_once(':') {if key.trim().parse::<i64>().is_ok() {legacy.entry(value.trim()).or_default().push(key.trim());}}}
+    for block in meta.split("    - serializedVersion:").skip(1) {
+        let mut ids=Vec::new();
+        if let Some(id)=meta_value(block,"internalID") {ids.push(id);}
+        if let Some(old)=meta_value(block,"name").and_then(|name|legacy.get(name)) {ids.extend(old.iter().copied());}
+        if ids.is_empty() {continue;}
+        let synthetic=format!("{header}    - serializedVersion:{block}");
+        let resolved=region(&synthetic,meta_value(block,"internalID").unwrap_or(ids[0]),size).or_else(|| {
+            // Legacy IDs map to names in older Unity metadata.
+            let mapping=format!("{header}{}: {}\n    - serializedVersion:{block}",ids[0],meta_value(block,"name").unwrap_or(""));region(&mapping,ids[0],size)
+        });
+        for id in ids {result.insert(id.into(),resolved);}
+    }
+    result
 }
 #[derive(Clone)]
 struct UiImage {
@@ -250,6 +280,21 @@ struct UiText {
     best_fit: Option<[f64;2]>,
     visible_center: bool,
     align_by_geometry: bool,
+    outlines: Vec<TextOutline>,
+    canvas_alpha: f64,
+}
+#[derive(Clone)]
+struct TextOutline { color:Color32, distance:[f64;2], use_graphic_alpha:bool }
+fn text_outline(doc:&Document,catalog:Option<&Arc<HashMap<String,PathBuf>>>) -> Option<TextOutline> {
+    if doc.text.len()>128*1024 || number(&doc.text,"m_Enabled",1.0)==0.0 {return None;}
+    let script=field(&doc.text,"m_Script").and_then(|v|reference(v,"guid"))
+        .and_then(|guid|catalog?.get(&guid.to_lowercase())).and_then(|path|path.file_stem()).and_then(|name|name.to_str()).unwrap_or("");
+    let class=field(&doc.text,"m_EditorClassIdentifier").unwrap_or("");
+    if ![doc.type_name.as_str(),script,class].iter().any(|name|name.to_ascii_lowercase().contains("outline")) {return None;}
+    field(&doc.text,"m_EffectColor")?;
+    let distance=vector(&doc.text,"m_EffectDistance",&["x","y"],&[1.0,1.0]);
+    if distance.iter().any(|v|!v.is_finite()) {return None;}
+    Some(TextOutline {color:tint(&doc.text,"m_EffectColor"),distance:[distance[0].clamp(-64.0,64.0),distance[1].clamp(-64.0,64.0)],use_graphic_alpha:number(&doc.text,"m_UseGraphicAlpha",1.0)!=0.0})
 }
 fn tint(text: &str, key: &str) -> Color32 {
     let c=vector(text,key,&["r","g","b","a"],&[1.0;4]);
@@ -331,6 +376,25 @@ pub(crate) fn checkpoint(cancelled:&std::sync::atomic::AtomicBool,paused:Option<
     }
     !cancelled.load(std::sync::atomic::Ordering::Relaxed)
 }
+fn preview_status_row(ui:&mut egui::Ui,status:&str,complete:bool,paused:&std::sync::atomic::AtomicBool,details:Option<&str>) -> bool {
+    let height=ui.spacing().interact_size.y.max(ui.text_style_height(&egui::TextStyle::Body));
+    let (rect,_)=ui.allocate_exact_size(Vec2::new(ui.available_width(),height),egui::Sense::hover());
+    let mut row=ui.new_child(egui::UiBuilder::new().id_salt("preview_status_row").max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    row.set_clip_rect(ui.clip_rect().intersect(rect));
+    let is_paused=paused.load(std::sync::atomic::Ordering::Relaxed);
+    let label=row.add(egui::Label::new(if !complete && is_paused {tr("已暂停合成预览")} else {status}).wrap_mode(egui::TextWrapMode::Extend));
+    if let Some(details)=details {label.on_hover_text(details);}
+    if complete {return false;}
+    if row.button(tr(if is_paused {"继续"} else {"暂停"})).clicked() {paused.store(!is_paused,std::sync::atomic::Ordering::Relaxed);}
+    row.button(tr("退出预览")).clicked()
+}
+fn paint_zoom_badge(painter:&egui::Painter,rect:egui::Rect,zoom:f64) {
+    let galley=painter.layout_no_wrap(format!("{} {:.0}%",tr("缩放"),zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE);
+    let size=galley.size()+egui::vec2(24.0,12.0);
+    let badge=egui::Rect::from_center_size(egui::pos2(rect.center().x,rect.bottom()-8.0-size.y*0.5),size);
+    painter.rect_filled(badge,6.0,Color32::from_black_alpha(128));
+    painter.galley(badge.min+egui::vec2(12.0,6.0),galley,Color32::WHITE);
+}
 fn paint_background(painter:&egui::Painter,rect:egui::Rect,background:&str,rgb:[u8;3]) {
     if background=="gray" || background=="custom" {
         let [r,g,b]=if background=="gray" {[128,128,128]} else {rgb};painter.rect_filled(rect,0.0,Color32::from_rgb(r,g,b));
@@ -351,10 +415,11 @@ impl Preview {
     }
     pub fn available(documents: &[Document], path: Option<&std::path::Path>) -> bool {
         path.is_some_and(|p|p.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab") || e.eq_ignore_ascii_case("unity"))) && documents.iter().any(|d|
-            d.type_name=="Tilemap" || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
+            d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
     }
     pub fn release(&mut self) {
         self.preparation=None;self.preparation_pending=false;self.world.release();
+        if self.sdf.has_state() {let sdf=std::mem::take(&mut self.sdf);std::thread::spawn(move || drop(sdf));}
         let prepared=std::mem::take(&mut self.prepared);let textures=std::mem::take(&mut self.textures);
         if !prepared.sprites.is_empty() || !textures.is_empty() {std::thread::spawn(move || {drop(prepared);drop(textures);});}
         self.paused.store(false,std::sync::atomic::Ordering::Relaxed);self.focus_request=None;
@@ -381,11 +446,47 @@ impl Preview {
         if self.preparation_pending {ctx.request_repaint_after(std::time::Duration::from_millis(100));}
         self.prepared.clone()
     }
+    fn clear_prefabs(&mut self) {
+        if self.prefabs.has_state() {self.prefabs.cancel();let prefabs=std::mem::take(&mut self.prefabs);std::thread::spawn(move || drop(prefabs));}
+    }
+    fn initialize_document(&mut self,documents:&[Document],identity:&str) -> usize {
+        let first_document=documents.first().map_or(0,|doc|doc.text.as_ptr() as usize);
+        let last_document=documents.last().map_or(0,|doc|doc.text.as_ptr() as usize);
+        let changed_identity=self.identity!=identity;
+        let prefab_count=match self.prefab_count {
+            Some((first,last,len,count)) if !changed_identity && first==first_document && last==last_document && len==documents.len()=>count,
+            _=>documents.iter().filter(|doc|doc.type_name=="PrefabInstance").count(),
+        };
+        if self.identity!=identity {self.clear_prefabs();self.identity=identity.into();self.release();self.ui_presence=None;self.expand_prefabs=prefab_count<=AUTO_PREFAB_LIMIT;self.zoom=1.0;self.pan=Vec2::ZERO;self.next_asset_check=None;self.ui_viewport=None;}
+        self.prefab_count=Some((first_document,last_document,documents.len(),prefab_count));
+        prefab_count
+    }
+    pub(crate) fn hierarchy_header(&mut self,ui:&mut egui::Ui,documents:&[Document],identity:&str) {
+        let count=self.initialize_document(documents,identity);
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(tr("Hierarchy"));
+            if count>0 {
+                crate::theme::toggle_switch(ui,tr("展开嵌套Prefab"),&mut self.expand_prefabs)
+                    .on_hover_text(format!("{}: {count}\n{}: {AUTO_PREFAB_LIMIT}",tr("当前文件中的 Prefab 实例"),tr("自动展开上限")));
+            }
+        });
+        if self.expand_prefabs && count>0 {
+            let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
+            let (_,pending)=self.prefabs.resolve(ui.ctx(),documents,catalog,self.paused.clone());
+            if pending {ui.small(tr("正在展开 Prefab…"));}
+        } else {self.clear_prefabs();}
+    }
+    pub(crate) fn hierarchy_documents(&self,identity:&str) -> Option<Arc<prefab::Expanded>> {
+        if self.expand_prefabs && self.identity==identity {self.prefabs.snapshot()} else {None}
+    }
     pub fn show(&mut self, ui: &mut egui::Ui, documents: &[Document], identity: &str, flags: &HashMap<String, crate::hierarchy_controls::Flags>, selected: Option<&str>) -> Option<String> {
-        if self.identity!=identity {self.identity=identity.into();self.release();self.ui_presence=None;self.zoom=1.0;self.pan=Vec2::ZERO;self.next_asset_check=None;self.ui_viewport=None;}
+        let prefab_count=self.initialize_document(documents,identity);
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("静态预览"));
             if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;self.world.fit();}
+            for (label,zoom) in [("50%",0.5),("100%",1.0),("200%",2.0)] {
+                if ui.button(label).clicked() {self.zoom=zoom;self.pan=Vec2::ZERO;self.world.set_zoom(zoom as f64);}
+            }
             ui.label(tr("背景色"));
             ui.push_id("preview_background", |ui| crate::theme::background_selector(ui, &mut self.background));
             let rgb = self.background_rgb.get_or_insert([190,190,190]);
@@ -393,16 +494,28 @@ impl Preview {
             ui.label(tr("排序轴"));
             let axis=self.sort_axis.get_or_insert(1);
             ui.selectable_value(axis,0,"X");ui.selectable_value(axis,1,"Y");ui.selectable_value(axis,2,"Z");
+            crate::theme::toggle_switch(ui,tr("辅助线"),&mut self.show_guides);
         });
-        let mut exit=false;
-        ui.horizontal(|ui| {
-            let paused=self.paused.load(std::sync::atomic::Ordering::Relaxed);
-            if ui.button(tr(if paused {"继续"} else {"暂停"})).clicked() {self.paused.store(!paused,std::sync::atomic::Ordering::Relaxed);}
-            if paused {ui.label(tr("预览已暂停"));}
-            exit=ui.button(tr("退出预览")).clicked();
-        });
-        if exit {self.open=false;self.release();ui.ctx().request_repaint();return None;}
         let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
+        let (expanded,expanding)=if self.expand_prefabs {
+            self.prefabs.resolve(ui.ctx(),documents,catalog.clone(),self.paused.clone())
+        } else {
+            if self.prefabs.has_state() {self.prefabs.cancel();let prefabs=std::mem::take(&mut self.prefabs);std::thread::spawn(move || drop(prefabs));}
+            (None,false)
+        };
+        if prefab_count>0 && !self.expand_prefabs {
+            ui.small(format!("{}: {prefab_count}",tr("未展开的 Prefab 实例")));
+        }
+        if expanding && expanded.is_none() {
+            if preview_status_row(ui,tr("正在展开 Prefab…"),false,&self.paused,None) {self.open=false;self.release();}
+            return None;
+        }
+        let resolved_flags=expanded.as_ref().map(|data|data.flags(flags));
+        let flags=resolved_flags.as_deref().unwrap_or(flags);
+        let documents=expanded.as_ref().map_or(documents,|data|data.documents.as_slice());
+        if let Some(data)=&expanded {
+            if !data.issues.is_empty() {ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {}",tr("Prefab 展开存在限制"),data.issues.len())).on_hover_text(data.issues.iter().take(32).cloned().collect::<Vec<_>>().join("\n"));}
+        }
         let first=documents.first().map_or(0,|d|d.text.as_ptr() as usize);
         let last=documents.last().map_or(0,|d|d.text.as_ptr() as usize);
         let has_ui=match self.ui_presence {
@@ -410,7 +523,9 @@ impl Preview {
             _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some());self.ui_presence=Some((first,last,documents.len(),value));value},
         };
         if !has_ui {
-            return self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),selected,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]));
+            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),selected,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]),self.show_guides,expanding,&mut self.open);
+            if !self.open {self.release();ui.ctx().request_repaint();}
+            return picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())));
         }
         let objects: HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
         let transforms: HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
@@ -437,6 +552,12 @@ impl Preview {
 
         let prepared=self.prepare_background(ui.ctx(),documents,flags,catalog.clone());
         missing+=prepared.missing;issues.extend(prepared.issues.iter().cloned());
+        let mut outlines_by_object:HashMap<&str,Vec<TextOutline>>=HashMap::new();
+        for component in documents {
+            if let Some(object)=component.game_object.as_deref() {
+                if let Some(outline)=text_outline(component,catalog.as_ref()) {outlines_by_object.entry(object).or_default().push(outline);}
+            }
+        }
         for doc in documents {
             use crate::ui_preview::Graphic;
             let Some(kind)=crate::ui_preview::graphic(doc) else {continue};
@@ -459,8 +580,8 @@ impl Preview {
             let order=(1_000_000_000,*ui_order.get(object).unwrap_or(&0),0);
             let color=tint(&doc.text,if kind==Graphic::Tmp {"m_fontColor"} else {"m_Color"});
             let alpha=crate::ui_preview::opacity(transform,documents,&transforms);
-            let rgba=color.to_srgba_unmultiplied();
-            let color=crate::asset_viewer::preview_color([rgba[0],rgba[1],rgba[2],(rgba[3] as f64*alpha).round() as u8]);
+            // Asset colors are already premultiplied in gamma space; preserve that space.
+            let color=color.gamma_multiply(alpha as f32);
             if color.a()==0 {
                 missing+=1; issues.push(format!("{} · {}", doc.file_id, tr("UI 颜色或 CanvasGroup 透明度为零"))); continue;
             }
@@ -475,6 +596,7 @@ impl Preview {
                     (if h==2 {0.5}else if h==4 {1.0}else{0.0},if v==512 {0.5}else if v==1024 {1.0}else{0.0})
                 } else {let align=crate::ui_preview::nested_number(&doc.text,"m_Alignment",0.0) as i64;((align%3) as f64*0.5,(align/3) as f64*0.5)};
                 texts.push(UiText{component:doc.file_id.clone(),content,layout,color,
+                    outlines:outlines_by_object.get(object).cloned().unwrap_or_default(),canvas_alpha:alpha,
                     family:self.fonts.family(ui.ctx(), crate::preview_fonts::reference(&doc.text, kind==Graphic::Tmp), catalog.as_ref()),
                     font_size:crate::ui_preview::nested_number(&doc.text,if kind==Graphic::Tmp {"m_fontSize"}else{"m_FontSize"},14.0).clamp(1.0,512.0),
                     best_fit:if kind==Graphic::Text && crate::ui_preview::nested_number(&doc.text,"m_BestFit",0.0)!=0.0 {Some([crate::ui_preview::nested_number(&doc.text,"m_MinSize",10.0).clamp(1.0,512.0),crate::ui_preview::nested_number(&doc.text,"m_MaxSize",40.0).clamp(1.0,512.0)])} else {None},
@@ -565,8 +687,9 @@ impl Preview {
             let uv=corners.map(|[a,b]|egui::pos2(((x+a*w)/iw) as f32,(1.0-(y+b*h)/ih) as f32));
             quads.push(Quad{texture:handle.id(),points,outline:points,uv,tint:sprite.tint,path:Some(sprite.path.clone()),component:sprite.component.clone(),selectable:sprite.selectable,order:sprite.order});
         }
-        if self.preparation_pending {ui.label(tr("正在准备预览…"));}
-        if loading {ui.label(tr("正在加载预览资源…"));}
+        let pending=expanding || self.preparation_pending || loading || self.textures.values().any(|texture|texture.receiver.is_some());
+        let status=tr(if expanding {"正在展开 Prefab…"} else if self.preparation_pending {"正在准备预览…"} else if pending {"正在加载预览资源…"} else {"合成预览已完成"});
+        if preview_status_row(ui,status,!pending,&self.paused,None) {self.open=false;self.release();ui.ctx().request_repaint();return None;}
         if missing>0 {
             ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {missing}",tr("部分资源缺失或暂不支持"))).on_hover_text(issues.join("\n"));
             ui.collapsing(tr("预览问题详情"), |ui| {
@@ -579,7 +702,6 @@ impl Preview {
         if has_ui && documents.iter().filter(|doc|doc.type_name=="MonoBehaviour" && doc.text.len()<128*1024).any(|doc|field(&doc.text,"m_HorizontalFit").is_some() || field(&doc.text,"m_ChildControlWidth").is_some() || field(&doc.text,"m_ShowMaskGraphic").is_some() || field(&doc.text,"m_Softness").is_some()) {
             ui.small(tr("UI 布局驱动与遮罩暂按静态属性近似显示。"));
         }
-        if documents.iter().any(|d|d.type_name=="PrefabInstance") {ui.colored_label(ui.visuals().warn_fg_color,tr("嵌套 Prefab 暂未展开，预览可能不完整。"));}
         ui.small(tr("XY 正交视图 · 滚轮缩放 · 拖动平移"));
         let (rect,response)=ui.allocate_exact_size(ui.available_size().max(Vec2::splat(1.0)),egui::Sense::click_and_drag());
         let painter=ui.painter_at(rect);
@@ -638,9 +760,10 @@ impl Preview {
             } else { ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)); }
         }
         let screen=|p:[f64;2]|rect.center()+self.pan+egui::vec2((p[0]-center[0]) as f32*scale,-(p[1]-center[1]) as f32*scale);
+        if self.show_guides {
         let origin=screen(reference_frame.as_ref().map_or([0.0,0.0], |points| points[0]));
         let axis_color=if self.background!="gray" && self.background!="custom" {
-            Color32::from_rgba_unmultiplied(35,110,210,210)
+            Color32::from_rgba_unmultiplied(100,100,100,170)
         } else {Color32::from_rgba_unmultiplied(128,128,128,100)};
         let axis=egui::Stroke::new(1.0_f32,axis_color);
         painter.line_segment([Pos2::new(rect.left(),origin.y),Pos2::new(rect.right(),origin.y)],axis);
@@ -649,6 +772,7 @@ impl Preview {
             let corner = screen(points[2]);
             painter.line_segment([Pos2::new(rect.left(),corner.y),Pos2::new(rect.right(),corner.y)],axis);
             painter.line_segment([Pos2::new(corner.x,rect.top()),Pos2::new(corner.x,rect.bottom())],axis);
+        }
         }
         enum DrawItem { Quad(usize), Text(usize) }
         let mut drawing:Vec<_>=quads.iter().enumerate().map(|(index,quad)|(quad.order,DrawItem::Quad(index)))
@@ -680,6 +804,7 @@ impl Preview {
                 }
             }
         }
+        self.sdf.begin();
         let highlighted=picked.as_deref().or(selected);
         let mut batch: Option<egui::Mesh> = None;
         for (_,item) in drawing {
@@ -714,6 +839,13 @@ impl Preview {
                     let alignment_bounds=text_alignment_bounds(galley.rect,galley.mesh_bounds,text.visible_center,text.align_by_geometry);
                     let top_left=text_origin(points,alignment_bounds,[text.horizontal as f32,text.vertical as f32]);
                     let clip=egui::Rect::from_points(&points).intersect(rect);
+                    for outline in &text.outlines {
+                        let opacity=if outline.use_graphic_alpha {text.color.a() as f64/255.0} else {text.canvas_alpha};
+                        let color=outline.color.gamma_multiply(opacity as f32);
+                        let width=outline.distance[0].abs().max(outline.distance[1].abs()) as f32*font_scale;
+                        let offset=-down/text.layout.size[1].max(0.001) as f32*outline.distance[1] as f32;
+                        self.sdf.paint(ui.ctx(),&painter.with_clip_rect(clip),&galley,top_left,right.y.atan2(right.x),width,offset,color);
+                    }
                     painter.with_clip_rect(clip).add(egui::epaint::TextShape::new(top_left,galley,text.color).with_angle(right.y.atan2(right.x)));
                 }
             }
@@ -732,14 +864,30 @@ impl Preview {
         for text in texts.iter().filter(|text|Some(text.component.as_str())==highlighted) {
             painter.add(egui::Shape::closed_line(ui_rect_points(text.layout).map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));
         }
+        paint_zoom_badge(&painter,rect,self.zoom as f64);
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
-        picked
+        picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn outline_detection_accepts_custom_names_and_respects_enabled_and_color() {
+        let mut doc=Document {file_id:"1".into(),type_name:"MonoBehaviour".into(),start_line:0,start_offset:0,
+            text:"  m_Enabled: 1\n  m_EditorClassIdentifier: Game::CustomTextOutline\n  m_EffectColor: {r: 0.2, g: 0.4, b: 0.6, a: 0.5}\n  m_EffectDistance: {x: 0, y: -1}\n  m_UseGraphicAlpha: 0\n".into(),game_object:Some("2".into()),parent_transform:None};
+        let effect=text_outline(&doc,None).unwrap();
+        assert_eq!(effect.distance,[0.0,-1.0]);assert!(!effect.use_graphic_alpha);
+        assert_eq!(effect.color.a(),128);
+        doc.text=doc.text.replace("m_Enabled: 1","m_Enabled: 0").into();assert!(text_outline(&doc,None).is_none());
+        doc.text="  m_Script: {fileID: 11500000, guid: abc, type: 3}\n  m_EffectColor: {r: 0, g: 1, b: 0, a: 1}\n".into();
+        let catalog=Arc::new(HashMap::from([("abc".into(),PathBuf::from("Assets/PFOutLine.cs"))]));
+        assert!(text_outline(&doc,Some(&catalog)).is_some());
+        let catalog=Arc::new(HashMap::from([("abc".into(),PathBuf::from("Assets/Shadow.cs"))]));
+        assert!(text_outline(&doc,Some(&catalog)).is_none());
+        assert!(text_outline(&doc,None).is_none());
+    }
     #[test]
     fn middle_center_uses_visible_glyph_height_without_font_padding() {
         let points=[Pos2::new(0.0,60.0),Pos2::new(240.0,60.0),Pos2::new(240.0,0.0),Pos2::new(0.0,0.0)];
@@ -853,6 +1001,13 @@ mod tests {
         assert_eq!(quads[0].points,[[-100.0,-50.0],[-90.0,-50.0],[-90.0,-40.0],[-100.0,-40.0]]);
         assert!(quads.iter().all(|quad|quad.component=="20"));
         assert_eq!(adjusted_slices(10.0,8.0,12.0),[0.0,4.0,4.0,10.0]);
+    }
+    #[test]
+    fn slice_index_matches_current_and_legacy_ids() {
+        let meta="spriteMode: 2\nspritePixelsToUnits: 100\nfileIDToRecycleName:\n  21300004: old_name\n    - serializedVersion: 2\n      name: old_name\n      rect:\n        x: 10\n        y: 20\n        width: 30\n        height: 40\n      alignment: 9\n      pivot: {x: 0.2, y: 0.8}\n      internalID: 21300002\n";
+        let index=region_index(meta,[100,100]);
+        for id in ["21300002","21300004"] {assert_eq!(index[id].unwrap().rect,region(meta,id,[100,100]).unwrap().rect);assert_eq!(index[id].unwrap().pivot,[0.2,0.8]);}
+        assert!(region_index(meta,[20,20])["21300002"].is_none());
     }
     #[test]
     fn sprite_slice_matches_file_id_and_rejects_out_of_bounds() {

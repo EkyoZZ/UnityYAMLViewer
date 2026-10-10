@@ -556,6 +556,72 @@ fn atlas_field_type(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Serialized particle modules are inspected without running a simulation.
+pub fn show_particle_properties_content(ui: &mut egui::Ui, type_name: &str, text: &str, query: &str) {
+    let fields=yaml_fields(text);
+    let mut index=ProjectIndex::default();
+    for (name,values) in [
+        ("ShadowCastingMode",vec![("Off",0),("On",1),("Two Sided",2),("Shadows Only",3)]),
+        ("MotionVectorGenerationMode",vec![("Camera",0),("Object",1),("Force No Motion",2)]),
+        ("LightProbeUsage",vec![("Off",0),("Blend Probes",1),("Use Proxy Volume",2),("Custom Provided",4)]),
+        ("ReflectionProbeUsage",vec![("Off",0),("Blend Probes",1),("Blend Probes And Skybox",2),("Simple",3)]),
+        ("RayTracingMode",vec![("Off",0),("Static",1),("Dynamic Transform",2),("Dynamic Geometry",3)]),
+        ("ReceiveGI",vec![("Lightmaps",1),("Light Probes",2)]),
+    ] {index.enums.insert(name.into(),vec![values.into_iter().map(|(label,value)|(label.into(),value)).collect()]);}
+    publish_property_columns(ui);
+    ui.collapsing(crate::localization::tr("组件信息"),|ui| {
+        for field in fields.iter().filter(|field|sprite_metadata(&field.name)) {raw_field(ui,field,crate::localization::tr("组件信息"));}
+    });
+    let properties:Vec<_>=fields.into_iter().filter(|field|!sprite_metadata(&field.name)).collect();
+    particle_fields(ui,&properties,type_name=="ParticleSystemRenderer",&index,&query.trim().to_lowercase(),0);
+}
+
+fn particle_field_kind(name:&str,renderer:bool,depth:usize) -> &str {
+    if depth==0 && renderer {
+        let (_,kind)=mesh_renderer_field_info(name);
+        if kind!=crate::localization::tr("原始值") {return kind;}
+        return match name {
+            "m_RenderMode"|"m_SortMode"|"m_MeshDistribution"=>"int",
+            "m_MinParticleSize"|"m_MaxParticleSize"|"m_CameraVelocityScale"|"m_VelocityScale"|"m_LengthScale"|"m_SortingFudge"|"m_NormalDirection"|"m_ShadowBias"=>"float",
+            "m_AllowRoll"|"m_EnableGPUInstancing"|"m_FreeformStretching"|"m_RotateWithStretchDirection"=>"bool",
+            "m_Pivot"|"m_Flip"=>"Vector3",
+            "m_Mesh"|"m_Mesh1"|"m_Mesh2"|"m_Mesh3"=>"Mesh",
+            "m_TrailMaterial"=>"Material",
+            _=>crate::localization::tr("原始值"),
+        };
+    }
+    match name {
+        "looping"|"prewarm"|"playOnAwake"|"useUnscaledTime"|"autoRandomSeed"|"useRigidbodyForVelocity" if depth==0=>"bool",
+        "enabled"=>"bool",
+        "lengthInSec" if depth==0=>"float",
+        "simulationSpeed" if depth==0=>"float",
+        "stopAction"|"cullingMode"|"ringBufferMode"|"scalingMode"|"moveWithTransform" if depth==0=>"int",
+        "randomSeed" if depth==0=>"uint",
+        "ringBufferLoopRange" if depth==0=>"Vector2",
+        _=>crate::localization::tr("原始值"),
+    }
+}
+
+fn particle_fields(ui:&mut egui::Ui,fields:&[YamlField],renderer:bool,index:&ProjectIndex,search:&str,depth:usize) {
+    for field in fields {
+        if field.name=="serializedVersion" {continue;}
+        if !search.is_empty() && !format!("{} {}",field.name,field.value).to_lowercase().contains(search) {continue;}
+        ui.push_id(&field.name,|ui| {
+            let kind=particle_field_kind(&field.name,renderer,depth);
+            if kind!=crate::localization::tr("原始值") {typed_field(ui,field,kind,index);}
+            else if depth<12 && field.value.lines().find(|line|!line.trim().is_empty()).is_some_and(|line|line.starts_with("    ") && !line.trim_start().starts_with('-')) {
+                let nested=field.value.lines().map(|line|line.strip_prefix("  ").unwrap_or(line)).collect::<Vec<_>>().join("\n");
+                let children=yaml_fields(&nested);
+                if children.is_empty() {raw_field(ui,field,kind);} else {
+                    crate::editing::with_field(ui,&field.name,|ui| {
+                        egui::CollapsingHeader::new(&field.name).default_open(!search.is_empty()).show(ui,|ui|particle_fields(ui,&children,renderer,index,search,depth+1));
+                    });
+                }
+            } else {raw_field(ui,field,kind);}
+        });
+    }
+}
+
 pub fn show_mesh_renderer_properties_content(ui: &mut egui::Ui, text: &str, query: &str) {
     let fields = yaml_fields(text);
     let search = query.trim().to_lowercase();
@@ -1451,6 +1517,19 @@ fn property_label(ui: &mut egui::Ui, name: &str, field_type: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn particle_modules_split_nested_fields_and_keep_unconfirmed_types_readonly() {
+        let fields=yaml_fields("ParticleSystem:\n  looping: 1\n  InitialModule:\n    enabled: 1\n    startLifetime:\n      scalar: 5\n");
+        assert_eq!(fields.len(),2);
+        let nested=fields[1].value.lines().map(|line|line.strip_prefix("  ").unwrap_or(line)).collect::<Vec<_>>().join("\n");
+        let children=yaml_fields(&nested);
+        assert_eq!(children[0].name,"enabled");assert_eq!(children[1].name,"startLifetime");
+        assert_eq!(particle_field_kind("looping",false,0),"bool");
+        assert_eq!(particle_field_kind("enabled",false,1),"bool");
+        assert_eq!(particle_field_kind("m_MinParticleSize",true,0),"float");
+        assert_eq!(particle_field_kind("randomSeed",false,0),"uint");
+        assert_eq!(particle_field_kind("scalar",false,2),crate::localization::tr("原始值"));
+    }
     #[test]
     fn editor_only_classes_and_fields_are_recognized() {
         let source="\n#if UNITY_EDITOR\npublic class TiledMapGrid : MonoBehaviour { public int MAP_WIDTH; public Color Color;\n#if CUSTOM_SYMBOL\npublic int unknown;\n#endif\n}\n#else\npublic class RuntimeGrid {}\n#endif\n";

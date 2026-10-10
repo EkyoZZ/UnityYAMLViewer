@@ -28,8 +28,13 @@ impl NodeControls {
             .map(|doc| (doc.file_id.as_str(), doc)).collect();
         let parents: HashMap<_, _> = transforms.values().filter_map(|doc| {
             let object = doc.game_object.as_deref()?;
-            let parent = doc.parent_transform.as_deref().filter(|id| *id != "0")
-                .and_then(|id| transforms.get(id)).and_then(|doc| doc.game_object.as_deref());
+            let mut current=doc.parent_transform.as_deref();let mut visited=HashSet::new();let mut parent=None;
+            while let Some(id)=current.filter(|id|*id!="0") {
+                if !visited.insert(id) {parent=Some(object);break;}
+                let Some(transform)=transforms.get(id) else {break;};
+                if let Some(go)=transform.game_object.as_deref() {parent=Some(go);break;}
+                current=transform.parent_transform.as_deref();
+            }
             Some((object, parent))
         }).collect();
         documents.iter().filter(|doc| doc.type_name == "GameObject").map(|doc| {

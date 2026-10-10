@@ -174,6 +174,7 @@ struct ViewerApp {
     preview: static_preview::Preview,
     preview_text: Arc<str>,
     preview_documents: Vec<Document>,
+    nested_selected: Option<(PathBuf,String)>,
     node_controls: HashMap<PathBuf, hierarchy_controls::NodeControls>,
     node_flags: HashMap<String, hierarchy_controls::Flags>,
     assets: asset_viewer::Assets,
@@ -299,8 +300,9 @@ impl ViewerApp {
     }
 
     fn refresh_node_flags(&mut self) {
+        let expanded=self.preview.hierarchy_documents(&self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default());
         self.node_flags = self.path.as_ref().and_then(|path| self.node_controls.get(path))
-            .map(|controls| controls.effective(&self.documents)).unwrap_or_default();
+            .map(|controls| controls.effective(expanded.as_ref().map_or(self.documents.as_slice(),|data|data.documents.as_slice()))).unwrap_or_default();
         if self.selected.is_some_and(|index| !self.document_flags(index).selectable) {
             self.selected = None;
             self.last_selected = None;
@@ -678,23 +680,33 @@ impl ViewerApp {
             ui.spacing_mut().item_spacing.x = spacing;
             let local = self.path.as_ref().and_then(|path| self.node_controls.get(path)).map(|controls| controls.local(&id)).unwrap_or_default();
             let flags = self.document_flags(game_object);
-            let mut toggle = None;
-            let controls_x = ui.ctx().data_mut(|data| data.get_temp::<f32>(egui::Id::new("hierarchy_controls_x"))).unwrap_or(ui.cursor().min.x);
-            let controls_rect = egui::Rect::from_min_size(egui::pos2(controls_x, ui.cursor().min.y), egui::vec2(30.0, 20.0));
-            let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(("node_switches", &id)).max_rect(controls_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-            controls_ui.spacing_mut().item_spacing.x = 0.0;
-            if hierarchy_controls::icon(&mut controls_ui, true, flags.visible, local.visible && !flags.visible).clicked() { toggle = Some(true); }
-            if hierarchy_controls::icon(&mut controls_ui, false, flags.selectable, local.selectable && !flags.selectable).clicked() { toggle = Some(false); }
-            if let (Some(eye), Some(path)) = (toggle, self.path.clone()) {
-                self.node_controls.entry(path).or_default().toggle(&id, eye);
-                self.refresh_node_flags();
-            }
-            let flags = self.document_flags(game_object);
             let label = self.node_label(ui, game_object, title).strong();
             let label = if !flags.visible || !flags.selectable { label.weak() } else { label };
             let selected = self.selected.is_some_and(|index| index == game_object || self.documents[index].game_object.as_deref() == Some(&id));
             let response = ui.add_enabled(flags.selectable, egui::SelectableLabel::new(selected, label));
-            if response.clicked() { self.selected = Some(game_object); }
+            let mut toggle = None;
+            let controls_x = ui.ctx().data_mut(|data| data.get_temp::<f32>(egui::Id::new("hierarchy_controls_x"))).unwrap_or(ui.cursor().min.x);
+            let controls_rect = egui::Rect::from_min_size(egui::pos2(controls_x, response.rect.center().y - 10.0), egui::vec2(30.0, 20.0));
+            let controls_clip = ui.ctx().data_mut(|data| data.get_temp::<egui::Rect>(egui::Id::new("hierarchy_controls_clip"))).unwrap_or(ui.clip_rect());
+            let row_rect = egui::Rect::from_min_max(
+                egui::pos2(controls_clip.left(), response.rect.top().min(controls_rect.top())),
+                egui::pos2(controls_clip.right(), response.rect.bottom().max(controls_rect.bottom())),
+            ).intersect(controls_clip);
+            let hovered = ui.input(|input| input.pointer.hover_pos().is_some_and(|pointer| row_rect.contains(pointer)));
+            if selected || response.has_focus() || hovered || !local.visible || !local.selectable || !flags.visible || !flags.selectable {
+            let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(("node_switches", &id)).max_rect(controls_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            if let Some(clip) = ui.ctx().data_mut(|data| data.get_temp::<egui::Rect>(egui::Id::new("hierarchy_controls_clip"))) {
+                controls_ui.set_clip_rect(clip);
+            }
+            controls_ui.spacing_mut().item_spacing.x = 0.0;
+            if hierarchy_controls::icon(&mut controls_ui, true, flags.visible, local.visible && !flags.visible).clicked() { toggle = Some(true); }
+            if hierarchy_controls::icon(&mut controls_ui, false, flags.selectable, local.selectable && !flags.selectable).clicked() { toggle = Some(false); }
+            }
+            if let (Some(eye), Some(path)) = (toggle, self.path.clone()) {
+                self.node_controls.entry(path).or_default().toggle(&id, eye);
+                self.refresh_node_flags();
+            }
+            if response.clicked() { self.selected = Some(game_object); self.nested_selected=None; }
             if response.double_clicked() { self.focus_preview_node(game_object); }
             response
         });
@@ -709,6 +721,52 @@ impl ViewerApp {
             response.response.scroll_to_me(Some(egui::Align::Center));
             self.locate_target = None;
         }
+    }
+
+    fn show_linked_node(&mut self,ui:&mut egui::Ui,index:usize,docs:&[Document],children:&HashMap<String,Vec<usize>>,flags:&HashMap<String,hierarchy_controls::Flags>,depth:usize) {
+        if depth>128 {return;}
+        let doc=&docs[index];let id=&doc.file_id;
+        let title=name_from_text(&doc.text).unwrap_or_else(||id.clone());
+        if !self.query.trim().is_empty() {
+            let query=self.query.to_lowercase();let mut pending=vec![index];let mut visited=std::collections::HashSet::new();let mut matched=false;
+            while let Some(item)=pending.pop() {
+                if !visited.insert(item) {continue;}
+                let node=&docs[item];
+                if docs.iter().filter(|component|component.file_id==node.file_id || component.game_object.as_deref()==Some(node.file_id.as_str())).any(|component|format!("{} {} {}",component.type_name,component.file_id,component.text).to_lowercase().contains(&query)) {matched=true;break;}
+                if let Some(items)=children.get(&node.file_id) {pending.extend(items.iter().copied());}
+            }
+            if !matched {return;}
+        }
+        let own=flags.get(id).copied().unwrap_or_default();
+        let original=self.documents.iter().position(|item|item.file_id==*id);
+        let selected=original.is_some_and(|index|self.selected==Some(index)) || self.nested_selected.as_ref().is_some_and(|(path,key)|Some(path)==self.path.as_ref() && key==id);
+        let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id(("linked_node",id)),depth<2);
+        if !self.query.trim().is_empty() {state.set_open(true);}
+        let row=ui.horizontal(|ui| {
+            if children.get(id).is_some_and(|items|!items.is_empty()) {state.show_toggle_button(ui,egui::collapsing_header::paint_default_icon);}
+            else {ui.allocate_exact_size(egui::vec2(ui.spacing().indent,20.0),egui::Sense::hover());}
+            let label=if own.visible && own.selectable {RichText::new(title).strong()} else {RichText::new(title).weak()};
+            let response=ui.add_enabled(own.selectable,egui::SelectableLabel::new(selected,label));
+            let clip=ui.ctx().data_mut(|data|data.get_temp::<egui::Rect>(egui::Id::new("hierarchy_controls_clip"))).unwrap_or(ui.clip_rect());
+            let x=ui.ctx().data_mut(|data|data.get_temp::<f32>(egui::Id::new("hierarchy_controls_x"))).unwrap_or(clip.left());
+            let hovered=ui.input(|input|input.pointer.hover_pos().is_some_and(|point|clip.contains(point) && point.y>=response.rect.top() && point.y<=response.rect.bottom()));
+            let local=self.path.as_ref().and_then(|path|self.node_controls.get(path)).map(|controls|controls.local(id)).unwrap_or_default();
+            if selected || hovered || response.has_focus() || !own.visible || !own.selectable || !local.visible || !local.selectable {
+                let mut controls=ui.new_child(egui::UiBuilder::new().id_salt(("linked_switches",id)).max_rect(egui::Rect::from_min_size(egui::pos2(x,response.rect.center().y-10.0),egui::vec2(30.0,20.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                controls.set_clip_rect(clip);controls.spacing_mut().item_spacing.x=0.0;
+                let eye=hierarchy_controls::icon(&mut controls,true,own.visible,local.visible && !own.visible).clicked();
+                let hand=hierarchy_controls::icon(&mut controls,false,own.selectable,local.selectable && !own.selectable).clicked();
+                if let Some(path)=self.path.clone() {if eye || hand {self.node_controls.entry(path).or_default().toggle(id,eye);self.refresh_node_flags();}}
+            }
+            if response.clicked() {
+                self.selected=original;
+                self.nested_selected=if original.is_none() {self.path.clone().map(|path|(path,id.clone()))} else {None};
+            }
+            if response.double_clicked() {self.preview.focus(docs.iter().filter(|component|component.game_object.as_deref()==Some(id.as_str())).map(|component|component.file_id.clone()).collect());}
+        });
+        state.show_body_indented(&row.response,ui,|ui| {
+            if let Some(items)=children.get(id) {for child in items {self.show_linked_node(ui,*child,docs,children,flags,depth+1);}}
+        });
     }
 
     fn show_game_object_inspector(&mut self, ui: &mut egui::Ui, object: usize) {
@@ -793,6 +851,8 @@ impl ViewerApp {
                             show_transform_properties_content(ui, &doc.text);
                         } else if doc.type_name == "SpriteRenderer" {
                             script_properties::show_sprite_renderer_properties_content(ui, &doc.text, &self.query);
+                        } else if matches!(doc.type_name.as_str(), "ParticleSystem" | "ParticleSystemRenderer") {
+                            script_properties::show_particle_properties_content(ui, &doc.type_name, &doc.text, &self.query);
                         } else if doc.type_name == "MeshRenderer" {
                             script_properties::show_mesh_renderer_properties_content(ui, &doc.text, &self.query);
                         } else if ui_preview::graphic(&doc).is_some() {
@@ -1236,7 +1296,8 @@ impl eframe::App for ViewerApp {
             .resizable(false)
             .exact_width(hierarchy_width)
             .show(ctx, |ui| {
-                ui.heading(crate::localization::tr("Hierarchy"));
+                let identity=self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default();
+                self.preview.hierarchy_header(ui,&self.documents,&identity);
                 ui.small(crate::localization::tr("按 GameObject / Transform 层级重建"));
                 // A vertical-only scroll area expands its reported width for long
                 // indented rows. SidePanel clips to its configured width, leaving
@@ -1289,21 +1350,36 @@ impl eframe::App for ViewerApp {
                                 &["m_Controller", "m_Clips", "m_Overrides"],
                             );
                         } else {
-                            let (roots, children, components, unlinked) =
-                                build_tree(&self.documents);
+                            let expanded=self.preview.hierarchy_documents(&self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default());
+                            let tree_docs=expanded.as_ref().map_or(self.documents.as_slice(),|data|data.documents.as_slice());
+                            let (roots, children, components, unlinked) = build_tree(tree_docs);
+                            let linked_flags=expanded.as_ref().map(|data|self.path.as_ref().and_then(|path|self.node_controls.get(path)).map(|controls|controls.effective(&data.documents)).unwrap_or_default());
                             let has_roots = !roots.is_empty();
-                            let controls_x = ui.cursor().min.x;
-                            ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("hierarchy_controls_x"), controls_x));
+                            // Pin node switches to the visible viewport, independent of horizontal scrolling.
+                            let controls_clip = ui.clip_rect();
+                            let controls_x = controls_clip.left().max(ui.cursor().min.x);
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("hierarchy_controls_x"), controls_x);
+                                data.insert_temp(egui::Id::new("hierarchy_controls_clip"), controls_clip);
+                            });
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 ui.add_space(30.0);
                                 ui.vertical(|ui| {
+                                    let mut tree_clip = ui.clip_rect();
+                                    tree_clip.min.x = tree_clip.min.x.max(controls_x + 30.0);
+                                    ui.set_clip_rect(tree_clip);
                                     ui.spacing_mut().indent = 14.0;
                                     for root in roots {
-                                        self.show_game_object(ui, root, &children, &components);
+                                        if let Some(data)=&expanded {
+                                            self.show_linked_node(ui,root,&data.documents,&children,linked_flags.as_ref().unwrap(),0);
+                                        } else {self.show_game_object(ui, root, &children, &components);}
                                     }
                                 });
                             });
+                            let unlinked:Vec<_>=if let Some(data)=&expanded {
+                                unlinked.into_iter().filter_map(|index|self.documents.iter().position(|doc|doc.file_id==data.documents[index].file_id)).collect()
+                            } else {unlinked};
                             if !has_roots && !unlinked.is_empty() {
                                 for item in unlinked {
                                     self.show_custom_asset_tree(ui, item);
@@ -1336,10 +1412,14 @@ impl eframe::App for ViewerApp {
                 self.preview_text = rendered;
             }
             egui::SidePanel::left("static_prefab_preview").resizable(true).default_width(600.0).min_width(180.0).max_width((ctx.available_rect().width() - 360.0).max(180.0)).show(ctx, |ui| {
+                // Keep overflowing toolbar content from expanding the panel's reported width.
+                let preview_rect=ui.available_rect_before_wrap();
+                let mut preview_ui=ui.new_child(egui::UiBuilder::new().id_salt("bounded_preview").max_rect(preview_rect));
+                preview_ui.set_clip_rect(ui.clip_rect().intersect(preview_rect));
                 let selected_id=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone());
-                if let Some(component_id)=self.preview.show(ui, &self.preview_documents, &self.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(), &self.node_flags, selected_id.as_deref()) {
+                if let Some(component_id)=self.preview.show(&mut preview_ui, &self.preview_documents, &self.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(), &self.node_flags, selected_id.as_deref()) {
                     if let Some(index)=self.documents.iter().position(|doc|doc.file_id==component_id) {
-                        self.selected=Some(index);
+                        self.selected=Some(index);self.nested_selected=None;
                         self.locate_target=Some(index);
                         match self.documents[index].type_name.as_str() {
                             "SpriteRenderer" => self.show_sprite_renderer_yaml=false,
@@ -1350,6 +1430,7 @@ impl eframe::App for ViewerApp {
                         ctx.request_repaint();
                     }
                 }
+                ui.allocate_rect(preview_rect,egui::Sense::hover());
             });
             if !self.preview.open {self.preview_documents.clear();self.preview_text=Arc::from("");}
         }
@@ -1372,7 +1453,7 @@ impl eframe::App for ViewerApp {
             let header_top_left = ui.cursor().min;
             egui::Frame::new().fill(header_fill).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if preview_available && theme::preview_toggle(ui, self.preview.open).clicked() {
                     self.preview.open = !self.preview.open;
                     ctx.data_mut(|data|data.insert_temp(egui::Id::new("inspector_hide_property_types"),self.preview.open));
@@ -1449,7 +1530,17 @@ impl eframe::App for ViewerApp {
                 if doc.type_name == "GameObject" { Some(index) }
                 else { self.documents.iter().position(|object| object.type_name == "GameObject" && Some(&object.file_id) == doc.game_object.as_ref()) }
             });
-            if let Some(object) = selected_object {
+            let expanded=self.preview.hierarchy_documents(&self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default());
+            let nested=self.nested_selected.as_ref().filter(|(path,_)|Some(path)==self.path.as_ref()).and_then(|(_,id)|expanded.as_ref()?.documents.iter().position(|doc|doc.file_id==*id));
+            if let (Some(index),Some(data))=(nested,expanded) {
+                ui.small(format!("Prefab · {}",crate::localization::tr("只读 Inspector")));
+                let documents=std::mem::replace(&mut self.documents,data.documents.clone());
+                let path=self.path.take();
+                editing::publish(ctx,None,0..0);
+                self.show_game_object_inspector(ui,index);
+                self.path=path;self.documents=documents;
+                editing::publish(ctx,None,0..0);
+            } else if let Some(object) = selected_object {
                 self.show_game_object_inspector(ui, object);
             } else if let Some(index) = self.selected {
 				let doc = &self.documents[index];
@@ -1461,6 +1552,7 @@ impl eframe::App for ViewerApp {
 				let is_script = doc.type_name == "MonoBehaviour";
 				let is_sprite_renderer = doc.type_name == "SpriteRenderer";
                 let is_mesh_renderer = doc.type_name == "MeshRenderer";
+                let is_particle = matches!(doc.type_name.as_str(), "ParticleSystem" | "ParticleSystemRenderer");
                 let is_tilemap = matches!(doc.type_name.as_str(), "Tilemap" | "TilemapRenderer" | "Grid");
 				let is_collider = script_properties::is_collider_type(&doc.type_name);
 				let is_animator = doc.type_name == "Animator";
@@ -1469,7 +1561,7 @@ impl eframe::App for ViewerApp {
                 let is_sprite_atlas = doc.type_name == "SpriteAtlas";
 				// Animation clips use their dedicated inspector, even when their
 				// keyframe lists also match the generic table format.
-				let custom_table = if is_script || is_animation_clip || is_transform || is_sprite_renderer || is_mesh_renderer || is_tilemap || is_collider || is_animator || is_animator_state || is_material || is_sprite_atlas {
+				let custom_table = if is_script || is_animation_clip || is_transform || is_sprite_renderer || is_mesh_renderer || is_particle || is_tilemap || is_collider || is_animator || is_animator_state || is_material || is_sprite_atlas {
 					None
 				} else {
 					yaml_uniform_table(&doc.text).map(|mut table| {
@@ -1529,7 +1621,7 @@ impl eframe::App for ViewerApp {
 					} else if is_script {
 						ui.selectable_value(&mut self.show_script_yaml, false, crate::localization::tr("显示属性"));
 						ui.selectable_value(&mut self.show_script_yaml, true, crate::localization::tr("显示 YAML"));
-					} else if is_sprite_renderer || is_mesh_renderer || is_tilemap {
+					} else if is_sprite_renderer || is_mesh_renderer || is_particle || is_tilemap {
 						ui.selectable_value(&mut self.show_sprite_renderer_yaml, false, crate::localization::tr("显示属性"));
 						ui.selectable_value(&mut self.show_sprite_renderer_yaml, true, crate::localization::tr("显示 YAML"));
 					} else if is_collider {
@@ -1585,6 +1677,10 @@ impl eframe::App for ViewerApp {
                 } else if is_tilemap {
                     let data = tilemap::cached(ctx, &doc.file_id, &doc.text);
                     tilemap::show(ui, &data, self.show_sprite_renderer_yaml);
+                } else if is_particle && !self.show_sprite_renderer_yaml {
+                    ScrollArea::both().id_salt("particle_properties").auto_shrink([false,false]).show(ui, |ui| {
+                        script_properties::show_particle_properties_content(ui, &doc.type_name, &doc.text, &self.query);
+                    });
                 } else if is_mesh_renderer && !self.show_sprite_renderer_yaml {
                     ScrollArea::both().id_salt("mesh_renderer_properties").auto_shrink([false,false]).show(ui, |ui| {
                         script_properties::show_mesh_renderer_properties_content(ui, &doc.text, &self.query);
@@ -1939,6 +2035,8 @@ fn parse_unity_yaml_with_progress(text: &str, cancelled: Option<&AtomicBool>, pr
             "224" => "RectTransform",
             "20" => "Camera",
             "23" => "MeshRenderer",
+            "198" => "ParticleSystem",
+            "199" => "ParticleSystemRenderer",
             "33" => "MeshFilter",
             "21" => "Material",
             "74" => "AnimationClip",
@@ -3309,6 +3407,7 @@ fn build_tree(
             }
         }
     }
+    let transforms:HashMap<_,_>=docs.iter().filter(|doc|matches!(doc.type_name.as_str(),"Transform"|"RectTransform")).map(|doc|(doc.file_id.as_str(),doc)).collect();
     let mut roots = Vec::new();
     let mut children: HashMap<String, Vec<usize>> = HashMap::new();
     let mut components: HashMap<String, Vec<usize>> = HashMap::new();
@@ -3321,11 +3420,15 @@ fn build_tree(
             && doc.game_object.is_some()
         {
             let own = doc.game_object.as_ref().unwrap();
-            match doc
-                .parent_transform
-                .as_ref()
-                .and_then(|parent| transform_to_go.get(parent))
-            {
+            let mut parent=doc.parent_transform.as_deref();
+            let mut visited=std::collections::HashSet::new();
+            let mut parent_go=None;
+            while let Some(id)=parent.filter(|id|*id!="0") {
+                if !visited.insert(id) {break;}
+                if let Some(go)=transform_to_go.get(id) {parent_go=Some(go);break;}
+                parent=transforms.get(id).and_then(|doc|doc.parent_transform.as_deref());
+            }
+            match parent_go {
                 Some(parent_go) if go_indices.contains_key(own) => children
                     .entry(parent_go.clone())
                     .or_default()

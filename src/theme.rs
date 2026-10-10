@@ -162,3 +162,23 @@ pub fn preview_toggle(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
     ui.painter().galley(egui::pos2(rect.left() + 21.0, rect.center().y - galley.size().y * 0.5), galley, color);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
+
+/// Reusable labeled switch. Pass a localized label and the caller-owned state.
+/// Returns a normal response with clicked/changed state; supports ui.add_enabled_ui.
+pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
+    let color=ui.visuals().text_color();
+    let font=egui::TextStyle::Button.resolve(ui.style());
+    let galley=ui.painter().layout_no_wrap(label.to_owned(),font,color);
+    let (rect,mut response)=ui.allocate_exact_size(egui::vec2(galley.size().x+8.0+40.0,26.0),egui::Sense::click());
+    if response.clicked() {*value=!*value;response.mark_changed();}
+    response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Checkbox,ui.is_enabled(),*value,label));
+    let rail=egui::Rect::from_center_size(egui::pos2(rect.right()-20.0,rect.center().y),egui::vec2(40.0,24.0));
+    let fill=if *value {rgb(45,125,250)} else if ui.visuals().dark_mode {rgb(62,62,66)} else {rgb(175,175,180)};
+    ui.painter().rect_filled(rail,12.0,fill);
+    let t=ui.ctx().animate_bool(response.id,*value);
+    let center=egui::pos2(rail.left()+12.0+16.0*t,rail.center().y);
+    ui.painter().circle_filled(center,10.0,if *value {Color32::WHITE} else {rgb(220,220,220)});
+    ui.painter().galley(egui::pos2(rect.left(),rect.center().y-galley.size().y*0.5),galley,color);
+    if response.has_focus() {ui.painter().rect_stroke(rail.expand(2.0),14.0,Stroke::new(1.0_f32,BLUE),egui::StrokeKind::Outside);}
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}

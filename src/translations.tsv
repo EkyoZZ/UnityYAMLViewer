@@ -303,3 +303,17 @@ UI 内置 Sprite 暂用颜色矩形近似显示。	UI 內建 Sprite 暫用顏色
 退出预览	退出預覽	Exit preview	プレビューを閉じる	미리보기 종료	Vorschau schließen	Fermer l’aperçu
 预览已暂停	預覽已暫停	Preview paused	プレビューを一時停止中	미리보기 일시 정지됨	Vorschau pausiert	Aperçu en pause
 正在合成预览…	正在合成預覽…	Composing preview…	プレビューを描画中…	미리보기 합성 중…	Vorschau wird gerendert…	Composition de l’aperçu…
+合成预览已完成	合成預覽已完成	Preview composition complete	プレビューの描画が完了しました	미리보기 합성 완료	Vorschau fertig gerendert	Composition de l’aperçu terminée
+已暂停合成预览	已暫停合成預覽	Preview composition paused	プレビューの描画を一時停止中	미리보기 합성 일시 정지됨	Vorschau-Rendering pausiert	Composition de l’aperçu en pause
+辅助线	輔助線	Guides	ガイド線	보조선	Hilfslinien	Repères
+正在展开 Prefab…	正在展開 Prefab…	Expanding prefabs…	Prefab を展開中…	Prefab 펼치는 중…	Prefabs werden aufgelöst…	Développement des Prefabs…
+Prefab 展开存在限制	Prefab 展開存在限制	Prefab expansion limitations	Prefab 展開の制限	Prefab 펼치기 제한	Einschränkungen bei Prefab-Auflösung	Limites du développement des Prefabs
+正在构建预览实例…	正在構建預覽實例…	Building preview instances…	プレビューのインスタンスを構築中…	미리보기 인스턴스 구성 중…	Vorschauinstanzen werden erstellt…	Construction des instances de l’aperçu…
+预览资源统计	預覽資源統計	Preview resource statistics	プレビューリソース統計	미리보기 리소스 통계	Vorschau-Ressourcenstatistik	Statistiques des ressources de l’aperçu
+缓存命中	快取命中	Cache hits	キャッシュヒット	캐시 적중	Cache-Treffer	Accès au cache
+加载耗时	載入耗時	Loading time	読み込み時間	로딩 시간	Ladezeit	Temps de chargement
+实例构建耗时	實例建構耗時	Instance build time	インスタンス構築時間	인스턴스 구성 시간	Instanzaufbauzeit	Temps de construction des instances
+展开嵌套Prefab	展開巢狀Prefab	Expand nested prefabs	ネストしたPrefabを展開	중첩 Prefab 펼치기	Verschachtelte Prefabs auflösen	Développer les Prefabs imbriqués
+当前文件中的 Prefab 实例	目前檔案中的 Prefab 實例	Prefab instances in this file	このファイルの Prefab インスタンス	현재 파일의 Prefab 인스턴스	Prefab-Instanzen in dieser Datei	Instances Prefab dans ce fichier
+自动展开上限	自動展開上限	Auto-expand limit	自動展開の上限	자동 펼치기 한도	Grenze für automatische Auflösung	Limite de développement automatique
+未展开的 Prefab 实例	未展開的 Prefab 實例	Unexpanded prefab instances	未展開の Prefab インスタンス	펼치지 않은 Prefab 인스턴스	Nicht aufgelöste Prefab-Instanzen	Instances Prefab non développées
