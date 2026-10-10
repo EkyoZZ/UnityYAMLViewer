@@ -1,3 +1,137 @@
+## 2026-10-10 正式编译 1.1.3 完成
+
+用户明确授权正式编译并准备自行发布。进程及目标 EXE 独占访问检查通过，cargo build --release --offline 成功（1.1.3）。原输出 target/release/unity_yaml_viewer.exe；发布副本 target/publish/v1.1.3/UnityYAMLViewer-v1.1.3-windows-x64.exe，附 SHA256SUMS.txt 和 release-notes.md。尚未上传或发布 GitHub Release，1.1.2 到 1.1.3 在线升级及任务栏快捷方式仍待实测。
+
+## 2026-10-10 版本升级到 1.1.3
+
+按用户要求更新 Cargo.toml 和 Cargo.lock 的应用版本为 1.1.3。关于窗口新增 1.1.3 更新内容：支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持；在线更新历史明确归到 1.1.2。README 中英当前版本与新增更新说明同步，应用说明补齐七语言。cargo check --offline 与 git diff --check 通过。未生成 1.1.3 EXE，现有 release EXE 仍为先前 1.1.2。
+
+## 2026-10-10 最新 Release 构建（UI 双十字范围）
+
+用户明确授权后，通过进程及目标 EXE 独占访问检查，cargo build --release --offline 成功。版本 1.1.2，输出 target/release/unity_yaml_viewer.exe。UI 参考范围不再绘制独立矩形，左下角和右上角各绘制灰色贯穿十字，四条辅助线围出参考范围，按范围两角定位而非固定原点，支持不同 Pivot。未自动启动或验证交互画面。
+
+## 2026-10-10 UI 参考矩形改为右上角十字辅助线
+
+按用户最新截图和补充要求，去掉 UI 参考范围闭合矩形，改为参考范围右上角的横竖贯穿预览辅助线，与原点十字使用同样灰色。参考范围仍用于默认居中与适应窗口，辅助线同步尺寸、缩放和平移。cargo check --offline 通过，未生成新版 EXE。
+
+## 2026-10-10 最新 Release 构建（根 Canvas 空白修复）
+
+用户明确授权后重新通过进程及 EXE 独占访问检查，cargo build --release --offline 成功，版本 1.1.2，输出 target/release/unity_yaml_viewer.exe。包含屏幕模式根 Canvas 参考布局、根节点全零 Scale 预览回退 (1,1,1)、独立 UI 参考框及不可见原因诊断。未自动启动程序，实际画面待用户验证。
+
+## 2026-10-10 根节点零缩放预览回退
+
+按用户要求，在公共 local(doc, root) 变换计算中，根节点 LocalScale 三轴全部为零时仅预览回退到 (1,1,1)。适用于普通 Sprite、RectTransform 和世界 Canvas 根节点；非零根缩放及子节点零缩放保持原值，不修改 YAML 或 Inspector 显示值。新增根/子零缩放区别的回归检查，cargo check --offline --tests 通过，未生成 EXE，未执行运行验证。
+
+## 2026-10-10 ui_tips_panel 空白预览根因修复
+
+实际文件位于 C:/Git/g003_client/Assets/Res/Prefabs/UI/Panel/ui_tips_panel.prefab（此前路径 q003_client 不存在）。根 Canvas RenderMode=1，根 RectTransform LocalScale=(0,0,0)、SizeDelta=(0,0)、Pivot=(0,0)，CanvasScaler 参考尺寸 864x1536，子 CanvasGroup alpha=1。零根缩放将全部图形压为零面积。新增 seed_screen_canvases 为启用且激活的屏幕模式根 Canvas 预设布局，参考尺寸作为大小、归一化根缩放为 1，保持根旋转/pivot、子节点原始变换，不改文件；世界空间 Canvas 保持原逻辑。参考框改为独立参考平面，不受活动和缩放影响。跳过图形新增布局、尺寸、零面积、透明度诊断。两张引用图片 GUID 已在 Res/Textures/UI/BoardV2 下匹配 lucky_word 和 lucky_super_word。新增屏幕模式零缩放回归检查，并验证世界模式不归一化（仅编译检查，不执行）。尚未生成新 EXE 或验证运行画面。
+
+## 2026-10-10 最新 Release 编译完成
+
+用户关闭占用程序并再次明确授权后，重新通过进程及目标 EXE 独占访问检查，cargo build --release --offline 成功。版本 1.1.2，输出 target/release/unity_yaml_viewer.exe；包含命令行文件打开及现有窗口转交、列表属性 / 表格切换、双击层级节点居中、UI 参考尺寸灰色边框及参考范围默认居中。未自动启动程序，交互效果仍待实际运行验证。
+
+## 2026-10-10 UI 参考范围边框和默认居中
+
+UI 预览以首个根 RectTransform 的 pivot 和矩阵放置参考尺寸矩形，使用与十字轴线一致的灰色线条。默认视图及适应窗口以参考矩形的边界中心和尺寸计算，超出参考范围的图形不影响默认中心或缩放；非 UI 保留原图形边界算法。边框同步参考尺寸、缩放和平移，双击节点仍通过平移居中目标。cargo check --offline 通过，未生成 EXE 或运行验证。
+
+## 2026-10-10 双击层级节点居中预览
+
+GameObject 和组件标签双击会打开静态预览并请求定位所属节点及可见子图形的联合边界中心。支持 SpriteRenderer、UI Image、RawImage 和 Text/TMP；保持当前缩放，只调整预览平移，不编辑 Transform 或 YAML。目标集合沿 Transform/RectTransform 子层级构建，有环时集合增长终止。纹理尚未加载时最多等待 10 秒，无可见图形不改变视图。cargo check --offline --tests 通过，未生成新版 EXE，未运行交互验证。
+
+## 2026-10-10 Inspector 列表属性 / 表格切换
+
+在 typed_field_inner 的可表格化数组及 List 列表中增加属性 / 表格切换，默认保留表格。各列表按 UI ID 独立记忆当前会话选择；属性模式按索引折叠展开各元素并逐字段显示，复用原 typed_field 和编辑 with_row 范围，因此类型控件、引用跳转、编辑及还原沿用现有逻辑。表格宽度、滚动和冻结表头状态保留。原始列表 YAML 仍可展开，packed 数据和无法表格化的复杂嵌套结构沿用原显示。新增七语言按钮翻译。cargo check --offline --tests 通过，未生成 EXE 或运行验证。
+
+## 2026-10-10 命令行打开及 Windows 单窗口转交
+
+新增 src/command_line.rs，读取所有文件路径参数（绝对化及规范化），启动恢复标签后打开传入文件。Windows 使用 LOCALAPPDATA/UnityYAMLViewer/open_requests 下独占 instance.lock 文件锁及原子 JSON 请求文件队列，现有窗口每 250ms 接收请求、打开标签并请求恢复和聚焦窗口；再次无参数调用仅激活窗口。锁随窗口释放，转交时原窗口退出可接管，5 秒未响应显示错误。非 Windows 仅支持启动路径参数。新增直接依赖 serde_json（已有缓存）。已完成 cargo check --offline；未生成新版 EXE，未运行验证。旧版窗口必须关闭后首次启动新版。
+
+## 2026-10-10 最新 Release 构建完成（UI Prefab 预览）
+
+用户明确授权编译后，已通过进程和目标 EXE 独占访问检查，并完成 cargo build --release --offline。版本 1.1.2，输出 target/release/unity_yaml_viewer.exe。包含 UI Image、九宫格、RawImage、Text/TMP 近似静态预览及 Graphic 点击选择；字体、动态布局和遮罩等限制见后续实现记录。未启动程序，尚未进行实际 UI Prefab 运行验证。
+
+## 2026-10-10 UI Prefab 首批静态预览（未重新构建）
+
+用户明确要求支持 UI Prefab，并追加 Text/文本框显示；接受字体效果暂不完全一致。新增 ui_preview.rs：识别 uGUI Image/RawImage/Text 与 TMP，计算 RectTransform 锚点、父尺寸、sizeDelta、anchoredPosition、pivot、TRS，按 m_Children 兄弟顺序建立 UI 绘制/点击顺序，Canvas 启用及 CanvasGroup alpha 继承。根尺寸缺失优先 CanvasScaler 参考分辨率，默认 1280×720；预览工具提供 UI 参考尺寸调整。
+
+static_preview.rs 支持 Image Simple/Sliced（meta Border、PPU/Canvas reference PPU/multiplier、Fill Center、尺寸小于边框时等比压缩）、线性 Filled、RawImage UVRect，空 Sprite 白色矩形及 Unity 内置 Sprite 颜色矩形近似并提示。Text/TMP 使用系统字体绘制内容、字号、颜色、对齐、换行与旋转，基础富文本标签剥除；输入框显示其子 Text/TMP 内容。文字与图像按相同 UI 层级顺序绘制/命中，点击选择 Graphic，眼睛/手继承继续生效，Sliced 选中只绘制一圈矩形边框。
+
+main Inspector 对 UI Graphic 联合显示所属 RectTransform，script_properties.rs 增加已知 uGUI 常见字段的编辑，不依赖 package 脚本成功解析；显示名识别 Image/RawImage/Text/TMP。暂存修改经现有 rendered 缓存实时更新。
+
+限制：Tiled、径向 Filled、Mask/RectMask2D 裁剪、LayoutGroup/ContentSizeFitter 等动态布局、嵌套 Prefab、精确 TMP SDF/字体材质/富文本特效未实现；文字非均匀缩放及倾斜透视仅近似。没有 Unity 环境或用户实际 UI 样本，尚未运行界面验证。cargo check --offline --tests 及空白检查通过，锚点/九宫格/文字测试仅编译，未执行断言，未重新生成 EXE。版本仍 1.1.2；构建须明确授权并检查占用。
+
+## 2026-10-10 预览点击目标改为渲染组件（未重新构建）
+
+按用户最新要求，预览点击 Sprite 改为选择 SpriteRenderer 的 fileID，Inspector 显示 Sprite 属性并保留已有所属 Transform 联合显示，Hierarchy 定位对应组件；选中轮廓随渲染组件同步。预览命中结果携带渲染组件 ID，为后续 UI Image 等 Graphic 选择沿用同一约定。当前 UI 图形渲染尚未实现，不能声称已支持 UI 预览/点击。尚未重新生成 EXE。
+
+## 2026-10-10 最新 Release 构建完成（预览点击选中）
+
+用户明确授权可以进行编译；unity_yaml_viewer 进程检查和目标 EXE 独占读写检查通过。cargo build --release --offline 成功（15.12 秒），target/release/unity_yaml_viewer.exe 为 1.1.2，已包含预览点击 Sprite 选择所属 Transform/RectTransform、透明像素和禁选过滤、层级定位与选中轮廓。尚未启动此构建验证预览点击及重叠选择交互，测试断言未执行，未提交或发布。
+
+## 2026-10-10 预览点击选择 Transform（未重新构建）
+
+用户指出预览应能点击图层选中所属节点 Transform，实际位置修改仍仅通过编辑模式的属性窗口进行，无需预览拖动修改对象。已将画布 Sense 改为 click_and_drag，单击按绘制顺序逆序命中 Sprite 矩形，逆变换处理旋转/镜像并检查源图 alpha，跳过透明像素与手图标禁选对象；返回所属 Transform/RectTransform fileID，由 main 同步 Inspector 属性页及 Hierarchy 展开定位，清除搜索过滤。选中的 Transform 图形显示细蓝色矩形轮廓。拖动仍只平移预览，不改变对象位置。
+
+纹理缓存保存 alpha 字节以命中测试，缓存预算按每像素 5 字节统计。新增旋转/镜像/退化矩形命中测试源码，cargo check --offline --tests 和差异空白检查通过，测试断言未执行，尚未运行预览点击/重叠/禁选交互或重新生成 EXE。
+
+## 2026-10-10 最新 Release 构建完成（数值拖动及性能优化）
+
+用户明确授权进行编译，unity_yaml_viewer 进程与目标 EXE 独占读写检查通过。cargo build --release --offline 成功（9.99 秒），target/release/unity_yaml_viewer.exe 为 1.1.2，包含数值框聚焦后水平拖动、Shift/Ctrl 速度调整、拖动合并撤销、暂存修改实时预览、减少层级 YAML 重复解析及文件检查，以及无边框预览入口和紧凑层级间距。尚未启动此构建验证数值拖动、输入、撤销和实际流畅度，测试断言未执行，未提交或发布。
+
+## 2026-10-10 数值框拖动与编辑性能优化（未重新构建）
+
+用户要求数值编辑更流畅，并在聚焦输入框后按住左键左右拖动改值，保留文本输入、不使用滑条。已在 editing.rs 的通用数值及向量分量 TextEdit 接入水平 scrub：整数默认每像素 1，浮点每像素 0.1；Shift 慢调、Ctrl 快调；沿用类型/范围验证，单次拖动 change_grouped 合并一次撤销，失焦/Enter 文本提交保持原有行为。Euler 拖动仍转回四元数；超出 f64 精确整数范围的 64 位整数保留键盘输入。向量输入 ID 不再随 session revision 变化。
+
+卡顿静态排查发现 node_label 对每个组件/对象反复调用 document_text，经 controller_source 完整解析 YAML；已仅在 GameObject 名称时读取已知文档范围，避免每个节点解析全文。parse_unity_yaml 正则改 OnceLock 缓存。预览文件 metadata 检查降为每秒一次。预览此前读取原始 documents，已改读取 Session.rendered 并缓存解析结果，确认文本/拖动修改实时反映到图形且不修改源 offsets。
+
+另有尚未构建的 UI 微调：预览按钮无底色无边框、绘制细线左右箭头，悬停浅背景；左侧图标保留宽度 30，去掉额外 4px 留白，GameObject 树缩进改 14px。
+
+cargo check --offline --tests 与差异空白检查通过。新增暂存向量预览/原始范围不变/单次撤销测试仅编译，未执行断言；拖动行为、实际流畅度、数字键盘输入尚未运行验证，未重新生成 EXE。后续构建仍须明确授权并检查进程和 EXE 占用。
+
+## 2026-10-10 最新 Release 构建完成（预览修正）
+
+用户明确授权可以进行编译；unity_yaml_viewer 进程检查与目标 EXE 独占读写检查通过。cargo build --release --offline 成功（10.26 秒），target/release/unity_yaml_viewer.exe 为 1.1.2，包含图标左侧固定两列及缩小、预览展开/收起箭头、灰色坐标轴、预览问题详情、Polygon Sprite 矩形兼容和 Hierarchy 双轴滚动黑条修正。尚未启动此构建验证两棵树恢复、图标布局或黑条消失，测试断言未执行，未提交或发布。
+
+## 2026-10-10 层级/预览之间间歇黑条排查（未重新构建）
+
+用户截图显示层级与预览之间偶发黑色竖条。检查 egui 0.31 SidePanel/ScrollArea 源码发现：Hierarchy 使用仅纵向 ScrollArea，长名称/深层缩进使非滚动轴内容宽度增大，Frame/SidePanel 按内容实际宽度推进下一个面板，但 SidePanel 仍裁剪于配置宽度，因而两面板之间可能留下未绘制区域并露出默认黑色窗口底色。将 Hierarchy 改为双轴 ScrollArea 并指定独立 ID，使长名称通过横向滚动查看，视口宽度保持面板约束。实际旧 EXE 黑条尚未运行复现/验证修复，未重新生成 EXE。
+
+## 2026-10-10 Polygon Sprite 矩形预览兼容（未重新构建）
+
+用户补充缺失树使用多边形轮廓，应仍可按矩形预览。检查发现 region 仅支持 spriteMode 1/2，直接拒绝 Unity Polygon 模式 3。已将模式 3 与 Single 一样按完整源图矩形、spritePivot/Pixels Per Unit 绘制，忽略 outline/physicsShape 的网格裁剪，保留图像 alpha。不修改资源导入设置。Multiple/Tight 已按 rect 取图，不依赖多边形轮廓。
+
+新增 Polygon 带 outline/physicsShape 及自定义 pivot、Multiple/Tight 带 outline 的测试源码，仅做编译检查；尚未取得用户树资源验证实际 spriteMode，因此这是已修复的明确兼容漏项，不能断言两棵树已实际验证恢复。未重新生成 EXE。
+
+## 2026-10-10 预览布局与缺失资源诊断调整（未重新构建）
+
+按用户截图将眼睛/手缩至 15 宽按钮，放在 Hierarchy 左侧固定两列，树箭头及名称在独立缩进区域，不再随节点缩进挤占名称；预览按钮加入 ◀（展开中）/▶（收起）箭头，坐标轴改为低对比灰色。增加可展开预览问题详情，显示对象/纹理路径/fileID 与 GUID 缺失、绘制模式不支持、解码失败或切片无效等原因。
+
+用户截图两棵树未显示且报 4 项缺失/不支持；当前环境无法读取 C:/Git/q003_client 示例工程，因此尚未确认这两棵树的实际失败原因，不得声称已修复树渲染。需提供对应资源或由用户查看新版问题详情。源码编译检查通过，尚未重新生成 EXE，后续构建仍须明确授权并检查占用。
+
+## 2026-10-10 最新 Release 构建完成
+
+用户明确授权进行编译，构建前未发现 unity_yaml_viewer 进程，目标 EXE 当时不存在。cargo build --release --offline 成功（18.21 秒），生成 target/release/unity_yaml_viewer.exe，版本 1.1.2，包含静态 Prefab Sprite 组合预览、Sprite/Transform 联合 Inspector 及眼睛/手父子继承开关。尚未启动验证界面或执行测试断言，未提交或发布。
+
+## 2026-10-10 层级可见性与选择开关（未生成 EXE）
+
+GameObject 节点前新增绘制的眼睛/手图标，开启与斜线禁用状态、悬停说明支持七语言。眼睛控制静态预览是否渲染，手控制层级节点与其组件是否允许选中；父节点关闭会沿 Transform/RectTransform 层级对子节点生效，子节点本地偏好独立保留，父节点恢复后继续按子节点本地开关生效。禁选当前对象或祖先会清除当前选择，展开箭头与图标仍可操作。开关不修改 Unity 的激活状态、Renderer Enabled 或源 YAML。按文件在本次打开会话中隔离，关闭标签清除。
+
+新增 `src/hierarchy_controls.rs`（状态、父级继承、绘制图标及测试源码），`main.rs` 接入自定义层级标题和选择限制，`static_preview.rs` 读取有效可见性过滤 Sprite。`cargo check --offline --tests` 通过，测试断言未运行，未生成 EXE、未验证界面。
+
+用户询问 Spine：当前预览不支持其动态 MeshRenderer 网格。将来需解析 skeleton JSON/binary、atlas/纹理、皮肤和附件并接入兼容运行时/骨骼网格计算；不需要安装 Unity/Spine 编辑器本身。当前没有加入 Spine 渲染实现。
+
+## 2026-10-10 静态 Prefab 预览首批实现（未生成 EXE）
+
+用户确认以整个 Prefab 为原点，按层级 Transform/RectTransform 的坐标、缩放、旋转构建 Sprite 静态组合；选中 SpriteRenderer 时同时显示所属节点的 Transform 属性。
+
+新增 `src/static_preview.rs`，XY 正交投影，根位置归零，保留根缩放和旋转；父子完整 TRS 矩阵累积，绘制普通 SpriteRenderer，包含 Sprite 裁剪、pivot、Pixels Per Unit、颜色、Flip X/Y、启用及对象激活状态、Sorting Layer 索引与 Order。通过现有 GUID 索引定位源纹理与 meta；现代 internalID 与旧 name/fileID 映射均可定位切片。图像后台解码，最多两项同时加载，限制尺寸、分配和缓存总量，纹理及 meta 时间戳变更时重新加载。
+
+Prefab 含非空 Sprite 引用时在 Inspector 标题前出现预览按钮；展开/收起、可拖动分隔线、展开隐藏属性类型列，支持适应窗口、滚轮缩放及拖动平移。选中 SpriteRenderer 时，Transform/RectTransform 折叠组与 Sprite 属性共用滚动区；编辑分别发布对应文档范围，沿用撤销及保存，预览随已确认暂存修改刷新。
+
+限制：尚未展开嵌套 Prefab/variant；仅 Simple 绘制模式，Sliced/Tiled 跳过并提示；不还原自定义 Shader、材质、SpriteMask、SortingGroup 或 Unity 透明排序。RectTransform 使用序列化 Local TRS，不计算 Canvas/anchor 布局；暂不渲染 UI Image/Text。源图支持 PNG/JPEG/TGA/BMP/WebP，无法解码或切片定位失败会计入缺失/不支持提示。
+
+版本保持当前 1.1.2。`cargo check --offline --tests` 与差异空白检查通过，新增变换/循环父引用/切片边界测试仅编译，未执行断言。尚未生成 EXE、运行界面或验证真实工程样本，未提交或发布。后续生成 EXE 必须重新获得明确授权并先检查进程与目标文件占用。
+
 # Unity YAML Viewer 交接：1.1.1 收尾 → 静态图形预览
 
 交接日期：2026-10-10。工程：`C:\Git\UnityYAMLViewer`。

@@ -23,6 +23,10 @@ mod theme;
 mod timeline_edit;
 mod animation_curves;
 mod updater;
+mod static_preview;
+mod ui_preview;
+mod hierarchy_controls;
+mod command_line;
 use script_properties::ScriptProperties;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -122,6 +126,7 @@ struct YamlTable {
 
 #[derive(Default)]
 struct ViewerApp {
+    command_inbox: Option<command_line::Inbox>,
     path: Option<PathBuf>,
     last_open_dir: Option<PathBuf>,
     raw: String,
@@ -158,6 +163,11 @@ struct ViewerApp {
     show_settings: bool,
     settings: AppSettings,
     updater: updater::Updater,
+    preview: static_preview::Preview,
+    preview_text: String,
+    preview_documents: Vec<Document>,
+    node_controls: HashMap<PathBuf, hierarchy_controls::NodeControls>,
+    node_flags: HashMap<String, hierarchy_controls::Flags>,
 }
 
 #[derive(Clone)]
@@ -171,6 +181,22 @@ struct ViewerTab {
 }
 
 impl ViewerApp {
+    fn refresh_node_flags(&mut self) {
+        self.node_flags = self.path.as_ref().and_then(|path| self.node_controls.get(path))
+            .map(|controls| controls.effective(&self.documents)).unwrap_or_default();
+        if self.selected.is_some_and(|index| !self.document_flags(index).selectable) {
+            self.selected = None;
+            self.last_selected = None;
+        }
+    }
+
+    fn document_flags(&self, index: usize) -> hierarchy_controls::Flags {
+        self.documents.get(index).and_then(|doc| {
+            let id = if doc.type_name == "GameObject" { Some(doc.file_id.as_str()) } else { doc.game_object.as_deref() };
+            id.and_then(|id| self.node_flags.get(id)).copied()
+        }).unwrap_or_default()
+    }
+
     fn update_windows(&mut self, ctx: &egui::Context) {
         if self.updater.show {
             let mut open = true;
@@ -415,6 +441,7 @@ impl ViewerApp {
         }
         self.edits.remove(&self.tabs[index].path);
         self.saved_histories.remove(&self.tabs[index].path);
+        self.node_controls.remove(&self.tabs[index].path);
         self.save_active_tab();
         self.tabs.remove(index);
         if self.tabs.is_empty() {
@@ -438,6 +465,8 @@ impl ViewerApp {
     fn display_name(&self, doc: &Document) -> String {
         if doc.type_name == "GameObject" {
             name_from_text(&doc.text).unwrap_or_else(|| format!("GameObject #{}", doc.file_id))
+        } else if let Some(kind)=ui_preview::graphic(doc) {
+            match kind {ui_preview::Graphic::Image=>"Image",ui_preview::Graphic::RawImage=>"RawImage",ui_preview::Graphic::Text=>"Text",ui_preview::Graphic::Tmp=>"TextMeshProUGUI"}.to_owned()
         } else if doc.type_name == "MonoBehaviour" {
             self.script_properties.script_name(&doc.text)
                 .unwrap_or("MonoBehaviour").to_string()
@@ -454,10 +483,12 @@ impl ViewerApp {
     }
 
     fn node_label(&self, ui: &egui::Ui, index: usize, title: String) -> RichText {
-        let title = editing::document_text(ui, &self.documents[index].file_id)
-            .and_then(|text| name_from_text(&text)).unwrap_or(title);
         let start = self.raw.find("--- !u!").unwrap_or(0)
             + self.documents[..index].iter().map(|doc| doc.text.len()).sum::<usize>();
+        let title = if self.documents[index].type_name == "GameObject" {
+            editing::document_text_in_range(ui, start..start + self.documents[index].text.len())
+                .and_then(|text| name_from_text(&text)).unwrap_or(title)
+        } else { title };
         let dirty = self.path.as_ref().and_then(|path| self.edits.get(path))
             .is_some_and(|session| session.lock().unwrap()
                 .has_changes_in(start..start + self.documents[index].text.len()));
@@ -496,27 +527,39 @@ impl ViewerApp {
             }
             false
         });
-        let response = egui::CollapsingHeader::new(self.node_label(ui, game_object, title).strong())
-            .id_salt(format!("go-{id}"))
-            .default_open(true)
-            .open(force_open.then_some(true))
-            .show(ui, |ui| {
-                if let Some(ids) = components.get(&id) {
-                    for &component in ids {
-                        self.show_document(ui, component, false);
-                    }
-                }
-                if let Some(ids) = children.get(&id).cloned() {
-                    for child in ids {
-                        self.show_game_object(ui, child, children, components);
-                    }
-                }
-            });
-        if response.header_response.clicked() {
-            self.selected = Some(game_object);
-        }
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(format!("go-{id}")), true);
+        if force_open { state.set_open(true); }
+        let response = state.show_header(ui, |ui| {
+            let local = self.path.as_ref().and_then(|path| self.node_controls.get(path)).map(|controls| controls.local(&id)).unwrap_or_default();
+            let flags = self.document_flags(game_object);
+            let mut toggle = None;
+            let controls_x = ui.ctx().data_mut(|data| data.get_temp::<f32>(egui::Id::new("hierarchy_controls_x"))).unwrap_or(ui.cursor().min.x);
+            let controls_rect = egui::Rect::from_min_size(egui::pos2(controls_x, ui.cursor().min.y), egui::vec2(30.0, 20.0));
+            let mut controls_ui = ui.new_child(egui::UiBuilder::new().id_salt(("node_switches", &id)).max_rect(controls_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            controls_ui.spacing_mut().item_spacing.x = 0.0;
+            if hierarchy_controls::icon(&mut controls_ui, true, flags.visible, local.visible && !flags.visible).clicked() { toggle = Some(true); }
+            if hierarchy_controls::icon(&mut controls_ui, false, flags.selectable, local.selectable && !flags.selectable).clicked() { toggle = Some(false); }
+            if let (Some(eye), Some(path)) = (toggle, self.path.clone()) {
+                self.node_controls.entry(path).or_default().toggle(&id, eye);
+                self.refresh_node_flags();
+            }
+            let flags = self.document_flags(game_object);
+            let label = self.node_label(ui, game_object, title).strong();
+            let label = if !flags.visible || !flags.selectable { label.weak() } else { label };
+            let response = ui.add_enabled(flags.selectable, egui::SelectableLabel::new(self.selected == Some(game_object), label));
+            if response.clicked() { self.selected = Some(game_object); }
+            if response.double_clicked() { self.focus_preview_node(game_object); }
+            response
+        }).body(|ui| {
+            if let Some(ids) = components.get(&id) {
+                for &component in ids { self.show_document(ui, component, false); }
+            }
+            if let Some(ids) = children.get(&id).cloned() {
+                for child in ids { self.show_game_object(ui, child, children, components); }
+            }
+        });
         if self.locate_target == Some(game_object) {
-            response.header_response.scroll_to_me(Some(egui::Align::Center));
+            response.1.response.scroll_to_me(Some(egui::Align::Center));
             self.locate_target = None;
         }
     }
@@ -532,7 +575,8 @@ impl ViewerApp {
         } else {
             self.node_label(ui, index, self.display_name(&self.documents[index]))
         };
-        let response = if is_match {
+        let selectable = self.document_flags(index).selectable;
+        let response = ui.add_enabled_ui(selectable, |ui| if is_match {
             let highlight_color = if ui.visuals().dark_mode {
                 Color32::YELLOW
             } else {
@@ -547,14 +591,42 @@ impl ViewerApp {
                 .inner
         } else {
             ui.selectable_label(self.selected == Some(index), label)
-        };
+        }).inner;
         if response.clicked() {
             self.selected = Some(index);
         }
+        if response.double_clicked() { self.focus_preview_node(index); }
         if self.locate_target == Some(index) {
             response.scroll_to_me(Some(egui::Align::Center));
             self.locate_target = None;
         }
+    }
+
+    fn focus_preview_node(&mut self, index: usize) {
+        if !static_preview::Preview::available(&self.documents, self.path.as_deref()) { return; }
+        let document = &self.documents[index];
+        let Some(object) = (if document.type_name == "GameObject" {
+            Some(document.file_id.clone())
+        } else { document.game_object.clone() }) else { return; };
+        let mut objects = std::collections::HashSet::from([object]);
+        loop {
+            let old_len = objects.len();
+            let transforms: std::collections::HashSet<_> = self.documents.iter()
+                .filter(|doc| matches!(doc.type_name.as_str(), "Transform" | "RectTransform")
+                    && doc.game_object.as_ref().is_some_and(|id| objects.contains(id)))
+                .map(|doc| doc.file_id.clone()).collect();
+            for doc in &self.documents {
+                if matches!(doc.type_name.as_str(), "Transform" | "RectTransform")
+                    && doc.parent_transform.as_ref().is_some_and(|id| transforms.contains(id)) {
+                    if let Some(id) = &doc.game_object { objects.insert(id.clone()); }
+                }
+            }
+            if old_len == objects.len() { break; }
+        }
+        let components = self.documents.iter()
+            .filter(|doc| doc.game_object.as_ref().is_some_and(|id| objects.contains(id)))
+            .map(|doc| doc.file_id.clone()).collect();
+        self.preview.focus(components);
     }
 
     fn game_object_has_match(
@@ -725,6 +797,15 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(inbox) = &mut self.command_inbox {
+            let requests = inbox.receive();
+            for paths in requests {
+                for path in paths { self.open_file(path); }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         localization::set_language(&self.settings.language);
         self.updater.poll();
         if self.path.as_ref().is_some_and(|path| !self.edits.contains_key(path))
@@ -878,6 +959,7 @@ impl eframe::App for ViewerApp {
         });
 
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
+        self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -885,7 +967,12 @@ impl eframe::App for ViewerApp {
             .show(ctx, |ui| {
                 ui.heading(crate::localization::tr("Hierarchy"));
                 ui.small(crate::localization::tr("按 GameObject / Transform 层级重建"));
-                ScrollArea::vertical()
+                // A vertical-only scroll area expands its reported width for long
+                // indented rows. SidePanel clips to its configured width, leaving
+                // an unpainted gap before the next panel. Scroll in both axes so
+                // the viewport stays bounded by the hierarchy panel instead.
+                ScrollArea::both()
+                    .id_salt("hierarchy_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         if let Some(clip_index) = self
@@ -934,9 +1021,18 @@ impl eframe::App for ViewerApp {
                             let (roots, children, components, unlinked) =
                                 build_tree(&self.documents);
                             let has_roots = !roots.is_empty();
-                            for root in roots {
-                                self.show_game_object(ui, root, &children, &components);
-                            }
+                            let controls_x = ui.cursor().min.x;
+                            ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("hierarchy_controls_x"), controls_x));
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.add_space(30.0);
+                                ui.vertical(|ui| {
+                                    ui.spacing_mut().indent = 14.0;
+                                    for root in roots {
+                                        self.show_game_object(ui, root, &children, &components);
+                                    }
+                                });
+                            });
                             if !has_roots && !unlinked.is_empty() {
                                 for item in unlinked {
                                     self.show_custom_asset_tree(ui, item);
@@ -956,6 +1052,33 @@ impl eframe::App for ViewerApp {
                     });
             });
 
+        let preview_available = static_preview::Preview::available(&self.documents, self.path.as_deref());
+        if !preview_available { self.preview.open = false; }
+        if self.preview.open {
+            let rendered = self.path.as_ref().and_then(|path| self.edits.get(path))
+                .map(|session| session.lock().unwrap().rendered()).unwrap_or_else(|| self.raw.clone());
+            if self.preview_text != rendered {
+                self.preview_documents = parse_unity_yaml(&rendered);
+                self.preview_text = rendered;
+            }
+            egui::SidePanel::left("static_prefab_preview").resizable(true).default_width(600.0).min_width(180.0).max_width((ctx.available_rect().width() - 360.0).max(180.0)).show(ctx, |ui| {
+                let selected_id=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone());
+                if let Some(component_id)=self.preview.show(ui, &self.preview_documents, &self.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(), &self.node_flags, selected_id.as_deref()) {
+                    if let Some(index)=self.documents.iter().position(|doc|doc.file_id==component_id) {
+                        self.selected=Some(index);
+                        self.locate_target=Some(index);
+                        match self.documents[index].type_name.as_str() {
+                            "SpriteRenderer" => self.show_sprite_renderer_yaml=false,
+                            "MonoBehaviour" => self.show_script_yaml=false,
+                            _ => {},
+                        }
+                        self.query.clear();
+                        ctx.request_repaint();
+                    }
+                }
+            });
+        }
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("inspector_hide_property_types"), self.preview.open));
         egui::CentralPanel::default().frame(egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill)).show(ctx, |ui| {
             let current_edit = self.path.as_ref().and_then(|path| self.edits.get(path)).cloned();
             let header_fill = if current_edit.is_some() {
@@ -967,6 +1090,10 @@ impl eframe::App for ViewerApp {
             egui::Frame::new().fill(header_fill).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
+                if preview_available && theme::preview_toggle(ui, self.preview.open).clicked() {
+                    self.preview.open = !self.preview.open;
+                    ctx.request_repaint();
+                }
                 ui.heading(if current_edit.is_some() { crate::localization::tr("Inspector · 编辑模式") } else { crate::localization::tr("只读 Inspector") });
                 if current_edit.is_some() {
                     if ui.add(egui::Button::new(RichText::new(crate::localization::tr("放弃编辑")).color(Color32::WHITE))
@@ -1156,10 +1283,23 @@ impl eframe::App for ViewerApp {
 					show_animation_yaml(ui, &doc.text, self.selected_keyframe.as_ref(), &self.query);
 				} else if is_transform && !self.show_transform_yaml {
 					show_transform_properties(ui, &doc.text);
-				} else if is_script && !self.show_script_yaml {
+				} else if is_script && !self.show_script_yaml && ui_preview::graphic(doc).is_none() {
 					self.script_properties.show(ui, &doc.text, &self.query);
-				} else if is_sprite_renderer && !self.show_sprite_renderer_yaml {
-					script_properties::show_sprite_renderer_properties(ui, &doc.text, &self.query);
+				} else if (is_sprite_renderer && !self.show_sprite_renderer_yaml) || (ui_preview::graphic(doc).is_some() && !self.show_script_yaml) {
+                    ScrollArea::both().id_salt("sprite_and_transform").auto_shrink([false, false]).show(ui, |ui| {
+                    if let Some(transform) = self.documents.iter().find(|candidate| matches!(candidate.type_name.as_str(), "Transform" | "RectTransform") && candidate.game_object == doc.game_object && doc.game_object.is_some()) {
+                        let transform_index = self.documents.iter().position(|candidate| candidate.file_id == transform.file_id).unwrap();
+                        let transform_offset = self.documents[..transform_index].iter().map(|d| d.text.len()).sum::<usize>();
+                        editing::publish(ctx, self.path.as_ref().and_then(|p| self.edits.get(p)).cloned(), prefix + transform_offset..prefix + transform_offset + transform.text.len());
+                        egui::CollapsingHeader::new(&transform.type_name).id_salt(("sprite_transform", &doc.file_id)).default_open(true).show(ui, |ui| {
+                            show_transform_properties_content(ui, &transform.text);
+                        });
+                        editing::publish(ctx, self.path.as_ref().and_then(|p| self.edits.get(p)).cloned(), prefix + offset..prefix + offset + doc.text.len());
+                        ui.separator();
+                    }
+                    if is_sprite_renderer {script_properties::show_sprite_renderer_properties_content(ui, &doc.text, &self.query);}
+                    else {script_properties::show_ui_graphic_properties_content(ui, &doc.text, &self.query);}
+                    });
 				} else if is_collider && !self.show_collider_yaml {
 					script_properties::show_collider_properties(ui, &doc.type_name, &doc.text, &self.query);
 				} else if is_animator && !self.show_animator_yaml {
@@ -1338,6 +1478,9 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(localization::tr("• 支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.2").strong());
                         ui.label(localization::tr("• 新增在线更新：启动自动检查、New 提示、更新说明与下载进度"));
                         ui.label(localization::tr("• 下载文件校验，保存提醒与二次确认，替换程序后自动重启"));
                         ui.add_space(8.0);
@@ -1443,9 +1586,12 @@ impl eframe::App for ViewerApp {
 }
 
 fn parse_unity_yaml(text: &str) -> Vec<Document> {
-    let header = Regex::new(r"(?m)^--- !u!(\d+) &(-?\d+).*$").unwrap();
-    let go = Regex::new(r"(?m)^\s*m_GameObject:\s*\{fileID:\s*(-?\d+)").unwrap();
-    let father = Regex::new(r"(?m)^\s*m_Father:\s*\{fileID:\s*(-?\d+)").unwrap();
+    static PATTERNS: std::sync::OnceLock<(Regex, Regex, Regex)> = std::sync::OnceLock::new();
+    let (header, go, father) = PATTERNS.get_or_init(|| (
+        Regex::new(r"(?m)^--- !u!(\d+) &(-?\d+).*$").unwrap(),
+        Regex::new(r"(?m)^\s*m_GameObject:\s*\{fileID:\s*(-?\d+)").unwrap(),
+        Regex::new(r"(?m)^\s*m_Father:\s*\{fileID:\s*(-?\d+)").unwrap(),
+    ));
     let starts: Vec<_> = header.find_iter(text).collect();
     let mut docs = Vec::new();
     for i in 0..starts.len() {
@@ -2418,8 +2564,10 @@ fn rotation_euler_degrees(q: &[f64]) -> Option<Vec<f64>> {
 }
 
 fn show_transform_properties(ui: &mut egui::Ui, text: &str) {
+    ScrollArea::both().id_salt("transform_properties").auto_shrink([false, false]).show(ui, |ui| show_transform_properties_content(ui, text));
+}
+fn show_transform_properties_content(ui: &mut egui::Ui, text: &str) {
     let viewport_width = ui.available_width();
-    ScrollArea::both().id_salt("transform_properties").auto_shrink([false, false]).show(ui, |ui| {
         ui.small(crate::localization::tr("旋转以欧拉角（度）显示；编辑模式中的改动需要保存才会写入文件。"));
         let mut remaining = Vec::new();
         ui.vertical(|ui| {
@@ -2493,7 +2641,6 @@ fn show_transform_properties(ui: &mut egui::Ui, text: &str) {
                 .font(egui::TextStyle::Monospace)
                 .desired_width(f32::INFINITY).interactive(false));
         });
-    });
 }
 
 // Size every component before placing any widget so the final axis cannot
@@ -2979,22 +3126,34 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) 
 }
 
 fn main() -> eframe::Result {
+    let (command_inbox, startup_paths) = match command_line::start() {
+        Ok(command_line::Startup::Primary(inbox, paths)) => (inbox, paths),
+        Ok(command_line::Startup::Forwarded) => return Ok(()),
+        Err(error) => {
+            rfd::MessageDialog::new().set_title("Unity YAML Viewer")
+                .set_description(format!("无法打开命令行请求：{error}"))
+                .set_level(rfd::MessageLevel::Error).show();
+            return Ok(());
+        }
+    };
     eframe::run_native(
         "Unity YAML Viewer",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default().with_icon(application_icon()),
             ..Default::default()
         },
-        Box::new(|creation_context| {
+        Box::new(move |creation_context| {
             configure_system_fonts(&creation_context.egui_ctx);
             restore_theme(&creation_context.egui_ctx);
             let mut app = ViewerApp {
+                command_inbox,
                 last_open_dir: load_last_open_dir(),
                 settings: AppSettings::load(),
                 ..Default::default()
             };
             localization::set_language(&app.settings.language);
             app.restore_open_tabs();
+            for path in startup_paths { app.open_file(path); }
             if app.settings.auto_check_updates { app.updater.check(&creation_context.egui_ctx, false); }
             Ok(Box::new(app))
         }),

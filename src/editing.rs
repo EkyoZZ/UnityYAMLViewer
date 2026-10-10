@@ -189,8 +189,16 @@ pub fn controller_machine_text(ui: &egui::Ui, machine: &str) -> Option<String> {
 }
 pub fn document_text(ui: &egui::Ui, machine: &str) -> Option<String> {
     let source = controller_source(ui, machine)?;
+    document_text_from_source(source)
+}
+pub fn document_text_in_range(ui: &egui::Ui, range: Range<usize>) -> Option<String> {
+    let mut source = source(ui)?;
+    source.range = range;
+    document_text_from_source(source)
+}
+fn document_text_from_source(source: Source) -> Option<String> {
     let session = source.session.lock().unwrap();
-    let mut text = session.original[source.range.clone()].to_string();
+    let mut text = session.original.get(source.range.clone())?.to_string();
     let mut preview = session.patches.clone();
     for (start, draft) in session.drafts.iter().filter(|(start, _)| source.range.contains(start)) {
         if session.original[..*start].lines().last().is_some_and(|line| line.trim() == "m_Name:") {
@@ -592,6 +600,38 @@ fn plain_string(value: &str) -> bool {
         && !value.contains(": ") && !value.ends_with(':')
         && !value.contains(" #")
 }
+#[derive(Clone)]
+struct NumberDrag { start: f64, pixels: f64 }
+fn integer_kind(kind: &str) -> bool {
+    matches!(kind.rsplit('.').next().unwrap_or(kind), "int" | "Int32" | "uint" | "UInt32" | "long" | "Int64" | "ulong" | "UInt64" | "short" | "Int16" | "ushort" | "UInt16" | "byte" | "Byte" | "sbyte" | "SByte")
+}
+/// A focused text box scrubs horizontally; a click still permits keyboard entry.
+fn scrub_number(ui: &egui::Ui, response: &egui::Response, was_focused: bool, input: &mut String, kind: &str) -> bool {
+    let drag_id = response.id.with("number_scrub");
+    let mut drag = ui.ctx().data(|data| data.get_temp::<NumberDrag>(drag_id));
+    if response.drag_started_by(egui::PointerButton::Primary) && was_focused && validate(kind, input) {
+        if let Ok(start) = input.parse::<f64>() {
+            // Larger integral values cannot be represented exactly by f64.
+            if !integer_kind(kind) || start.abs() <= 9_007_199_254_740_991.0 { drag = Some(NumberDrag { start, pixels: 0.0 }); }
+        }
+    }
+    let Some(mut drag) = drag else { return false };
+    if !ui.input(|i| i.pointer.primary_down()) {
+        ui.ctx().data_mut(|data| data.remove::<NumberDrag>(drag_id));
+        return false;
+    }
+    let multiplier = ui.input(|i| if i.modifiers.shift { 0.1 } else if i.modifiers.ctrl { 10.0 } else { 1.0 });
+    drag.pixels += response.drag_delta().x as f64 * multiplier;
+    let value = drag.start + drag.pixels * if integer_kind(kind) { 1.0 } else { 0.1 };
+    let candidate = if integer_kind(kind) { format!("{:.0}", value.round()) }
+        else if matches!(kind, "double" | "Double") { ((value * 1e6).round() / 1e6).to_string() }
+        else { (((value * 1e6).round() / 1e6) as f32).to_string() };
+    if validate(kind, &candidate) { *input = candidate; }
+    ui.ctx().data_mut(|data| data.insert_temp(drag_id, drag));
+    response.request_focus();
+    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    true
+}
 pub fn text(ui: &mut egui::Ui, bind: &Binding, kind: &str, width: f32) {
     text_inner(ui, bind, kind, width, false);
 }
@@ -600,16 +640,23 @@ fn text_inner(ui: &mut egui::Ui, bind: &Binding, kind: &str, width: f32, exact_w
     let is_string = matches!(kind.rsplit('.').next().unwrap_or(kind), "string" | "String" | "char" | "Char");
     let displayed = if is_string { crate::yaml_strings::display(&current).into_owned() } else { current.clone() };
     let mut draft = bind.source.session.lock().unwrap().drafts.get(&bind.range.start).cloned().unwrap_or(displayed.clone());
-    let editor = TextEdit::singleline(&mut draft).id(ui.id().with(("edit_value", bind.range.start))).desired_width(width);
+    let editor_id = ui.id().with(("edit_value", bind.range.start));
+    let was_focused = ui.memory(|memory| memory.has_focus(editor_id));
+    let editor = TextEdit::singleline(&mut draft).id(editor_id).desired_width(width);
     let response = if exact_width {
         ui.add_sized(egui::vec2(width, ui.spacing().interact_size.y), editor)
     } else { ui.add(editor) };
-    if response.changed() {
+    let scrubbing = !is_string && scrub_number(ui, &response, was_focused, &mut draft, kind);
+    if scrubbing {
+        let mut session = bind.source.session.lock().unwrap();
+        session.drafts.remove(&bind.range.start);
+        session.change_grouped(bind.range.clone(), draft.clone(), true);
+    } else if response.changed() {
         let mut session = bind.source.session.lock().unwrap();
         if draft == displayed { session.drafts.remove(&bind.range.start); } else { session.drafts.insert(bind.range.start, draft.clone()); }
         ui.ctx().request_repaint();
     }
-    if response.lost_focus() || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))) {
+    if !scrubbing && (response.lost_focus() || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))) {
         bind.source.session.lock().unwrap().drafts.remove(&bind.range.start);
         if draft != displayed {
             if validate(kind, &draft) {
@@ -718,16 +765,23 @@ fn control_inner(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Op
             return true;
         }
         let mut changed = false;
+        let mut scrubbing_vector = false;
         let width = ((ui.available_width() - axes.len() as f32 * 20.0 - 50.0) / axes.len() as f32).clamp(48.0, 96.0);
         for (component, (axis, v)) in axes.iter().zip(&mut values).enumerate() {
             ui.label(if kind == "MaterialVector4" { ["x", "y", "z", "w"][component] } else { *axis });
             let mut input = v.to_string();
-            let revision = bind.source.session.lock().unwrap().revision;
-            let draft_id = ui.id().with(("vector_draft", bind.range.start, axis, revision));
+            let draft_id = ui.id().with(("vector_draft", bind.range.start, axis));
+            let was_focused = ui.memory(|memory| memory.has_focus(draft_id));
             if let Some(draft) = bind.source.session.lock().unwrap().component_drafts.get(&(bind.range.start, component)).cloned() { input = draft; }
             let response = ui.add(TextEdit::singleline(&mut input).id(draft_id).desired_width(width));
-            if response.changed() { bind.source.session.lock().unwrap().component_drafts.insert((bind.range.start, component), input.clone()); }
-            if response.lost_focus() || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))) {
+            let scalar_kind = if kind.ends_with("Int") { "int" } else { "float" };
+            let scrubbing = scrub_number(ui, &response, was_focused, &mut input, scalar_kind);
+            if scrubbing {
+                bind.source.session.lock().unwrap().component_drafts.remove(&(bind.range.start, component));
+                if let Ok(next) = input.parse::<f64>() { changed |= next != *v; *v = next; }
+                scrubbing_vector = true;
+            } else if response.changed() { bind.source.session.lock().unwrap().component_drafts.insert((bind.range.start, component), input.clone()); }
+            if !scrubbing && (response.lost_focus() || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))) {
                 bind.source.session.lock().unwrap().component_drafts.remove(&(bind.range.start, component));
                 if validate(if kind.ends_with("Int") { "int" } else { "float" }, &input) {
                     let next = input.parse::<f64>().unwrap(); changed |= next != *v; *v = next;
@@ -737,8 +791,12 @@ fn control_inner(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Op
         if changed {
             let (axes, values) = if kind == "Euler" { (&["x", "y", "z", "w"][..], euler_quaternion(&values).to_vec()) } else { (axes, values) };
             if kind == "Quaternion" && values.iter().all(|v| *v == 0.0) { warning(ui, crate::localization::tr("四元数不能全部为零，已恢复之前的值。")); }
-            else if kind.ends_with("Int") { bind.apply(format!("{{{}}}", axes.iter().zip(values).map(|(axis, v)| format!("{axis}: {v}")).collect::<Vec<_>>().join(", "))); }
-            else { bind.apply(float_components(&value, axes, &values)); }
+            else {
+                let next = if kind.ends_with("Int") { format!("{{{}}}", axes.iter().zip(values).map(|(axis, v)| format!("{axis}: {v}")).collect::<Vec<_>>().join(", ")) }
+                    else { float_components(&value, axes, &values) };
+                if scrubbing_vector { bind.source.session.lock().unwrap().change_grouped(bind.range.clone(), next, true); }
+                else { bind.apply(next); }
+            }
         }
         return true;
     }
@@ -1126,9 +1184,29 @@ mod tests {
         });
     }
     #[test]
+    fn grouped_vector_edit_preview_uses_patches_and_keeps_original_offsets() {
+        let raw = "--- !u!4 &10\nTransform:\n  m_LocalPosition: {x: 0, y: 2, z: 3}\n--- !u!1 &20\nGameObject:\n  m_Name: tree\n";
+        in_ui(raw, |ui, shared| {
+            let bind = binding(ui, "m_LocalPosition", "{x: 0, y: 2, z: 3}").unwrap();
+            for x in [1, 10, 100] {
+                shared.lock().unwrap().change_grouped(bind.range.clone(), format!("{{x: {x}, y: 2, z: 3}}"), true);
+            }
+            let boundary = raw.find("--- !u!1").unwrap();
+            let preview = document_text_in_range(ui, 0..boundary).unwrap();
+            assert!(preview.contains("{x: 100, y: 2, z: 3}"));
+            assert!(!preview.contains("GameObject"));
+            assert!(document_text_in_range(ui, boundary..raw.len()).unwrap().contains("m_Name: tree"));
+            let mut session = shared.lock().unwrap();
+            assert_eq!(session.undo.len(), 1);
+            assert_eq!(session.original, raw);
+            session.undo();
+            assert_eq!(session.rendered(), raw);
+        });
+    }
+    #[test]
     fn editor_controls_render_with_synthetic_property_and_table_data() {
         let raw = "--- !u!212 &1\nSpriteRenderer:\n  m_Enabled: 1\n  m_Color: {r: 1, g: 0.5, b: 0, a: 1}\n  m_Size: {x: 2, y: 3}\n  m_DrawMode: 0\n  m_SpriteTileMode: 0\n  m_SpriteSortPoint: 0\n  m_SortingOrder: 1\n  m_Sprite: {fileID: 0}\n";
-        in_ui(raw, |ui, _| crate::script_properties::show_sprite_renderer_properties(ui, raw, ""));
+        in_ui(raw, |ui, _| crate::script_properties::show_sprite_renderer_properties_content(ui, raw, ""));
         in_ui("  values: 180000001c000000\n", |ui, _| assert!(packed_int_list(ui, "values", "180000001c000000", "int")));
         let raw = "--- !u!4 &1\nTransform:\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}\n";
         in_ui(raw, |ui, _| crate::show_transform_properties(ui, raw));

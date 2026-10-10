@@ -98,3 +98,25 @@ pub fn selector(ui: &mut egui::Ui, preference: &mut String) {
         }
     });
 }
+
+/// Lightweight preview toggle, aligned with the Inspector heading.
+pub fn preview_toggle(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
+    let label = crate::localization::tr("预览");
+    let font = egui::FontId::proportional(13.0);
+    let color = ui.visuals().text_color();
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, color);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(galley.size().x + 30.0, 26.0), egui::Sense::click());
+    if response.hovered() || response.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, 4.0, ui.visuals().widgets.hovered.bg_fill);
+    }
+    let icon = egui::pos2(rect.left() + 10.0, rect.center().y);
+    let direction = if expanded { -1.0_f32 } else { 1.0_f32 };
+    let stroke = egui::Stroke::new(1.4_f32, if response.hovered() { color } else { ui.visuals().weak_text_color() });
+    ui.painter().add(egui::Shape::line(vec![
+        icon + egui::vec2(-direction * 2.0, -4.0),
+        icon + egui::vec2(direction * 2.0, 0.0),
+        icon + egui::vec2(-direction * 2.0, 4.0),
+    ], stroke));
+    ui.painter().galley(egui::pos2(rect.left() + 21.0, rect.center().y - galley.size().y * 0.5), galley, color);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}

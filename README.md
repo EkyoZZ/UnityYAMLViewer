@@ -12,7 +12,11 @@
 
 ### 当前状态
 
-当前版本 **1.1.2** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前版本 **1.1.3** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+
+### 1.1.3 更新
+
+- 支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持。
 
 ### 1.1.2 更新
 
@@ -31,6 +35,10 @@
 - 新增 AnimationClip 时间轴编辑功能。
 
 ### 已有功能
+
+- Prefab 静态 Sprite 组合预览：按层级 Transform 叠加位置、缩放和旋转，支持源图切片、颜色和翻转；可拖动调整预览宽度、缩放及平移。选中 SpriteRenderer 时同时查看和编辑所属节点的 Transform/RectTransform。
+- UI Prefab 预览支持 Image 普通/九宫格及横向/纵向填充、RawImage、Text/TextMeshPro 静态文字；按 RectTransform 锚点、pivot、尺寸及层级变换计算布局，点击选中对应 Graphic，同时查看 RectTransform。UI 根尺寸缺失时可调整参考尺寸。
+- 首批预览为 XY 正交视图；UI 文字使用系统字体近似，内置 Sprite 使用颜色矩形近似。嵌套 Prefab、平铺/径向填充、动态布局、自定义材质及遮罩尚未完整支持。
 
 - 支持打开或拖放 `.prefab`、`.unity`、`.asset`、`.mat`、`.controller`、`.overrideController`、`.anim`、`.spriteatlas`、`.guiskin`、`.yaml` 和 `.yml`
 - 按 `GameObject` / `Transform` 关系重建 Prefab 和场景层级，并列出组件
@@ -67,6 +75,16 @@ MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/
 2. 点击“打开”，或将 Unity YAML 文件拖进窗口。
 3. 在左侧层级中选择对象或组件，在右侧 Inspector 查看属性或原始 YAML。
 4. 用顶部搜索框查找名称、字段值、`fileID` 或 GUID。
+
+### 命令行及 AI 工具打开文件
+
+通过可执行程序传入一个或多个文件路径即可打开；包含空格的路径需要加引号。支持相对路径和中文路径，最后一个文件成为当前标签。
+
+```powershell
+& 'C:\Git\UnityYAMLViewer\target\release\unity_yaml_viewer.exe' 'C:\项目\Assets\示例.prefab'
+```
+
+Windows 下已有窗口时，请求会交给现有窗口，打开文件并请求将窗口置于前台；已打开的文件直接切换到对应标签。不带路径调用则激活现有窗口。AI 工具可直接调用同一命令。首次使用这项功能前需要编译新版，并关闭旧版窗口。
 
 ### 构建与运行
 
@@ -116,7 +134,11 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Version **1.1.2** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Version **1.1.3** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+
+### 1.1.3 release notes
+
+- Added Prefab preview. Currently supports 2D only; Spine and 3D objects are not supported yet.
 
 ### 1.1.2 release notes
 
@@ -133,6 +155,10 @@ Version **1.1.2** starts in read-only mode and provides explicit property and ta
 - Added AnimationClip timeline editing.
 
 ### Available features
+
+- Static Prefab Sprite preview with hierarchical transforms, source texture slicing, tint and flips; resize the preview pane, zoom and pan. Selecting a SpriteRenderer also displays its owning Transform/RectTransform for inspection and editing.
+- UI Prefab previews support Simple/Sliced and linear Filled Images, RawImage and static Text/TextMeshPro, with RectTransform anchors, pivots, size and hierarchical transforms. Clicking selects the Graphic with its RectTransform shown alongside it. Reference dimensions can be adjusted when the root size is missing.
+- The preview uses an XY orthographic view, system font approximations and colored rectangles for built-in UI Sprites. Nested Prefabs, tiling/radial fills, driven layouts, custom materials and masks are not fully supported.
 
 - Open or drag and drop `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.overrideController`, `.anim`, `.spriteatlas`, `.guiskin`, `.yaml`, and `.yml` files
 - Rebuild Prefab and scene hierarchies from `GameObject` / `Transform` relationships and list components

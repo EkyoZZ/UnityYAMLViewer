@@ -446,7 +446,7 @@ fn is_component_field(name: &str) -> bool {
     matches!(name, "m_ObjectHideFlags" | "m_CorrespondingSourceObject" | "m_PrefabInstance" | "m_PrefabAsset" | "m_GameObject" | "m_Enabled" | "m_EditorHideFlags" | "m_Script" | "m_Name" | "m_EditorClassIdentifier")
 }
 
-pub fn show_sprite_renderer_properties(ui: &mut egui::Ui, text: &str, query: &str) {
+pub fn show_sprite_renderer_properties_content(ui: &mut egui::Ui, text: &str, query: &str) {
     let fields = yaml_fields(text);
     let search = query.trim().to_lowercase();
     let mut index = ProjectIndex::default();
@@ -460,7 +460,6 @@ pub fn show_sprite_renderer_properties(ui: &mut egui::Ui, text: &str, query: &st
         index.enums.insert(name.to_string(), vec![entries.into_iter().map(|(name, value)| (name.to_string(), value)).collect()]);
     }
     ui.small(crate::localization::tr("SpriteRenderer 内置字段，无需查找脚本。"));
-    ScrollArea::both().id_salt("sprite_renderer_properties").auto_shrink([false, false]).show(ui, |ui| {
             publish_property_columns(ui);
         ui.collapsing(crate::localization::tr("组件信息"), |ui| {
             for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
@@ -490,7 +489,6 @@ pub fn show_sprite_renderer_properties(ui: &mut egui::Ui, text: &str, query: &st
                 show_field(ui, field);
             }
         });
-    });
 }
 
 fn sprite_metadata(name: &str) -> bool {
@@ -1001,7 +999,34 @@ fn typed_field_inner(ui: &mut egui::Ui, field: &YamlField, field_type: &str, ind
             assign_table_types(&mut table, collection_element_type(field_type).unwrap(), index);
             egui::CollapsingHeader::new(crate::lf!("{0} ({2}) · {1} 条", field.name, table.rows.len(), field_type))
                 .default_open(true).show(ui, |ui| {
+                    let mode_id = ui.id().with("collection_property_mode");
+                    let mut properties = ui.ctx().data_mut(|data| data.get_temp::<bool>(mode_id)).unwrap_or(false);
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut properties, true, crate::localization::tr("属性"));
+                        ui.selectable_value(&mut properties, false, crate::localization::tr("表格"));
+                    });
+                    ui.ctx().data_mut(|data| data.insert_temp(mode_id, properties));
                     if table.rows.is_empty() { ui.label(crate::localization::tr("空列表")); }
+                    else if properties {
+                        for (row_index, row) in table.rows.iter().enumerate() {
+                            ui.push_id(row_index, |ui| {
+                                crate::editing::with_row(ui, row_index, |ui| {
+                                    egui::CollapsingHeader::new(format!("[{row_index}]"))
+                                        .default_open(true).show(ui, |ui| {
+                                            for header in table.headers.iter().skip(1) {
+                                                let Some(value) = row.get(header) else { continue; };
+                                                let nested = YamlField { name: header.clone(), value: value.clone() };
+                                                ui.push_id(header, |ui| {
+                                                    if let Some(kind) = table.column_types.get(header) {
+                                                        typed_field(ui, &nested, kind, index);
+                                                    } else { raw_field(ui, &nested, crate::localization::tr("类型未知")); }
+                                                });
+                                            }
+                                        });
+                                });
+                            });
+                        }
+                    }
                     else {
                         let state_id = ui.id().with("collection_table_layout");
                         let (mut widths, mut offset, mut freeze) = ui.ctx().data_mut(|data| data.get_temp::<(Vec<f32>, f32, bool)>(state_id))
@@ -1296,6 +1321,7 @@ fn property_label(ui: &mut egui::Ui, name: &str, field_type: &str) {
     let name_width = (210.0 - (ui.cursor().min.x-origin)).max(40.0);
     ui.allocate_ui_with_layout(egui::vec2(name_width, 20.0), egui::Layout::left_to_right(egui::Align::Center),
         |ui| { ui.set_min_width(name_width); ui.add(egui::Label::new(name).truncate()) }).inner.on_hover_text(name);
+    if ui.ctx().data_mut(|data| data.get_temp::<bool>(egui::Id::new("inspector_hide_property_types"))).unwrap_or(false) { return; }
     ui.allocate_ui_with_layout(egui::vec2(100.0, 20.0), egui::Layout::left_to_right(egui::Align::Center),
         |ui| { ui.set_min_width(100.0); ui.add(egui::Label::new(RichText::new(field_type).small().weak()).truncate()) }).inner
         .on_hover_text(field_type);
@@ -1500,5 +1526,39 @@ mod tests {
         assert!(fields[1].value.contains("    speed: 0"));
         assert!(fields[2].value.contains("  - 2"));
         assert_eq!(fields[3].value, "0");
+    }
+}
+/// Known uGUI scalar fields stay editable even when Unity's package scripts are unavailable.
+pub fn show_ui_graphic_properties_content(ui: &mut egui::Ui, text: &str, query: &str) {
+    let mut index=ProjectIndex::default();
+    index.enums.insert("ImageType".into(),vec![vec![("Simple".into(),0),("Sliced".into(),1),("Tiled".into(),2),("Filled".into(),3)]]);
+    index.enums.insert("ImageFillMethod".into(),vec![vec![("Horizontal".into(),0),("Vertical".into(),1),("Radial90".into(),2),("Radial180".into(),3),("Radial360".into(),4)]]);
+    publish_property_columns(ui);
+    let fields=yaml_fields(text);
+    let kind=|name:&str| match name {
+        "m_Enabled"|"m_RaycastTarget"|"m_Maskable"|"m_FillCenter"|"m_PreserveAspect"|"m_FillClockwise"|"m_UseSpriteMesh"|"m_enableWordWrapping"|"m_isRichText" => Some("bool"),
+        "m_Color"|"m_fontColor" => Some("Color"),
+        "m_Type" => Some("ImageType"), "m_FillMethod" => Some("ImageFillMethod"),
+        "m_FillAmount"|"m_PixelsPerUnitMultiplier"|"m_fontSize"|"m_fontSizeBase" => Some("float"),
+        "m_Text"|"m_text" => Some("string"),
+        "m_HorizontalAlignment"|"m_VerticalAlignment"|"m_textAlignment"|"m_FillOrigin" => Some("int"),
+        _ => None,
+    };
+    ui.collapsing(crate::localization::tr("组件信息"),|ui| {
+        for field in fields.iter().filter(|field|is_component_field(&field.name)&&field.name!="m_Enabled") {raw_field(ui,field,crate::localization::tr("组件信息"));}
+    });
+    for field in fields.iter().filter(|field|!is_component_field(&field.name)||field.name=="m_Enabled") {
+        if !query.trim().is_empty() && !format!("{} {}",field.name,field.value).to_lowercase().contains(&query.trim().to_lowercase()) {continue}
+        if let Some(kind)=kind(&field.name) {typed_field(ui,field,kind,&index);}
+        else if field.name=="m_FontData" {
+            ui.collapsing("Font",|ui|crate::editing::with_field(ui,"m_FontData",|ui| {
+                let nested=field.value.lines().map(|line|line.strip_prefix("  ").unwrap_or(line)).collect::<Vec<_>>().join("\n");
+                for child in yaml_fields(&nested) {
+                    let kind=match child.name.as_str() {"m_FontSize"|"m_FontStyle"|"m_Alignment"|"m_HorizontalOverflow"|"m_VerticalOverflow"=>Some("int"),"m_RichText"|"m_BestFit"=>Some("bool"),"m_LineSpacing"=>Some("float"),_=>None};
+                    if let Some(kind)=kind {typed_field(ui,&child,kind,&index);} else {raw_field(ui,&child,crate::localization::tr("原始值"));}
+                }
+            }));
+        }
+        else {raw_field(ui,field,crate::localization::tr("原始值"));}
     }
 }
