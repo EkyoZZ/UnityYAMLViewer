@@ -112,16 +112,9 @@ fn channel_slider(ui: &mut egui::Ui, label: &str, value: &mut f64, maximum: f64,
         ui.add_sized([12.0, 20.0], egui::Label::new(label));
         ui.scope(|ui| {
             ui.spacing_mut().slider_width = 140.0;
-            ui.spacing_mut().slider_rail_height = 6.0;
-            let dark = ui.visuals().dark_mode;
-            let visuals = ui.visuals_mut();
-            visuals.widgets.inactive.bg_fill = if dark { Color32::from_gray(90) } else { Color32::from_gray(150) };
-            for widget in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
-                widget.fg_stroke = Stroke::new(1.5_f32, if dark { Color32::WHITE } else { Color32::BLACK });
-            }
             let slider = egui::Slider::new(value, 0.0..=maximum)
                 .clamping(egui::SliderClamping::Edits).trailing_fill(true);
-            ui.add(if integer { slider.integer() } else { slider }).changed()
+            crate::theme::slider(ui, true, if integer { slider.integer() } else { slider }).changed()
         }).inner
     }).inner
 }

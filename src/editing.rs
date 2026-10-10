@@ -297,6 +297,20 @@ pub fn line_binding(ui: &egui::Ui, line_index: usize, name: &str) -> Option<Bind
     None
 }
 
+pub fn set_animation_values(ui: &egui::Ui, values: &[(usize, f64)]) -> bool {
+    let Some(source) = source(ui) else { return false };
+    let mut changes = Vec::new();
+    for (line, value) in values {
+        if !value.is_finite() || value.abs() > f32::MAX as f64 { return false; }
+        let Some(bind) = line_binding(ui, *line, "value") else { return false };
+        changes.push((bind.range, (*value as f32).to_string()));
+    }
+    changes.sort_by_key(|(range, _)| range.start);
+    changes.dedup_by_key(|(range, _)| range.start);
+    let continuing = ui.input(|input| input.pointer.primary_down());
+    source.session.lock().unwrap().change_many(changes, continuing)
+}
+
 pub fn move_animation_keys(ui: &egui::Ui, keys: &[(usize, f64)], continuing: bool) -> bool {
     let Some(source) = source(ui) else { return false };
     if source.session.lock().unwrap().has_drafts() {
@@ -622,7 +636,7 @@ pub fn range_control(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, (min,
     let mut slider = egui::Slider::new(&mut value, min..=max)
         .clamping(egui::SliderClamping::Edits);
     if integer { slider = slider.integer(); }
-    let response = ui.add_enabled(bind.is_some(), slider).on_hover_text(format!("Range({min}, {max})"));
+    let response = crate::theme::slider(ui, bind.is_some(), slider).on_hover_text(format!("Range({min}, {max})"));
     if response.changed() {
         let text = if integer { format!("{value:.0}") } else { (value as f32).to_string() };
         if validate(kind, &text) {

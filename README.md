@@ -12,7 +12,16 @@
 
 ### 当前状态
 
-当前版本 **1.1.1** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前版本 **1.1.2** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+
+### 1.1.2 更新
+
+- 新增 GitHub Releases 在线更新；设置底部提供“启动时自动检查更新”（默认开启）与“检查更新”按钮。
+- 检测到新版本时，设置按钮前显示红色 New；点击查看版本与发行说明。确认已是最新版后清除 New，手动检查会提示。
+- 后台下载并显示进度，必须通过附件大小、SHA-256 和 Windows 程序架构校验；失败不会替换现有程序。
+- 下载完成后提醒保存；未保存修改会阻止更新。二次确认后退出、备份旧程序、替换并重启，替换失败尝试恢复备份。
+
+更新源为本仓库最新正式 Release，标签采用 `v1.1.2` 等语义版本，附件采用 `UnityYAMLViewer-v1.1.2-windows-x64.exe`（对应架构也支持 x86 / arm64）或 `unity_yaml_viewer.exe`，并须由 GitHub 提供 SHA-256 digest。支持包含程序的同名 Windows ZIP；GitHub 自动生成的源码包不用于更新。当前更新器只替换单个可执行文件，不安装其他依赖或资源。
 
 ### 1.1.1 更新
 
@@ -107,7 +116,14 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Version **1.1.1** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Version **1.1.2** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+
+### 1.1.2 release notes
+
+- Added GitHub Releases updates, enabled startup checks, a manual check button and a red New badge.
+- View release notes and download progress. Downloads require size, SHA-256 and executable architecture validation.
+- Save pending edits before confirming replacement and restart. The updater backs up the old executable and attempts rollback on failure.
+- Publish a stable semantic version tag and a matching `UnityYAMLViewer-v1.1.2-windows-x64.exe` asset with GitHub's SHA-256 digest. The updater replaces only the executable; source archives are not update packages.
 
 ### 1.1.1 release notes
 

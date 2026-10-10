@@ -238,3 +238,18 @@ Transform 引用	Transform 引用	Transform reference	Transform 参照	Transform
 线性	線性	Linear	線形	선형	Linear	Linéaire
 常量	常數	Constant	定数	상수	Konstant	Constante
 加权	加權	Weighted	加重	가중	Gewichtet	Pondéré
+检查更新	檢查更新	Check for updates	更新を確認	업데이트 확인	Nach Updates suchen	Rechercher des mises à jour
+启动时自动检查更新	啟動時自動檢查更新	Check for updates at startup	起動時に更新を確認	시작 시 업데이트 자동 확인	Beim Start nach Updates suchen	Rechercher des mises à jour au démarrage
+正在检查更新…	正在檢查更新…	Checking for updates…	更新を確認中…	업데이트 확인 중…	Updates werden geprüft…	Recherche de mises à jour…
+软件更新	軟體更新	Software update	ソフトウェア更新	소프트웨어 업데이트	Softwareupdate	Mise à jour du logiciel
+目前已是最新版本。	目前已是最新版本。	You are using the latest version.	最新バージョンです。	현재 최신 버전입니다.	Sie verwenden die neueste Version.	Vous utilisez la dernière version.
+此版本未提供更新说明。	此版本未提供更新說明。	No release notes are available.	更新内容はありません。	업데이트 설명이 없습니다.	Keine Versionshinweise verfügbar.	Aucune note de version disponible.
+正在下载并校验更新文件…	正在下載並校驗更新檔案…	Downloading and verifying the update…	更新をダウンロードして検証中…	업데이트 다운로드 및 검증 중…	Update wird heruntergeladen und geprüft…	Téléchargement et vérification de la mise à jour…
+此版本没有兼容的 Windows 更新附件。	此版本沒有相容的 Windows 更新附件。	No compatible Windows update asset is available.	互換性のある Windows 更新ファイルがありません。	호환되는 Windows 업데이트 파일이 없습니다.	Keine kompatible Windows-Updatedatei verfügbar.	Aucun fichier de mise à jour Windows compatible.
+更新	更新	Update	更新	업데이트	Aktualisieren	Mettre à jour
+确认更新并重启	確認更新並重新啟動	Confirm update and restart	更新して再起動	업데이트 및 재시작 확인	Update und Neustart bestätigen	Confirmer la mise à jour et redémarrer
+更新已下载并通过校验。请先保存未保存的内容，确认后将替换程序并重启。	更新已下載並通過校驗。請先儲存未儲存的內容，確認後將替換程式並重新啟動。	The update has been downloaded and verified. Save your changes before confirming replacement and restart.	更新のダウンロードと検証が完了しました。変更を保存してから更新と再起動を確認してください。	업데이트 다운로드 및 검증이 완료되었습니다. 변경 사항을 저장한 후 교체 및 재시작을 확인하세요.	Das Update wurde heruntergeladen und geprüft. Speichern Sie Ihre Änderungen vor dem Ersetzen und Neustart.	La mise à jour est téléchargée et vérifiée. Enregistrez vos modifications avant de confirmer le remplacement et le redémarrage.
+以下文件尚未保存，请取消更新并保存后再确认：	以下檔案尚未儲存，請取消更新並儲存後再確認：	These files have unsaved changes. Cancel and save them before confirming:	次のファイルは未保存です。キャンセルして保存してから確認してください：	다음 파일이 저장되지 않았습니다. 취소하고 저장한 후 다시 확인하세요:	Diese Dateien sind nicht gespeichert. Abbrechen und vor der Bestätigung speichern:	Ces fichiers ne sont pas enregistrés. Annulez et enregistrez-les avant de confirmer :
+更新失败：	更新失敗：	Update failed:	更新失敗：	업데이트 실패:	Update fehlgeschlagen:	Échec de la mise à jour :
+• 新增在线更新：启动自动检查、New 提示、更新说明与下载进度	• 新增線上更新：啟動自動檢查、New 提示、更新說明與下載進度	• Online updates: startup checks, New badge, release notes and download progress	• オンライン更新：起動時の確認、New 表示、更新内容とダウンロード進捗	• 온라인 업데이트: 시작 시 확인, New 표시, 업데이트 설명 및 다운로드 진행률	• Onlineupdates: Startprüfung, New-Anzeige, Versionshinweise und Downloadfortschritt	• Mises à jour en ligne : vérification au démarrage, indicateur New, notes et progression
+• 下载文件校验，保存提醒与二次确认，替换程序后自动重启	• 下載檔案校驗，儲存提醒與二次確認，替換程式後自動重新啟動	• Verified downloads, save reminders, final confirmation and automatic restart	• ダウンロード検証、保存の通知、最終確認と自動再起動	• 다운로드 검증, 저장 알림, 최종 확인 및 자동 재시작	• Downloadprüfung, Speicherhinweis, Bestätigung und automatischer Neustart	• Vérification des fichiers, rappel de sauvegarde, confirmation et redémarrage automatique

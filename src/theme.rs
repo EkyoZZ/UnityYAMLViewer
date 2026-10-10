@@ -47,21 +47,28 @@ pub fn install(ctx: &egui::Context) {
 
 fn rgb(r: u8, g: u8, b: u8) -> Color32 { Color32::from_rgb(r,g,b) }
 
-/// Keep zoom slider rails distinct from the surrounding theme surface.
-pub fn zoom_slider(ui: &mut egui::Ui, value: &mut f32, maximum: f32) -> egui::Response {
+/// Shared appearance for all standard sliders, including read-only property ranges.
+/// Scoped styling avoids changing nearby buttons, inputs or custom color gradients.
+pub fn slider(ui: &mut egui::Ui, enabled: bool, slider: egui::Slider<'_>) -> egui::Response {
     ui.scope(|ui| {
         let dark = ui.visuals().dark_mode;
         ui.spacing_mut().slider_rail_height = 5.0;
         let visuals = ui.visuals_mut();
-        visuals.widgets.inactive.bg_fill = if dark { rgb(82,90,108) } else { rgb(205,215,229) };
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.5_f32, BLUE);
+        visuals.widgets.inactive.bg_fill = if dark { rgb(112,122,142) } else { rgb(161,175,194) };
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.5_f32, if dark { rgb(126,190,255) } else { rgb(0,91,190) });
+        visuals.widgets.noninteractive.bg_fill = if dark { rgb(160,177,202) } else { rgb(86,108,139) };
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.5_f32, if dark { rgb(214,229,250) } else { rgb(39,63,96) });
         visuals.widgets.hovered.bg_fill = BLUE;
         visuals.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
         visuals.widgets.active.bg_fill = BLUE;
         visuals.widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
         visuals.selection.bg_fill = BLUE;
-        ui.add(egui::Slider::new(value,1.0..=maximum).logarithmic(true).suffix("×").trailing_fill(true))
+        ui.add_enabled(enabled, slider.trailing_fill(true))
     }).inner
+}
+
+pub fn zoom_slider(ui: &mut egui::Ui, value: &mut f32, maximum: f32) -> egui::Response {
+    slider(ui, true, egui::Slider::new(value,1.0..=maximum).logarithmic(true).suffix("×"))
 }
 
 pub fn set_preference(ctx: &egui::Context, preference: &str) {
@@ -74,7 +81,7 @@ pub fn set_preference(ctx: &egui::Context, preference: &str) {
 
 /// Joined tabs with a solid blue active segment, matching the reference.
 pub fn selector(ui: &mut egui::Ui, preference: &mut String) {
-    ui.allocate_ui_with_layout(egui::vec2(192.0, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (index, (value, label)) in [("light", "浅色"), ("dark", "深色"), ("system", "系统")].into_iter().enumerate() {
             let selected = preference == value;
@@ -85,7 +92,7 @@ pub fn selector(ui: &mut egui::Ui, preference: &mut String) {
             let button = egui::Button::new(RichText::new(crate::localization::tr(label)).color(if selected { Color32::WHITE } else { BLUE }))
                 .fill(if selected { BLUE } else { ui.visuals().window_fill })
                 .stroke(Stroke::new(1.0_f32, BLUE)).corner_radius(rounding);
-            let response = ui.add_sized([64.0, 30.0], button);
+            let response = ui.add_sized([208.0 / 3.0, 30.0], button.wrap());
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, crate::localization::tr(label)));
             if response.clicked() { *preference = value.into(); }
         }

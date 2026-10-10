@@ -22,18 +22,22 @@ mod localized_format;
 mod theme;
 mod timeline_edit;
 mod animation_curves;
+mod updater;
 use script_properties::ScriptProperties;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-struct AppSettings { theme: String, language: String, undo_steps: usize }
+struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool }
 impl Default for AppSettings {
-    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT } }
+    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true } }
 }
 impl AppSettings {
     fn load() -> Self {
         let mut settings = Self::default();
         if let Some(path) = last_open_dir_config_path() {
+            if let Ok(value) = fs::read_to_string(path.with_file_name("auto_check_updates.txt")) {
+                settings.auto_check_updates = value.trim() != "false";
+            }
             if let Ok(language) = fs::read_to_string(path.with_file_name("language.txt")) {
                 if localization::LANGUAGES.iter().any(|(code, _)| *code == language.trim()) {
                     settings.language = language.trim().into();
@@ -49,6 +53,10 @@ impl AppSettings {
         settings
     }
     fn persist(&self) {
+        if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("auto_check_updates.txt")) {
+            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            let _ = fs::write(path, self.auto_check_updates.to_string());
+        }
         if let Some(path) = last_open_dir_config_path().map(|path| path.with_file_name("language.txt")) {
             if let Some(parent) = path.parent() { if fs::create_dir_all(parent).is_err() { return; } }
             let _ = fs::write(path, self.language.as_bytes());
@@ -149,6 +157,7 @@ struct ViewerApp {
     pending_close_tab: Option<PathBuf>,
     show_settings: bool,
     settings: AppSettings,
+    updater: updater::Updater,
 }
 
 #[derive(Clone)]
@@ -162,6 +171,84 @@ struct ViewerTab {
 }
 
 impl ViewerApp {
+    fn update_windows(&mut self, ctx: &egui::Context) {
+        if self.updater.show {
+            let mut open = true;
+            egui::Window::new(localization::tr("软件更新")).id(egui::Id::new("update_release"))
+                .open(&mut open).collapsible(false).default_width(480.0).show(ctx, |ui| {
+                    if let Some(release) = self.updater.release.clone() {
+                        ui.label(format!("{} {} → {}", localization::tr("版本"), APP_VERSION, release.tag_name));
+                        ui.separator();
+                        ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                            ui.add(egui::Label::new(release.body.as_deref().filter(|s| !s.trim().is_empty()).unwrap_or(localization::tr("此版本未提供更新说明。"))).wrap());
+                        });
+                        ui.separator();
+                        if self.updater.downloading {
+                            let (done, total) = self.updater.progress;
+                            let fraction = if total == 0 { 0.0 } else { done as f32 / total as f32 };
+                            ui.add(egui::ProgressBar::new(fraction).show_percentage().text(format!("{:.1} / {:.1} MB", done as f64 / 1048576.0, total as f64 / 1048576.0)));
+                            ui.label(localization::tr("正在下载并校验更新文件…"));
+                            ui.horizontal(|ui| {
+                                ui.add_enabled(false, egui::Button::new(localization::tr("更新")));
+                                if ui.button(localization::tr("取消")).clicked() { self.updater.cancel_download(); }
+                            });
+                        } else {
+                            if release.asset().is_none() { ui.label(localization::tr("此版本没有兼容的 Windows 更新附件。")); }
+                            ui.horizontal(|ui| {
+                                if ui.add_enabled(release.asset().is_some(), egui::Button::new(localization::tr("更新"))).clicked() {
+                                    if self.updater.staged.is_some() { self.updater.confirm = true; }
+                                    else { self.updater.download(ctx); }
+                                }
+                                if ui.button(localization::tr("取消")).clicked() { self.updater.show = false; }
+                            });
+                        }
+                    }
+                });
+            if !open { self.updater.show = false; }
+        }
+        if self.updater.confirm {
+            let mut open = true;
+            let dirty: Vec<_> = self.edits.iter().filter(|(_, session)| session.lock().unwrap().has_changes()).map(|(path, _)| path.clone()).collect();
+            egui::Window::new(localization::tr("确认更新并重启")).id(egui::Id::new("confirm_update_restart"))
+                .open(&mut open).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
+                    ui.label(localization::tr("更新已下载并通过校验。请先保存未保存的内容，确认后将替换程序并重启。"));
+                    if !dirty.is_empty() {
+                        ui.colored_label(Color32::RED, localization::tr("以下文件尚未保存，请取消更新并保存后再确认："));
+                        ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                            for path in &dirty { ui.label(path.display().to_string()); }
+                        });
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(dirty.is_empty(), egui::Button::new(localization::tr("确认更新并重启"))).clicked() {
+                            if let Some(path) = self.updater.staged.as_ref() {
+                                match updater::install(path) {
+                                    Ok(()) => { self.persist_open_tabs(); std::process::exit(0); }
+                                    Err(error) => { self.updater.message = Some(format!("{} {error}", localization::tr("更新失败："))); self.updater.confirm = false; }
+                                }
+                            }
+                        }
+                        if ui.button(localization::tr("取消")).clicked() { self.updater.confirm = false; }
+                    });
+                });
+            if !open { self.updater.confirm = false; }
+        }
+        if let Some(message) = self.updater.message.clone() {
+            let mut open = true;
+            egui::Window::new(localization::tr("检查更新")).id(egui::Id::new("update_message"))
+                .open(&mut open).collapsible(false).resizable(false).default_width(260.0).min_width(260.0).max_width(260.0).show(ctx, |ui| {
+                    ui.add_space(16.0);
+                    ui.set_width(260.0);
+                    ui.add_sized(egui::vec2(ui.available_width(), 0.0), egui::Label::new(localization::tr(&message)).wrap().halign(egui::Align::Center));
+                    ui.add_space(20.0);
+                    let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::hover());
+                    let button_rect = egui::Rect::from_center_size(row.center(), egui::vec2(112.0, 34.0));
+                    if ui.put(button_rect, egui::Button::new(localization::tr("确定"))).clicked() { self.updater.message = None; }
+                    ui.add_space(10.0);
+                });
+            if !open { self.updater.message = None; }
+        }
+    }
+
     fn persist_open_tabs(&self) {
         if self.restoring_session { return; }
         let Some(config_path) = last_open_dir_config_path().map(|path| path.with_file_name("open_tabs.txt")) else { return };
@@ -639,6 +726,7 @@ impl ViewerApp {
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         localization::set_language(&self.settings.language);
+        self.updater.poll();
         if self.path.as_ref().is_some_and(|path| !self.edits.contains_key(path))
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
             if let Some(path) = self.path.clone() {
@@ -696,6 +784,9 @@ impl eframe::App for ViewerApp {
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                if self.updater.release.is_some() && ui.add(egui::Button::new(RichText::new("New").color(Color32::WHITE)).fill(Color32::from_rgb(210, 40, 40))).clicked() {
+                    self.updater.show = true;
+                }
                 if toolbar_button(ui, crate::localization::tr("设置")).clicked() { self.show_settings = true; }
                 if toolbar_button(ui, crate::localization::tr("打开")).clicked() {
                     let dialog = rfd::FileDialog::new().add_filter(
@@ -1153,10 +1244,10 @@ impl eframe::App for ViewerApp {
         }
 
         if self.show_settings {
-            egui::Window::new(crate::localization::tr("设置")).id(egui::Id::new("settings_window")).open(&mut self.show_settings).collapsible(false).resizable(false).default_width(332.0).min_width(332.0).max_width(332.0).default_height(0.0).show(ctx, |ui| {
+            egui::Window::new(crate::localization::tr("设置")).id(egui::Id::new("settings_window")).open(&mut self.show_settings).collapsible(false).resizable(false).default_width(348.0).min_width(348.0).max_width(348.0).default_height(0.0).show(ctx, |ui| {
                 egui::Grid::new("application_settings").num_columns(2).spacing(egui::vec2(12.0, 16.0)).show(ui, |ui| {
                     settings_label(ui, crate::localization::tr("关于"));
-                    if settings_control(ui, |ui| ui.button(crate::localization::tr("关于 Unity YAML Viewer"))).inner.clicked() {
+                    if settings_control(ui, |ui| ui.add_sized([208.0, 30.0], egui::Button::new(crate::localization::tr("关于 Unity YAML Viewer")).wrap())).inner.clicked() {
                         self.show_about = true;
                         self.show_older_history = false;
                     }
@@ -1164,7 +1255,7 @@ impl eframe::App for ViewerApp {
                     settings_label(ui, localization::tr("语言"));
                     let previous_language = self.settings.language.clone();
                     let selected_language = localization::LANGUAGES.iter().find(|(code, _)| *code == self.settings.language).map(|(_, name)| *name).unwrap_or("简体中文");
-                    settings_control(ui, |ui| egui::ComboBox::from_id_salt("settings_language").selected_text(selected_language).show_ui(ui, |ui| {
+                    settings_control(ui, |ui| egui::ComboBox::from_id_salt("settings_language").width(208.0).selected_text(selected_language).show_ui(ui, |ui| {
                         for (code, name) in localization::LANGUAGES {
                             ui.selectable_value(&mut self.settings.language, code.into(), name);
                         }
@@ -1195,38 +1286,45 @@ impl eframe::App for ViewerApp {
                     ui.end_row();
                     settings_label(ui, crate::localization::tr("单个文件缓存撤销步骤"));
                     let previous = self.settings.undo_steps;
-                    settings_control(ui, |ui| {
-                        ui.set_width(192.0);
-                        ui.spacing_mut().slider_width = 132.0;
-                        ui.scope(|ui| {
-                            let dark = ui.visuals().dark_mode;
-                            let blue = ui.visuals().hyperlink_color;
-                            ui.spacing_mut().slider_rail_height = 5.0;
-                            let visuals = ui.visuals_mut();
-                            visuals.widgets.inactive.bg_fill = if dark { Color32::from_rgb(82, 90, 108) } else { Color32::from_rgb(205, 215, 229) };
-                            visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.5_f32, blue);
-                            visuals.widgets.hovered.bg_fill = blue;
-                            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5_f32, Color32::WHITE);
-                            visuals.widgets.active.bg_fill = blue;
-                            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5_f32, Color32::WHITE);
-                            visuals.selection.bg_fill = blue;
-                            ui.add(egui::Slider::new(&mut self.settings.undo_steps, editing::MIN_UNDO_LIMIT..=editing::MAX_UNDO_LIMIT).integer().trailing_fill(true));
+                    settings_group(ui, "undo_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            // Anchor the number field to the column's left edge and give
+                            // the rail all remaining width, independently of the value's digits.
+                            ui.add_sized([40.0, ui.spacing().interact_size.y], egui::DragValue::new(&mut self.settings.undo_steps)
+                                .range(editing::MIN_UNDO_LIMIT..=editing::MAX_UNDO_LIMIT).speed(1.0));
+                            ui.spacing_mut().slider_width = ui.available_width();
+                            theme::slider(ui, true, egui::Slider::new(&mut self.settings.undo_steps, editing::MIN_UNDO_LIMIT..=editing::MAX_UNDO_LIMIT).integer().show_value(false));
                         });
+                        ui.add(egui::Label::new(RichText::new(crate::localization::tr("撤销步骤范围：50～1000，默认 200。超过上限后移除最早的记录。增加上限会增加内存占用。")).small().weak()).wrap());
                     });
                     if previous != self.settings.undo_steps {
                         self.settings.persist();
                         for session in self.edits.values().chain(self.saved_histories.values()) { session.lock().unwrap().set_undo_limit(self.settings.undo_steps); }
                     }
                     ui.end_row();
-                    ui.label("");
-                    ui.allocate_ui_with_layout(egui::vec2(192.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.add(egui::Label::new(RichText::new(crate::localization::tr("撤销步骤范围：50～1000，默认 200。超过上限后移除最早的记录。增加上限会增加内存占用。")).small().weak()).wrap());
+                    settings_label(ui, localization::tr("检查更新"));
+                    settings_group(ui, "update_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                        if ui.add(egui::Checkbox::new(&mut self.settings.auto_check_updates, localization::tr("启动时自动检查更新"))).changed() {
+                            self.settings.persist();
+                        }
+                        if ui.add_enabled_ui(!self.updater.checking && !self.updater.downloading, |ui| {
+                            ui.add_sized([208.0, 30.0], egui::Button::new(localization::tr("检查更新")).wrap())
+                        }).inner.clicked() {
+                            self.updater.check(ctx, true);
+                        }
+                        if self.updater.checking { ui.horizontal(|ui| { ui.spinner(); ui.label(localization::tr("正在检查更新…")); }); }
                     });
                     ui.end_row();
                 });
-                ui.add_space(14.0);
+                ui.add_space(8.0);
             });
         }
+        self.update_windows(ctx);
         if self.show_about {
             egui::Window::new(crate::localization::tr("关于 Unity YAML Viewer"))
                 .open(&mut self.show_about)
@@ -1240,6 +1338,10 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(localization::tr("• 新增在线更新：启动自动检查、New 提示、更新说明与下载进度"));
+                        ui.label(localization::tr("• 下载文件校验，保存提醒与二次确认，替换程序后自动重启"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.1").strong());
                         ui.label(crate::localization::tr("• 更新深浅主题配色，优化界面与设置体验"));
                         ui.label(crate::localization::tr("• 新增简中、繁中、英语、日语、韩语、德语、法语，支持即时切换并记住选择"));
                         ui.label(crate::localization::tr("• 优化编辑模式视觉提示和更新历史展示"));
@@ -2070,8 +2172,21 @@ fn show_animation_timeline(
                     show_animation_components(ui, &values, &bindings, track, keyframe.time);
                     if can_show_swatch {
                         let rgba = [channel("r",0.0) as f64,channel("g",0.0) as f64,channel("b",0.0) as f64,channel("a",1.0) as f64];
-                        let (swatch, _) = ui.allocate_exact_size(egui::vec2(120.0,19.0),egui::Sense::hover());
-                        color_property::paint_swatch(ui,swatch,rgba);
+                        let channels: Option<Vec<_>> = ["r","g","b","a"].iter().map(|component| {
+                            matching.iter().find(|binding| binding.attribute.rsplit('.').next()==Some(*component))
+                                .and_then(|binding| binding.keyframes.iter().find(|key| (key.time-keyframe.time).abs()<1e-6))
+                        }).collect();
+                        if let Some(channels) = channels {
+                            if let Some(color) = ui.push_id(("animation_color",keyframe.yaml_line), |ui| color_property::show(ui,group_root.unwrap_or("Color"),rgba)).inner {
+                                if editing::active(ui) {
+                                    let values: Vec<_> = channels.iter().zip(color).flat_map(|(key,value)| key.time_lines.iter().map(move |line| (*line+1,value))).collect();
+                                    editing::set_animation_values(ui,&values);
+                                }
+                            }
+                        } else {
+                            let (swatch, _) = ui.allocate_exact_size(egui::vec2(120.0,19.0),egui::Sense::hover());
+                            color_property::paint_swatch(ui,swatch,rgba);
+                        }
                     }
                 });
             } else {
@@ -2757,13 +2872,29 @@ fn build_tree(
 }
 
 fn settings_label(ui: &mut egui::Ui, label: &str) {
-    ui.allocate_ui_with_layout(egui::vec2(128.0, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    // Allocate a cell-sized label directly, so the grid centers it against the whole right group.
+    let height = 30.0;
+    ui.allocate_ui_with_layout(egui::vec2(128.0, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.add(egui::Label::new(label).wrap());
     });
 }
 
+fn settings_group<R>(ui: &mut egui::Ui, key: &str, contents: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+    // Grid alignment happens before child contents are laid out. Remember the group's
+    // measured height so it starts at the top of its centered cell rather than its middle.
+    let id = ui.make_persistent_id(key);
+    let height = ui.ctx().data_mut(|data| data.get_temp::<f32>(id)).unwrap_or(30.0);
+    let response = ui.allocate_ui_with_layout(egui::vec2(208.0, height), egui::Layout::top_down(egui::Align::Min), contents);
+    let measured = response.response.rect.height();
+    if (measured - height).abs() > 0.5 {
+        ui.ctx().data_mut(|data| data.insert_temp(id, measured));
+        ui.ctx().request_discard("settings group height changed");
+    }
+    response
+}
+
 fn settings_control<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-    ui.allocate_ui_with_layout(egui::vec2(192.0, 30.0), egui::Layout::right_to_left(egui::Align::Center), contents)
+    ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::right_to_left(egui::Align::Center), contents)
 }
 
 fn toolbar_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
@@ -2864,6 +2995,7 @@ fn main() -> eframe::Result {
             };
             localization::set_language(&app.settings.language);
             app.restore_open_tabs();
+            if app.settings.auto_check_updates { app.updater.check(&creation_context.egui_ctx, false); }
             Ok(Box::new(app))
         }),
     )
