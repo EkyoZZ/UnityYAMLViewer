@@ -276,3 +276,7 @@ UI 内置 Sprite 暂用颜色矩形近似显示。	UI 內建 Sprite 暫用顏色
 属性	屬性	Properties	プロパティ	속성	Eigenschaften	Propriétés
 表格	表格	Table	表	표	Tabelle	Tableau
 • 支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持	• 支援 Prefab 預覽，目前僅支援 2D，暫不支援 Spine 和 3D 物件	• Added Prefab preview. Currently supports 2D only; Spine and 3D objects are not supported yet.	• Prefab プレビューに対応。現在は 2D のみで、Spine と 3D オブジェクトは未対応です。	• Prefab 미리보기 지원. 현재 2D만 지원하며 Spine 및 3D 오브젝트는 아직 지원하지 않습니다.	• Prefab-Vorschau hinzugefügt. Derzeit nur 2D; Spine und 3D-Objekte werden noch nicht unterstützt.	• Aperçu des Prefabs ajouté. Seule la 2D est actuellement prise en charge ; Spine et les objets 3D ne le sont pas encore.
+更新说明图片加载失败	更新說明圖片載入失敗	Release image failed to load	更新画像を読み込めませんでした	업데이트 이미지 로드 실패	Bild konnte nicht geladen werden	Échec du chargement de l’image
+打开图片	開啟圖片	Open image	画像を開く	이미지 열기	Bild öffnen	Ouvrir l’image
+确认	確認	Confirm	確認	확인	Bestätigen	Confirmer
+打开发布页面，手动更新	開啟發佈頁面，手動更新	Open release page to update manually	リリースページから手動更新	릴리스 페이지에서 수동 업데이트	Release-Seite für manuelles Update öffnen	Ouvrir la page de publication pour mettre à jour manuellement

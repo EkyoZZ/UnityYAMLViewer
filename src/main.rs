@@ -27,6 +27,7 @@ mod static_preview;
 mod ui_preview;
 mod hierarchy_controls;
 mod command_line;
+mod release_notes;
 use script_properties::ScriptProperties;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -206,26 +207,29 @@ impl ViewerApp {
                         ui.label(format!("{} {} → {}", localization::tr("版本"), APP_VERSION, release.tag_name));
                         ui.separator();
                         ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                            ui.add(egui::Label::new(release.body.as_deref().filter(|s| !s.trim().is_empty()).unwrap_or(localization::tr("此版本未提供更新说明。"))).wrap());
+                            self.updater.notes.show(ui, release.body.as_deref().filter(|s| !s.trim().is_empty()).unwrap_or(localization::tr("此版本未提供更新说明。")));
                         });
                         ui.separator();
+                        ui.hyperlink_to(localization::tr("打开发布页面，手动更新"), release.page_url());
                         if self.updater.downloading {
                             let (done, total) = self.updater.progress;
                             let fraction = if total == 0 { 0.0 } else { done as f32 / total as f32 };
                             ui.add(egui::ProgressBar::new(fraction).show_percentage().text(format!("{:.1} / {:.1} MB", done as f64 / 1048576.0, total as f64 / 1048576.0)));
                             ui.label(localization::tr("正在下载并校验更新文件…"));
                             ui.horizontal(|ui| {
-                                ui.add_enabled(false, egui::Button::new(localization::tr("更新")));
-                                if ui.button(localization::tr("取消")).clicked() { self.updater.cancel_download(); }
+                                ui.add_space(((ui.available_width()-240.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
+                                ui.add_enabled_ui(false, |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("更新"))));
+                                if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.cancel_download(); }
                             });
                         } else {
                             if release.asset().is_none() { ui.label(localization::tr("此版本没有兼容的 Windows 更新附件。")); }
                             ui.horizontal(|ui| {
-                                if ui.add_enabled(release.asset().is_some(), egui::Button::new(localization::tr("更新"))).clicked() {
+                                ui.add_space(((ui.available_width()-240.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
+                                if ui.add_enabled_ui(release.asset().is_some(), |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("更新")))).inner.clicked() {
                                     if self.updater.staged.is_some() { self.updater.confirm = true; }
                                     else { self.updater.download(ctx); }
                                 }
-                                if ui.button(localization::tr("取消")).clicked() { self.updater.show = false; }
+                                if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.show = false; }
                             });
                         }
                     }
@@ -236,16 +240,21 @@ impl ViewerApp {
             let mut open = true;
             let dirty: Vec<_> = self.edits.iter().filter(|(_, session)| session.lock().unwrap().has_changes()).map(|(path, _)| path.clone()).collect();
             egui::Window::new(localization::tr("确认更新并重启")).id(egui::Id::new("confirm_update_restart"))
-                .open(&mut open).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
-                    ui.label(localization::tr("更新已下载并通过校验。请先保存未保存的内容，确认后将替换程序并重启。"));
+                .open(&mut open).collapsible(false).resizable(false).default_width(320.0).min_width(320.0).max_width(320.0).show(ctx, |ui| {
+                    ui.set_width(320.0);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    ui.add_space(8.0);
+                    ui.add(egui::Label::new(localization::tr("更新已下载并通过校验。请先保存未保存的内容，确认后将替换程序并重启。")).wrap());
                     if !dirty.is_empty() {
-                        ui.colored_label(Color32::RED, localization::tr("以下文件尚未保存，请取消更新并保存后再确认："));
+                        ui.add(egui::Label::new(RichText::new(localization::tr("以下文件尚未保存，请取消更新并保存后再确认：")).color(Color32::RED)).wrap());
                         ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                            for path in &dirty { ui.label(path.display().to_string()); }
+                            for path in &dirty { ui.add(egui::Label::new(path.display().to_string()).wrap()); }
                         });
                     }
+                    ui.add_space(16.0);
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(dirty.is_empty(), egui::Button::new(localization::tr("确认更新并重启"))).clicked() {
+                        ui.add_space(((ui.available_width()-240.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
+                        if ui.add_enabled_ui(dirty.is_empty(), |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("确认")))).inner.clicked() {
                             if let Some(path) = self.updater.staged.as_ref() {
                                 match updater::install(path) {
                                     Ok(()) => { self.persist_open_tabs(); std::process::exit(0); }
@@ -253,8 +262,9 @@ impl ViewerApp {
                                 }
                             }
                         }
-                        if ui.button(localization::tr("取消")).clicked() { self.updater.confirm = false; }
+                        if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.confirm = false; }
                     });
+                    ui.add_space(8.0);
                 });
             if !open { self.updater.confirm = false; }
         }
@@ -265,6 +275,13 @@ impl ViewerApp {
                     ui.add_space(16.0);
                     ui.set_width(260.0);
                     ui.add_sized(egui::vec2(ui.available_width(), 0.0), egui::Label::new(localization::tr(&message)).wrap().halign(egui::Align::Center));
+                    if let Some(release) = &self.updater.release {
+                        ui.add_space(8.0);
+                        ui.hyperlink_to(localization::tr("打开发布页面，手动更新"), release.page_url());
+                    } else {
+                        ui.add_space(8.0);
+                        ui.hyperlink_to(localization::tr("打开发布页面，手动更新"), "https://github.com/EkyoZZ/UnityYAMLViewer/releases/latest");
+                    }
                     ui.add_space(20.0);
                     let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::hover());
                     let button_rect = egui::Rect::from_center_size(row.center(), egui::vec2(112.0, 34.0));

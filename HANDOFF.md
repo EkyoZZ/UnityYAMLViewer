@@ -1,3 +1,94 @@
+# 换电脑交接：1.1.3 与更新弹窗后续修正
+
+交接日期：2026-10-10。以下总览优先于后面的历史记录；历史中的未实现、旧版本和旧显示方案可能已被后续修改取代。
+
+## 当前状态与下一步
+
+- 当前源码版本 1.1.3。当前 HEAD：c291ec1，提交标题为「* 更新1.1.3 支持部分Prefab静态预览,暂不支持Spine和3D对象」。
+- 1.1.3 已正式编译过，发布副本已准备好；用户随后提供了 1.1.2 检测到 v1.1.3 的更新弹窗截图，说明版本检测已走通。是否已完成下载、覆盖、重启，以及任务栏启动，尚未确认。
+- 最新更新弹窗修正还在未提交工作区，未重新编译进现有 EXE。下一台电脑应先带齐这些文件，再检查源码，获得新的明确编译授权后重新构建并更新发布副本和校验文件。
+- 未提交文件：HANDOFF.md、src/main.rs、src/translations.tsv、src/updater.rs；未跟踪的新文件：src/release_notes.rs。仅拉取 Git 仓库无法带走这些改动，尤其不能漏掉 release_notes.rs。此次交接没有自动提交、推送或发布。
+
+## 换电脑要带走什么
+
+1. 推荐复制整个工程工作区，保留 .git 和所有未提交文件。若仅同步 Git，需要自行提交或另外复制以上五个文件。
+2. target 是构建输出，不应假设 Git 会同步。要保留现有发行附件，请额外复制 target/publish/v1.1.3；否则在新电脑按规则重建。
+3. 运行验证用 Unity 项目也需另外同步，包含 prefab、贴图及 .meta、脚本。只带 prefab 无法解析外部 GUID 图片引用。
+4. 旧版 1.1.2 EXE 和原任务栏快捷方式环境是在线升级测试的重要条件；要验证任务栏固定项，最好在同一台已有固定项的电脑验证。
+5. 软件配置位于 APPDATA/UnityYAMLViewer，包括打开标签、语言、主题、最后目录和更新偏好。路径依赖本机位置，换电脑后可能需要重新打开文件。LOCALAPPDATA/UnityYAMLViewer/open_requests 是运行时命令转交目录，不必迁移。
+
+## 必须遵守的工程规则
+
+- 文本文件保持 UTF-8。
+- 生成 EXE 前必须取得用户对本次编译的明确授权；此前授权不代表换电脑后可自行重编译。
+- 编译前重新检查 unity_yaml_viewer 进程和目标 EXE 的独占 ReadWrite 访问。占用时告知用户关闭，等待再次明确授权并重新检查。不得杀进程或换输出目录绕过检查。
+- cargo check --offline、cargo check --offline --tests 可用于检查；后者只编译检查测试代码，不代表测试实际执行通过。
+- 任务结束时未运行程序、未自动更新安装、未改变任务栏固定项。
+
+## 已完成并进入此前 1.1.3 的功能
+
+- Prefab 静态 2D 预览：SpriteRenderer 的原始贴图、切片、pivot、PPU、颜色、翻转及层级位置/旋转/缩放。Polygon Sprite 可用原图矩形近似显示。不支持 Spine 与 3D 对象。
+- UI：Image 普通、九宫格和横向/纵向填充，RawImage，Text/TMP 近似静态文字；RectTransform 锚点布局，CanvasGroup 透明度。字体与富文本不保证完全一致；动态布局、遮罩、平铺和径向填充尚未完整支持。
+- 所有根节点三轴 Scale 全为零时仅在预览按 (1,1,1) 回退；子节点零缩放不改。屏幕模式根 Canvas 使用参考尺寸及有效缩放。文件和 Inspector 保存值保持原样。
+- UI 默认和适应窗口以参考范围居中。最终视觉规则为左下角、右上角两个灰色十字，四条贯穿线围住参考范围，不绘制独立矩形框；不同 pivot 下按两角定位。
+- 预览点击选择 SpriteRenderer / UI Graphic，并同时显示所属 Transform / RectTransform。层级双击将节点及可见子图形居中，保持缩放，不编辑节点位置。
+- 层级眼睛/手开关控制预览显示和可选状态，父节点影响子节点；仅本机视图状态，不写入 YAML。
+- 列表支持独立属性 / 表格切换；数值支持聚焦后的左右拖动，已有编辑和预览刷新优化。
+- 命令行可传多个中文、带空格或相对路径。Windows 已有窗口时用独占锁和文件队列转交请求，切换标签并请求激活窗口；无参数再次调用激活已有窗口。
+
+## 未提交的更新弹窗修正
+
+- src/release_notes.rs：识别发行说明中的 HTML img src 和 Markdown 图片语法，后台 HTTPS 加载，等比例适配显示；失败提供原图链接。下载限制 8 MiB，尺寸限制 8192，解码分配限制 64 MiB。这是图片识别，不是完整 Markdown/HTML 渲染器。
+- src/updater.rs：新增图片状态，切换发行版本时清空；page_url 使用固定项目 URL 和编码后的 tag 路径。
+- src/main.rs：更新 / 取消按钮 120x36 居中；确认弹窗固定 320 宽、说明和未保存路径换行、确认 / 取消按钮 120x36 居中。
+- 发行说明弹窗以及应用内检查/下载/安装启动失败消息提供「打开发布页面，手动更新」；已知版本打开指定 tag，否则打开 latest。后台安装脚本失败的系统 MessageBox 尚未增加可点击链接。
+- src/translations.tsv：补充相关七语言文本。行必须保持七列。
+- 用户截图来自旧版 1.1.2。新版改动无法改变已经运行的旧版更新弹窗；新版安装后才会影响未来更新提示。
+
+## 构建输出与发布
+
+现有构建尚未包含上面未提交的弹窗改动：
+
+- 原输出：target/release/unity_yaml_viewer.exe。
+- 发布附件：target/publish/v1.1.3/UnityYAMLViewer-v1.1.3-windows-x64.exe。
+- 大小：13264896 字节。
+- SHA-256：1aee00e31e58450e6fcb6b5d7d621c14aa7f26e561c3c1ba0b097c0fe5a34a40。
+- 同目录有 SHA256SUMS.txt 和 release-notes.md。重新编译后必须重新复制发布附件并计算哈希；旧哈希不能沿用。
+- 发布说明：支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持。
+- 标签 v1.1.3，附件名称需符合上述命名或 unity_yaml_viewer.exe。更新源：https://api.github.com/repos/EkyoZZ/UnityYAMLViewer/releases/latest。
+- 当前安装代码使用 current_exe() 原路径覆盖，保留原文件名，不按发行附件改名。任务栏快捷方式理论上保留目标路径；若原名包含版本号，名字仍会保留旧版本数字。实际固定项仍需运行验证。
+- 升级会校验附件大小、GitHub digest SHA-256 和 PE 架构，下载后需用户确认，未保存改动会阻止安装；后台等待旧进程退出、备份、覆盖和重启。
+
+## 验证状态与建议顺序
+
+已通过多次 cargo check --offline，早期功能也通过 cargo check --offline --tests；没有实际执行测试程序。更新说明图片尚未通过在线加载或窗口视觉验证。GitHub 网络在本次工具环境不可用，不能据此断言用户电脑不可访问。
+
+新电脑建议：
+
+1. 检查上述未提交文件都存在，运行编译检查与 git diff --check。
+2. 核对确认窗换行、按钮布局、图片加载失败入口；获得授权并完成占用检查后构建最新版。
+3. 用 1.1.2 实测检测 v1.1.3、下载/哈希验证、取消、未保存阻止、确认、覆盖、重启、关于版本显示和任务栏启动。截图目前仅确认检测及弹窗出现。
+4. 用包含新修正的程序检查后续发行说明，验证 HTML 图片、Markdown 图片、中文文本、宽图缩放、加载失败、两个弹窗的按钮居中。1.1.3 同版本不能触发自身更新，可使用后续实际发行版测试；不要误称旧版弹窗已经修复。
+5. 若 1.1.3 已正式发布，是否替换附件或发布后续补丁版本由用户决定，不擅自更改线上附件或版本。
+
+## 样例及关键文件
+
+实际样例是 C:/Git/g003_client/Assets/Res/Prefabs/UI/Panel/ui_tips_panel.prefab，注意是 g003_client；之前误用 q003_client 导致无法读取。根 Canvas RenderMode=1，根 Scale=(0,0,0)、SizeDelta=(0,0)、Pivot=(0,0)，参考分辨率 864x1536，子 CanvasGroup alpha=1。两张图片位于 Res/Textures/UI/BoardV2/ui_boardv2_lucky_word.png 和 ui_boardv2_lucky_super_word.png。用户最新截图已显示图片文字及双十字参考范围，仍提示四项不支持/不可见，需要按详情判断，不应直接忽略。
+
+关键源码：src/static_preview.rs、src/ui_preview.rs（渲染/布局），src/hierarchy_controls.rs（节点开关），src/command_line.rs（启动参数/转交），src/script_properties.rs 和 src/editing.rs（属性/编辑），src/updater.rs 与 src/release_notes.rs（更新），src/main.rs（窗口和交互）。
+
+---
+
+# 历史工作记录
+
+## 2026-10-10 更新弹窗补充调整
+
+确认更新弹窗固定 320 宽，说明及未保存路径换行，确认 / 取消按钮 120x36 居中。发行说明弹窗新增发布页超链接，更新消息弹窗（含下载和安装启动失败）也显示入口；已知版本链接到项目 releases/tag/<tag>，无版本时链接到 releases/latest。URL 固定项目域名并按路径段编码 tag。外部安装脚本自身失败的 Windows MessageBox 暂沿用旧提示。图片说明渲染和按钮修复仍未重新编译到发布 EXE，现有发布副本为之前的 1.1.3。cargo check --offline 已通过。
+
+## 2026-10-10 更新弹窗图片和按钮修复（1.1.3 未重新构建）
+
+新增 release_notes 模块解析 Release 说明里的 HTML img src 和 Markdown 图片语法，后台 HTTPS 加载并限制 8 MiB 下载、8192 尺寸及 64 MiB 解码，等比例适配说明宽度，失败显示提示和原图链接。更新 / 取消按钮统一 120x36 并居中，下载中布局一致。切换发行版本时清除图片缓存。cargo check --offline 通过，尚未重新生成发布附件。注意截图由旧 1.1.2 渲染，新版修复无法改变已发布旧程序的弹窗；需更新后才能用于后续版本说明。
+
 ## 2026-10-10 正式编译 1.1.3 完成
 
 用户明确授权正式编译并准备自行发布。进程及目标 EXE 独占访问检查通过，cargo build --release --offline 成功（1.1.3）。原输出 target/release/unity_yaml_viewer.exe；发布副本 target/publish/v1.1.3/UnityYAMLViewer-v1.1.3-windows-x64.exe，附 SHA256SUMS.txt 和 release-notes.md。尚未上传或发布 GitHub Release，1.1.2 到 1.1.3 在线升级及任务栏快捷方式仍待实测。

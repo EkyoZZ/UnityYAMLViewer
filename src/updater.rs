@@ -12,6 +12,11 @@ pub struct Asset { pub name: String, browser_download_url: String, size: u64, di
 #[derive(Clone, Deserialize)]
 pub struct Release { pub tag_name: String, pub body: Option<String>, assets: Vec<Asset> }
 impl Release {
+    pub fn page_url(&self) -> String {
+        let mut url = reqwest::Url::parse("https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/").unwrap();
+        url.path_segments_mut().unwrap().pop_if_empty().push(&self.tag_name);
+        url.into()
+    }
     pub fn asset(&self) -> Option<&Asset> {
         let architecture = if cfg!(target_arch = "aarch64") { "arm64" } else if cfg!(target_arch = "x86") { "x86" } else { "x64" };
         let named_executable = format!("unityyamlviewer-{}-windows-{architecture}.exe", self.tag_name.to_ascii_lowercase());
@@ -28,6 +33,7 @@ impl Release {
 enum Event { Checked(Result<Option<Release>, String>), Progress(u64, u64), Downloaded(Result<PathBuf, String>) }
 #[derive(Default)]
 pub struct Updater {
+    pub notes: crate::release_notes::ReleaseNotes,
     receiver: Option<mpsc::Receiver<Event>>,
     pub release: Option<Release>,
     pub show: bool,
@@ -72,6 +78,7 @@ impl Updater {
                     match result {
                         Ok(release) => {
                             if self.release.as_ref().map(|r| &r.tag_name) != release.as_ref().map(|r| &r.tag_name) {
+                                self.notes = Default::default();
                                 self.staged = None;
                                 self.confirm = false;
                             }
