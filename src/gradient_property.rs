@@ -150,14 +150,14 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
         ui.allocate_ui_with_layout(egui::vec2(100.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.set_min_width(100.0); ui.weak("Gradient");
         });
-        if swatch(ui, &gradient, 180.0, 22.0).on_hover_text("点击查看渐变关键点（只读）").clicked() { open = true; }
-        if crate::editing::dirty_scope(ui) && ui.small_button("还原").clicked() { crate::editing::restore_scope(ui); }
+        if swatch(ui, &gradient, 180.0, 22.0).on_hover_text(crate::localization::tr("点击查看渐变关键点（只读）")).clicked() { open = true; }
+        if crate::editing::dirty_scope(ui) && ui.small_button(crate::localization::tr("还原")).clicked() { crate::editing::restore_scope(ui); }
     });
     if open {
         egui::Window::new(name).id(id.with("window")).open(&mut open).resizable(false)
             .default_width(300.0).min_width(300.0).max_width(300.0).show(ui.ctx(), |ui| {
             ui.set_width(300.0);
-            ui.small(if crate::editing::active(ui) { "编辑渐变关键点，保存编辑后写入文件。" } else { "只读渐变，不修改资源文件。" });
+            ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑渐变关键点，保存编辑后写入文件。") } else { crate::localization::tr("只读渐变，不修改资源文件。") });
             ui.label(if gradient.mode == 0 { "Mode: Blend (Classic)" } else { "Mode: Fixed" });
             let content_width = ui.available_width();
             ui.add_space(12.0);
@@ -195,17 +195,17 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
             ui.add_space(12.0);
             ui.separator();
             let (label, time) = match selected {
-                SelectedKey::Color(index) => (format!("颜色关键点 {index}"), gradient.colors[index].0),
-                SelectedKey::Alpha(index) => (format!("Alpha 关键点 {index}"), gradient.alphas[index].0),
+                SelectedKey::Color(index) => (crate::lf!("颜色关键点 {0}", index), gradient.colors[index].0),
+                SelectedKey::Alpha(index) => (crate::lf!("Alpha 关键点 {0}", index), gradient.alphas[index].0),
             };
             ui.strong(label);
             let time_key = match selected { SelectedKey::Color(index) => format!("ctime{}", gradient.color_indices[index]), SelectedKey::Alpha(index) => format!("atime{}", gradient.alpha_indices[index]) };
-            ui.horizontal(|ui| { key_column(ui, "位置（%）"); if !crate::editing::gradient_number(ui, &time_key, false) { readonly_key_value(ui, format!("{:.4}", time * 100.0)); } });
+            ui.horizontal(|ui| { key_column(ui, crate::localization::tr("位置（%）")); if !crate::editing::gradient_number(ui, &time_key, false) { readonly_key_value(ui, format!("{:.4}", time * 100.0)); } });
             match selected {
                 SelectedKey::Color(index) => {
                     let color = gradient.colors[index].1;
                     ui.horizontal(|ui| {
-                        key_column(ui, "颜色");
+                        key_column(ui, crate::localization::tr("颜色"));
                         if !crate::editing::gradient_color(ui, &format!("key{}", gradient.color_indices[index])) {
                             crate::color_property::show(ui, &format!("Color {index}"), [color[0], color[1], color[2], 1.0]);
                         }
@@ -215,13 +215,13 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
                     }
                 }
                 SelectedKey::Alpha(index) => {
-                    ui.horizontal(|ui| { key_column(ui, "Alpha（0–1）"); if !crate::editing::gradient_number(ui, &format!("key{}", gradient.alpha_indices[index]), true) { readonly_key_value(ui, gradient.alphas[index].1.to_string()); } });
+                    ui.horizontal(|ui| { key_column(ui, crate::localization::tr("Alpha（0–1）")); if !crate::editing::gradient_number(ui, &format!("key{}", gradient.alpha_indices[index]), true) { readonly_key_value(ui, gradient.alphas[index].1.to_string()); } });
                 }
             }
-            ui.collapsing("全部关键点", |ui| {
+            ui.collapsing(crate::localization::tr("全部关键点"), |ui| {
             ui.add_space(8.0);
-            ui.strong("颜色关键点");
-            ui.horizontal(|ui| { key_column(ui, "位置"); ui.label("颜色"); });
+            ui.strong(crate::localization::tr("颜色关键点"));
+            ui.horizontal(|ui| { key_column(ui, crate::localization::tr("位置")); ui.label(crate::localization::tr("颜色")); });
             for (index, (time, color)) in gradient.colors.iter().enumerate() {
                 ui.push_id(("color", index), |ui| {
                     ui.horizontal(|ui| {
@@ -234,8 +234,8 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
                 });
             }
             ui.add_space(8.0);
-            ui.strong("Alpha 关键点");
-            ui.horizontal(|ui| { key_column(ui, "位置"); ui.label("Alpha（0–1）"); });
+            ui.strong(crate::localization::tr("Alpha 关键点"));
+            ui.horizontal(|ui| { key_column(ui, crate::localization::tr("位置")); ui.label(crate::localization::tr("Alpha（0–1）")); });
             for (index, (time, alpha)) in gradient.alphas.iter().enumerate() {
                 ui.push_id(("alpha", index), |ui| {
                     ui.horizontal(|ui| {

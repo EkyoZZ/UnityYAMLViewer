@@ -23,6 +23,7 @@ enum ProjectState {
 
 #[derive(Default)]
 struct ProjectIndex {
+    shader_properties: Arc<HashMap<String, HashMap<String, String>>>,
     assets: Arc<HashMap<String, PathBuf>>,
     scripts: HashMap<String, PathBuf>,
     classes: HashMap<String, Vec<ClassInfo>>,
@@ -61,6 +62,7 @@ impl ScriptProperties {
     pub fn update(&mut self, path: Option<&Path>, ctx: &egui::Context) {
         self.current_root = path.and_then(project_root);
         ctx.data_mut(|data| data.remove::<Arc<HashMap<String, PathBuf>>>(egui::Id::new("asset_catalog")));
+        ctx.data_mut(|data| data.remove::<Arc<HashMap<String, HashMap<String, String>>>>(egui::Id::new("shader_properties")));
         let Some(root) = self.current_root.clone() else { return };
         if !self.projects.contains_key(&root) {
             self.start_scan(root.clone(), ctx.clone());
@@ -76,6 +78,7 @@ impl ScriptProperties {
         }
         if let Some(ProjectState::Ready(index)) = self.projects.get(&root) {
             ctx.data_mut(|data| data.insert_temp(egui::Id::new("asset_catalog"), index.assets.clone()));
+            ctx.data_mut(|data| data.insert_temp(egui::Id::new("shader_properties"), index.shader_properties.clone()));
         }
     }
 
@@ -93,8 +96,8 @@ impl ScriptProperties {
         let root = self.current_root.clone();
         if let Some(root) = &root {
             ui.horizontal(|ui| {
-                ui.small(format!("Unity 工程：{}", root.display()));
-                if ui.button("重新扫描脚本").clicked() {
+                ui.small(crate::lf!("Unity 工程：{0}", root.display()));
+                if ui.button(crate::localization::tr("重新扫描脚本")).clicked() {
                     self.start_scan(root.clone(), ui.ctx().clone());
                 }
             });
@@ -112,25 +115,26 @@ impl ScriptProperties {
         };
         if let Some((index, class)) = resolved {
             ui.label(RichText::new(&class.name).strong());
-            ui.small(format!("脚本：{}", class.path.display()));
+            ui.small(crate::lf!("脚本：{0}", class.path.display()));
             if index.issues > 0 {
-                ui.small(format!("扫描中有 {} 项无法读取或存在重复 GUID；相关字段可能无法确定类型。", index.issues));
+                ui.small(crate::lf!("扫描中有 {0} 项无法读取或存在重复 GUID；相关字段可能无法确定类型。", index.issues));
             }
         } else {
             ui.label(match index {
-                Some(ProjectState::Loading(_)) => "正在建立脚本 GUID 索引…暂时显示原始属性。",
-                Some(ProjectState::Ready(_)) => "未找到对应脚本或无法确定脚本类；字段类型未知。",
-                None => "未找到 Unity 工程根目录（Assets / ProjectSettings）；字段类型未知。",
+                Some(ProjectState::Loading(_)) => crate::localization::tr("正在建立脚本 GUID 索引…暂时显示原始属性。"),
+                Some(ProjectState::Ready(_)) => crate::localization::tr("未找到对应脚本或无法确定脚本类；字段类型未知。"),
+                None => crate::localization::tr("未找到 Unity 工程根目录（Assets / ProjectSettings）；字段类型未知。"),
             });
         }
-        ui.small("类型来自脚本声明；编辑模式支持已确认类型的属性。复杂原始结构保持只读。");
+        ui.small(crate::localization::tr("类型来自脚本声明；编辑模式支持已确认类型的属性。复杂原始结构保持只读。"));
         let known_fields = resolved.map(|(index, class)| index.inherited_fields(class, &mut HashSet::new()));
         let ranges = resolved.map(|(index, class)| index.inherited_ranges(class, &mut HashSet::new()));
         let search = query.trim().to_lowercase();
-        ScrollArea::both().id_salt("script_properties").show(ui, |ui| {
-            ui.collapsing("组件信息", |ui| {
+        ScrollArea::both().id_salt("script_properties").auto_shrink([false, false]).show(ui, |ui| {
+            publish_property_columns(ui);
+            ui.collapsing(crate::localization::tr("组件信息"), |ui| {
                 for field in fields.iter().filter(|field| is_component_field(&field.name)) {
-                    raw_field(ui, field, "组件信息");
+                    raw_field(ui, field, crate::localization::tr("组件信息"));
                 }
             });
             ui.separator();
@@ -144,7 +148,7 @@ impl ScriptProperties {
                     if let (Some(field_type), Some((index, _))) = (field_type, resolved) {
                         typed_field_range(ui, field, field_type, index, ranges.as_ref().and_then(|ranges| ranges.get(&field.name)).copied());
                     } else {
-                        raw_field(ui, field, "类型未知");
+                        raw_field(ui, field, crate::localization::tr("类型未知"));
                     }
                 });
             }
@@ -189,11 +193,17 @@ fn scan_project(root: &Path) -> ProjectIndex {
             if index.assets.contains_key(&guid) {
                 Arc::make_mut(&mut index.assets).remove(&guid);
                 index.scripts.remove(&guid);
+                Arc::make_mut(&mut index.shader_properties).remove(&guid);
                 duplicate_guids.insert(guid);
                 index.issues += 1;
                 continue;
             }
             Arc::make_mut(&mut index.assets).insert(guid.clone(), script_path.clone());
+            if script_path.extension().and_then(|ext| ext.to_str()) == Some("shader") {
+                if let Ok(source) = fs::read_to_string(&script_path) {
+                    Arc::make_mut(&mut index.shader_properties).insert(guid.clone(), parse_shader_properties(&source));
+                }
+            }
             if script_path.extension().and_then(|ext| ext.to_str()) != Some("cs") { continue; }
             let Ok(source) = fs::read_to_string(&script_path) else { index.issues += 1; continue };
             index.scripts.insert(guid, script_path.clone());
@@ -449,11 +459,12 @@ pub fn show_sprite_renderer_properties(ui: &mut egui::Ui, text: &str, query: &st
     ] {
         index.enums.insert(name.to_string(), vec![entries.into_iter().map(|(name, value)| (name.to_string(), value)).collect()]);
     }
-    ui.small("SpriteRenderer 内置字段，无需查找脚本。");
-    ScrollArea::both().id_salt("sprite_renderer_properties").show(ui, |ui| {
-        ui.collapsing("组件信息", |ui| {
+    ui.small(crate::localization::tr("SpriteRenderer 内置字段，无需查找脚本。"));
+    ScrollArea::both().id_salt("sprite_renderer_properties").auto_shrink([false, false]).show(ui, |ui| {
+            publish_property_columns(ui);
+        ui.collapsing(crate::localization::tr("组件信息"), |ui| {
             for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
-                raw_field(ui, field, "组件信息");
+                raw_field(ui, field, crate::localization::tr("组件信息"));
             }
         });
         ui.separator();
@@ -467,14 +478,14 @@ pub fn show_sprite_renderer_properties(ui: &mut egui::Ui, text: &str, query: &st
             if !search.is_empty() && !format!("{} {label} {kind} {}", field.name, field.value).to_lowercase().contains(&search) { return; }
             ui.push_id(&field.name, |ui| {
                 let display = YamlField { name: label.to_string(), value: field.value.clone() };
-                if kind == "原始值" { raw_field(ui, &display, kind); }
+                if kind == crate::localization::tr("原始值") { raw_field(ui, &display, kind); }
                 else { typed_field(ui, &display, kind, &index); }
             });
         };
         for name in &primary {
             if let Some(field) = fields.iter().find(|field| field.name == *name) { show_field(ui, field); }
         }
-        egui::CollapsingHeader::new("其他渲染设置与字段").default_open(!search.is_empty()).show(ui, |ui| {
+        egui::CollapsingHeader::new(crate::localization::tr("其他渲染设置与字段")).default_open(!search.is_empty()).show(ui, |ui| {
             for field in fields.iter().filter(|field| !sprite_metadata(&field.name) && !primary.contains(&field.name.as_str())) {
                 show_field(ui, field);
             }
@@ -515,15 +526,19 @@ pub fn show_material_properties(ui: &mut egui::Ui, text: &str, query: &str) {
     let index = ProjectIndex::default();
     let search = query.trim().to_lowercase();
     let matches = |field: &YamlField| search.is_empty() || format!("{} {}", field.name, field.value).to_lowercase().contains(&search);
-    ui.small("材质属性；颜色组按 RGBA 显示，Shader 的 Vector 属性也可能存储在此组。");
-    ScrollArea::both().id_salt("material_properties").show(ui, |ui| {
-        ui.collapsing("资源信息", |ui| {
-            for field in fields.iter().filter(|field| is_component_field(&field.name)) { raw_field(ui, field, "资源信息"); }
+    let shader_types = ui.ctx().data_mut(|data| data.get_temp::<Arc<HashMap<String, HashMap<String, String>>>>(egui::Id::new("shader_properties")));
+    let shader_guid = fields.iter().find(|field| field.name == "m_Shader").and_then(|field| guid_from_meta(&field.value));
+    let property_types = shader_guid.as_ref().and_then(|guid| shader_types.as_ref()?.get(guid));
+    ui.small(crate::localization::tr("按 Shader 声明区分 Color 和 Vector4；无法确认类型时以只读四分量显示。"));
+    ScrollArea::both().id_salt("material_properties").auto_shrink([false, false]).show(ui, |ui| {
+            publish_property_columns(ui);
+        ui.collapsing(crate::localization::tr("资源信息"), |ui| {
+            for field in fields.iter().filter(|field| is_component_field(&field.name)) { raw_field(ui, field, crate::localization::tr("资源信息")); }
         });
         for field in fields.iter().filter(|field| matches!(field.name.as_str(), "m_Shader" | "m_Parent" | "m_CustomRenderQueue" | "m_EnableInstancingVariants" | "m_DoubleSidedGI") && matches(field)) {
             let (label, kind) = match field.name.as_str() {
-                "m_Shader" => ("Shader", "Shader 引用"),
-                "m_Parent" => ("Parent", "Material 引用"),
+                "m_Shader" => ("Shader", crate::localization::tr("Shader 引用")),
+                "m_Parent" => ("Parent", crate::localization::tr("Material 引用")),
                 "m_CustomRenderQueue" => ("Render Queue", "int"),
                 "m_EnableInstancingVariants" => ("Enable GPU Instancing", "bool"),
                 _ => ("Double Sided GI", "bool"),
@@ -532,7 +547,7 @@ pub fn show_material_properties(ui: &mut egui::Ui, text: &str, query: &str) {
         }
         if let Some(saved) = fields.iter().find(|field| field.name == "m_SavedProperties") {
             for (group, entries) in material_groups(&saved.value) {
-                let label = match group.as_str() { "m_TexEnvs" => "纹理", "m_Ints" => "整数", "m_Floats" => "浮点数", _ => "颜色 / Vector4" };
+                let label = match group.as_str() { "m_TexEnvs" => crate::localization::tr("纹理"), "m_Ints" => crate::localization::tr("整数"), "m_Floats" => crate::localization::tr("浮点数"), _ => crate::localization::tr("颜色 / Vector4") };
                 egui::CollapsingHeader::new(format!("{label} ({})", entries.len())).id_salt(&group).default_open(true).show(ui, |ui| {
                     for entry in entries.iter().filter(|entry| matches(entry)) {
                         ui.push_id(&entry.name, |ui| {
@@ -543,7 +558,7 @@ pub fn show_material_properties(ui: &mut egui::Ui, text: &str, query: &str) {
                                     for line in entry.value.lines().filter(|line| !line.trim().is_empty()) {
                                         let Some((name, value)) = line.trim().split_once(':') else { recognized = false; break };
                                         let (label, kind) = match name {
-                                            "m_Texture" => ("Texture", "Texture 引用"),
+                                            "m_Texture" => ("Texture", crate::localization::tr("Texture 引用")),
                                             "m_Scale" => ("Tiling", "Vector2"),
                                             "m_Offset" => ("Offset", "Vector2"),
                                             _ => { recognized = false; break; }
@@ -554,23 +569,61 @@ pub fn show_material_properties(ui: &mut egui::Ui, text: &str, query: &str) {
                                         for (label, kind, value) in texture_fields {
                                             ui.push_id(label, |ui| crate::editing::with_field(ui, &entry.name, |ui| typed_field(ui, &YamlField { name: label.into(), value: value.into() }, kind, &index)));
                                         }
-                                    } else { raw_field(ui, entry, "未识别的纹理结构"); }
+                                    } else { raw_field(ui, entry, crate::localization::tr("未识别的纹理结构")); }
                                 });
                             } else {
-                                let kind = match group.as_str() { "m_Ints" => "int", "m_Floats" => "float", _ => "Color" };
-                                typed_field(ui, entry, kind, &index);
+                                if group == "m_Colors" {
+                                    match property_types.and_then(|types| types.get(&entry.name)).map(String::as_str) {
+                                        Some("Color") => typed_field(ui, entry, "Color", &index),
+                                        Some("Vector4") => material_vector_field(ui, entry, true),
+                                        _ => material_vector_field(ui, entry, false),
+                                    }
+                                } else {
+                                    let kind = if group == "m_Ints" { "int" } else { "float" };
+                                    typed_field(ui, entry, kind, &index);
+                                }
                             }
                         });
                     }
                 });
             }
-            ui.collapsing("原始材质属性 YAML", |ui| readonly_text(ui, &saved.value, true));
+            ui.collapsing(crate::localization::tr("原始材质属性 YAML"), |ui| readonly_text(ui, &saved.value, true));
         }
-        ui.collapsing("其他渲染设置", |ui| {
+        ui.collapsing(crate::localization::tr("其他渲染设置"), |ui| {
             for field in fields.iter().filter(|field| !is_component_field(&field.name) && !matches!(field.name.as_str(), "serializedVersion" | "m_Shader" | "m_Parent" | "m_CustomRenderQueue" | "m_EnableInstancingVariants" | "m_DoubleSidedGI" | "m_SavedProperties") && matches(field)) {
-                raw_field(ui, field, "原始值");
+                raw_field(ui, field, crate::localization::tr("原始值"));
             }
         });
+    });
+}
+
+fn parse_shader_properties(source: &str) -> HashMap<String, String> {
+    let pattern = Regex::new(r#"(?s)//[^\r\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|[^\s]"#).unwrap();
+    let tokens: Vec<_> = pattern.find_iter(source).map(|item| item.as_str()).filter(|item| !item.starts_with("//") && !item.starts_with("/*")).collect();
+    let mut properties = HashMap::new();
+    let Some(start) = tokens.windows(2).position(|pair| pair == ["Properties", "{"]) else { return properties };
+    let mut depth = 1;
+    let mut position = start + 2;
+    while position < tokens.len() && depth > 0 {
+        match tokens[position] { "{" => depth += 1, "}" => depth -= 1, _ => {} }
+        if depth == 1 && position + 5 < tokens.len() && tokens[position+1] == "(" && tokens[position+2].starts_with('"') && tokens[position+3] == "," && tokens[position+5] == ")" {
+            let kind = match tokens[position+4] { "Color" => Some("Color"), "Vector" => Some("Vector4"), _ => None };
+            if let Some(kind) = kind { properties.insert(tokens[position].into(), kind.into()); }
+        }
+        position += 1;
+    }
+    properties
+}
+
+fn material_vector_field(ui: &mut egui::Ui, field: &YamlField, confirmed: bool) {
+    ui.horizontal(|ui| {
+        property_label(ui, &field.name, if confirmed { "Vector4" } else { "Color / Vector4" });
+        if confirmed && crate::editing::control(ui, &field.name, &field.value, "MaterialVector4", None) { return; }
+        if let Some(values) = crate::inline_vector(&field.value, &["r", "g", "b", "a"]) {
+            let available = ui.clip_rect().width() - (ui.cursor().min.x - ui.min_rect().left());
+            let values: Vec<_> = values.iter().map(ToString::to_string).collect();
+            crate::show_vector_inputs(ui, &["x", "y", "z", "w"], &values, available);
+        } else { invalid_value(ui, &field.value); }
     });
 }
 
@@ -584,11 +637,12 @@ pub fn show_animator_properties(ui: &mut egui::Ui, text: &str, query: &str) {
     ] {
         index.enums.insert(name.to_string(), vec![entries.into_iter().map(|(name, value)| (name.to_string(), value)).collect()]);
     }
-    ui.small("Animator 属性；引用资源可打开，本文件对象可定位。");
-    ScrollArea::both().id_salt("animator_properties").show(ui, |ui| {
-        ui.collapsing("组件信息", |ui| {
+    ui.small(crate::localization::tr("Animator 属性；引用资源可打开，本文件对象可定位。"));
+    ScrollArea::both().id_salt("animator_properties").auto_shrink([false, false]).show(ui, |ui| {
+            publish_property_columns(ui);
+        ui.collapsing(crate::localization::tr("组件信息"), |ui| {
             for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
-                raw_field(ui, field, "组件信息");
+                raw_field(ui, field, crate::localization::tr("组件信息"));
             }
         });
         ui.separator();
@@ -596,8 +650,8 @@ pub fn show_animator_properties(ui: &mut egui::Ui, text: &str, query: &str) {
             let (label, kind) = match field.name.as_str() {
                 "serializedVersion" => continue,
                 "m_Enabled" => ("Enabled", "bool"),
-                "m_Avatar" => ("Avatar", "Avatar 引用"),
-                "m_Controller" => ("Controller", "RuntimeAnimatorController 引用"),
+                "m_Avatar" => ("Avatar", crate::localization::tr("Avatar 引用")),
+                "m_Controller" => ("Controller", crate::localization::tr("RuntimeAnimatorController 引用")),
                 "m_CullingMode" => ("Culling Mode", "AnimatorCullingMode"),
                 "m_UpdateMode" => ("Update Mode", "AnimatorUpdateMode"),
                 "m_ApplyRootMotion" => ("Apply Root Motion", "bool"),
@@ -609,15 +663,47 @@ pub fn show_animator_properties(ui: &mut egui::Ui, text: &str, query: &str) {
                 "m_WriteDefaultValuesOnDisable" => ("Write Default Values On Disable", "bool"),
                 "m_AnimatePhysics" => ("Animate Physics", "bool"),
                 "m_WarningMessage" => ("Warning Message", "string"),
-                _ => (field.name.as_str(), "原始值"),
+                _ => (field.name.as_str(), crate::localization::tr("原始值")),
             };
             if !search.is_empty() && !format!("{} {label} {kind} {}", field.name, field.value).to_lowercase().contains(&search) { continue; }
             ui.push_id(&field.name, |ui| {
                 let display = YamlField { name: label.to_string(), value: field.value.clone() };
-                if kind == "原始值" { raw_field(ui, &display, kind); }
+                if kind == crate::localization::tr("原始值") { raw_field(ui, &display, kind); }
                 else { typed_field(ui, &display, kind, &index); }
             });
         }
+    });
+}
+
+pub fn show_animator_state_properties(ui: &mut egui::Ui, text: &str, query: &str) {
+    let fields = yaml_fields(text);
+    let index = ProjectIndex::default();
+    let search = query.trim().to_lowercase();
+    let properties = [
+        ("m_Name", "string"), ("m_Tag", "string"),
+        ("m_Motion", crate::localization::tr("Motion 引用")), ("m_Speed", "float"),
+        ("m_SpeedParameter", "string"), ("m_SpeedParameterActive", "bool"),
+        ("m_TimeParameter", "string"), ("m_TimeParameterActive", "bool"),
+        ("m_Mirror", "bool"), ("m_MirrorParameter", "string"), ("m_MirrorParameterActive", "bool"),
+        ("m_CycleOffset", "float"), ("m_CycleOffsetParameter", "string"), ("m_CycleOffsetParameterActive", "bool"),
+        ("m_IKOnFeet", "bool"), ("m_WriteDefaultValues", "bool"),
+        ("m_Transitions", "List<AnimatorStateTransition>"),
+        ("m_StateMachineBehaviours", "List<StateMachineBehaviour>"),
+    ];
+    ScrollArea::both().id_salt("animator_state_properties").auto_shrink([false, false]).show(ui, |ui| {
+            publish_property_columns(ui);
+        for (name, kind) in properties {
+            let Some(field) = fields.iter().find(|field| field.name == name) else { continue };
+            if !search.is_empty() && !format!("{name} {kind} {}", field.value).to_lowercase().contains(&search) { continue; }
+            ui.push_id(name, |ui| typed_field(ui, field, kind, &index));
+        }
+        ui.collapsing(crate::localization::tr("其他属性"), |ui| {
+            for field in fields.iter().filter(|field| !properties.iter().any(|(name, _)| *name == field.name)) {
+                if !search.is_empty() && !format!("{} {}", field.name, field.value).to_lowercase().contains(&search) { continue; }
+                if field.name == "m_Position" { typed_field(ui, field, "Vector3", &index); }
+                else { raw_field(ui, field, crate::localization::tr("原始值")); }
+            }
+        });
     });
 }
 
@@ -632,11 +718,12 @@ pub fn show_collider_properties(ui: &mut egui::Ui, type_name: &str, text: &str, 
     let index = ProjectIndex::default();
     let search = query.trim().to_lowercase();
     let is_2d = type_name.ends_with("2D");
-    ui.small("碰撞体属性；进入编辑模式后可修改已确认类型的属性。");
-    ScrollArea::both().id_salt("collider_properties").show(ui, |ui| {
-        ui.collapsing("组件信息", |ui| {
+    ui.small(crate::localization::tr("碰撞体属性；进入编辑模式后可修改已确认类型的属性。"));
+    ScrollArea::both().id_salt("collider_properties").auto_shrink([false, false]).show(ui, |ui| {
+            publish_property_columns(ui);
+        ui.collapsing(crate::localization::tr("组件信息"), |ui| {
             for field in fields.iter().filter(|field| sprite_metadata(&field.name)) {
-                raw_field(ui, field, "组件信息");
+                raw_field(ui, field, crate::localization::tr("组件信息"));
             }
         });
         ui.separator();
@@ -678,18 +765,18 @@ pub fn show_collider_properties(ui: &mut egui::Ui, type_name: &str, text: &str, 
                     "m_CompositeOrder" => ("Composite Order", "int"),
                     "m_LayerOverridePriority" => ("Layer Override Priority", "int"),
                     "m_CookingOptions" => ("Cooking Options", "int"),
-                    "m_Material" => ("Material", if is_2d { "PhysicsMaterial2D 引用" } else { "PhysicMaterial 引用" }),
-                    "m_Mesh" => ("Mesh", "Mesh 引用"),
-                    "m_TerrainData" => ("Terrain Data", "TerrainData 引用"),
+                    "m_Material" => ("Material", if is_2d { crate::localization::tr("PhysicsMaterial2D 引用") } else { crate::localization::tr("PhysicMaterial 引用") }),
+                    "m_Mesh" => ("Mesh", crate::localization::tr("Mesh 引用")),
+                    "m_TerrainData" => ("Terrain Data", crate::localization::tr("TerrainData 引用")),
                     "m_IncludeLayers" => ("Include Layers", "LayerMask"),
                     "m_ExcludeLayers" => ("Exclude Layers", "LayerMask"),
                     "m_ForceSendLayers" => ("Force Send Layers", "LayerMask"),
                     "m_ForceReceiveLayers" => ("Force Receive Layers", "LayerMask"),
                     "m_ContactCaptureLayers" => ("Contact Capture Layers", "LayerMask"),
                     "m_CallbackLayers" => ("Callback Layers", "LayerMask"),
-                    "m_SpriteTilingProperty" => ("Sprite Tiling", "原始值"),
+                    "m_SpriteTilingProperty" => ("Sprite Tiling", crate::localization::tr("原始值")),
                     "serializedVersion" => return,
-                    _ => (field.name.as_str(), "原始值"),
+                    _ => (field.name.as_str(), crate::localization::tr("原始值")),
                 };
                 let mut display = YamlField { name: label.to_string(), value: field.value.clone() };
                 if kind == "LayerMask" {
@@ -699,7 +786,7 @@ pub fn show_collider_properties(ui: &mut egui::Ui, type_name: &str, text: &str, 
                         let kind = if display.value.starts_with('-') { "int" } else { "uint" };
                         typed_field(ui, &display, kind, &index);
                     } else { raw_field(ui, &display, kind); }
-                } else if kind == "原始值" { raw_field(ui, &display, kind); }
+                } else if kind == crate::localization::tr("原始值") { raw_field(ui, &display, kind); }
                 else { typed_field(ui, &display, kind, &index); }
             });
         }
@@ -726,14 +813,14 @@ fn show_collider_points(ui: &mut egui::Ui, field: &YamlField) {
 }
 fn show_collider_points_inner(ui: &mut egui::Ui, field: &YamlField) {
     let Some(paths) = collider_point_paths(&field.value) else {
-        raw_field(ui, field, "未识别的顶点结构");
+        raw_field(ui, field, crate::localization::tr("未识别的顶点结构"));
         return;
     };
     let count: usize = paths.iter().map(Vec::len).sum();
-    ui.collapsing(format!("Points · {} 条路径，{count} 个顶点", paths.len()), |ui| {
+    ui.collapsing(crate::lf!("Points · {0} 条路径，{1} 个顶点", paths.len(), count), |ui| {
         for (path_index, points) in paths.iter().enumerate() {
             ui.push_id(path_index, |ui| {
-                ui.collapsing(format!("Path {path_index} · {} 个顶点", points.len()), |ui| {
+                ui.collapsing(crate::lf!("Path {1} · {0} 个顶点", points.len(), path_index), |ui| {
                     for (point_index, point) in points.iter().enumerate() {
                         ui.push_id(point_index, |ui| {
                             let shape = crate::editing::placeholder(ui);
@@ -760,7 +847,7 @@ fn show_collider_points_inner(ui: &mut egui::Ui, field: &YamlField) {
 fn sprite_field_info(name: &str) -> (&str, &str) {
     match name {
         "m_Enabled" => ("Enabled", "bool"),
-        "m_Sprite" => ("Sprite", "Sprite 引用"),
+        "m_Sprite" => ("Sprite", crate::localization::tr("Sprite 引用")),
         "m_Color" => ("Color", "Color"),
         "m_FlipX" => ("Flip X", "bool"),
         "m_FlipY" => ("Flip Y", "bool"),
@@ -781,9 +868,9 @@ fn sprite_field_info(name: &str) -> (&str, &str) {
         "m_RendererPriority" => ("Renderer Priority", "int"),
         "m_RenderingLayerMask" => ("Rendering Layer Mask", "uint"),
         "m_ScaleInLightmap" => ("Scale in Lightmap", "float"),
-        "m_ProbeAnchor" => ("Probe Anchor", "Transform 引用"),
-        "m_LightProbeVolumeOverride" => ("Light Probe Volume", "GameObject 引用"),
-        _ => (name, "原始值"),
+        "m_ProbeAnchor" => ("Probe Anchor", crate::localization::tr("Transform 引用")),
+        "m_LightProbeVolumeOverride" => ("Light Probe Volume", crate::localization::tr("GameObject 引用")),
+        _ => (name, crate::localization::tr("原始值")),
     }
 }
 
@@ -796,7 +883,7 @@ fn raw_field(ui: &mut egui::Ui, field: &YamlField, field_type: &str) {
         ui.horizontal(|ui| {
             property_label(ui, &field.name, field_type);
             if crate::editing::active(ui) && !field.value.contains("fileID:") {
-                ui.add(egui::Label::new(RichText::new("类型未确认，暂不开放编辑").small())).on_hover_text("无法验证声明类型的属性保持只读，避免写入不符合 Unity 类型的数据。");
+                ui.add(egui::Label::new(RichText::new(crate::localization::tr("类型未确认，暂不开放编辑")).small())).on_hover_text(crate::localization::tr("无法验证声明类型的属性保持只读，避免写入不符合 Unity 类型的数据。"));
             }
             readonly_text(ui, &field.value, false);
         });
@@ -842,12 +929,12 @@ fn reference_buttons(ui: &mut egui::Ui, value: &str) {
             if let Some(path) = catalog.as_ref().and_then(|catalog| catalog.get(&guid)) {
                 (Some(ReferenceOpen::Asset(path.clone(), file_id)), path.display().to_string())
             } else {
-                (None, "GUID 索引尚未完成，或资源不存在、属于内置资源。".to_string())
+                (None, crate::localization::tr("GUID 索引尚未完成，或资源不存在、属于内置资源。").to_string())
             }
         } else if file_id != "0" {
-            (Some(ReferenceOpen::Local(file_id)), "跳转到本文件中对应的对象".to_string())
+            (Some(ReferenceOpen::Local(file_id)), crate::localization::tr("跳转到本文件中对应的对象").to_string())
         } else { continue; };
-        let button_label = if matches!(request, Some(ReferenceOpen::Local(_))) { "定位" } else { "打开" };
+        let button_label = if matches!(request, Some(ReferenceOpen::Local(_))) { crate::localization::tr("定位") } else { crate::localization::tr("打开") };
         ui.push_id(i, |ui| {
             if ui.add_enabled(request.is_some(), egui::Button::new(button_label)).on_hover_text(explanation).clicked() {
                 ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("open_reference"), request.unwrap()));
@@ -859,7 +946,7 @@ fn reference_buttons(ui: &mut egui::Ui, value: &str) {
 pub fn show_prefab_reference(ui: &mut egui::Ui, text: &str, documents: &[crate::Document]) {
     if let Some(reference) = prefab_source_reference(text, documents) {
         ui.horizontal(|ui| {
-            ui.label("源 Prefab / 对象");
+            ui.label(crate::localization::tr("源 Prefab / 对象"));
             readonly_text(ui, &reference, false);
         });
     }
@@ -912,15 +999,15 @@ fn typed_field_inner(ui: &mut egui::Ui, field: &YamlField, field_type: &str, ind
     if collection_element_type(field_type).is_some() {
         if let Some(mut table) = collection_table(&field.name, &field.value) {
             assign_table_types(&mut table, collection_element_type(field_type).unwrap(), index);
-            egui::CollapsingHeader::new(format!("{} ({field_type}) · {} 条", field.name, table.rows.len()))
+            egui::CollapsingHeader::new(crate::lf!("{0} ({2}) · {1} 条", field.name, table.rows.len(), field_type))
                 .default_open(true).show(ui, |ui| {
-                    if table.rows.is_empty() { ui.label("空列表"); }
+                    if table.rows.is_empty() { ui.label(crate::localization::tr("空列表")); }
                     else {
                         let state_id = ui.id().with("collection_table_layout");
                         let (mut widths, mut offset, mut freeze) = ui.ctx().data_mut(|data| data.get_temp::<(Vec<f32>, f32, bool)>(state_id))
                             .filter(|(widths, _, _)| widths.len() == table.headers.len())
                             .unwrap_or_else(|| (crate::table_column_widths(&table), 0.0, true));
-                        ui.checkbox(&mut freeze, "冻结表头");
+                        ui.checkbox(&mut freeze, crate::localization::tr("冻结表头"));
                         ui.push_id(&field.name, |ui| {
                             ui.scope(|ui| {
                                 ui.set_max_height(320.0);
@@ -929,7 +1016,7 @@ fn typed_field_inner(ui: &mut egui::Ui, field: &YamlField, field_type: &str, ind
                         });
                         ui.ctx().data_mut(|data| data.insert_temp(state_id, (widths, offset, freeze)));
                     }
-                    ui.collapsing("原始列表 YAML", |ui| readonly_text(ui, &field.value, true));
+                    ui.collapsing(crate::localization::tr("原始列表 YAML"), |ui| readonly_text(ui, &field.value, true));
                 });
             return;
         }
@@ -944,29 +1031,33 @@ fn typed_field_inner(ui: &mut egui::Ui, field: &YamlField, field_type: &str, ind
                     });
                 }
             });
-        } else { raw_field(ui, field, "RectOffset（未识别的结构）"); }
+        } else { raw_field(ui, field, crate::localization::tr("RectOffset（未识别的结构）")); }
         return;
     }
     if matches!(field_type, "Gradient" | "UnityEngine.Gradient") {
         if crate::gradient_property::show(ui, &field.name, &field.value) { return; }
-        raw_field(ui, field, "Gradient（未识别的结构或模式）");
+        raw_field(ui, field, crate::localization::tr("Gradient（未识别的结构或模式）"));
         return;
     }
     if field.value.contains('\n') {
         let class = index.classes.get(kind).filter(|classes| classes.len() == 1).map(|classes| &classes[0]);
-        if let Some(class) = class.filter(|_| !field_type.contains(['[', '<'])) {
+        let builtin = builtin_struct_fields(field_type);
+        if !field_type.contains(['[', '<']) && (class.is_some() || builtin.is_some()) {
             let nested_text = field.value.lines().map(|line| line.strip_prefix("  ").unwrap_or(line))
                 .collect::<Vec<_>>().join("\n");
             let nested = yaml_fields(&nested_text);
             if !nested.is_empty() {
-                let known = index.inherited_fields(class, &mut HashSet::new());
-                let ranges = index.inherited_ranges(class, &mut HashSet::new());
+                let mut known = builtin.unwrap_or_default();
+                let ranges = class.map(|class| index.inherited_ranges(class, &mut HashSet::new())).unwrap_or_default();
+                if let Some(class) = class {
+                    known.extend(index.inherited_fields(class, &mut HashSet::new()));
+                }
                 ui.collapsing(format!("{}  ({field_type})", field.name), |ui| {
                     for field in &nested {
                         ui.push_id(&field.name, |ui| {
                             if let Some(kind) = known.get(&field.name) {
                                 typed_field_range(ui, field, kind, index, ranges.get(&field.name).copied());
-                            } else { raw_field(ui, field, "类型未知"); }
+                            } else { raw_field(ui, field, crate::localization::tr("类型未知")); }
                         });
                     }
                 });
@@ -1038,17 +1129,17 @@ fn typed_field_inner(ui: &mut egui::Ui, field: &YamlField, field_type: &str, ind
                     let value = field.value.parse::<i64>().ok();
                     let selected = values.iter().find(|(_, number)| Some(*number) == value)
                         .map(|(name, number)| format!("{name} ({number})"))
-                        .unwrap_or_else(|| format!("未匹配值 ({})", field.value));
+                        .unwrap_or_else(|| crate::lf!("未匹配值 ({0})", field.value));
                     egui::ComboBox::from_id_salt(("enum_options", &field.name, field_type))
                         .width(240.0)
                         .selected_text(selected)
                         .show_ui(ui, |ui| {
-                            ui.small("枚举列表（只读）");
+                            ui.small(crate::localization::tr("枚举列表（只读）"));
                             for (name, number) in values {
                                 // Allow opening and inspecting the list without
                                 // storing a replacement value in the asset.
                                 ui.selectable_label(Some(*number) == value, format!("{name} ({number})"))
-                                    .on_hover_text("仅查看枚举定义，不修改当前值");
+                                    .on_hover_text(crate::localization::tr("仅查看枚举定义，不修改当前值"));
                             }
                         });
                 } else { readonly_text(ui, &field.value, false); }
@@ -1131,7 +1222,7 @@ pub fn show_table_cell(ui: &mut egui::Ui, name: &str, raw: &str, field_type: Opt
         return true;
     }
     if let Some(kind) = field_type {
-        if crate::editing::control(ui, name, raw, kind, enums) { return true; }
+        if crate::editing::table_control(ui, name, raw, kind, enums) { return true; }
     }
     match field_type.map(short_type) {
         Some("Color") => {
@@ -1164,6 +1255,24 @@ fn rect_offset_fields(text: &str) -> Option<Vec<(&'static str, String)>> {
         }).collect()
 }
 
+// Unity UI types may be supplied by an assembly or have unavailable source.
+// Use serialized field names, rather than guessing types from YAML values.
+fn builtin_struct_fields(field_type: &str) -> Option<BTreeMap<String, String>> {
+    let fields = match field_type {
+        "ColorBlock" | "UnityEngine.UI.ColorBlock" => &[
+            ("m_NormalColor", "Color"),
+            ("m_HighlightedColor", "Color"),
+            ("m_PressedColor", "Color"),
+            ("m_SelectedColor", "Color"),
+            ("m_DisabledColor", "Color"),
+            ("m_ColorMultiplier", "float"),
+            ("m_FadeDuration", "float"),
+        ][..],
+        _ => return None,
+    };
+    Some(fields.iter().map(|(name, kind)| (name.to_string(), kind.to_string())).collect())
+}
+
 fn builtin_enum_values(field_type: &str) -> Option<Vec<(String, i64)>> {
     match field_type {
         "TextAnchor" | "UnityEngine.TextAnchor" => Some(["UpperLeft", "UpperCenter", "UpperRight", "MiddleLeft", "MiddleCenter", "MiddleRight", "LowerLeft", "LowerCenter", "LowerRight"]
@@ -1174,12 +1283,19 @@ fn builtin_enum_values(field_type: &str) -> Option<Vec<(String, i64)>> {
 
 fn invalid_value(ui: &mut egui::Ui, value: &str) {
     readonly_text(ui, value, false);
-    ui.colored_label(Color32::RED, "值与声明类型不符或越界");
+    ui.colored_label(Color32::RED, crate::localization::tr("值与声明类型不符或越界"));
+}
+
+fn publish_property_columns(ui: &egui::Ui) {
+    let origin = ui.cursor().min.x;
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("inspector_property_column_origin"), origin));
 }
 
 fn property_label(ui: &mut egui::Ui, name: &str, field_type: &str) {
-    ui.allocate_ui_with_layout(egui::vec2(210.0, 20.0), egui::Layout::left_to_right(egui::Align::Center),
-        |ui| { ui.set_min_width(210.0); ui.add(egui::Label::new(name).truncate()) }).inner.on_hover_text(name);
+    let origin = ui.ctx().data_mut(|data| data.get_temp::<f32>(egui::Id::new("inspector_property_column_origin"))).unwrap_or(ui.cursor().min.x);
+    let name_width = (210.0 - (ui.cursor().min.x-origin)).max(40.0);
+    ui.allocate_ui_with_layout(egui::vec2(name_width, 20.0), egui::Layout::left_to_right(egui::Align::Center),
+        |ui| { ui.set_min_width(name_width); ui.add(egui::Label::new(name).truncate()) }).inner.on_hover_text(name);
     ui.allocate_ui_with_layout(egui::vec2(100.0, 20.0), egui::Layout::left_to_right(egui::Align::Center),
         |ui| { ui.set_min_width(100.0); ui.add(egui::Label::new(RichText::new(field_type).small().weak()).truncate()) }).inner
         .on_hover_text(field_type);
@@ -1187,6 +1303,37 @@ fn property_label(ui: &mut egui::Ui, name: &str, field_type: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shader_properties_distinguish_colors_and_vectors_without_name_guesses() {
+        let source = r#"Shader "Test" {
+            Properties {
+                // _Fake ("Fake", Color) = (1,1,1,1)
+                [HDR] _ArbitraryName ("Tint", Color) = (1,1,1,1)
+                _LooksLikeColor ("Direction", Vector) = (0,0,1,0)
+                _Speed ("Speed", Float) = 1
+            }
+            SubShader { _Outside ("Outside", Color) = (1,1,1,1) }
+        }"#;
+        let properties = parse_shader_properties(source);
+        assert_eq!(properties.len(), 2);
+        assert_eq!(properties["_ArbitraryName"], "Color");
+        assert_eq!(properties["_LooksLikeColor"], "Vector4");
+        assert!(!properties.contains_key("_Fake"));
+        assert!(!properties.contains_key("_Outside"));
+    }
+    #[test]
+    fn color_block_resolves_serialized_properties_without_source() {
+        let known = builtin_struct_fields("UnityEngine.UI.ColorBlock").unwrap();
+        let nested = yaml_fields("  m_NormalColor: {r: 1, g: 1, b: 1, a: 1}\n  m_SelectedColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}\n  m_ColorMultiplier: 1\n  m_FadeDuration: 0.1");
+        assert_eq!(nested.len(), 4);
+        assert_eq!(known[&nested[0].name], "Color");
+        assert_eq!(known[&nested[1].name], "Color");
+        assert_eq!(known[&nested[2].name], "float");
+        assert_eq!(known[&nested[3].name], "float");
+        assert_eq!(builtin_struct_fields("ColorBlock"), Some(known));
+        assert!(builtin_struct_fields("Custom.ColorBlock").is_none());
+    }
+
     #[test]
     fn range_metadata_preserves_literals_aliases_and_inheritance() {
         let source = r#"

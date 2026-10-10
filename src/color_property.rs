@@ -8,6 +8,20 @@ struct Preview {
     open: bool,
 }
 
+/// Shared RGB band and alpha bar for material and animation previews.
+pub fn paint_swatch(ui: &egui::Ui, rect: Rect, rgba: [f64; 4]) {
+    // The opaque upper band keeps RGB visible even when alpha is zero.
+    let rgb = rgb_color(rgba);
+    let top = Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.bottom() - 4.0));
+    ui.painter().rect_filled(top, 0.0, rgb);
+    let bottom = Rect::from_min_max(egui::pos2(rect.left(), top.bottom()), rect.max);
+    ui.painter().rect_filled(bottom, 0.0, Color32::BLACK);
+    ui.painter().rect_filled(Rect::from_min_max(bottom.min,
+        egui::pos2(bottom.left() + bottom.width() * rgba[3].clamp(0.0, 1.0) as f32, bottom.bottom())),
+        0.0, Color32::WHITE);
+    ui.painter().rect_stroke(rect, 0.0, ui.visuals().widgets.inactive.bg_stroke, egui::StrokeKind::Inside);
+}
+
 pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
     let id = ui.id().with(("color_preview", name));
     let mut state = ui.ctx().data_mut(|data| data.get_temp::<Preview>(id))
@@ -16,21 +30,12 @@ pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
     let before = state.rgba;
     let available = ui.clip_rect().width() - (ui.cursor().min.x - ui.min_rect().left());
     let (rect, response) = ui.allocate_exact_size(egui::vec2(available.clamp(80.0, 120.0), 19.0), Sense::click());
-    // The opaque upper band keeps RGB visible even when alpha is zero.
-    let rgb = rgb_color(rgba);
-    let top = Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + 15.0));
-    ui.painter().rect_filled(top, 0.0, rgb);
-    let bottom = Rect::from_min_max(egui::pos2(rect.left(), top.bottom()), rect.max);
-    ui.painter().rect_filled(bottom, 0.0, Color32::BLACK);
-    ui.painter().rect_filled(Rect::from_min_max(bottom.min,
-        egui::pos2(bottom.left() + bottom.width() * rgba[3].clamp(0.0, 1.0) as f32, bottom.bottom())),
-        0.0, Color32::WHITE);
-    ui.painter().rect_stroke(rect, 0.0, ui.visuals().widgets.inactive.bg_stroke, egui::StrokeKind::Inside);
+    paint_swatch(ui, rect, rgba);
     if response.clicked() {
         state.rgba = rgba;
         state.open = true;
     }
-    response.on_hover_text(format!("RGB: {}, {}, {}\nAlpha: {}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]));
+    response.on_hover_text(crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]));
     if state.open {
         let mut open = true;
         egui::Window::new(name)
@@ -38,7 +43,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
             .default_width(220.0).min_width(220.0).max_width(220.0)
             .show(ui.ctx(), |ui| {
                 ui.set_width(220.0);
-                ui.small(if crate::editing::active(ui) { "编辑颜色，保存编辑后写入文件。" } else { "仅预览，不修改属性或资源文件。" });
+                ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑颜色，保存编辑后写入文件。") } else { crate::localization::tr("仅预览，不修改属性或资源文件。") });
                 palette(ui, &mut state.rgba);
                 egui::ComboBox::from_id_salt("color_units")
                     .selected_text(["RGB 0–1", "RGB 0–255", "HSV"][state.mode as usize])
@@ -83,19 +88,19 @@ pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
                             state.rgba[0] = ((value >> 16) & 255) as f64 / 255.0;
                             state.rgba[1] = ((value >> 8) & 255) as f64 / 255.0;
                             state.rgba[2] = (value & 255) as f64 / 255.0;
-                        } else { crate::editing::warning(ui, "颜色十六进制值需要 6 位（例如 FFFFFF），已恢复之前的颜色。"); }
+                        } else { crate::editing::warning(ui, crate::localization::tr("颜色十六进制值需要 6 位（例如 FFFFFF），已恢复之前的颜色。")); }
                     }
                 });
                 if state.original.iter().any(|value| *value < 0.0 || *value > 1.0) {
-                    ui.small("原始颜色包含 HDR 或超出 0–1 的值；色块和调色区域仅显示 0–1 范围。");
+                    ui.small(crate::localization::tr("原始颜色包含 HDR 或超出 0–1 的值；色块和调色区域仅显示 0–1 范围。"));
                 }
-                if ui.button("恢复原始颜色").clicked() { state.rgba = state.original; }
+                if ui.button(crate::localization::tr("恢复原始颜色")).clicked() { state.rgba = state.original; }
             });
         state.open = open;
     }
     if !state.rgba.iter().all(|value| value.is_finite() && value.abs() <= f32::MAX as f64) {
         state.rgba = before;
-        crate::editing::warning(ui, "颜色分量必须为有效浮点数，已恢复之前的颜色。");
+        crate::editing::warning(ui, crate::localization::tr("颜色分量必须为有效浮点数，已恢复之前的颜色。"));
     }
     let changed = (before != state.rgba).then_some(state.rgba);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));

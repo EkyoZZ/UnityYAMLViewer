@@ -12,7 +12,8 @@ pub struct Session {
     pub disk: Vec<u8>,
     patches: BTreeMap<usize, (usize, String)>,
     saved_patches: BTreeMap<usize, (usize, String)>,
-    undo: VecDeque<BTreeMap<usize, (usize, String)>>,
+    undo: VecDeque<(String, BTreeMap<usize, (usize, String)>)>,
+    saved_original: String,
     drafts: BTreeMap<usize, String>,
     component_drafts: BTreeMap<(usize, usize), String>,
     revision: usize,
@@ -28,7 +29,7 @@ pub struct Binding { source: Source, range: Range<usize> }
 fn id() -> egui::Id { egui::Id::new("property_edit_source") }
 impl Session {
     pub fn new(path: PathBuf, original: String, disk: Vec<u8>) -> Self {
-        Self { path, original, disk, patches: BTreeMap::new(), saved_patches: BTreeMap::new(), undo: VecDeque::new(), drafts: BTreeMap::new(), component_drafts: BTreeMap::new(), revision: 0, undo_limit: DEFAULT_UNDO_LIMIT, active_drag: None, warning: None }
+        Self { path, saved_original: original.clone(), original, disk, patches: BTreeMap::new(), saved_patches: BTreeMap::new(), undo: VecDeque::new(), drafts: BTreeMap::new(), component_drafts: BTreeMap::new(), revision: 0, undo_limit: DEFAULT_UNDO_LIMIT, active_drag: None, warning: None }
     }
     pub fn rendered(&self) -> String {
         let mut text = self.original.clone();
@@ -36,12 +37,12 @@ impl Session {
         text
     }
     pub fn undo(&mut self) {
-        if !self.has_drafts() { if let Some(previous) = self.undo.pop_back() { self.patches = previous; } }
+        if !self.has_drafts() { if let Some((original, previous)) = self.undo.pop_back() { self.original = original; self.patches = previous; } }
         self.drafts.clear(); self.component_drafts.clear(); self.revision += 1; self.active_drag = None;
     }
     fn record_undo(&mut self, previous: BTreeMap<usize, (usize, String)>) {
         if self.undo.len() == self.undo_limit { self.undo.pop_front(); }
-        self.undo.push_back(previous);
+        self.undo.push_back((self.original.clone(), previous));
     }
     fn change(&mut self, range: Range<usize>, value: String) {
         self.active_drag = None;
@@ -52,7 +53,7 @@ impl Session {
         let current = self.patches.get(&range.start).map(|(_, value)| value.as_str()).unwrap_or(&self.original[range.clone()]);
         if current == value { return; }
         if self.patches.iter().any(|(start, (end, _))| *start != range.start && *start < range.end && *end > range.start) {
-            self.warning = Some("此属性与另一项修改重叠，已拒绝修改。".into()); return;
+            self.warning = Some(crate::localization::tr("此属性与另一项修改重叠，已拒绝修改。").into()); return;
         }
         if !continuing || self.active_drag != Some(range.start) { self.record_undo(self.patches.clone()); }
         self.active_drag = Some(range.start);
@@ -60,10 +61,13 @@ impl Session {
         else { self.patches.insert(range.start, (range.end, value)); }
     }
     pub fn has_drafts(&self) -> bool { !self.drafts.is_empty() || !self.component_drafts.is_empty() }
-    pub fn has_changes(&self) -> bool { self.patches != self.saved_patches || self.has_drafts() }
+    pub fn has_changes(&self) -> bool {
+        self.rendered() != baseline_text(&self.disk) || self.has_drafts()
+    }
     pub fn can_undo(&self) -> bool { !self.undo.is_empty() || self.has_drafts() }
     pub fn mark_saved(&mut self, text: &str) {
         self.saved_patches = self.patches.clone();
+        self.saved_original = self.original.clone();
         let bom = self.disk.starts_with(&[0xef, 0xbb, 0xbf]);
         self.disk = text.as_bytes().to_vec();
         if !text.starts_with('\u{feff}') && bom {
@@ -72,6 +76,12 @@ impl Session {
         self.finish_drag();
     }
     pub fn has_changes_in(&self, range: Range<usize>) -> bool {
+        if self.original != self.saved_original {
+            let changed_structure = self.original.get(range.clone()).and_then(|text| crate::parse_unity_yaml(text).first().map(|doc| (doc.file_id.clone(),doc.text.clone())))
+                .is_some_and(|(file_id,text)| !crate::parse_unity_yaml(&self.saved_original).iter().any(|doc| doc.file_id==file_id && doc.text==text));
+            return changed_structure || self.patches.keys().chain(self.drafts.keys()).chain(self.component_drafts.keys().map(|(start, _)| start))
+                .any(|start| range.contains(start));
+        }
         self.patches.keys().chain(self.saved_patches.keys())
             .filter(|start| self.patches.get(start) != self.saved_patches.get(start))
             .chain(self.drafts.keys())
@@ -79,15 +89,161 @@ impl Session {
             .any(|start| range.contains(start))
     }
     pub fn finish_drag(&mut self) { self.active_drag = None; }
+    fn change_many(&mut self, changes: Vec<(Range<usize>, String)>, continuing: bool) -> bool {
+        if self.has_drafts() { return false; }
+        if changes.iter().enumerate().any(|(i, (range, _))| range.end > self.original.len()
+            || changes[..i].iter().any(|(other, _)| other.start < range.end && other.end > range.start)
+            || self.patches.iter().any(|(start, (end, _))| *start != range.start && *start < range.end && *end > range.start)) { return false; }
+        let changed = changes.iter().any(|(range, value)| self.patches.get(&range.start).map(|(_, value)| value.as_str()).unwrap_or(&self.original[range.clone()]) != value);
+        if !changed { return true; }
+        let Some(anchor) = changes.first().map(|(range, _)| range.start) else { return true };
+        if !continuing || self.active_drag != Some(anchor) { self.record_undo(self.patches.clone()); }
+        self.active_drag = Some(anchor);
+        for (range, value) in changes {
+            if self.original[range.clone()] == value { self.patches.remove(&range.start); }
+            else { self.patches.insert(range.start, (range.end, value)); }
+        }
+        true
+    }
     pub fn set_undo_limit(&mut self, limit: usize) {
         self.undo_limit = limit.clamp(MIN_UNDO_LIMIT, MAX_UNDO_LIMIT);
         while self.undo.len() > self.undo_limit { self.undo.pop_front(); }
     }
 }
+fn baseline_text(disk: &[u8]) -> String {
+    let disk = disk.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(disk);
+    String::from_utf8_lossy(disk).into_owned()
+}
+pub fn create_empty_controller_state(ui: &egui::Ui, machine: &str, position: egui::Pos2) -> Option<String> {
+    if !position.x.is_finite() || !position.y.is_finite() { return None; }
+    let source = source(ui)?;
+    let mut session = source.session.lock().unwrap();
+    if session.has_drafts() {
+        session.warning = Some(crate::localization::tr("请先确认正在输入的属性，再创建状态。").into()); return None;
+    }
+    let mut text = session.rendered();
+    let documents = crate::parse_unity_yaml(&text);
+    let owner = documents.iter().position(|doc| doc.file_id == machine && doc.type_name == "AnimatorStateMachine")?;
+    let owner_start = text.find("--- !u!")? + documents[..owner].iter().map(|doc| doc.text.len()).sum::<usize>();
+    let mut file_id = 1_102_000_000_i64;
+    while documents.iter().any(|doc| doc.file_id == file_id.to_string()) { file_id = file_id.checked_add(1)?; }
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut name = "New State".to_string();
+    let mut suffix = 1;
+    while documents.iter().any(|doc| crate::name_from_text(&doc.text).as_deref() == Some(&name)) {
+        name = format!("New State {suffix}"); suffix += 1;
+    }
+    let entry = format!("  - serializedVersion: 1{newline}    m_State: {{fileID: {file_id}}}{newline}    m_Position: {{x: {}, y: {}, z: 0}}{newline}", position.x, position.y);
+    let mut offset = owner_start;
+    let mut insertion = None;
+    let mut in_list = false;
+    for line in documents[owner].text.split_inclusive('\n') {
+        if line.trim().starts_with("m_ChildStates:") {
+            let value = line.trim().strip_prefix("m_ChildStates:")?.trim();
+            if value == "[]" {
+                insertion = Some((offset..offset + line.len(), format!("  m_ChildStates:{newline}{entry}"))); break;
+            }
+            if !value.is_empty() { return None; }
+            in_list = true;
+        } else if in_list && !line.trim().is_empty() && line.starts_with("  ") && !line.starts_with("    ") && !line.trim_start().starts_with('-') {
+            insertion = Some((offset..offset, entry.clone())); break;
+        }
+        offset += line.len();
+    }
+    let (range, replacement) = insertion.or_else(|| in_list.then(|| (offset..offset, entry)))?;
+    text.replace_range(range, &replacement);
+    if !text.ends_with('\n') { text.push_str(newline); }
+    text.push_str(&format!("--- !u!1102 &{file_id}{newline}AnimatorState:{newline}  serializedVersion: 6{newline}  m_ObjectHideFlags: 1{newline}  m_CorrespondingSourceObject: {{fileID: 0}}{newline}  m_PrefabInstance: {{fileID: 0}}{newline}  m_PrefabAsset: {{fileID: 0}}{newline}  m_Name: {name}{newline}  m_Speed: 1{newline}  m_CycleOffset: 0{newline}  m_Transitions: []{newline}  m_StateMachineBehaviours: []{newline}  m_Position: {{x: 50, y: 50, z: 0}}{newline}  m_IKOnFeet: 0{newline}  m_WriteDefaultValues: 1{newline}  m_Mirror: 0{newline}  m_SpeedParameterActive: 0{newline}  m_MirrorParameterActive: 0{newline}  m_CycleOffsetParameterActive: 0{newline}  m_TimeParameterActive: 0{newline}  m_Motion: {{fileID: 0}}{newline}  m_Tag:{newline}  m_SpeedParameter:{newline}  m_MirrorParameter:{newline}  m_CycleOffsetParameter:{newline}  m_TimeParameter:{newline}"));
+    let created = crate::parse_unity_yaml(&text);
+    if created.len() != documents.len() + 1
+        || created.iter().zip(&documents).any(|(after, before)| after.file_id != before.file_id || after.type_name != before.type_name)
+        || created.iter().filter(|doc| doc.file_id == file_id.to_string()).count() != 1
+        || crate::file_ids_for_key(&created[owner].text, "m_State").iter().filter(|id| **id == file_id.to_string()).count() != 1 {
+        return None;
+    }
+    let previous = session.patches.clone();
+    session.record_undo(previous);
+    session.original = text;
+    session.patches.clear();
+    session.component_drafts.clear();
+    session.revision += 1;
+    session.finish_drag();
+    Some(file_id.to_string())
+}
 pub fn publish(ctx: &egui::Context, session: Option<Shared>, range: Range<usize>) {
     ctx.data_mut(|data| { data.remove::<Source>(id()); if let Some(session) = session { data.insert_temp(id(), Source { session, range }); } });
 }
 pub fn active(ui: &egui::Ui) -> bool { ui.ctx().data(|data| data.get_temp::<Source>(id())).is_some() }
+fn controller_source(ui: &egui::Ui, machine: &str) -> Option<Source> {
+    let mut source = source(ui)?;
+    let session = source.session.lock().unwrap();
+    let documents = crate::parse_unity_yaml(&session.original);
+    let index = documents.iter().position(|doc| doc.file_id == machine)?;
+    let start = session.original.find("--- !u!")? + documents[..index].iter().map(|doc| doc.text.len()).sum::<usize>();
+    source.range = start..start + documents[index].text.len();
+    drop(session);
+    Some(source)
+}
+pub fn controller_machine_text(ui: &egui::Ui, machine: &str) -> Option<String> {
+    document_text(ui, machine)
+}
+pub fn document_text(ui: &egui::Ui, machine: &str) -> Option<String> {
+    let source = controller_source(ui, machine)?;
+    let session = source.session.lock().unwrap();
+    let mut text = session.original[source.range.clone()].to_string();
+    let mut preview = session.patches.clone();
+    for (start, draft) in session.drafts.iter().filter(|(start, _)| source.range.contains(start)) {
+        if session.original[..*start].lines().last().is_some_and(|line| line.trim() == "m_Name:") {
+            let value = session.original[*start..].lines().next().unwrap_or("").trim_end();
+            let state = session.original[..*start].rsplit("---").next().is_some_and(|document| document.starts_with(" !u!1102 "));
+            preview.insert(*start, (*start + value.len(), quoted(draft, if state { "" } else { value })));
+        }
+    }
+    for (start, (end, value)) in preview.iter().rev().filter(|(start, (end, _))| **start >= source.range.start && *end <= source.range.end) {
+        text.replace_range(start - source.range.start..end - source.range.start, value);
+    }
+    Some(text)
+}
+fn controller_binding(ui: &egui::Ui, machine: &str, node: Option<(&str, &str)>) -> Option<Binding> {
+    let source = controller_source(ui, machine)?;
+    let session = source.session.lock().unwrap();
+    let mut offset = source.range.start;
+    let mut matched = false;
+    let mut found = None;
+    for line in session.original[source.range.clone()].split_inclusive('\n') {
+        let trimmed = line.trim().trim_start_matches("- ");
+        if line.trim_start().starts_with('-') { matched = false; }
+        if let Some((key, value)) = trimmed.split_once(':') {
+            if let Some((reference_key, file_id)) = node {
+                if key == reference_key { matched = value.trim() == format!("{{fileID: {file_id}}}"); }
+            }
+            let special_position = node.is_some_and(|(reference_key, position_key)| reference_key.is_empty()
+                && matches!(position_key, "m_EntryPosition" | "m_AnyStatePosition" | "m_ExitPosition") && key == position_key);
+            if (node.is_none() && key == "m_DefaultState") || (matched && key == "m_Position") || special_position {
+                let colon = line.find(':')? + 1;
+                let start = offset + colon + line[colon..].len() - line[colon..].trim_start().len();
+                if found.is_some() { return None; }
+                found = Some(start..start + value.trim().len());
+            }
+        }
+        offset += line.len();
+    }
+    drop(session);
+    Some(Binding { source, range: found? })
+}
+pub fn drag_controller_node(ui: &egui::Ui, machine: &str, node: &str, key: &str, delta: egui::Vec2, continuing: bool) {
+    let target = if node.is_empty() { ("", key) } else { (key, node) };
+    let Some(bind) = controller_binding(ui, machine, Some(target)) else { return };
+    let value = bind.value();
+    let Some(mut xyz) = crate::inline_vector(&value, &["x", "y", "z"]) else { return };
+    xyz[0] += delta.x as f64; xyz[1] += delta.y as f64;
+    if xyz.iter().all(|value| value.is_finite()) {
+        bind.source.session.lock().unwrap().change_grouped(bind.range.clone(), float_components(&value, &["x", "y", "z"], &xyz), continuing);
+    }
+}
+pub fn set_controller_default(ui: &egui::Ui, machine: &str, node: &str) {
+    if let Some(bind) = controller_binding(ui, machine, None) { bind.apply(format!("{{fileID: {node}}}")); }
+}
 pub fn scope_value(ui: &egui::Ui) -> Option<String> {
     let source = source(ui)?;
     let session = source.session.lock().unwrap();
@@ -96,6 +252,9 @@ pub fn scope_value(ui: &egui::Ui) -> Option<String> {
         value.replace_range(start - source.range.start..end - source.range.start, patch);
     }
     Some(value)
+}
+pub fn edit_revision(ui: &egui::Ui) -> Option<usize> {
+    source(ui).map(|source| source.session.lock().unwrap().revision)
 }
 pub fn named_binding(ui: &egui::Ui, name: &str) -> Option<Binding> {
     let source = source(ui)?;
@@ -116,11 +275,101 @@ pub fn named_binding(ui: &egui::Ui, name: &str) -> Option<Binding> {
     drop(session);
     Some(Binding { source, range: ranges.remove(0) })
 }
+/// Bind an exact document line so equal values in different animation keys
+/// cannot cause an ambiguous match or modify another keyframe.
+pub fn line_binding(ui: &egui::Ui, line_index: usize, name: &str) -> Option<Binding> {
+    let source = source(ui)?;
+    let session = source.session.lock().unwrap();
+    let text = session.original.get(source.range.clone())?;
+    let mut offset = source.range.start;
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        if index == line_index {
+            let (key, value) = line.trim().split_once(':')?;
+            if key != name || value.trim().is_empty() { return None; }
+            let colon = line.find(':')? + 1;
+            let start = offset + colon + line[colon..].len() - line[colon..].trim_start().len();
+            let range = start..start + value.trim().len();
+            drop(session);
+            return Some(Binding { source, range });
+        }
+        offset += line.len();
+    }
+    None
+}
+
+pub fn move_animation_keys(ui: &egui::Ui, keys: &[(usize, f64)], continuing: bool) -> bool {
+    let Some(source) = source(ui) else { return false };
+    if source.session.lock().unwrap().has_drafts() {
+        warning(ui, crate::localization::tr("请先确认正在输入的值，再拖动关键帧。"));
+        return false;
+    }
+    let mut changes = Vec::new();
+    for (line, time) in keys {
+        if !time.is_finite() || *time < 0.0 || *time > f32::MAX as f64 { return false; }
+        let Some(bind) = line_binding(ui, *line, "time") else { return false };
+        changes.push((bind.range, (*time as f32).to_string()));
+    }
+    if let Some(bind) = named_binding(ui,"m_StopTime") {
+        let Some(text) = scope_value(ui) else { return false };
+        let end = animation_end_after_moves(&text, keys);
+        changes.push((bind.range,(end as f32).to_string()));
+    }
+    source.session.lock().unwrap().change_many(changes, continuing)
+}
+fn animation_end_after_moves(text: &str, keys: &[(usize, f64)]) -> f64 {
+    text.lines().enumerate().filter_map(|(index, line)| {
+        let value = line.trim().trim_start_matches("- ").strip_prefix("time:")?;
+        keys.iter().find(|(line, _)| *line == index).map(|(_, time)| *time)
+            .or_else(|| value.trim().parse::<f64>().ok())
+            .filter(|time| time.is_finite() && *time >= 0.0)
+    }).fold(0.0_f64, f64::max)
+}
+
+#[cfg(test)]
+mod animation_duration_tests {
+    use super::*;
+    #[test]
+    fn end_follows_moved_keys_and_keeps_other_tracks() {
+        let text = "time: 1.4\nvalue: 1\ntime: 1.4\nvalue: 2\ntime: 1\nvalue: 3\nm_StopTime: 1.4\n";
+        let time = 40.0 / 30.0;
+        assert_eq!(animation_end_after_moves(text, &[(0,time),(2,time)]),time);
+        assert_eq!(animation_end_after_moves(text, &[(0,time)]),1.4);
+        assert_eq!(animation_end_after_moves(text, &[(0,1.5),(2,1.5)]),1.5);
+    }
+}
+/// Commit a structural animation edit as one undo operation.
+pub fn change_animation_document(ui: &egui::Ui, transform: impl FnOnce(&str) -> Option<String>) -> bool {
+    let Some(source) = source(ui) else { return false };
+    let mut session = source.session.lock().unwrap();
+    if session.has_drafts() { session.warning = Some(crate::localization::tr("请先确认正在输入的值，再拖动关键帧。").into()); return false; }
+    let Some(owner) = session.original.get(source.range.clone()).and_then(|text| crate::parse_unity_yaml(text).first().map(|doc| doc.file_id.clone())) else { return false };
+    let mut text = session.rendered();
+    let docs = crate::parse_unity_yaml(&text);
+    let Some(index) = docs.iter().position(|doc| doc.file_id == owner) else { return false };
+    let start = text.find("--- !u!").unwrap_or(0) + docs[..index].iter().map(|doc| doc.text.len()).sum::<usize>();
+    let Some(replacement) = transform(&docs[index].text) else { return false };
+    if replacement == docs[index].text { return false; }
+    text.replace_range(start..start + docs[index].text.len(), &replacement);
+    let after = crate::parse_unity_yaml(&text);
+    if after.len() != docs.len() || after.iter().zip(&docs).any(|(a,b)| a.file_id != b.file_id || a.type_name != b.type_name) { return false; }
+    let previous = session.patches.clone();
+    let structural = replacement.lines().count() != docs[index].text.lines().count();
+    let continuing = !structural && ui.input(|input| input.pointer.primary_down());
+    if !continuing || session.active_drag != Some(source.range.start) { session.record_undo(previous); }
+    session.original = text;
+    session.patches.clear();
+    if structural { session.revision += 1; }
+    session.active_drag = if continuing { Some(source.range.start) } else { None };
+    drop(session);
+    ui.ctx().data_mut(|data| data.remove::<Source>(id()));
+    ui.ctx().request_repaint();
+    true
+}
 fn source(ui: &egui::Ui) -> Option<Source> { ui.ctx().data(|data| data.get_temp(id())) }
 pub fn warning(ui: &egui::Ui, message: &str) { if let Some(source) = source(ui) { source.session.lock().unwrap().warning = Some(message.into()); } }
 pub fn reference_warning(ui: &egui::Ui, rect: egui::Rect) {
     if active(ui) && ui.interact(rect, ui.id().with("locked_reference"), egui::Sense::click()).clicked() {
-        warning(ui, "带 fileID 的属性暂不开放编辑。修改可能破坏本文件内部对象索引、Prefab 关联或外部资源引用。请在 Unity 编辑器中修改引用。");
+        warning(ui, crate::localization::tr("带 fileID 的属性暂不开放编辑。修改可能破坏本文件内部对象索引、Prefab 关联或外部资源引用。请在 Unity 编辑器中修改引用。"));
     }
 }
 fn normalized(name: &str) -> String { name.trim_start_matches("m_").chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect() }
@@ -249,13 +498,13 @@ impl Binding {
     pub fn dirty(&self) -> bool { self.source.session.lock().unwrap().has_changes_in(self.range.clone()) }
     fn apply(&self, value: String) { self.source.session.lock().unwrap().change(self.range.clone(), value); }
     fn apply_color(&self, ui: &egui::Ui, color: [f64; 4]) {
-        if !color.iter().all(|value| value.is_finite() && value.abs() <= f32::MAX as f64) { warning(ui, "颜色分量必须为有效浮点数，已恢复之前的值。"); return; }
+        if !color.iter().all(|value| value.is_finite() && value.abs() <= f32::MAX as f64) { warning(ui, crate::localization::tr("颜色分量必须为有效浮点数，已恢复之前的值。")); return; }
         let continuing = ui.input(|input| input.pointer.any_down() && !input.pointer.any_pressed());
         let value = float_components(&self.value(), &["r", "g", "b", "a"], &color);
         self.source.session.lock().unwrap().change_grouped(self.range.clone(), value, continuing);
     }
     pub fn restore(&self) {
-        let original = { let mut session = self.source.session.lock().unwrap(); session.drafts.remove(&self.range.start); session.component_drafts.retain(|(start, _), _| *start != self.range.start); session.saved_patches.get(&self.range.start).map(|(_, value)| value.clone()).unwrap_or_else(|| session.original[self.range.clone()].to_string()) };
+        let original = { let mut session = self.source.session.lock().unwrap(); session.drafts.remove(&self.range.start); session.component_drafts.retain(|(start, _), _| *start != self.range.start); (session.original == session.saved_original).then(|| session.saved_patches.get(&self.range.start).map(|(_, value)| value.clone())).flatten().unwrap_or_else(|| session.original[self.range.clone()].to_string()) };
         self.apply(original);
     }
 }
@@ -271,7 +520,7 @@ pub fn restore_scope(ui: &egui::Ui) {
         let mut session = source.session.lock().unwrap();
         let previous = session.patches.clone();
         session.patches.retain(|start, _| !source.range.contains(start));
-        let saved: Vec<_> = session.saved_patches.iter().filter(|(start, _)| source.range.contains(start)).map(|(start, value)| (*start, value.clone())).collect();
+        let saved: Vec<_> = session.saved_patches.iter().filter(|(start, _)| session.original == session.saved_original && source.range.contains(start)).map(|(start, value)| (*start, value.clone())).collect();
         session.patches.extend(saved);
         if session.patches != previous { session.record_undo(previous); }
         session.drafts.retain(|start, _| !source.range.contains(start));
@@ -307,6 +556,8 @@ fn float_components(current: &str, axes: &[&str], values: &[f64]) -> String {
     format!("{{{components}}}")
 }
 fn quoted(value: &str, original: &str) -> String {
+    // Preserve Unity's plain scalar style, including numeric-looking names.
+    if !original.starts_with(['\'', '"']) && plain_string(value) { return value.to_string(); }
     if original.starts_with('\'') && !value.chars().any(char::is_control) { return format!("'{}'", value.replace('\'', "''")); }
     let unicode_style = original.contains("\\u") || original.contains("\\U");
     let mut result = String::from("\"");
@@ -319,21 +570,44 @@ fn quoted(value: &str, original: &str) -> String {
     }
     result.push('"'); result
 }
+fn plain_string(value: &str) -> bool {
+    if value.is_empty() { return true; }
+    value.trim() == value
+        && !value.chars().any(char::is_control)
+        && !value.starts_with(['-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`'])
+        && !value.contains(": ") && !value.ends_with(':')
+        && !value.contains(" #")
+}
 pub fn text(ui: &mut egui::Ui, bind: &Binding, kind: &str, width: f32) {
+    text_inner(ui, bind, kind, width, false);
+}
+fn text_inner(ui: &mut egui::Ui, bind: &Binding, kind: &str, width: f32, exact_width: bool) {
     let current = bind.value();
     let is_string = matches!(kind.rsplit('.').next().unwrap_or(kind), "string" | "String" | "char" | "Char");
     let displayed = if is_string { crate::yaml_strings::display(&current).into_owned() } else { current.clone() };
     let mut draft = bind.source.session.lock().unwrap().drafts.get(&bind.range.start).cloned().unwrap_or(displayed.clone());
-    let response = ui.add(TextEdit::singleline(&mut draft).id(ui.id().with(("edit_value", bind.range.start))).desired_width(width));
+    let editor = TextEdit::singleline(&mut draft).id(ui.id().with(("edit_value", bind.range.start))).desired_width(width);
+    let response = if exact_width {
+        ui.add_sized(egui::vec2(width, ui.spacing().interact_size.y), editor)
+    } else { ui.add(editor) };
     if response.changed() {
         let mut session = bind.source.session.lock().unwrap();
         if draft == displayed { session.drafts.remove(&bind.range.start); } else { session.drafts.insert(bind.range.start, draft.clone()); }
+        ui.ctx().request_repaint();
     }
     if response.lost_focus() || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))) {
         bind.source.session.lock().unwrap().drafts.remove(&bind.range.start);
         if draft != displayed {
-            if validate(kind, &draft) { bind.apply(if is_string { quoted(&draft, &current) } else { draft }); }
-            else { warning(ui, "输入值与属性类型不符或超出范围，已恢复为之前的有效值。"); }
+            if validate(kind, &draft) {
+                let state_name = if is_string {
+                    let session = bind.source.session.lock().unwrap();
+                    let prefix = &session.original[..bind.range.start];
+                    prefix.lines().last().is_some_and(|line| line.trim() == "m_Name:")
+                        && prefix.rsplit("---").next().is_some_and(|document| document.starts_with(" !u!1102 "))
+                } else { false };
+                bind.apply(if is_string { quoted(&draft, if state_name { "" } else { &current }) } else { draft });
+            }
+            else { warning(ui, crate::localization::tr("输入值与属性类型不符或超出范围，已恢复为之前的有效值。")); }
         }
     }
 }
@@ -356,11 +630,37 @@ pub fn range_control(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, (min,
                 let continuing = ui.input(|input| input.pointer.any_down() && !input.pointer.any_pressed());
                 bind.source.session.lock().unwrap().change_grouped(bind.range.clone(), text, continuing);
             }
-        } else { warning(ui, "滑条数值超出属性类型范围，已恢复之前的值。"); }
+        } else { warning(ui, crate::localization::tr("滑条数值超出属性类型范围，已恢复之前的值。")); }
     }
     if let Some(bind) = bind.filter(Binding::dirty) {
-        if ui.small_button("还原").clicked() { bind.restore(); }
+        if ui.small_button(crate::localization::tr("还原")).clicked() { bind.restore(); }
     }
+}
+
+pub fn table_control(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Option<&[(String, i64)]>) -> bool {
+    let scalar = kind.rsplit('.').next().unwrap_or(kind);
+    if active(ui) && enums.is_none() && !raw.contains("fileID:") {
+        if let Some(bind) = binding(ui, name, raw) {
+            let value = bind.value();
+            if validate(scalar, if matches!(scalar, "string" | "String" | "char" | "Char") { "x" } else { &value })
+                && !matches!(scalar, "bool" | "Boolean") {
+                let path = bind.source.session.lock().unwrap().path.clone();
+                ui.push_id(path, |ui| ui.horizontal(|ui| {
+                    let button = egui::Button::new(crate::localization::tr("还原")).small();
+                    let button_width = ui.painter().layout_no_wrap(crate::localization::tr("还原").into(),
+                        egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color()).size().x
+                        + 2.0 * ui.spacing().button_padding.x;
+                    let width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(0.0);
+                    text_inner(ui, &bind, kind, width, true);
+                    if bind.dirty() && ui.add_sized(egui::vec2(button_width, ui.spacing().interact_size.y), button).clicked() {
+                        bind.restore();
+                    }
+                }));
+                return true;
+            }
+        }
+    }
+    control(ui, name, raw, kind, enums)
 }
 
 pub fn control(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Option<&[(String, i64)]>) -> bool {
@@ -369,7 +669,7 @@ pub fn control(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Opti
     ui.push_id(path, |ui| ui.horizontal(|ui| {
         let shown = control_inner(ui, name, raw, kind, enums);
         if shown { if let Some(bind) = binding(ui, name, raw).filter(Binding::dirty) {
-            if ui.small_button("还原").clicked() { bind.restore(); }
+            if ui.small_button(crate::localization::tr("还原")).clicked() { bind.restore(); }
         } }
         shown
     }).inner).inner
@@ -394,7 +694,7 @@ fn control_inner(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Op
         if number != original { if let Some(number) = number { bind.apply(number.to_string()); } }
         return true;
     }
-    let axes: Option<&[&str]> = match kind { "Color" => Some(&["r", "g", "b", "a"]), "Vector2" | "Vector2Int" => Some(&["x", "y"]), "Vector3" | "Vector3Int" | "Euler" => Some(&["x", "y", "z"]), "Vector4" | "Quaternion" => Some(&["x", "y", "z", "w"]), _ => None };
+    let axes: Option<&[&str]> = match kind { "Color" | "MaterialVector4" => Some(&["r", "g", "b", "a"]), "Vector2" | "Vector2Int" => Some(&["x", "y"]), "Vector3" | "Vector3Int" | "Euler" => Some(&["x", "y", "z"]), "Vector4" | "Quaternion" => Some(&["x", "y", "z", "w"]), _ => None };
     if let Some(axes) = axes {
         let Some(mut values) = (if kind == "Euler" { crate::inline_vector(&value, &["x", "y", "z", "w"]).and_then(|q| crate::rotation_euler_degrees(&q)) } else { crate::inline_vector(&value, axes) }) else { return false };
         if kind == "Color" {
@@ -406,7 +706,7 @@ fn control_inner(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Op
         let mut changed = false;
         let width = ((ui.available_width() - axes.len() as f32 * 20.0 - 50.0) / axes.len() as f32).clamp(48.0, 96.0);
         for (component, (axis, v)) in axes.iter().zip(&mut values).enumerate() {
-            ui.label(*axis);
+            ui.label(if kind == "MaterialVector4" { ["x", "y", "z", "w"][component] } else { *axis });
             let mut input = v.to_string();
             let revision = bind.source.session.lock().unwrap().revision;
             let draft_id = ui.id().with(("vector_draft", bind.range.start, axis, revision));
@@ -417,12 +717,12 @@ fn control_inner(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Op
                 bind.source.session.lock().unwrap().component_drafts.remove(&(bind.range.start, component));
                 if validate(if kind.ends_with("Int") { "int" } else { "float" }, &input) {
                     let next = input.parse::<f64>().unwrap(); changed |= next != *v; *v = next;
-                } else { warning(ui, "向量分量必须为有效数值且不能越界，已恢复之前的值。"); }
+                } else { warning(ui, crate::localization::tr("向量分量必须为有效数值且不能越界，已恢复之前的值。")); }
             }
         }
         if changed {
             let (axes, values) = if kind == "Euler" { (&["x", "y", "z", "w"][..], euler_quaternion(&values).to_vec()) } else { (axes, values) };
-            if kind == "Quaternion" && values.iter().all(|v| *v == 0.0) { warning(ui, "四元数不能全部为零，已恢复之前的值。"); }
+            if kind == "Quaternion" && values.iter().all(|v| *v == 0.0) { warning(ui, crate::localization::tr("四元数不能全部为零，已恢复之前的值。")); }
             else if kind.ends_with("Int") { bind.apply(format!("{{{}}}", axes.iter().zip(values).map(|(axis, v)| format!("{axis}: {v}")).collect::<Vec<_>>().join(", "))); }
             else { bind.apply(float_components(&value, axes, &values)); }
         }
@@ -443,8 +743,8 @@ pub fn packed_int_list(ui: &mut egui::Ui, name: &str, raw: &str, element: &str) 
     if !unsigned && !matches!(element.rsplit('.').next().unwrap_or(element), "int" | "Int32") { return false; }
     if raw.is_empty() || raw.len() % 8 != 0 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) { return false; }
     let count = raw.len() / 8;
-    egui::CollapsingHeader::new(format!("{name} ({element}[]) · {count} 条")).default_open(true).show(ui, |ui| {
-        ui.horizontal(|ui| { ui.add_sized([60.0, 24.0], egui::Label::new("索引")); ui.label("值"); });
+    egui::CollapsingHeader::new(crate::lf!("{0} ({1}[]) · {2} 条", name, element, count)).default_open(true).show(ui, |ui| {
+        ui.horizontal(|ui| { ui.add_sized([60.0, 24.0], egui::Label::new(crate::localization::tr("索引"))); ui.label(crate::localization::tr("值")); });
         let root = binding(ui, name, raw);
         egui::ScrollArea::vertical().id_salt(("packed_int_list", name)).max_height(count.min(11) as f32 * 24.0 + if count > 11 { 12.0 } else { 0.0 }).auto_shrink([false, true]).show(ui, |ui| {
             for index in 0..count {
@@ -469,9 +769,9 @@ pub fn packed_int_list(ui: &mut egui::Ui, name: &str, raw: &str, element: &str) 
                                 if validate(if unsigned { "uint" } else { "int" }, &draft) {
                                     let number = if unsigned { draft.parse::<u32>().unwrap() } else { draft.parse::<i32>().unwrap() as u32 };
                                     if draft != shown { bind.apply(number.to_le_bytes().iter().map(|byte| if raw.chars().any(|c| c.is_ascii_uppercase()) { format!("{byte:02X}") } else { format!("{byte:02x}") }).collect()); }
-                                } else { warning(ui, "列表值与整数类型不符或越界，已恢复之前的值。"); }
+                                } else { warning(ui, crate::localization::tr("列表值与整数类型不符或越界，已恢复之前的值。")); }
                             }
-                            if bind.dirty() && ui.small_button("还原").clicked() { bind.restore(); }
+                            if bind.dirty() && ui.small_button(crate::localization::tr("还原")).clicked() { bind.restore(); }
                         } else { let mut shown = shown; ui.add_sized([200.0, 24.0], TextEdit::singleline(&mut shown).interactive(false)); }
                     });
                     let mut rect = response.response.rect; rect.max.x = ui.max_rect().right();
@@ -508,7 +808,7 @@ fn gradient_value(ui: &mut egui::Ui, key: &str, component: Option<usize>) -> boo
                     bind.apply(float_components(&bind.value(), &["r", "g", "b", "a"], color));
                 } else { bind.apply(((next / 100.0 * 65535.0).round() as u16).to_string()); }
             }
-        } else { warning(ui, match component { Some(3) => "Alpha 必须为 0～1，已恢复之前的值。", Some(_) => "颜色分量必须为有限浮点数，已恢复之前的值。", None => "渐变位置必须为 0～100%，已恢复之前的值。" }); }
+        } else { warning(ui, match component { Some(3) => crate::localization::tr("Alpha 必须为 0～1，已恢复之前的值。"), Some(_) => crate::localization::tr("颜色分量必须为有限浮点数，已恢复之前的值。"), None => crate::localization::tr("渐变位置必须为 0～100%，已恢复之前的值。") }); }
     }
     true
 }
@@ -524,13 +824,13 @@ pub fn gradient_color(ui: &mut egui::Ui, key: &str) -> bool {
 
 pub fn save(session: &Session) -> Result<String, String> {
     use std::io::Write;
-    if session.warning.is_some() { return Err("存在输入验证警告，请确认已回退的值后再保存。".into()); }
-    if session.has_drafts() { return Err("仍有输入正在编辑，请按 Enter 或点击其他位置确认输入后再保存。".into()); }
+    if session.warning.is_some() { return Err(crate::localization::tr("存在输入验证警告，请确认已回退的值后再保存。").into()); }
+    if session.has_drafts() { return Err(crate::localization::tr("仍有输入正在编辑，请按 Enter 或点击其他位置确认输入后再保存。").into()); }
     let current = std::fs::read(&session.path).map_err(|error| error.to_string())?;
-    if current != session.disk { return Err("文件已被其他程序修改，未覆盖磁盘文件。请放弃编辑并重新打开文件。".into()); }
+    if current != session.disk { return Err(crate::localization::tr("文件已被其他程序修改，未覆盖磁盘文件。请放弃编辑并重新打开文件。").into()); }
     let text = session.rendered();
     if crate::parse_unity_yaml(&text).iter().map(|doc| (&doc.file_id, &doc.type_name)).collect::<Vec<_>>() != crate::parse_unity_yaml(&session.original).iter().map(|doc| (&doc.file_id, &doc.type_name)).collect::<Vec<_>>() {
-        return Err("保存验证失败：对象索引或类型发生变化。".into());
+        return Err(crate::localization::tr("保存验证失败：对象索引或类型发生变化。").into());
     }
     let temporary = session.path.with_file_name(format!(".{}.unity-yaml-edit-{}.tmp", session.path.file_name().unwrap().to_string_lossy(), std::process::id()));
     let mut created = false;
@@ -540,8 +840,8 @@ pub fn save(session: &Session) -> Result<String, String> {
         if session.disk.starts_with(&[0xef, 0xbb, 0xbf]) && !text.starts_with('\u{feff}') { file.write_all(&[0xef, 0xbb, 0xbf]).map_err(|error| error.to_string())?; }
         file.write_all(text.as_bytes()).and_then(|_| file.sync_all()).map_err(|error| error.to_string())?;
         drop(file);
-        if std::fs::read(&session.path).map_err(|error| error.to_string())? != session.disk { return Err("保存前检测到文件发生变化，已取消保存。".into()); }
-        std::fs::rename(&temporary, &session.path).map_err(|error| format!("无法写入文件：{error}"))?;
+        if std::fs::read(&session.path).map_err(|error| error.to_string())? != session.disk { return Err(crate::localization::tr("保存前检测到文件发生变化，已取消保存。").into()); }
+        std::fs::rename(&temporary, &session.path).map_err(|error| crate::lf!("无法写入文件：{0}", error))?;
         Ok(text)
     })();
     if result.is_err() && created { let _ = std::fs::remove_file(&temporary); }
@@ -551,6 +851,107 @@ pub fn save(session: &Session) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn animation_batch_drag_uses_one_undo_and_preserves_values() {
+        let raw = "time: 0\r\nvalue: 1\r\ntime: 0.5\r\nvalue: 1\r\n";
+        let mut session = Session::new(PathBuf::from("clip.anim"), raw.into(), raw.as_bytes().to_vec());
+        let second = raw.find("0.5").unwrap();
+        assert!(session.change_many(vec![(6..7, "0.1".into()), (second..second+3, "0.6".into())], true));
+        assert!(session.change_many(vec![(6..7, "0.2".into()), (second..second+3, "0.7".into())], true));
+        assert_eq!(session.undo.len(), 1);
+        assert_eq!(session.rendered(), "time: 0.2\r\nvalue: 1\r\ntime: 0.7\r\nvalue: 1\r\n");
+        session.undo();
+        assert_eq!(session.rendered(), raw);
+        session.drafts.insert(6, "typing".into());
+        assert!(!session.change_many(vec![(6..7, "0.3".into())], true));
+        assert_eq!(session.rendered(), raw);
+    }
+    #[test]
+    fn special_controller_nodes_move_only_their_own_position_and_group_undo() {
+        let raw = "--- !u!1107 &10\nAnimatorStateMachine:\n  m_AnyStatePosition: {x: 10, y: 20, z: 3}\n  m_EntryPosition: {x: 10, y: 20, z: 4}\n  m_ExitPosition: {x: 10, y: 20, z: 5}\n  m_DefaultState: {fileID: 0}\n";
+        for key in ["m_AnyStatePosition", "m_EntryPosition", "m_ExitPosition"] {
+            in_ui(raw, |ui, edit| {
+                drag_controller_node(ui, "10", "", key, egui::vec2(10.0, -5.0), false);
+                drag_controller_node(ui, "10", "", key, egui::vec2(2.0, 1.0), true);
+                let changed = edit.lock().unwrap().rendered();
+                let expected = raw.lines().find(|line| line.trim_start().starts_with(key)).unwrap()
+                    .replace("x: 10, y: 20", "x: 22, y: 16");
+                assert_eq!(changed, raw.replace(raw.lines().find(|line| line.trim_start().starts_with(key)).unwrap(), &expected));
+                edit.lock().unwrap().undo();
+                assert_eq!(edit.lock().unwrap().rendered(), raw);
+            });
+        }
+    }
+    #[test]
+    fn state_name_draft_previews_without_committing_or_changing_undo_history() {
+        let raw = "--- !u!1102 &20\nAnimatorState:\n  m_Name: 3\n  m_Speed: 1\n";
+        in_ui(raw, |ui, edit| {
+            let start = raw.find("m_Name: 3").unwrap() + "m_Name: ".len();
+            edit.lock().unwrap().drafts.insert(start, "2".into());
+            assert!(document_text(ui, "20").unwrap().contains("m_Name: 2\n"));
+            assert_eq!(edit.lock().unwrap().rendered(), raw);
+            assert!(edit.lock().unwrap().undo.is_empty());
+            edit.lock().unwrap().undo();
+            assert!(document_text(ui, "20").unwrap().contains("m_Name: 3\n"));
+        });
+    }
+    #[test]
+    fn plain_unity_strings_keep_numeric_names_and_quote_yaml_delimiters() {
+        assert_eq!(quoted("0", "New State"), "0");
+        assert_eq!(quoted("2", "0"), "2");
+        assert_eq!(quoted("Idle State", "New State"), "Idle State");
+        assert_eq!(quoted("", "New State"), "");
+        for value in ["a: b", "a # comment", "{value}", " leading", "line\nbreak"] {
+            let serialized = quoted(value, "New State");
+            assert!(serialized.starts_with('"'));
+            assert_eq!(crate::yaml_strings::display(&serialized), value);
+        }
+        assert_eq!(quoted("2", "\"0\""), "\"2\"");
+    }
+    #[test]
+    fn creates_empty_states_with_unique_ids_and_atomic_undo() {
+        for children in ["  m_ChildStates: []\n", "  m_ChildStates:\n  - serializedVersion: 1\n    m_State: {fileID: 1102000000}\n    m_Position: {x: 1, y: 2, z: 0}\n"] {
+            let raw = format!("%YAML 1.1\n--- !u!1107 &10\nAnimatorStateMachine:\n{children}  m_DefaultState: {{fileID: 0}}\n--- !u!1102 &1102000000\nAnimatorState:\n  m_Name: New State\n  m_Motion: {{fileID: 0}}\n");
+            in_ui(&raw, |ui, edit| {
+                let first = create_empty_controller_state(ui, "10", egui::pos2(123.0, 456.0)).unwrap();
+                assert_eq!(first, "1102000001");
+                let created = edit.lock().unwrap().rendered();
+                let documents = crate::parse_unity_yaml(&created);
+                assert_eq!(documents.len(), 3);
+                assert!(documents[0].text.contains("m_Position: {x: 123, y: 456, z: 0}"));
+                assert!(documents[2].text.contains("m_Name: New State 1"));
+                assert!(documents[2].text.contains("m_Motion: {fileID: 0}"));
+                set_controller_default(ui, "10", &first);
+                edit.lock().unwrap().undo();
+                assert_eq!(edit.lock().unwrap().rendered(), created);
+                let second = create_empty_controller_state(ui, "10", egui::pos2(0.0, 0.0)).unwrap();
+                assert_ne!(first, second);
+                edit.lock().unwrap().undo();
+                assert_eq!(edit.lock().unwrap().rendered(), created);
+                edit.lock().unwrap().undo();
+                assert_eq!(edit.lock().unwrap().rendered(), raw);
+                assert!(!edit.lock().unwrap().has_changes());
+            });
+        }
+    }
+    #[test]
+    fn controller_layout_and_default_changes_target_owner_and_undo_independently() {
+        let raw = "%YAML 1.1\n--- !u!1107 &10\nAnimatorStateMachine:\n  m_ChildStates:\n  - serializedVersion: 1\n    m_State: {fileID: 20}\n    m_Position: {x: 100, y: 50, z: 7}\n  - serializedVersion: 1\n    m_State: {fileID: 21}\n    m_Position: {x: 100, y: 50, z: 7}\n  m_DefaultState: {fileID: 20}\n--- !u!1102 &20\nAnimatorState:\n  m_Position: {x: 0, y: 0, z: 0}\n";
+        in_ui(raw, |ui, edit| {
+            drag_controller_node(ui, "10", "21", "m_State", egui::vec2(10.0, -5.0), false);
+            drag_controller_node(ui, "10", "21", "m_State", egui::vec2(2.0, -3.0), true);
+            let moved = edit.lock().unwrap().rendered();
+            assert!(moved.contains("m_Position: {x: 112, y: 42, z: 7}"));
+            assert!(moved.contains("m_Position: {x: 100, y: 50, z: 7}"));
+            assert!(moved.contains("m_Position: {x: 0, y: 0, z: 0}"));
+            set_controller_default(ui, "10", "21");
+            assert!(controller_machine_text(ui, "10").unwrap().contains("m_DefaultState: {fileID: 21}"));
+            edit.lock().unwrap().undo();
+            assert_eq!(edit.lock().unwrap().rendered(), moved);
+            edit.lock().unwrap().undo();
+            assert_eq!(edit.lock().unwrap().rendered(), raw);
+        });
+    }
     #[test]
     fn float_components_write_short_single_precision_and_preserve_other_channels() {
         let value = 0.10214877128601074_f64;
@@ -582,7 +983,9 @@ mod tests {
         let next = shared.lock().unwrap().rendered();
         shared.lock().unwrap().mark_saved(&next);
         shared.lock().unwrap().undo();
-        assert_eq!(shared.lock().unwrap().rendered(), saved);
+        // Saving records a baseline, not an undo step. The restore was already
+        // undone, so the next undo reverses the original name edit.
+        assert_eq!(shared.lock().unwrap().rendered(), raw);
         assert!(shared.lock().unwrap().has_changes());
     }
 

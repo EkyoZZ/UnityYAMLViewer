@@ -108,9 +108,9 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
     let roots = file_ids_for_key(&controller.text, "m_StateMachine");
     if !roots.contains(&view.root) { view.root = roots.first().cloned().unwrap_or_default(); view.machine = view.root.clone(); view.fit = true; }
     ui.horizontal_wrapped(|ui| {
-        ui.strong("Animator 关系图");
-        ui.selectable_value(&mut view.yaml, false, "显示关系图");
-        ui.selectable_value(&mut view.yaml, true, "显示 YAML");
+        ui.strong(crate::localization::tr("Animator 关系图"));
+        ui.selectable_value(&mut view.yaml, false, crate::localization::tr("显示关系图"));
+        ui.selectable_value(&mut view.yaml, true, crate::localization::tr("显示 YAML"));
     });
     if view.yaml {
         ui.ctx().data_mut(|data| data.insert_temp(id, view));
@@ -124,26 +124,32 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
                     if ui.selectable_value(&mut view.root, root.clone(), label).changed() { view.machine = root.clone(); view.fit = true; }
                 }
             });
-        if ui.button("返回 Layer").clicked() { view.machine = view.root.clone(); view.fit = true; }
-        if ui.button("适应画布").clicked() { view.fit = true; }
-        ui.small("拖动画布 · 滚轮缩放 · 点击连线 · 双击子状态机进入");
+        if ui.button(crate::localization::tr("返回 Layer")).clicked() { view.machine = view.root.clone(); view.fit = true; }
+        if ui.button(crate::localization::tr("适应画布")).clicked() { view.fit = true; }
+        ui.small(crate::localization::tr("拖动画布 · 滚轮缩放 · 点击连线 · 双击子状态机进入"));
     });
-    ui.collapsing("Parameters（参数）", |ui| {
+    ui.collapsing(crate::localization::tr("Parameters（参数）"), |ui| {
         egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| parameters(ui, &controller.text));
     });
-    let Some(machine) = documents.iter().find(|doc| doc.file_id == view.machine) else { ui.label("未找到状态机"); return };
-    let data = graph(documents, machine);
+    let Some(machine) = documents.iter().find(|doc| doc.file_id == view.machine) else { ui.label(crate::localization::tr("未找到状态机")); return };
+    let mut machine = machine.clone();
+    if let Some(text) = crate::editing::controller_machine_text(ui, &machine.file_id) { machine.text = text; }
+    let mut data = graph(documents, &machine);
+    for node in &mut data.nodes {
+        if node.index.is_some() {
+            if let Some(name) = crate::editing::document_text(ui, &node.id).and_then(|text| name_from_text(&text)) { node.label = name; }
+        }
+    }
     let height = (ui.available_height() * 0.48).clamp(180.0, 360.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click_and_drag());
     let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(rect, 0.0, if ui.visuals().dark_mode { Color32::from_gray(28) } else { Color32::from_gray(225) });
+    painter.rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
     if view.fit {
         let bounds = data.nodes.iter().fold(Rect::NOTHING, |bounds, node| bounds.union(Rect::from_min_size(node.position, egui::vec2(160.0, 48.0))));
         view.zoom = ((rect.width() - 40.0) / bounds.width()).min((rect.height() - 40.0) / bounds.height()).clamp(0.15, 1.5);
         view.pan = rect.size() * 0.5 - bounds.center().to_vec2() * view.zoom;
         view.fit = false;
     }
-    if response.dragged() { view.pan += ui.input(|input| input.pointer.delta()); }
     if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll != 0.0 {
@@ -154,10 +160,31 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
         }
     }
     let boxes: Vec<_> = data.nodes.iter().map(|node| Rect::from_min_size(rect.min + view.pan + node.position.to_vec2() * view.zoom, egui::vec2(160.0, 48.0) * view.zoom)).collect();
+    let menu_position_id = id.with("create_state_position");
+    if response.secondary_clicked() {
+        if let Some(pointer) = response.interact_pointer_pos() {
+            let position = (pointer - rect.min - view.pan) / view.zoom;
+            ui.ctx().data_mut(|data| data.insert_temp(menu_position_id, egui::pos2(position.x, position.y)));
+        }
+    }
+    response.context_menu(|ui| {
+        ui.add_enabled_ui(crate::editing::active(ui), |ui| {
+            ui.menu_button("Create State", |ui| {
+                if ui.button("Empty").clicked() {
+                    let position = ui.ctx().data(|data| data.get_temp::<Pos2>(menu_position_id)).unwrap_or(egui::pos2(240.0, 100.0));
+                    if let Some(file_id) = crate::editing::create_empty_controller_state(ui, &machine.file_id, position) {
+                        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("created_controller_state"), file_id));
+                        ui.ctx().request_repaint();
+                    } else { crate::editing::warning(ui, crate::localization::tr("未能创建状态，请确认 ChildStates 结构有效，且已确认正在编辑的输入。")); }
+                    ui.close_menu();
+                }
+            });
+        });
+    });
     let mut edge_hit = None;
     for edge in &data.edges {
         let a = boxes[edge.from].center(); let b = boxes[edge.to].center();
-        let color = if edge.index.is_some() && edge.index == *selected { Color32::YELLOW }
+        let color = if edge.index.is_some() && edge.index == *selected { ui.visuals().hyperlink_color }
             else if edge.index.is_none() { Color32::from_rgb(180, 115, 25) } else { Color32::from_gray(110) };
         let points = if edge.from == edge.to {
             let bounds = boxes[edge.from];
@@ -190,21 +217,45 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
         }
     }
     if let Some(index) = edge_hit { *selected = Some(index); }
+    let mut node_dragged = false;
     for (i, node) in data.nodes.iter().enumerate() {
         let bounds = boxes[i];
         let color = match node.kind { 1 => Color32::from_rgb(30, 130, 65), 2 => Color32::from_rgb(45, 135, 140), 3 => Color32::from_rgb(160, 40, 45), 5 => Color32::from_rgb(175, 100, 20), _ => Color32::from_gray(75) };
-        painter.rect_filled(bounds, 4.0, color);
-        painter.rect_stroke(bounds, 4.0, Stroke::new(2.0_f32, if node.index.is_some() && node.index == *selected { Color32::YELLOW } else { Color32::from_gray(125) }), egui::StrokeKind::Inside);
+        let corner_radius = (10.0 * view.zoom).min(bounds.height() * 0.5);
+        painter.rect_filled(bounds, corner_radius, color);
+        painter.rect_stroke(bounds, corner_radius, Stroke::new(2.0_f32, if node.index.is_some() && node.index == *selected { ui.visuals().hyperlink_color } else { ui.visuals().widgets.inactive.bg_stroke.color }), egui::StrokeKind::Inside);
         let label = painter.layout(node.label.clone(), egui::FontId::proportional((13.0 * view.zoom).clamp(8.0, 20.0)), Color32::WHITE, bounds.width() - 8.0);
         painter.galley(bounds.center() - label.size() * 0.5, label, Color32::WHITE);
-        let interaction = ui.interact(bounds.intersect(rect), id.with(&node.id), Sense::click());
+        let editable = crate::editing::active(ui);
+        let interaction = ui.interact(bounds.intersect(rect), id.with(&node.id), if editable { Sense::click_and_drag() } else { Sense::click() });
+        if editable && interaction.dragged() {
+            node_dragged = true;
+            if let Some(index) = node.index { *selected = Some(index); }
+            let key = match node.kind {
+                1 => "m_EntryPosition", 2 => "m_AnyStatePosition", 3 => "m_ExitPosition",
+                4 => "m_StateMachine", _ => "m_State",
+            };
+            crate::editing::drag_controller_node(ui, &machine.file_id, if node.index.is_some() { &node.id } else { "" }, key,
+                ui.input(|input| input.pointer.delta()) / view.zoom, !interaction.drag_started());
+            ui.ctx().request_repaint();
+        }
+        if node.index.is_some() && node.kind != 4 {
+            interaction.context_menu(|ui| {
+                if ui.add_enabled(editable, egui::Button::new(crate::localization::tr("设为默认状态"))).clicked() {
+                    crate::editing::set_controller_default(ui, &machine.file_id, &node.id);
+                    ui.close_menu();
+                }
+            });
+        }
         if interaction.clicked() { if let Some(index) = node.index { *selected = Some(index); } }
         if interaction.double_clicked() && node.kind == 4 { view.machine = node.id.clone(); view.fit = true; }
     }
+    if response.dragged() && !node_dragged { view.pan += ui.input(|input| input.pointer.delta()); }
     if let Some(document) = selected.and_then(|index| documents.get(index)) {
         if matches!(document.type_name.as_str(), "AnimatorStateTransition" | "AnimatorTransition") { transition_details(ui, document); }
         else if document.type_name == "AnimatorState" {
-            ui.label(format!("状态：{}", name_from_text(&document.text).unwrap_or_default()));
+            let text = crate::editing::document_text(ui, &document.file_id).unwrap_or_else(|| document.text.clone());
+            ui.label(crate::lf!("状态：{0}", name_from_text(&text).unwrap_or_default()));
             crate::script_properties::show_graph_reference(ui, "Motion", scalar(&document.text, "m_Motion").unwrap_or("{fileID: 0}"));
         }
     }
@@ -213,9 +264,9 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
 
 fn parameters(ui: &mut egui::Ui, text: &str) {
     let entries = parse_parameters(text);
-    if entries.is_empty() { ui.label("没有参数"); return; }
+    if entries.is_empty() { ui.label(crate::localization::tr("没有参数")); return; }
     egui::Grid::new("controller_parameters").striped(true).show(ui, |ui| {
-        for title in ["名称", "类型", "默认值"] { ui.strong(title); } ui.end_row();
+        for title in [crate::localization::tr("名称"), crate::localization::tr("类型"), crate::localization::tr("默认值")] { ui.strong(title); } ui.end_row();
         for (name, kind, value) in entries {
             ui.label(name); ui.label(kind); ui.label(value); ui.end_row();
         }
@@ -232,7 +283,7 @@ fn parse_parameters(text: &str) -> Vec<(String, String, String)> {
                 Some("3") => ("Int", scalar(entry, "m_DefaultInt").unwrap_or("0").to_string()),
                 Some("4") => ("Bool", if scalar(entry, "m_DefaultBool") == Some("1") { "true" } else { "false" }.into()),
                 Some("9") => ("Trigger", "—".into()),
-                _ => ("未知", scalar(entry, "m_Type").unwrap_or("").to_string()),
+                _ => (crate::localization::tr("未知"), scalar(entry, "m_Type").unwrap_or("").to_string()),
             };
             (name.to_string(), kind.to_string(), value)
     }).collect()
@@ -270,7 +321,7 @@ mod tests {
 }
 
 fn transition_details(ui: &mut egui::Ui, document: &Document) {
-    egui::CollapsingHeader::new("过渡属性与 Conditions").default_open(true).show(ui, |ui| {
+    egui::CollapsingHeader::new(crate::localization::tr("过渡属性与 Conditions")).default_open(true).show(ui, |ui| {
         for key in ["m_HasExitTime", "m_ExitTime", "m_TransitionDuration", "m_TransitionOffset", "m_HasFixedDuration", "m_InterruptionSource", "m_OrderedInterruption", "m_CanTransitionToSelf"] {
             if let Some(value) = scalar(&document.text, key) { ui.label(format!("{}: {value}", key.trim_start_matches("m_"))); }
         }

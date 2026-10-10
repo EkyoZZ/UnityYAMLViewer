@@ -12,7 +12,14 @@
 
 ### 当前状态
 
-当前版本 **1.1.0** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前版本 **1.1.1** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+
+### 1.1.1 更新
+
+- 更新深浅主题配色，优化界面与设置体验。
+- 新增简中、繁中、英语、日语、韩语、德语、法语，支持即时切换并记住选择。
+- 优化编辑模式视觉提示和更新历史展示。
+- 新增 AnimationClip 时间轴编辑功能。
 
 ### 已有功能
 
@@ -25,6 +32,7 @@
 - 自动识别 UTF-8；遇到无效 UTF-8 字节时尝试按 GBK 读取
 - 为 `AnimationClip`、`AnimatorController`、`AnimatorOverrideController`、`Material` 和 `SpriteAtlas` 提供结构化导航
 - 按路径 / 组件 / 属性查看动画曲线，显示时长、采样率、关键帧，并定位回原始 YAML
+- 动画时间轴支持缩放、多选拖动、刻度右键按曲线插值加帧及右键删除；属性 / 曲线双页支持分量配色、切线手柄、切线模式和权重编辑，支持撤销与保存
 - Animator Controller 提供只读状态关系图：Layer 切换、默认状态、Entry / Any State / Exit、过渡连线、子状态机、画布拖动缩放和参数默认值；点击状态查看 Motion 引用，点击连线查看过渡条件，支持切回 YAML
 - 将规则 YAML 列表显示为表格，并支持冻结表头
 - Transform / RectTransform 支持属性与 YAML 切换，可在编辑模式中修改已识别属性
@@ -99,7 +107,14 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Version **1.1.0** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Version **1.1.1** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+
+### 1.1.1 release notes
+
+- Refreshed light and dark themes, with improved interface and settings.
+- Added Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German and French, with instant switching and saved preferences.
+- Improved visual cues in edit mode and release history display.
+- Added AnimationClip timeline editing.
 
 ### Available features
 

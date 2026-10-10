@@ -1,0 +1,240 @@
+设置	設定	Settings	設定	설정	Einstellungen	Paramètres
+• 新增 AnimationClip 时间轴编辑功能	• 新增 AnimationClip 時間軸編輯功能	• Added AnimationClip timeline editing	• AnimationClip のタイムライン編集機能を追加	• AnimationClip 타임라인 편집 기능 추가	• AnimationClip-Zeitleistenbearbeitung hinzugefügt	• Ajout de la modification de la chronologie AnimationClip
+请先确认正在输入的值，再拖动关键帧。	請先確認正在輸入的值，再拖曳關鍵影格。	Confirm pending input before dragging keyframes.	入力中の値を確定してからキーフレームをドラッグしてください。	입력 중인 값을 확정한 후 키프레임을 드래그하세요.	Aktuelle Eingabe bestätigen, bevor Keyframes verschoben werden.	Validez la saisie en cours avant de déplacer les images clés.
+点击选择 · Ctrl / Shift 多选 · 空白处拖动框选 · 拖动选中关键帧按帧移动	點擊選取 · Ctrl / Shift 多選 · 空白處拖曳框選 · 拖曳所選關鍵影格逐格移動	Click to select · Ctrl / Shift for multiple selection · Drag empty space to box-select · Drag selected keys to snap to frames	クリックで選択 · Ctrl / Shift で複数選択 · 空白をドラッグで範囲選択 · キーをドラッグでフレーム単位移動	클릭 선택 · Ctrl / Shift 다중 선택 · 빈 공간 드래그로 영역 선택 · 선택한 키를 프레임 단위로 드래그	Klicken zum Auswählen · Ctrl / Shift für Mehrfachauswahl · Leeren Bereich ziehen für Rahmenauswahl · Ausgewählte Keys auf Frames ziehen	Cliquer pour sélectionner · Ctrl / Shift pour sélection multiple · Glisser dans le vide pour sélectionner une zone · Glisser les clés avec alignement sur les images
+按 Shader 声明区分 Color 和 Vector4；无法确认类型时以只读四分量显示。	依 Shader 宣告區分 Color 與 Vector4；無法確認類型時以唯讀四分量顯示。	Color and Vector4 follow Shader declarations; unverified types show four read-only components.	Shader 宣言で Color と Vector4 を区別。型が不明な場合は4成分を読み取り専用で表示します。	Shader 선언에 따라 Color와 Vector4를 구분합니다. 확인되지 않은 유형은 읽기 전용 4성분으로 표시합니다.	Color und Vector4 gemäß Shader-Deklaration; unbestätigte Typen als vier schreibgeschützte Komponenten.	Color et Vector4 selon la déclaration du Shader ; types non vérifiés affichés en quatre composantes en lecture seule.
+• 更新深浅主题配色，优化界面与设置体验	• 更新深淺主題配色，優化介面與設定體驗	• Refreshed light and dark themes, with improved interface and settings	• ライト・ダークの配色を更新し、画面と設定の使いやすさを改善	• 라이트·다크 테마 색상 및 화면과 설정 사용성 개선	• Neue Farben für helle und dunkle Designs sowie verbesserte Oberfläche und Einstellungen	• Nouvelles couleurs des thèmes clair et sombre, interface et paramètres améliorés
+• 新增简中、繁中、英语、日语、韩语、德语、法语，支持即时切换并记住选择	• 新增簡中、繁中、英語、日語、韓語、德語、法語，支援即時切換並記住選擇	• Added Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German and French, with instant switching and saved preferences	• 簡体字中国語・繁体字中国語・英語・日本語・韓国語・ドイツ語・フランス語に対応。即時切り替えと選択の保存	• 간체·번체 중국어, 영어, 일본어, 한국어, 독일어, 프랑스어 지원; 즉시 전환 및 선택 저장	• Vereinfachtes und traditionelles Chinesisch, Englisch, Japanisch, Koreanisch, Deutsch und Französisch mit sofortigem Wechsel und gespeicherter Auswahl	• Chinois simplifié et traditionnel, anglais, japonais, coréen, allemand et français, avec changement immédiat et choix conservé
+• 优化编辑模式视觉提示和更新历史展示	• 優化編輯模式視覺提示與更新歷史顯示	• Improved visual cues in edit mode and release history display	• 編集モードの視覚的な表示と更新履歴を改善	• 편집 모드 시각 표시 및 업데이트 기록 표시 개선	• Verbesserte visuelle Hinweise im Bearbeitungsmodus und Versionsanzeige	• Indications visuelles du mode édition et historique des versions améliorés
+查看更多历史	查看更多歷史	Show older releases	過去の更新履歴を表示	이전 버전 기록 보기	Ältere Versionen anzeigen	Afficher les versions précédentes
+收起历史版本	收起歷史版本	Hide older releases	過去の更新履歴を閉じる	이전 버전 기록 접기	Ältere Versionen ausblenden	Masquer les versions précédentes
+• 属性与表格编辑，显式保存与放弃，修改整行高亮和逐项还原	• 屬性與表格編輯、儲存與放棄、整行標示與逐項還原	• Property and table editing, save/discard, row highlighting and per-item restore	• プロパティと表の編集、保存・破棄、行の強調と項目別復元	• 속성 및 표 편집, 저장/취소, 행 강조 및 항목별 복원	• Eigenschaften und Tabellen bearbeiten, speichern/verwerfen, Zeilenmarkierung und einzelne Werte zurücksetzen	• Édition des propriétés et tableaux, enregistrer/abandonner, surlignage et restauration par élément
+• 支持已识别的数值、字符串、布尔值、枚举、向量、颜色和渐变关键点编辑	• 支援已識別的數值、字串、布林、列舉、向量、顏色與漸層編輯	• Edit verified numbers, strings, booleans, enums, vectors, colors and gradient keys	• 確認済みの数値、文字列、真偽値、列挙、ベクトル、色、グラデーションを編集	• 확인된 숫자, 문자열, 불리언, 열거형, 벡터, 색상, 그라디언트 편집	• Bestätigte Zahlen, Zeichenfolgen, Boolesche Werte, Enums, Vektoren, Farben und Verläufe bearbeiten	• Édition des nombres, chaînes, booléens, énumérations, vecteurs, couleurs et dégradés vérifiés
+• 支持 Transform / RectTransform、材质字段和列表 / 数组元素编辑	• 支援 Transform / RectTransform、材質欄位與清單 / 陣列編輯	• Edit Transform / RectTransform, material fields and list / array elements	• Transform / RectTransform、マテリアル、リスト・配列を編集	• Transform / RectTransform, 머티리얼 필드, 목록 / 배열 편집	• Transform / RectTransform, Materialfelder und Listen / Arrays bearbeiten	• Édition de Transform / RectTransform, matériaux et listes / tableaux
+• 每个文件独立撤销记录，默认 200 步，可在设置中调整到 50～1000	• 每個檔案獨立復原紀錄，預設 200 步，可調至 50～1000	• Per-file undo history: default 200, configurable from 50 to 1000	• ファイルごとの履歴：既定200回、50～1000に設定可能	• 파일별 실행 취소: 기본 200, 50~1000 설정 가능	• Rückgängig-Verlauf pro Datei: Standard 200, einstellbar von 50 bis 1000	• Historique par fichier : 200 par défaut, réglable de 50 à 1000
+• 保存后保留撤销历史，Ctrl+Z 自动进入编辑模式；关闭文件或放弃编辑后清空	• 儲存後保留復原歷史，Ctrl+Z 進入編輯模式；關閉或放棄後清空	• Undo history survives saving; Ctrl+Z enters edit mode; closing/discarding clears it	• 保存後も履歴を保持。Ctrl+Z で編集モード。閉じる・破棄で消去	• 저장 후 기록 유지; Ctrl+Z로 편집 모드; 닫기/취소 시 삭제	• Verlauf bleibt nach Speichern; Ctrl+Z öffnet Bearbeitungsmodus; Schließen/Verwerfen löscht ihn	• Historique conservé après sauvegarde ; Ctrl+Z ouvre l’édition ; fermeture/abandon l’efface
+• 切换标签保留暂存修改，保存或放弃前阻止关闭编辑中的文件和应用	• 切換分頁保留暫存修改，儲存或放棄前阻止關閉	• Tab switching preserves edits; save or discard before closing files or the app	• タブ切り替えで編集を保持。閉じる前に保存または破棄	• 탭 전환 시 편집 유지; 닫기 전에 저장 또는 취소	• Tabwechsel behält Änderungen; vor dem Schließen speichern oder verwerfen	• Changements conservés entre onglets ; enregistrer ou abandonner avant de fermer
+• 属性类型验证与引用保护；原始 YAML 保持只读	• 屬性類型驗證與引用保護；原始 YAML 維持唯讀	• Type validation and reference protection; raw YAML stays read-only	• 型検証と参照保護。元の YAML は読み取り専用	• 유형 검증 및 참조 보호; 원본 YAML은 읽기 전용	• Typprüfung und Referenzschutz; Original-YAML bleibt schreibgeschützt	• Validation des types et protection des références ; YAML original en lecture seule
+• 保存前检查外部改动，精确写回值片段并保留未修改文本与换行	• 儲存前檢查外部變更，僅寫回修改值並保留文字與換行	• Check external changes before saving; update values while preserving other text and line endings	• 保存前に外部変更を検査。値のみ更新し、他のテキストと改行を保持	• 저장 전 외부 변경 확인; 다른 텍스트와 줄바꿈을 유지하며 값만 수정	• Externe Änderungen vor Speichern prüfen; übrigen Text und Zeilenenden erhalten	• Vérification des changements externes ; préservation du texte et des fins de ligne
+• 设置弹窗整合关于、主题和撤销步数，记住用户设置	• 設定整合關於、主題與復原步數，記住使用者設定	• Settings combine About, theme and undo limits, with persistent preferences	• 設定にアプリ情報、テーマ、履歴上限を統合。設定を保存	• 정보, 테마, 실행 취소 한도를 통합하고 설정 저장	• Einstellungen bündeln Info, Design und Rückgängig-Limit; Auswahl wird gespeichert	• Paramètres réunissant informations, thème et limite d’annulation ; préférences conservées
+• 支持 Unity YAML 资源的层级与 Inspector 浏览	• 支援 Unity YAML 資源的階層與 Inspector 瀏覽	• Browse Unity YAML assets with hierarchy and Inspector	• Unity YAML アセットの階層と Inspector を閲覧	• Unity YAML 계층 및 Inspector 탐색	• Unity-YAML-Assets mit Hierarchie und Inspector anzeigen	• Consultation des ressources Unity YAML avec hiérarchie et Inspector
+• 支持搜索、多标签页、GUID / FileID 复制和编码识别	• 支援搜尋、多分頁、GUID / FileID 複製與編碼識別	• Search, multiple tabs, GUID / FileID copy and encoding detection	• 検索、複数タブ、GUID / FileID コピー、文字コード検出	• 검색, 여러 탭, GUID / FileID 복사, 인코딩 감지	• Suche, mehrere Tabs, GUID / FileID kopieren und Kodierung erkennen	• Recherche, onglets multiples, copie GUID / FileID et détection d’encodage
+• 提供动画、材质、动画控制器等常见资源的结构化展示	• 提供動畫、材質與動畫控制器等資源的結構化顯示	• Structured views for animations, materials and animation controllers	• アニメーション、マテリアル、コントローラーの構造化表示	• 애니메이션, 머티리얼, 컨트롤러의 구조화된 보기	• Strukturierte Ansichten für Animationen, Materialien und Controller	• Vues structurées des animations, matériaux et contrôleurs
+• 只读浏览资源，不写入原始文件	• 唯讀瀏覽資源，不寫入原始檔案	• Read-only browsing without writing to source files	• 元のファイルに書き込まない読み取り専用閲覧	• 원본 파일에 쓰지 않는 읽기 전용 탐색	• Schreibgeschütztes Anzeigen ohne Änderung der Quelldateien	• Consultation en lecture seule sans écriture dans les fichiers sources
+根对象（本对象）	根物件（本物件）	Root object (self)	ルートオブジェクト（自身）	루트 객체 (자체)	Wurzelobjekt (selbst)	Objet racine (lui-même)
+扫描中有 {} 项无法读取或存在重复 GUID；相关字段可能无法确定类型。	掃描中有 {} 項無法讀取或 GUID 重複；相關欄位類型可能無法確定。	{} unreadable items or duplicate GUIDs; some field types may be unknown.	読み取り不可または GUID 重複が {} 件。型を特定できない場合があります。	읽기 실패 또는 중복 GUID {}개; 일부 필드 유형을 알 수 없습니다.	{} unlesbare Einträge oder doppelte GUIDs; einige Feldtypen sind eventuell unbekannt.	{} éléments illisibles ou GUID dupliqués ; certains types peuvent être inconnus.
+正在建立脚本 GUID 索引…暂时显示原始属性。	正在建立腳本 GUID 索引…暫時顯示原始屬性。	Building script GUID index… showing raw properties for now.	スクリプト GUID 索引を作成中…元のプロパティを表示します。	스크립트 GUID 인덱스 생성 중… 원시 속성을 표시합니다.	Skript-GUID-Index wird erstellt… vorläufig werden Originaleigenschaften angezeigt.	Création de l’index GUID des scripts… affichage provisoire des propriétés brutes.
+未找到对应脚本或无法确定脚本类；字段类型未知。	未找到對應腳本或無法確定腳本類別；欄位類型未知。	Script missing or class unresolved; field types unknown.	スクリプトまたはクラスを特定できません。フィールドの型は不明です。	스크립트 또는 클래스를 찾을 수 없어 필드 유형을 알 수 없습니다.	Skript fehlt oder Klasse unbestimmt; Feldtypen unbekannt.	Script absent ou classe non résolue ; types des champs inconnus.
+未找到 Unity 工程根目录（Assets / ProjectSettings）；字段类型未知。	未找到 Unity 專案根目錄（Assets / ProjectSettings）；欄位類型未知。	Unity project root (Assets / ProjectSettings) not found; field types unknown.	Unity プロジェクトルート（Assets / ProjectSettings）が見つかりません。型は不明です。	Unity 프로젝트 루트(Assets / ProjectSettings)를 찾을 수 없어 유형을 알 수 없습니다.	Unity-Projektwurzel (Assets / ProjectSettings) fehlt; Feldtypen unbekannt.	Racine du projet Unity (Assets / ProjectSettings) introuvable ; types inconnus.
+类型来自脚本声明；编辑模式支持已确认类型的属性。复杂原始结构保持只读。	類型來自腳本宣告；編輯模式支援已確認類型的屬性。複雜原始結構維持唯讀。	Types come from script declarations. Verified properties are editable; complex raw structures stay read-only.	型はスクリプト宣言から取得。確認済みプロパティは編集可能で、複雑な構造は読み取り専用です。	유형은 스크립트 선언에서 가져옵니다. 확인된 속성은 편집 가능하며 복잡한 구조는 읽기 전용입니다.	Typen stammen aus Skriptdeklarationen. Bestätigte Eigenschaften sind bearbeitbar; komplexe Strukturen bleiben schreibgeschützt.	Types issus des scripts. Les propriétés vérifiées sont éditables ; les structures complexes restent en lecture seule.
+SpriteRenderer 内置字段，无需查找脚本。	SpriteRenderer 內建欄位，無需尋找腳本。	Built-in SpriteRenderer fields; no script lookup needed.	SpriteRenderer の組み込みフィールド。スクリプト検索は不要です。	SpriteRenderer 기본 필드; 스크립트 검색이 필요 없습니다.	Integrierte SpriteRenderer-Felder; keine Skriptsuche nötig.	Champs intégrés de SpriteRenderer ; aucune recherche de script nécessaire.
+材质属性；颜色组按 RGBA 显示，Shader 的 Vector 属性也可能存储在此组。	材質屬性；顏色組依 RGBA 顯示，Shader 的 Vector 屬性也可能存於此組。	Material properties; colors use RGBA. Shader Vector properties may also be stored here.	マテリアルプロパティ。色は RGBA 表示。Shader の Vector もこのグループに格納される場合があります。	머티리얼 속성; 색상은 RGBA입니다. Shader Vector 속성도 이 그룹에 저장될 수 있습니다.	Materialeigenschaften; Farben als RGBA. Shader-Vector-Eigenschaften können ebenfalls hier liegen.	Propriétés du matériau ; couleurs en RGBA. Les propriétés Vector du Shader peuvent aussi être stockées ici.
+Animator 属性；引用资源可打开，本文件对象可定位。	Animator 屬性；引用資源可開啟，本檔案物件可定位。	Animator properties; open referenced assets or locate objects in this file.	Animator プロパティ。参照アセットを開くか、このファイルのオブジェクトに移動できます。	Animator 속성; 참조 에셋을 열거나 파일 내 객체를 찾을 수 있습니다.	Animator-Eigenschaften; referenzierte Assets öffnen oder lokale Objekte finden.	Propriétés Animator ; ouvrir les ressources référencées ou localiser les objets du fichier.
+碰撞体属性；进入编辑模式后可修改已确认类型的属性。	碰撞體屬性；進入編輯模式後可修改已確認類型的屬性。	Collider properties; verified types can be changed in edit mode.	コライダーのプロパティ。確認済みの型は編集モードで変更可能です。	콜라이더 속성; 확인된 유형은 편집 모드에서 변경할 수 있습니다.	Collider-Eigenschaften; bestätigte Typen sind im Bearbeitungsmodus änderbar.	Propriétés du collider ; les types vérifiés sont modifiables en mode édition.
+未识别的纹理结构	未識別的紋理結構	Unrecognized texture structure	不明なテクスチャ構造	알 수 없는 텍스처 구조	Unbekannte Texturstruktur	Structure de texture inconnue
+未识别的顶点结构	未識別的頂點結構	Unrecognized vertex structure	不明な頂点構造	알 수 없는 정점 구조	Unbekannte Punktstruktur	Structure de sommets inconnue
+RectOffset（未识别的结构）	RectOffset（未識別的結構）	RectOffset (unrecognized structure)	RectOffset（不明な構造）	RectOffset (알 수 없는 구조)	RectOffset (unbekannte Struktur)	RectOffset (structure inconnue)
+Gradient（未识别的结构或模式）	Gradient（未識別的結構或模式）	Gradient (unrecognized structure or mode)	Gradient（不明な構造またはモード）	Gradient (알 수 없는 구조 또는 모드)	Gradient (unbekannte Struktur oder Modus)	Gradient (structure ou mode inconnu)
+GUID 索引尚未完成，或资源不存在、属于内置资源。	GUID 索引尚未完成，或資源不存在、屬於內建資源。	GUID index incomplete, asset missing, or built-in asset.	GUID 索引が未完成、アセットが存在しない、または組み込みアセットです。	GUID 인덱스가 미완료이거나 에셋이 없거나 기본 에셋입니다.	GUID-Index unvollständig, Asset fehlt oder ist integriert.	Index GUID incomplet, ressource absente ou intégrée.
+编辑颜色，保存编辑后写入文件。	編輯顏色，儲存編輯後寫入檔案。	Edit color; save edits to write to file.	色を編集。保存するとファイルに書き込みます。	색상 편집; 저장하면 파일에 기록됩니다.	Farbe bearbeiten; erst beim Speichern in Datei schreiben.	Modifier la couleur ; enregistrer pour écrire dans le fichier.
+仅预览，不修改属性或资源文件。	僅預覽，不修改屬性或資源檔案。	Preview only; properties and asset files are unchanged.	プレビューのみ。プロパティやアセットは変更しません。	미리보기 전용; 속성이나 에셋 파일은 변경되지 않습니다.	Nur Vorschau; Eigenschaften und Assets bleiben unverändert.	Aperçu uniquement ; les propriétés et fichiers restent inchangés.
+原始颜色包含 HDR 或超出 0–1 的值；色块和调色区域仅显示 0–1 范围。	原始顏色含 HDR 或超出 0–1 的值；色塊與調色區僅顯示 0–1 範圍。	Original color contains HDR or values outside 0–1; swatches and palette show only 0–1.	元の色には HDR または 0–1 範囲外の値があります。パレットは 0–1 のみ表示します。	원래 색상에 HDR 또는 0–1 범위 밖의 값이 있습니다. 팔레트는 0–1만 표시합니다.	Originalfarbe enthält HDR oder Werte außerhalb 0–1; Palette zeigt nur 0–1.	La couleur contient du HDR ou des valeurs hors 0–1 ; la palette affiche uniquement 0–1.
+点击查看渐变关键点（只读）	點擊檢視漸層關鍵點（唯讀）	Click to view gradient keys (read-only)	クリックでグラデーションキーを表示（読み取り専用）	클릭하여 그라디언트 키 보기 (읽기 전용)	Klicken für Verlaufsschlüssel (schreibgeschützt)	Cliquer pour voir les clés du dégradé (lecture seule)
+编辑渐变关键点，保存编辑后写入文件。	編輯漸層關鍵點，儲存編輯後寫入檔案。	Edit gradient keys; save edits to write to file.	グラデーションキーを編集。保存時にファイルに書き込みます。	그라디언트 키 편집; 저장하면 파일에 기록됩니다.	Verlaufsschlüssel bearbeiten; beim Speichern in Datei schreiben.	Modifier les clés du dégradé ; enregistrer pour écrire dans le fichier.
+只读渐变，不修改资源文件。	唯讀漸層，不修改資源檔案。	Read-only gradient; asset file is unchanged.	読み取り専用グラデーション。アセットは変更しません。	읽기 전용 그라디언트; 에셋 파일은 변경되지 않습니다.	Schreibgeschützter Verlauf; Asset bleibt unverändert.	Dégradé en lecture seule ; fichier inchangé.
+此属性与另一项修改重叠，已拒绝修改。	此屬性與另一項修改重疊，已拒絕修改。	Change rejected: this property overlaps another edit.	別の編集と重複するため変更を拒否しました。	다른 편집과 겹쳐 변경이 거부되었습니다.	Änderung abgelehnt: Überschneidung mit anderer Bearbeitung.	Modification refusée : chevauchement avec une autre édition.
+请先确认正在输入的属性，再创建状态。	請先確認正在輸入的屬性，再建立狀態。	Confirm the current property input before creating a state.	入力中のプロパティを確定してからステートを作成してください。	속성 입력을 확정한 후 상태를 만드세요.	Aktuelle Eingabe bestätigen, bevor ein Zustand erstellt wird.	Validez la saisie avant de créer un état.
+未能创建状态，请确认 ChildStates 结构有效，且已确认正在编辑的输入。	無法建立狀態，請確認 ChildStates 結構有效，並確認編輯中的輸入。	Cannot create state. Check ChildStates structure and confirm pending inputs.	ステートを作成できません。ChildStates 構造と未確定入力を確認してください。	상태를 만들 수 없습니다. ChildStates 구조와 미확정 입력을 확인하세요.	Zustand nicht erstellt. ChildStates-Struktur prüfen und Eingaben bestätigen.	État non créé. Vérifiez ChildStates et validez les saisies en cours.
+带 fileID 的属性暂不开放编辑。修改可能破坏本文件内部对象索引、Prefab 关联或外部资源引用。请在 Unity 编辑器中修改引用。	含 fileID 的屬性暫不開放編輯。修改可能破壞物件索引、Prefab 關聯或外部引用。請在 Unity 編輯器中修改引用。	Properties containing fileID are read-only. Changes could break object indexes, Prefab links or asset references. Edit references in Unity.	fileID を含むプロパティは読み取り専用です。変更すると参照が壊れる可能性があります。Unity で参照を編集してください。	fileID가 있는 속성은 읽기 전용입니다. 변경 시 객체 인덱스, Prefab 연결 또는 참조가 손상될 수 있습니다. Unity에서 수정하세요.	Eigenschaften mit fileID sind schreibgeschützt. Änderungen könnten Indizes oder Referenzen beschädigen. Referenzen in Unity bearbeiten.	Les propriétés avec fileID sont en lecture seule. Les modifier pourrait casser les index ou références. Modifiez les références dans Unity.
+输入值与属性类型不符或超出范围，已恢复为之前的有效值。	輸入值與屬性類型不符或超出範圍，已還原先前有效值。	Input has the wrong type or is out of range; previous valid value restored.	入力の型が不一致または範囲外です。以前の有効な値に戻しました。	입력 유형이 다르거나 범위를 벗어나 이전 유효 값으로 복원했습니다.	Falscher Typ oder außerhalb des Bereichs; vorheriger gültiger Wert wiederhergestellt.	Type incorrect ou valeur hors limites ; valeur valide précédente restaurée.
+滑条数值超出属性类型范围，已恢复之前的值。	滑桿數值超出屬性類型範圍，已還原先前值。	Slider value out of range; previous value restored.	スライダー値が範囲外です。以前の値に戻しました。	슬라이더 값이 범위를 벗어나 이전 값으로 복원했습니다.	Schiebereglerwert außerhalb des Bereichs; vorheriger Wert wiederhergestellt.	Valeur du curseur hors limites ; valeur précédente restaurée.
+向量分量必须为有效数值且不能越界，已恢复之前的值。	向量分量須為有效數值且不可超出範圍，已還原先前值。	Vector components must be valid and in range; previous value restored.	ベクトル成分は有効かつ範囲内の数値が必要です。以前の値に戻しました。	벡터 성분은 유효한 범위의 숫자여야 합니다. 이전 값으로 복원했습니다.	Vektorkomponenten müssen gültig und im Bereich sein; vorheriger Wert wiederhergestellt.	Les composantes doivent être valides et dans les limites ; valeur précédente restaurée.
+四元数不能全部为零，已恢复之前的值。	四元數不可全部為零，已還原先前值。	Quaternion cannot be all zero; previous value restored.	クォータニオンはすべてゼロにできません。以前の値に戻しました。	쿼터니언은 모두 0일 수 없습니다. 이전 값으로 복원했습니다.	Quaternion darf nicht nur Nullen enthalten; vorheriger Wert wiederhergestellt.	Le quaternion ne peut pas être entièrement nul ; valeur précédente restaurée.
+列表值与整数类型不符或越界，已恢复之前的值。	清單值與整數類型不符或超出範圍，已還原先前值。	List value is not a valid integer or is out of range; previous value restored.	リスト値が有効な整数ではないか範囲外です。以前の値に戻しました。	목록 값이 유효한 정수가 아니거나 범위를 벗어나 복원했습니다.	Listenwert ist keine gültige Ganzzahl oder außerhalb des Bereichs; vorheriger Wert wiederhergestellt.	Valeur de liste entière invalide ou hors limites ; valeur précédente restaurée.
+Alpha 必须为 0～1，已恢复之前的值。	Alpha 須為 0～1，已還原先前值。	Alpha must be 0–1; previous value restored.	Alpha は 0～1 が必要です。以前の値に戻しました。	Alpha는 0–1이어야 합니다. 이전 값으로 복원했습니다.	Alpha muss 0–1 sein; vorheriger Wert wiederhergestellt.	Alpha doit être entre 0 et 1 ; valeur précédente restaurée.
+渐变位置必须为 0～100%，已恢复之前的值。	漸層位置須為 0～100%，已還原先前值。	Gradient position must be 0–100%; previous value restored.	グラデーション位置は 0～100% が必要です。以前の値に戻しました。	그라디언트 위치는 0–100%여야 합니다. 이전 값으로 복원했습니다.	Verlaufsposition muss 0–100% sein; vorheriger Wert wiederhergestellt.	Position du dégradé entre 0 et 100 % requise ; valeur précédente restaurée.
+颜色分量必须为有效浮点数，已恢复之前的值。	顏色分量須為有效浮點數，已還原先前值。	Color components must be valid floats; previous value restored.	色の成分は有効な浮動小数点数が必要です。以前の値に戻しました。	색상 성분은 유효한 실수여야 합니다. 이전 값으로 복원했습니다.	Farbkomponenten müssen gültige Gleitkommazahlen sein; vorheriger Wert wiederhergestellt.	Les composantes doivent être des nombres flottants valides ; valeur précédente restaurée.
+颜色分量必须为有限浮点数，已恢复之前的值。	顏色分量須為有限浮點數，已還原先前值。	Color components must be finite floats; previous value restored.	色の成分は有限の浮動小数点数が必要です。以前の値に戻しました。	색상 성분은 유한한 실수여야 합니다. 이전 값으로 복원했습니다.	Farbkomponenten müssen endliche Zahlen sein; vorheriger Wert wiederhergestellt.	Les composantes doivent être des nombres finis ; valeur précédente restaurée.
+颜色分量必须为有效浮点数，已恢复之前的颜色。	顏色分量須為有效浮點數，已還原先前顏色。	Color components must be valid floats; previous color restored.	色の成分は有効な浮動小数点数が必要です。以前の色に戻しました。	색상 성분은 유효한 실수여야 합니다. 이전 색상으로 복원했습니다.	Farbkomponenten müssen gültige Zahlen sein; vorherige Farbe wiederhergestellt.	Les composantes doivent être des nombres valides ; couleur précédente restaurée.
+颜色十六进制值需要 6 位（例如 FFFFFF），已恢复之前的颜色。	顏色十六進位值需 6 位（例如 FFFFFF），已還原先前顏色。	Hex color requires 6 digits (e.g. FFFFFF); previous color restored.	色は6桁の16進数（例 FFFFFF）が必要です。以前の色に戻しました。	색상은 6자리 16진수(예: FFFFFF)여야 합니다. 이전 색상으로 복원했습니다.	Hex-Farbe benötigt 6 Stellen (z. B. FFFFFF); vorherige Farbe wiederhergestellt.	La couleur hexadécimale exige 6 chiffres (ex. FFFFFF) ; couleur précédente restaurée.
+存在输入验证警告，请确认已回退的值后再保存。	存在輸入驗證警告，請確認已還原的值後再儲存。	Input validation warning. Confirm restored values before saving.	入力検証の警告があります。戻された値を確認してから保存してください。	입력 검증 경고가 있습니다. 복원된 값을 확인한 후 저장하세요.	Eingabevalidierungswarnung. Wiederhergestellte Werte vor dem Speichern bestätigen.	Avertissement de validation. Vérifiez les valeurs restaurées avant d’enregistrer.
+仍有输入正在编辑，请按 Enter 或点击其他位置确认输入后再保存。	仍有輸入正在編輯，請按 Enter 或點擊其他位置確認後再儲存。	Input still pending. Press Enter or click elsewhere to confirm before saving.	未確定の入力があります。Enter または別の場所をクリックして確定後に保存してください。	미확정 입력이 있습니다. Enter를 누르거나 다른 곳을 클릭한 후 저장하세요.	Eingabe noch offen. Vor dem Speichern mit Enter oder Klick außerhalb bestätigen.	Saisie en cours. Appuyez sur Entrée ou cliquez ailleurs pour valider avant d’enregistrer.
+文件已被其他程序修改，未覆盖磁盘文件。请放弃编辑并重新打开文件。	檔案已被其他程式修改，未覆寫磁碟檔案。請放棄編輯並重新開啟。	File changed by another application; disk file was not overwritten. Discard edits and reopen.	別のアプリがファイルを変更しました。上書きしていません。編集を破棄して再度開いてください。	다른 앱이 파일을 변경했습니다. 덮어쓰지 않았습니다. 편집을 취소하고 다시 여세요.	Datei von anderer Anwendung geändert; nicht überschrieben. Änderungen verwerfen und erneut öffnen.	Fichier modifié par une autre application ; non écrasé. Abandonnez les modifications et rouvrez-le.
+保存验证失败：对象索引或类型发生变化。	儲存驗證失敗：物件索引或類型已變更。	Save validation failed: object index or type changed.	保存検証に失敗：オブジェクト索引または型が変更されています。	저장 검증 실패: 객체 인덱스 또는 유형이 변경되었습니다.	Speicherprüfung fehlgeschlagen: Objektindex oder Typ geändert.	Échec de validation : index ou type d’objet modifié.
+保存前检测到文件发生变化，已取消保存。	儲存前偵測到檔案變更，已取消儲存。	File changed before saving; save cancelled.	保存前にファイルの変更を検出。保存を中止しました。	저장 전에 파일 변경이 감지되어 저장을 취소했습니다.	Datei vor dem Speichern geändert; Speichern abgebrochen.	Fichier modifié avant l’enregistrement ; opération annulée.
+首个正式版本。	首個正式版本。	First stable release.	初の正式リリース。	첫 정식 버전.	Erste stabile Version.	Première version stable.
+打开	開啟	Open	開く	열기	Öffnen	Ouvrir
+语言	語言	Language	言語	언어	Sprache	Langue
+关于	關於	About	このアプリについて	정보	Über	À propos
+关于 Unity YAML Viewer	關於 Unity YAML Viewer	About Unity YAML Viewer	Unity YAML Viewer について	Unity YAML Viewer 정보	Über Unity YAML Viewer	À propos de Unity YAML Viewer
+主题	主題	Theme	テーマ	테마	Design	Thème
+浅色	淺色	Light	ライト	라이트	Hell	Clair
+深色	深色	Dark	ダーク	다크	Dunkel	Sombre
+系统	系統	System	システム	시스템	System	Système
+跟随系统	跟隨系統	System	システム	시스템	System	Système
+单个文件缓存撤销步骤	單一檔案快取復原步驟	Undo steps per file	ファイルごとの元に戻す回数	파일별 실행 취소 단계	Rückgängig-Schritte pro Datei	Étapes d’annulation par fichier
+撤销步骤范围：50～1000，默认 200。超过上限后移除最早的记录。增加上限会增加内存占用。	復原步驟範圍：50～1000，預設 200。超過上限會移除最早的紀錄。提高上限會增加記憶體用量。	Undo range: 50–1000, default 200. Oldest entries are removed at the limit. Higher limits use more memory.	元に戻す回数：50～1000、既定値200。上限を超えると古い履歴を削除します。上限を増やすとメモリ使用量が増えます。	실행 취소 범위: 50~1000, 기본값 200. 한도를 넘으면 오래된 기록이 삭제됩니다. 한도가 높을수록 메모리 사용량이 늘어납니다.	Rückgängig: 50–1000 Schritte, Standard 200. Bei Erreichen des Limits werden die ältesten Einträge entfernt. Höhere Limits benötigen mehr Speicher.	Annulation : 50–1000 étapes, 200 par défaut. Les plus anciennes sont supprimées à la limite. Une limite supérieure utilise plus de mémoire.
+尚未打开文件	尚未開啟檔案	No file opened	ファイルが開かれていません	열린 파일 없음	Keine Datei geöffnet	Aucun fichier ouvert
+查找：	尋找：	Search:	検索：	검색:	Suchen:	Rechercher :
+名称、组件、字段值、fileID 或 GUID	名稱、元件、欄位值、fileID 或 GUID	Name, component, field value, fileID or GUID	名前、コンポーネント、値、fileID、GUID	이름, 컴포넌트, 필드 값, fileID 또는 GUID	Name, Komponente, Feldwert, fileID oder GUID	Nom, composant, valeur, fileID ou GUID
+清除查找	清除搜尋	Clear search	検索をクリア	검색 지우기	Suche löschen	Effacer la recherche
+也可以将 .prefab、.unity、.asset 等 Unity YAML 文件拖入窗口打开	也可將 .prefab、.unity、.asset 等 Unity YAML 檔案拖入視窗開啟	Drag .prefab, .unity, .asset or other Unity YAML files into this window to open them	.prefab、.unity、.asset などの Unity YAML ファイルをドラッグして開けます	.prefab, .unity, .asset 등 Unity YAML 파일을 창으로 끌어 열 수 있습니다	Unity-YAML-Dateien (.prefab, .unity, .asset usw.) zum Öffnen in dieses Fenster ziehen	Glissez un fichier Unity YAML (.prefab, .unity, .asset, etc.) dans cette fenêtre pour l’ouvrir
+未命名	未命名	Untitled	無題	제목 없음	Unbenannt	Sans titre
+Hierarchy	階層	Hierarchy	ヒエラルキー	계층	Hierarchie	Hiérarchie
+按 GameObject / Transform 层级重建	依 GameObject / Transform 階層重建	Rebuilt from GameObject / Transform hierarchy	GameObject / Transform の階層から再構成	GameObject / Transform 계층으로 재구성	Aus GameObject-/Transform-Hierarchie rekonstruiert	Reconstruit depuis la hiérarchie GameObject / Transform
+按 Animation path / Component / Property 重建	依 Animation path / Component / Property 重建	Rebuilt from Animation path / Component / Property	Animation path / Component / Property から再構成	Animation path / Component / Property로 재구성	Aus Animation path / Component / Property rekonstruiert	Reconstruit depuis Animation path / Component / Property
+未关联对象 / 解析异常	未關聯物件 / 解析異常	Unlinked objects / parse errors	未関連オブジェクト / 解析エラー	연결되지 않은 객체 / 파싱 오류	Nicht zugeordnete Objekte / Analysefehler	Objets non liés / erreurs d’analyse
+Inspector · 编辑模式	Inspector · 編輯模式	Inspector · Edit mode	Inspector · 編集モード	Inspector · 편집 모드	Inspector · Bearbeitungsmodus	Inspector · Mode édition
+只读 Inspector	唯讀 Inspector	Read-only Inspector	読み取り専用 Inspector	읽기 전용 Inspector	Schreibgeschützter Inspector	Inspector en lecture seule
+放弃编辑	放棄編輯	Discard edits	編集を破棄	편집 취소	Änderungen verwerfen	Abandonner les modifications
+保存编辑	儲存編輯	Save edits	編集を保存	편집 저장	Änderungen speichern	Enregistrer les modifications
+编辑模式	編輯模式	Edit mode	編集モード	편집 모드	Bearbeitungsmodus	Mode édition
+重载	重新載入	Reload	再読み込み	다시 불러오기	Neu laden	Recharger
+从磁盘重新读取当前文件并清空旧撤销记录	從磁碟重新讀取目前檔案並清除舊復原紀錄	Reload this file from disk and clear its undo history	ディスクから再読み込みし、元に戻す履歴を消去	디스크에서 파일을 다시 읽고 실행 취소 기록 지우기	Datei vom Datenträger neu laden und Rückgängig-Verlauf löschen	Relire le fichier et effacer l’historique d’annulation
+复制 GUID	複製 GUID	Copy GUID	GUID をコピー	GUID 복사	GUID kopieren	Copier le GUID
+当前对象没有 GUID	目前物件沒有 GUID	This object has no GUID	このオブジェクトに GUID はありません	이 객체에는 GUID가 없습니다	Dieses Objekt hat keine GUID	Cet objet n’a pas de GUID
+复制 FileID	複製 FileID	Copy FileID	FileID をコピー	FileID 복사	FileID kopieren	Copier le FileID
+自身 FileID	自身 FileID	Object FileID	自身の FileID	자체 FileID	Eigene FileID	FileID de l’objet
+显示属性	顯示屬性	Properties	プロパティ	속성 보기	Eigenschaften	Propriétés
+显示 YAML	顯示 YAML	YAML	YAML を表示	YAML 보기	YAML anzeigen	Afficher le YAML
+显示表格	顯示表格	Table	表を表示	표 보기	Tabelle anzeigen	Afficher le tableau
+冻结表头	凍結表頭	Freeze header	ヘッダーを固定	머리글 고정	Kopfzeile fixieren	Figer l’en-tête
+原始 YAML（点击关键帧后自动定位并高亮对应的 time / value）	原始 YAML（點擊關鍵影格後自動定位並醒目顯示對應的 time / value）	Raw YAML (click a keyframe to locate and highlight its time / value)	元の YAML（キーフレームをクリックすると time / value を強調表示）	원본 YAML (키프레임을 클릭하면 해당 time / value로 이동하고 강조)	Original-YAML (Keyframe anklicken, um time / value zu finden und hervorzuheben)	YAML original (cliquez sur une image clé pour localiser et surligner time / value)
+可框选后右键复制；此处的输入不会写回或保存到原文件	可選取後按右鍵複製；此處輸入不會寫回或儲存至原始檔案	Select text and right-click to copy; input here is not saved to the source file	テキストを選択して右クリックでコピー。この入力は元のファイルに保存されません	텍스트 선택 후 우클릭하여 복사; 여기의 입력은 원본 파일에 저장되지 않습니다	Text markieren und per Rechtsklick kopieren; Eingaben hier werden nicht in der Quelldatei gespeichert	Sélectionnez puis faites un clic droit pour copier ; la saisie ici n’est pas enregistrée dans le fichier source
+从左侧选择 GameObject 或 Component，即可查看对应原始 YAML。应用不会写回或修改文件。	從左側選擇 GameObject 或 Component，即可查看對應原始 YAML。瀏覽不會修改檔案。	Select a GameObject or Component on the left to view its raw YAML. Browsing does not modify files.	左側で GameObject または Component を選択すると元の YAML を表示します。閲覧ではファイルは変更されません。	왼쪽에서 GameObject 또는 Component를 선택하면 원본 YAML을 볼 수 있습니다. 탐색은 파일을 변경하지 않습니다.	Links ein GameObject oder eine Component auswählen, um das Original-YAML anzuzeigen. Beim Anzeigen werden keine Dateien geändert.	Sélectionnez un GameObject ou Component à gauche pour voir son YAML original. La consultation ne modifie pas les fichiers.
+尚未读取	尚未讀取	Not loaded	未読み込み	읽지 않음	Nicht geladen	Non chargé
+更新历史	更新歷史	Release history	更新履歴	업데이트 기록	Versionsverlauf	Historique des versions
+Unity 文本序列化资源查看与属性编辑工具	Unity 文字序列化資源檢視與屬性編輯工具	Viewer and property editor for Unity text-serialized assets	Unity テキストシリアライズアセットの閲覧・プロパティ編集ツール	Unity 텍스트 직렬화 에셋 뷰어 및 속성 편집기	Anzeige und Eigenschafteneditor für textserialisierte Unity-Assets	Visionneuse et éditeur de propriétés pour les ressources Unity sérialisées en texte
+编辑已保存到文件。	編輯已儲存至檔案。	Edits saved to file.	編集をファイルに保存しました。	편집 내용을 파일에 저장했습니다.	Änderungen in Datei gespeichert.	Modifications enregistrées dans le fichier.
+⚠ 放弃编辑？	⚠ 放棄編輯？	⚠ Discard edits?	⚠ 編集を破棄しますか？	⚠ 편집을 취소할까요?	⚠ Änderungen verwerfen?	⚠ Abandonner les modifications ?
+选择“是”将直接关闭，不写入文件；选择“否”继续编辑。	選擇「是」直接關閉，不寫入檔案；選擇「否」繼續編輯。	Choose Yes to close without saving, or No to continue editing.	「はい」で保存せず閉じる。「いいえ」で編集を続行。	예를 선택하면 저장하지 않고 닫고, 아니요를 선택하면 편집을 계속합니다.	Ja schließt ohne Speichern, Nein setzt die Bearbeitung fort.	Oui ferme sans enregistrer ; Non poursuit l’édition.
+是，放弃并关闭	是，放棄並關閉	Yes, discard and close	はい、破棄して閉じる	예, 취소하고 닫기	Ja, verwerfen und schließen	Oui, abandonner et fermer
+否，继续编辑	否，繼續編輯	No, continue editing	いいえ、編集を続行	아니요, 계속 편집	Nein, weiter bearbeiten	Non, continuer l’édition
+⚠ 编辑提示	⚠ 編輯提示	⚠ Editing notice	⚠ 編集の通知	⚠ 편집 알림	⚠ Bearbeitungshinweis	⚠ Avis d’édition
+确定	確定	OK	OK	확인	OK	OK
+定位	定位	Locate	移動	위치 찾기	Finden	Localiser
+还原	還原	Restore	元に戻す	복원	Zurücksetzen	Restaurer
+索引	索引	Index	インデックス	인덱스	Index	Index
+值	值	Value	値	값	Wert	Valeur
+条目	項目	Entry	項目	항목	Eintrag	Entrée
+名称	名稱	Name	名前	이름	Name	Nom
+类型	類型	Type	型	유형	Typ	Type
+默认值	預設值	Default value	既定値	기본값	Standardwert	Valeur par défaut
+未知	未知	Unknown	不明	알 수 없음	Unbekannt	Inconnu
+组件信息	元件資訊	Component information	コンポーネント情報	컴포넌트 정보	Komponenteninformationen	Informations du composant
+资源信息	資源資訊	Asset information	アセット情報	에셋 정보	Asset-Informationen	Informations de la ressource
+类型未知	類型未知	Unknown type	型不明	알 수 없는 유형	Unbekannter Typ	Type inconnu
+原始值	原始值	Raw value	元の値	원시 값	Originalwert	Valeur brute
+其他属性	其他屬性	Other properties	その他のプロパティ	기타 속성	Weitere Eigenschaften	Autres propriétés
+其他渲染设置	其他算繪設定	Other rendering settings	その他の描画設定	기타 렌더링 설정	Weitere Rendering-Einstellungen	Autres paramètres de rendu
+其他渲染设置与字段	其他算繪設定與欄位	Other rendering settings and fields	その他の描画設定とフィールド	기타 렌더링 설정 및 필드	Weitere Rendering-Einstellungen und Felder	Autres paramètres et champs de rendu
+纹理	紋理	Textures	テクスチャ	텍스처	Texturen	Textures
+整数	整數	Integers	整数	정수	Ganzzahlen	Entiers
+浮点数	浮點數	Floats	浮動小数点数	부동 소수점	Gleitkommazahlen	Nombres flottants
+颜色 / Vector4	顏色 / Vector4	Colors / Vector4	カラー / Vector4	색상 / Vector4	Farben / Vector4	Couleurs / Vector4
+原始材质属性 YAML	原始材質屬性 YAML	Raw material properties YAML	元のマテリアルプロパティ YAML	원본 머티리얼 속성 YAML	Original-YAML der Materialeigenschaften	YAML original des propriétés du matériau
+空列表	空清單	Empty list	空のリスト	빈 목록	Leere Liste	Liste vide
+原始列表 YAML	原始清單 YAML	Raw list YAML	元のリスト YAML	원본 목록 YAML	Original-YAML der Liste	YAML original de la liste
+类型未确认，暂不开放编辑	類型未確認，暫不開放編輯	Type unverified; editing unavailable	型未確認のため編集不可	유형이 확인되지 않아 편집할 수 없음	Typ unbestätigt; Bearbeitung nicht verfügbar	Type non vérifié ; édition indisponible
+无法验证声明类型的属性保持只读，避免写入不符合 Unity 类型的数据。	無法驗證宣告類型的屬性維持唯讀，避免寫入不符合 Unity 類型的資料。	Properties with unverified declared types are read-only to prevent invalid Unity data.	宣言された型を検証できないプロパティは、不正な Unity データを防ぐため読み取り専用です。	선언 유형을 확인할 수 없는 속성은 잘못된 Unity 데이터 입력을 막기 위해 읽기 전용입니다.	Eigenschaften mit ungeprüftem Typ sind schreibgeschützt, um ungültige Unity-Daten zu verhindern.	Les propriétés dont le type déclaré n’est pas vérifié restent en lecture seule pour éviter des données Unity invalides.
+源 Prefab / 对象	來源 Prefab / 物件	Source Prefab / object	元の Prefab / オブジェクト	원본 Prefab / 객체	Quell-Prefab / Objekt	Prefab / objet source
+跳转到本文件中对应的对象	跳至本檔案中對應的物件	Go to the corresponding object in this file	このファイル内の対応するオブジェクトへ移動	이 파일의 해당 객체로 이동	Zum entsprechenden Objekt in dieser Datei springen	Aller à l’objet correspondant dans ce fichier
+枚举列表（只读）	列舉清單（唯讀）	Enum list (read-only)	列挙リスト（読み取り専用）	열거형 목록 (읽기 전용)	Enum-Liste (schreibgeschützt)	Liste d’énumération (lecture seule)
+仅查看枚举定义，不修改当前值	僅檢視列舉定義，不修改目前值	View enum definitions without changing the value	列挙定義の表示のみ。現在の値は変更しません	현재 값을 변경하지 않고 열거형 정의 보기	Enum-Definitionen anzeigen, ohne den Wert zu ändern	Voir les définitions d’énumération sans modifier la valeur
+值与声明类型不符或越界	值與宣告類型不符或超出範圍	Value does not match the declared type or is out of range	値が宣言型と一致しないか範囲外です	값이 선언 유형과 일치하지 않거나 범위를 벗어남	Wert passt nicht zum deklarierten Typ oder ist außerhalb des Bereichs	Valeur incompatible avec le type déclaré ou hors limites
+其他字段（原始 YAML）	其他欄位（原始 YAML）	Other fields (raw YAML)	その他のフィールド（元の YAML）	기타 필드 (원본 YAML)	Weitere Felder (Original-YAML)	Autres champs (YAML original)
+无法识别有效数值	無法識別有效數值	No valid number recognized	有効な数値を認識できません	유효한 숫자를 인식할 수 없음	Keine gültige Zahl erkannt	Aucun nombre valide reconnu
+Animator 关系图	Animator 關係圖	Animator graph	Animator グラフ	Animator 관계도	Animator-Diagramm	Graphe Animator
+显示关系图	顯示關係圖	Graph	グラフを表示	관계도 보기	Diagramm anzeigen	Afficher le graphe
+返回 Layer	返回 Layer	Back to Layer	Layer に戻る	Layer로 돌아가기	Zurück zum Layer	Retour au Layer
+适应画布	符合畫布	Fit to canvas	キャンバスに合わせる	캔버스에 맞추기	An Zeichenfläche anpassen	Ajuster au canevas
+拖动画布 · 滚轮缩放 · 点击连线 · 双击子状态机进入	拖曳畫布 · 滾輪縮放 · 點擊連線 · 按兩下進入子狀態機	Drag to pan · Scroll to zoom · Click connections · Double-click a sub-state machine to enter	ドラッグで移動 · スクロールで拡大縮小 · 接続をクリック · サブステートマシンをダブルクリックで開く	드래그 이동 · 휠 확대/축소 · 연결 클릭 · 하위 상태 머신 더블 클릭	Ziehen zum Verschieben · Scrollen zum Zoomen · Verbindungen anklicken · Unterzustandsmaschine doppelklicken	Glisser pour déplacer · Molette pour zoomer · Cliquer sur les liens · Double-cliquer sur une sous-machine à états
+Parameters（参数）	Parameters（參數）	Parameters	パラメーター	매개변수	Parameter	Paramètres
+未找到状态机	未找到狀態機	State machine not found	ステートマシンが見つかりません	상태 머신을 찾을 수 없음	Zustandsmaschine nicht gefunden	Machine à états introuvable
+设为默认状态	設為預設狀態	Set as default state	デフォルトステートに設定	기본 상태로 설정	Als Standardzustand festlegen	Définir comme état par défaut
+没有参数	沒有參數	No parameters	パラメーターなし	매개변수 없음	Keine Parameter	Aucun paramètre
+过渡属性与 Conditions	轉換屬性與 Conditions	Transition properties and conditions	遷移プロパティと条件	전환 속성 및 조건	Übergangseigenschaften und Bedingungen	Propriétés et conditions de transition
+恢复原始颜色	還原原始顏色	Restore original color	元の色に戻す	원래 색상 복원	Originalfarbe wiederherstellen	Restaurer la couleur d’origine
+颜色	顏色	Color	色	색상	Farbe	Couleur
+位置	位置	Position	位置	위치	Position	Position
+位置（%）	位置（%）	Position (%)	位置（%）	위치 (%)	Position (%)	Position (%)
+全部关键点	全部關鍵點	All keys	すべてのキー	모든 키	Alle Schlüssel	Toutes les clés
+颜色关键点	顏色關鍵點	Color keys	カラーキー	색상 키	Farbschlüssel	Clés de couleur
+Alpha 关键点	Alpha 關鍵點	Alpha keys	アルファキー	알파 키	Alpha-Schlüssel	Clés alpha
+Alpha（0–1）	Alpha（0–1）	Alpha (0–1)	アルファ（0–1）	알파 (0–1)	Alpha (0–1)	Alpha (0–1)
+Unity 工程：{}	Unity 專案：{}	Unity project: {}	Unity プロジェクト：{}	Unity 프로젝트: {}	Unity-Projekt: {}	Projet Unity : {}
+脚本：{}	腳本：{}	Script: {}	スクリプト：{}	스크립트: {}	Skript: {}	Script : {}
+重新扫描脚本	重新掃描腳本	Rescan scripts	スクリプトを再スキャン	스크립트 다시 검색	Skripte erneut durchsuchen	Analyser les scripts à nouveau
+引用文件不存在：{}	引用檔案不存在：{}	Referenced file does not exist: {}	参照ファイルが存在しません：{}	참조 파일이 없습니다: {}	Referenzierte Datei fehlt: {}	Fichier référencé inexistant : {}
+此引用为可执行文件或脚本，不支持直接打开。	此引用為執行檔或腳本，不支援直接開啟。	This reference is an executable or script and cannot be opened directly.	この参照は実行ファイルまたはスクリプトのため直接開けません。	이 참조는 실행 파일 또는 스크립트여서 직접 열 수 없습니다.	Diese Referenz ist eine ausführbare Datei oder ein Skript und kann nicht direkt geöffnet werden.	Cette référence est un exécutable ou script et ne peut pas être ouverte directement.
+已交给系统默认程序打开：{}	已交由系統預設程式開啟：{}	Opened with the default application: {}	既定のアプリで開きました：{}	기본 앱으로 열었습니다: {}	Mit Standardanwendung geöffnet: {}	Ouvert avec l’application par défaut : {}
+无法打开引用：{error}	無法開啟引用：{error}	Cannot open reference: {error}	参照を開けません：{error}	참조를 열 수 없습니다: {error}	Referenz kann nicht geöffnet werden: {error}	Impossible d’ouvrir la référence : {error}
+无法读取文件：{error}	無法讀取檔案：{error}	Cannot read file: {error}	ファイルを読み込めません：{error}	파일을 읽을 수 없습니다: {error}	Datei kann nicht gelesen werden: {error}	Impossible de lire le fichier : {error}
+无法写入文件：{error}	無法寫入檔案：{error}	Cannot write file: {error}	ファイルに書き込めません：{error}	파일에 쓸 수 없습니다: {error}	Datei kann nicht geschrieben werden: {error}	Impossible d’écrire le fichier : {error}
+无法进入编辑模式：{error}	無法進入編輯模式：{error}	Cannot enter edit mode: {error}	編集モードに切り替えられません：{error}	편집 모드로 전환할 수 없습니다: {error}	Bearbeitungsmodus nicht verfügbar: {error}	Impossible de passer en mode édition : {error}
+重载失败：{error}	重新載入失敗：{error}	Reload failed: {error}	再読み込みに失敗：{error}	다시 불러오기 실패: {error}	Neuladen fehlgeschlagen: {error}	Échec du rechargement : {error}
+GBK（检测到无效 UTF-8 字节）	GBK（偵測到無效 UTF-8 位元組）	GBK (invalid UTF-8 bytes detected)	GBK（無効な UTF-8 バイトを検出）	GBK (잘못된 UTF-8 바이트 감지)	GBK (ungültige UTF-8-Bytes erkannt)	GBK (octets UTF-8 invalides détectés)
+已读取 {} 个 Unity 序列化对象（只读模式）	已讀取 {} 個 Unity 序列化物件（唯讀模式）	Loaded {} Unity serialized objects (read-only)	Unity シリアライズオブジェクトを {} 個読み込み（読み取り専用）	Unity 직렬화 객체 {}개 읽음 (읽기 전용)	{} serialisierte Unity-Objekte geladen (schreibgeschützt)	{} objets Unity sérialisés chargés (lecture seule)
+已从磁盘重载 {} 个 Unity 序列化对象（只读模式），旧撤销记录已清空	已從磁碟重新載入 {} 個 Unity 序列化物件（唯讀模式），舊復原紀錄已清除	Reloaded {} Unity objects from disk (read-only); undo history cleared	ディスクから {} 個の Unity オブジェクトを再読み込み（読み取り専用）。履歴を消去しました	디스크에서 Unity 객체 {}개 다시 읽음 (읽기 전용); 실행 취소 기록 삭제됨	{} Unity-Objekte neu geladen (schreibgeschützt); Rückgängig-Verlauf gelöscht	{} objets Unity rechargés (lecture seule) ; historique d’annulation effacé
+文件已被外部修改，请重新打开后再编辑，不能撤销旧记录。	檔案已被外部修改，請重新開啟後再編輯，無法復原舊紀錄。	File changed externally. Reopen it before editing; the old history cannot be undone.	ファイルが外部で変更されました。再度開いて編集してください。以前の履歴は元に戻せません。	파일이 외부에서 변경되었습니다. 다시 열어 편집하세요. 이전 기록은 취소할 수 없습니다.	Datei extern geändert. Vor der Bearbeitung erneut öffnen; alter Verlauf kann nicht rückgängig gemacht werden.	Fichier modifié ailleurs. Rouvrez-le avant de l’éditer ; l’ancien historique ne peut pas être annulé.
+文件已被外部修改，请重新打开后再进入编辑模式。	檔案已被外部修改，請重新開啟後再進入編輯模式。	File changed externally. Reopen it before entering edit mode.	ファイルが外部で変更されました。再度開いて編集モードに切り替えてください。	파일이 외부에서 변경되었습니다. 다시 연 후 편집 모드로 전환하세요.	Datei extern geändert. Vor dem Bearbeitungsmodus erneut öffnen.	Fichier modifié ailleurs. Rouvrez-le avant de passer en mode édition.
+文件包含无法正确解码的字节，暂不开放编辑。	檔案包含無法正確解碼的位元組，暫不開放編輯。	File contains undecodable bytes; editing is unavailable.	デコードできないバイトが含まれているため編集できません。	디코딩할 수 없는 바이트가 있어 편집할 수 없습니다.	Datei enthält nicht dekodierbare Bytes; Bearbeitung nicht verfügbar.	Le fichier contient des octets indécodables ; édition indisponible.
+仍有文件处于编辑模式，请先保存或放弃编辑，再关闭程序。	仍有檔案處於編輯模式，請先儲存或放棄編輯，再關閉程式。	Some files are in edit mode. Save or discard edits before closing.	編集中のファイルがあります。保存または破棄してから終了してください。	편집 중인 파일이 있습니다. 저장하거나 취소한 후 종료하세요.	Dateien sind im Bearbeitungsmodus. Vor dem Schließen speichern oder Änderungen verwerfen.	Des fichiers sont en mode édition. Enregistrez ou abandonnez les modifications avant de fermer.
+{}  ·  fileID: {}  ·  YAML 第 {} 行	{}  ·  fileID: {}  ·  YAML 第 {} 行	{}  ·  fileID: {}  ·  YAML line {}	{}  ·  fileID: {}  ·  YAML {} 行目	{}  ·  fileID: {}  ·  YAML {}행	{}  ·  fileID: {}  ·  YAML-Zeile {}	{}  ·  fileID: {}  ·  ligne YAML {}
+复制 {field_name}	複製 {field_name}	Copy {field_name}	{field_name} をコピー	{field_name} 복사	{field_name} kopieren	Copier {field_name}
+总时长：0.00s — {duration:.2}s{sample_rate}	總時長：0.00s — {duration:.2}s{sample_rate}	Duration: 0.00s — {duration:.2}s{sample_rate}	再生時間：0.00s — {duration:.2}s{sample_rate}	총 길이: 0.00s — {duration:.2}s{sample_rate}	Dauer: 0.00s — {duration:.2}s{sample_rate}	Durée : 0.00s — {duration:.2}s{sample_rate}
+{}　·　文件编码：{}	{}　·　檔案編碼：{}	{} · Encoding: {}	{} · 文字コード：{}	{} · 파일 인코딩: {}	{} · Dateikodierung: {}	{} · Encodage : {}
+本文件中未找到 fileID: {file_id}	本檔案中未找到 fileID: {file_id}	fileID not found in this file: {file_id}	このファイルに fileID が見つかりません：{file_id}	이 파일에서 fileID를 찾을 수 없습니다: {file_id}	fileID in dieser Datei nicht gefunden: {file_id}	fileID introuvable dans ce fichier : {file_id}
+版本 {APP_VERSION}	版本 {APP_VERSION}	Version {APP_VERSION}	バージョン {APP_VERSION}	버전 {APP_VERSION}	Version {APP_VERSION}	Version {APP_VERSION}
+“{name}”有未保存的修改。是否放弃编辑并关闭文件？	「{name}」有未儲存的修改。是否放棄編輯並關閉檔案？	“{name}” has unsaved changes. Discard edits and close?	「{name}」に未保存の変更があります。破棄して閉じますか？	“{name}”에 저장하지 않은 변경 사항이 있습니다. 취소하고 닫을까요?	„{name}“ enthält ungespeicherte Änderungen. Verwerfen und schließen?	« {name} » contient des modifications non enregistrées. Les abandonner et fermer ?
+从左侧路径树选择一个动画属性，可查看其独立时间轴。	從左側路徑樹選擇動畫屬性，可檢視獨立時間軸。	Select an animation property in the left tree to view its timeline.	左側のツリーでアニメーションプロパティを選択するとタイムラインを表示します。	왼쪽 트리에서 애니메이션 속성을 선택하면 타임라인을 볼 수 있습니다.	Animationseigenschaft im linken Baum auswählen, um ihre Zeitleiste anzuzeigen.	Sélectionnez une propriété d’animation dans l’arbre de gauche pour afficher sa chronologie.
+当前属性：{} · {}	目前屬性：{} · {}	Current property: {} · {}	現在のプロパティ：{} · {}	현재 속성: {} · {}	Aktuelle Eigenschaft: {} · {}	Propriété actuelle : {} · {}
+关键帧：{}　·　时间：{:.3}s	關鍵影格：{}　·　時間：{:.3}s	Keyframe: {} · Time: {:.3}s	キーフレーム：{} · 時間：{:.3}s	키프레임: {} · 시간: {:.3}s	Keyframe: {} · Zeit: {:.3}s	Image clé : {} · Temps : {:.3}s
+值：{}	值：{}	Value: {}	値：{}	값: {}	Wert: {}	Valeur : {}
+旋转以欧拉角（度）显示；编辑模式中的改动需要保存才会写入文件。	旋轉以歐拉角（度）顯示；編輯模式中的變更需儲存才會寫入檔案。	Rotation uses Euler angles (degrees); edits are written only when saved.	回転はオイラー角（度）で表示。編集内容は保存時に書き込まれます。	회전은 오일러 각도(도)로 표시됩니다. 편집은 저장할 때만 기록됩니다.	Rotation als Eulerwinkel (Grad); Änderungen werden erst beim Speichern geschrieben.	Rotation en angles d’Euler (degrés) ; les modifications sont écrites à l’enregistrement.
+{text}\n原始 YAML：{raw_text}	{text}\n原始 YAML：{raw_text}	{text}\nRaw YAML: {raw_text}	{text}\n元の YAML：{raw_text}	{text}\n원본 YAML: {raw_text}	{text}\nOriginal-YAML: {raw_text}	{text}\nYAML original : {raw_text}
+{}（{} 条）	{}（{} 筆）	{} ({} entries)	{}（{} 件）	{} ({}개)	{} ({} Einträge)	{} ({} entrées)
+{} ({field_type}) · {} 条	{} ({field_type}) · {} 筆	{} ({field_type}) · {} entries	{} ({field_type}) · {} 件	{} ({field_type}) · {}개	{} ({field_type}) · {} Einträge	{} ({field_type}) · {} entrées
+{name} ({element}[]) · {count} 条	{name} ({element}[]) · {count} 筆	{name} ({element}[]) · {count} entries	{name} ({element}[]) · {count} 件	{name} ({element}[]) · {count}개	{name} ({element}[]) · {count} Einträge	{name} ({element}[]) · {count} entrées
+未匹配值 ({})	未匹配值 ({})	Unmatched value ({})	一致しない値 ({})	일치하지 않는 값 ({})	Nicht zugeordneter Wert ({})	Valeur non correspondante ({})
+状态：{}	狀態：{}	State: {}	ステート：{}	상태: {}	Zustand: {}	État : {}
+颜色关键点 {index}	顏色關鍵點 {index}	Color key {index}	カラーキー {index}	색상 키 {index}	Farbschlüssel {index}	Clé de couleur {index}
+Alpha 关键点 {index}	Alpha 關鍵點 {index}	Alpha key {index}	アルファキー {index}	알파 키 {index}	Alpha-Schlüssel {index}	Clé alpha {index}
+Points · {} 条路径，{count} 个顶点	Points · {} 條路徑，{count} 個頂點	Points · {} paths, {count} vertices	Points · {} パス、{count} 頂点	Points · 경로 {}개, 정점 {count}개	Points · {} Pfade, {count} Punkte	Points · {} chemins, {count} sommets
+Path {path_index} · {} 个顶点	Path {path_index} · {} 個頂點	Path {path_index} · {} vertices	Path {path_index} · {} 頂点	Path {path_index} · 정점 {}개	Path {path_index} · {} Punkte	Path {path_index} · {} sommets
+RGB: {}, {}, {}\nAlpha: {}\n点击打开调色板（仅预览）	RGB: {}, {}, {}\nAlpha: {}\n點擊開啟調色盤（僅預覽）	RGB: {}, {}, {}\nAlpha: {}\nClick to open palette (preview only)	RGB: {}, {}, {}\nAlpha: {}\nクリックでパレットを開く（プレビューのみ）	RGB: {}, {}, {}\nAlpha: {}\n클릭하여 팔레트 열기 (미리보기 전용)	RGB: {}, {}, {}\nAlpha: {}\nKlicken zum Öffnen der Palette (nur Vorschau)	RGB: {}, {}, {}\nAlpha: {}\nCliquer pour ouvrir la palette (aperçu uniquement)
+Avatar 引用	Avatar 引用	Avatar reference	Avatar 参照	Avatar 참조	Avatar-Referenz	Référence Avatar
+GameObject 引用	GameObject 引用	GameObject reference	GameObject 参照	GameObject 참조	GameObject-Referenz	Référence GameObject
+Material 引用	Material 引用	Material reference	Material 参照	Material 참조	Material-Referenz	Référence Material
+Mesh 引用	Mesh 引用	Mesh reference	Mesh 参照	Mesh 참조	Mesh-Referenz	Référence Mesh
+Motion 引用	Motion 引用	Motion reference	Motion 参照	Motion 참조	Motion-Referenz	Référence Motion
+PhysicMaterial 引用	PhysicMaterial 引用	PhysicMaterial reference	PhysicMaterial 参照	PhysicMaterial 참조	PhysicMaterial-Referenz	Référence PhysicMaterial
+PhysicsMaterial2D 引用	PhysicsMaterial2D 引用	PhysicsMaterial2D reference	PhysicsMaterial2D 参照	PhysicsMaterial2D 참조	PhysicsMaterial2D-Referenz	Référence PhysicsMaterial2D
+RuntimeAnimatorController 引用	RuntimeAnimatorController 引用	RuntimeAnimatorController reference	RuntimeAnimatorController 参照	RuntimeAnimatorController 참조	RuntimeAnimatorController-Referenz	Référence RuntimeAnimatorController
+Shader 引用	Shader 引用	Shader reference	Shader 参照	Shader 참조	Shader-Referenz	Référence Shader
+Sprite 引用	Sprite 引用	Sprite reference	Sprite 参照	Sprite 참조	Sprite-Referenz	Référence Sprite
+TerrainData 引用	TerrainData 引用	TerrainData reference	TerrainData 参照	TerrainData 참조	TerrainData-Referenz	Référence TerrainData
+Texture 引用	Texture 引用	Texture reference	Texture 参照	Texture 참조	Texture-Referenz	Référence Texture
+Transform 引用	Transform 引用	Transform reference	Transform 参照	Transform 참조	Transform-Referenz	Référence Transform
+属性编辑	屬性編輯	Dopesheet	プロパティ編集	속성 편집	Eigenschaften	Propriétés
+曲线编辑	曲線編輯	Curves	カーブ編集	곡선 편집	Kurven	Courbes
+新增关键帧	新增關鍵影格	Add keyframe	キーフレームを追加	키프레임 추가	Keyframe hinzufügen	Ajouter une image clé
+删除选中关键帧	刪除所選關鍵影格	Delete selected keyframes	選択したキーフレームを削除	선택한 키프레임 삭제	Ausgewählte Keyframes löschen	Supprimer les images clés sélectionnées
+帧	影格	Frame	フレーム	프레임	Frame	Image
+缩放	縮放	Zoom	ズーム	확대/축소	Zoom	Zoom
+适应窗口	符合視窗	Fit to window	ウィンドウに合わせる	창에 맞춤	An Fenster anpassen	Adapter à la fenêtre
+纵向缩放	縱向縮放	Vertical zoom	縦方向ズーム	세로 확대/축소	Vertikaler Zoom	Zoom vertical
+左权重	左權重	Left weight	左のウェイト	왼쪽 가중치	Linkes Gewicht	Poids gauche
+右权重	右權重	Right weight	右のウェイト	오른쪽 가중치	Rechtes Gewicht	Poids droit
+自动钳制	自動箝制	Clamped Auto	クランプ自動	클램프 자동	Begrenzt automatisch	Auto limité
+自动	自動	Auto	自動	자동	Automatisch	Automatique
+自由平滑	自由平滑	Free Smooth	自由スムーズ	자유 평활	Frei geglättet	Lissage libre
+平坦	平坦	Flat	フラット	평탄	Flach	Plat
+断开切线	斷開切線	Broken	接線を分離	접선 분리	Getrennte Tangenten	Tangentes séparées
+左切线	左切線	Left Tangent	左接線	왼쪽 접선	Linke Tangente	Tangente gauche
+右切线	右切線	Right Tangent	右接線	오른쪽 접선	Rechte Tangente	Tangente droite
+双侧切线	雙側切線	Both Tangents	両接線	양쪽 접선	Beide Tangenten	Deux tangentes
+自由	自由	Free	自由	자유	Frei	Libre
+线性	線性	Linear	線形	선형	Linear	Linéaire
+常量	常數	Constant	定数	상수	Konstant	Constante
+加权	加權	Weighted	加重	가중	Gewichtet	Pondéré
