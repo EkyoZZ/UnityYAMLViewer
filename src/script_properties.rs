@@ -633,6 +633,7 @@ pub fn show_mesh_renderer_properties_content(ui: &mut egui::Ui, text: &str, quer
         ("ReflectionProbeUsage", vec![("Off",0),("Blend Probes",1),("Blend Probes And Skybox",2),("Simple",3)]),
         ("RayTracingMode", vec![("Off",0),("Static",1),("Dynamic Transform",2),("Dynamic Geometry",3)]),
         ("ReceiveGI", vec![("Lightmaps",1),("Light Probes",2)]),
+        ("SkinQuality", vec![("Auto",0),("Bone 1",1),("Bone 2",2),("Bone 4",4)]),
     ] {
         index.enums.insert(name.into(), vec![values.into_iter().map(|(label,value)| (label.into(),value)).collect()]);
     }
@@ -655,6 +656,15 @@ pub fn show_mesh_renderer_properties_content(ui: &mut egui::Ui, text: &str, quer
 
 fn mesh_renderer_field_info(name: &str) -> (&str, &str) {
     match name {
+        "m_Quality" => ("Skin Quality", "SkinQuality"),
+        "m_UpdateWhenOffscreen" => ("Update When Offscreen", "bool"),
+        "m_SkinnedMotionVectors" => ("Skinned Motion Vectors", "bool"),
+        "m_Mesh" => ("Mesh", "Mesh"),
+        "m_Bones" => ("Bones", "Transform[]"),
+        "m_RootBone" => ("Root Bone", "Transform"),
+        "m_BlendShapeWeights" => ("Blend Shape Weights", "float[]"),
+        "m_AABB" => ("Local Bounds", "SkinnedMeshBounds"),
+        "m_DirtyAABB" => ("Dirty Bounds", "bool"),
         "m_MotionVectors" => ("Motion Vectors", "MotionVectorGenerationMode"),
         "m_LightProbeUsage" => ("Light Probes", "LightProbeUsage"),
         "m_ReflectionProbeUsage" => ("Reflection Probes", "ReflectionProbeUsage"),
@@ -1469,6 +1479,7 @@ fn rect_offset_fields(text: &str) -> Option<Vec<(&'static str, String)>> {
 // Use serialized field names, rather than guessing types from YAML values.
 fn builtin_struct_fields(field_type: &str) -> Option<BTreeMap<String, String>> {
     let fields = match field_type {
+        "SkinnedMeshBounds" => &[("m_Center", "Vector3"), ("m_Extent", "Vector3")][..],
         "ColorBlock" | "UnityEngine.UI.ColorBlock" => &[
             ("m_NormalColor", "Color"),
             ("m_HighlightedColor", "Color"),

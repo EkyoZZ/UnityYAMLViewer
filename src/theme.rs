@@ -91,6 +91,9 @@ pub fn toolbar_selector(ui: &mut egui::Ui, preference: &mut String) {
 pub fn background_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("", "棋盘格"), ("gray", "灰色"), ("custom", "自定义")]);
 }
+pub fn model_background_selector(ui:&mut egui::Ui,preference:&mut String) {
+    selector_inner(ui,preference,true,[("checker","棋盘格"),("gray","灰色")]);
+}
 
 /// Filled toolbar actions use the same height and text padding as theme tabs.
 pub fn toolbar_button(ui: &egui::Ui, label: &str, update: bool) -> egui::Button<'static> {
@@ -103,11 +106,21 @@ pub fn toolbar_button(ui: &egui::Ui, label: &str, update: bool) -> egui::Button<
         .min_size(egui::vec2(width, 24.0))
 }
 
-fn selector_inner(ui: &mut egui::Ui, preference: &mut String, compact: bool, labels: [(&str, &str); 3]) {
+pub fn preview_mode_selector(ui:&mut egui::Ui,dynamic:&mut bool) -> bool {
+    let mut value=if *dynamic {"dynamic"} else {"static"}.to_owned();
+    selector_inner(ui,&mut value,true,[("static","静态"),("dynamic","动态")]);
+    let next=value=="dynamic";let changed=next!=*dynamic;*dynamic=next;changed
+}
+
+pub(crate) fn preview_navigation_button(label:&str)->egui::Button<'_> {
+    egui::Button::new(RichText::new(label).color(Color32::WHITE))
+        .fill(BLUE).stroke(Stroke::new(1.0_f32,BLUE)).corner_radius(4.0)
+}
+fn selector_inner<const N:usize>(ui: &mut egui::Ui, preference: &mut String, compact: bool, labels: [(&str, &str); N]) {
     let font = egui::TextStyle::Button.resolve(ui.style());
     let widths = labels.map(|(_, label)| if compact {
         ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 12.0
-    } else { 208.0 / 3.0 });
+    } else { 208.0 / N as f32 });
     let height = if compact { 24.0 } else { 30.0 };
     ui.allocate_ui_with_layout(egui::vec2(widths.iter().sum(), height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -116,7 +129,7 @@ fn selector_inner(ui: &mut egui::Ui, preference: &mut String, compact: bool, lab
             let selected = preference == value;
             let rounding = egui::CornerRadius {
                 nw: if index == 0 { 4 } else { 0 }, sw: if index == 0 { 4 } else { 0 },
-                ne: if index == 2 { 4 } else { 0 }, se: if index == 2 { 4 } else { 0 },
+                ne: if index == N-1 { 4 } else { 0 }, se: if index == N-1 { 4 } else { 0 },
             };
             let button = egui::Button::new(RichText::new(crate::localization::tr(label)).color(if selected { Color32::WHITE } else { BLUE }))
                 .fill(if selected { BLUE } else { ui.visuals().window_fill })

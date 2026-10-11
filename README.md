@@ -12,7 +12,11 @@
 
 ### 当前状态
 
-当前开发版本 **1.1.4** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前开发版本 **1.1.5** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+
+### 1.1.5 更新（开发中，待测试）
+
+Spine 3.8 独立骨骼渲染与多轨动画预览、场景 / Prefab 静态 Spine 合成，以及左下轨道列表和底部中央缩放 / 播放悬浮控件。完整限制与验证状态见 [1.1.5 功能记录](docs/versions/1.1.5.md)。已生成 1.1.5 Release 开发构建，实际运行效果待测试，尚未正式发布。
 
 ### 1.1.4 更新（开发中）
 
@@ -138,7 +142,11 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Development version **1.1.4** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Development version **1.1.5** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+
+### 1.1.5 release notes (in development, awaiting testing)
+
+Spine 3.8 standalone rendering and multi-track animation preview, static Spine composition in scenes / prefabs, and floating track and zoom / playback controls. See the [1.1.5 feature record](docs/versions/1.1.5.md) for limitations and validation status. A 1.1.5 Release development build is available; runtime validation and official release remain pending.
 
 ### 1.1.4 release notes (in development)
 

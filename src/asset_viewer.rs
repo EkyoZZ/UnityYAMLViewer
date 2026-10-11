@@ -103,15 +103,43 @@ impl ImageTab {
     }
 }
 #[derive(Default)]
-pub struct Assets { images: HashMap<PathBuf, ImageTab> }
+pub struct Assets {
+    models: HashMap<PathBuf, crate::model_preview::Preview>,
+    images: HashMap<PathBuf, ImageTab>,
+    spine: HashMap<PathBuf, Result<crate::spine_preview::Preview,String>>,
+
+}
 impl Assets {
-    pub fn forget(&mut self, path: &Path) { self.images.remove(path); }
+    pub fn forget(&mut self, path: &Path) { self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
             if other != path { tab.original = None; tab.texture = None; tab.pending = None; }
         }
         ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
+        self.models.retain(|other,_|other==path);
+        if crate::model_preview::is_model(path) {
+            let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
+            if refresh.as_deref()==Some(path){self.models.remove(path);}
+            let reload=self.models.entry(path.to_owned()).or_insert_with(||crate::model_preview::Preview::new(ui.ctx(),path)).show(ui);
+            if reload {self.models.remove(path);}
+            return;
+        }
+        if crate::spine_preview::is_spine(path) || crate::spine_preview::is_data_asset(text) {
+            self.spine.retain(|other,_|other==path);
+            let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
+            if crate::spine_preview::is_data_asset(text) && catalog.is_none() {ui.spinner();ui.label("正在索引 Spine 资源…");return;}
+            let reload=match self.spine.entry(path.to_owned()).or_insert_with(|| {
+                if crate::spine_preview::is_data_asset(text) {crate::spine_preview::Preview::load_asset(ui.ctx(),text,catalog.as_ref().unwrap())}
+                else {crate::spine_preview::Preview::load(ui.ctx(),path)}
+            }) {
+                Ok(preview)=>preview.show(ui),
+                Err(error)=>{ui.colored_label(Color32::RED,error.as_str());ui.button(crate::localization::tr("重载")).clicked()},
+            };
+            if reload {self.spine.remove(path);ui.ctx().data_mut(|data|data.insert_temp(egui::Id::new("spine_reload_request"),true));}
+            return;
+        }
+        self.spine.clear();
         if !is_image(path) {
             egui::ScrollArea::both().id_salt(("reference_text", path)).auto_shrink([false, false]).show(ui, |ui| {
                 let language = syntax_language(path);

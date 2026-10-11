@@ -2,6 +2,7 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
+- [1.1.5：Spine 静态渲染、多轨动画预览与悬浮控件（开发中，待测试）](docs/versions/1.1.5.md)
 - [1.1.4：场景/Tilemap 与嵌套 Prefab、预览性能及 Inspector 优化（已封版，待发布）](docs/versions/1.1.4.md)
 - [1.1.3：静态 2D 预览](docs/versions/1.1.3.md)
 - [1.1.2：在线更新](docs/versions/1.1.2.md)

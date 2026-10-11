@@ -293,16 +293,19 @@ fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,
     }
     {let mut status=shared.status.lock().unwrap();status.total=paths.len();status.stage=1;status.errors=prepared.issues.clone();}
     let loading_started=Instant::now();
+    let baked:HashMap<_,_>=prepared.sprites.iter().filter_map(|s|Some((s.path.clone(),s.baked.clone()?))).collect();
     let mut textures=vec![None;paths.len()];
     let next=std::sync::atomic::AtomicUsize::new(0);let reserved=std::sync::atomic::AtomicUsize::new(0);
     let (sender,receiver)=std::sync::mpsc::channel();
     std::thread::scope(|scope| {
         for _ in 0..2.min(paths.len()) {
-            let sender=sender.clone();let paths=&paths;let next=&next;let reserved=&reserved;let cache=&cache;
+            let sender=sender.clone();let paths=&paths;let next=&next;let reserved=&reserved;let cache=&cache;let baked=&baked;
             scope.spawn(move || loop {
                 if !shared.checkpoint() {return;}
                 let index=next.fetch_add(1,Ordering::Relaxed);let Some(path)=paths.get(index) else {return;};
-                let started=Instant::now();let result=load_cached(path,reserved,cache,shared);
+                let started=Instant::now();let result=if let Some(baked)=baked.get(path) {
+                    if reserve_bytes(reserved,baked.image.pixels.len()*4) {Ok((Arc::new(CpuTexture{size:baked.image.size,pixels:baked.image.pixels.clone(),meta:String::new(),regions:Mutex::default()}),false))} else {Err("Preview texture cache exceeds 256 MiB".into())}
+                } else {load_cached(path,reserved,cache,shared)};
                 let elapsed=started.elapsed();
                 if sender.send((index,result,elapsed)).is_err() {return;}
             });
@@ -331,7 +334,7 @@ fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,
     for (index,sprite) in prepared.sprites.iter().enumerate() {
         if index%256==0 && !shared.checkpoint() {return;}
         let texture_index=indices[&sprite.path];let Some(texture)=&textures[texture_index] else {continue;};
-        let r=regions.entry((texture_index,sprite.id.clone())).or_insert_with(||*texture.regions.lock().unwrap().entry(sprite.id.clone()).or_insert_with(||super::region(&texture.meta,&sprite.id,texture.size)));
+        let r=regions.entry((texture_index,sprite.id.clone())).or_insert_with(||sprite.baked.as_ref().map(|b|b.region).or_else(||*texture.regions.lock().unwrap().entry(sprite.id.clone()).or_insert_with(||super::region(&texture.meta,&sprite.id,texture.size))));
         let Some(r)=r else {continue;};
         let [x,y,w,h]=r.rect;let corners=[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]];
         let points=corners.map(|[a,b]|sprite.matrix.point((a-r.pivot[0])*w/r.ppu*if sprite.flip[0]{-1.0}else{1.0},(b-r.pivot[1])*h/r.ppu*if sprite.flip[1]{-1.0}else{1.0}));

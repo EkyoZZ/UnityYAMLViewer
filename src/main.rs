@@ -22,6 +22,8 @@ mod localized_format;
 mod theme;
 mod icons;
 mod asset_viewer;
+mod spine_preview;
+mod model_preview;
 mod preview_fonts;
 mod recent_files;
 mod timeline_edit;
@@ -473,7 +475,7 @@ impl ViewerApp {
                 "yaml",
                 "yml",
             ],
-        );
+        ).add_filter("Spine 3.8", &["skel", "bytes", "json", "txt"]);
         let dialog = if let Some(directory) = &self.last_open_dir {
             dialog.set_directory(directory)
         } else {
@@ -499,7 +501,7 @@ impl ViewerApp {
             self.remember_recent_file();
             return;
         }
-        if asset_viewer::is_image(&path) && path.is_file() {
+        if (asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -518,7 +520,7 @@ impl ViewerApp {
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if asset_viewer::is_image(&path) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
@@ -648,6 +650,7 @@ impl ViewerApp {
         game_object: usize,
         children: &HashMap<String, Vec<usize>>,
         components: &HashMap<String, Vec<usize>>,
+        depth: usize,
     ) {
         let id = self.documents[game_object].file_id.clone();
         let title = self.display_name(&self.documents[game_object]);
@@ -665,7 +668,7 @@ impl ViewerApp {
             }
             false
         });
-        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(format!("go-{id}")), self.documents.len()<2000);
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(format!("go-{id}")), depth<2);
         if force_open { state.set_open(true); }
         let has_visible_children = children.get(&id).is_some_and(|items| items.iter()
             .any(|child| self.game_object_has_match(*child, children, components)));
@@ -713,7 +716,7 @@ impl ViewerApp {
         if has_visible_children {
             state.show_body_indented(&response.response, ui, |ui| {
                 if let Some(ids) = children.get(&id).cloned() {
-                    for child in ids { self.show_game_object(ui, child, children, components); }
+                    for child in ids { self.show_game_object(ui, child, children, components, depth+1); }
                 }
             });
         }
@@ -811,16 +814,25 @@ impl ViewerApp {
                 let doc = self.documents[index].clone();
                 ui.push_id((&inspector_path, &doc.file_id), |ui| {
                     let focused = self.selected == Some(index) && previous != Some(index);
-                    let mut header = egui::CollapsingHeader::new(self.display_name(&doc)).id_salt("component")
-                        .default_open(matches!(doc.type_name.as_str(), "Transform" | "RectTransform"));
-                    if focused { header = header.open(Some(true)); }
+                    let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id("component"),matches!(doc.type_name.as_str(),"Transform"|"RectTransform"));
+                    if focused {state.set_open(true);}
                     let header_background = ui.painter().add(egui::Shape::Noop);
                     let header_fill = if ui.visuals().dark_mode {
                         Color32::from_rgb(65, 76, 96)
                     } else {
                         Color32::from_rgb(210, 225, 244)
                     };
-                    let response = header.show(ui, |ui| {
+                    let mut title_clicked=false;
+                    let mut title_rect=egui::Rect::NOTHING;
+                    let mut header=state.show_header(ui,|ui| {
+                        let title=ui.add(egui::Label::new(self.display_name(&doc)).sense(egui::Sense::click()));
+                        title_clicked=title.clicked();
+                        title_rect=title.rect;
+                        model_preview::component_button(ui,&doc.text);
+                        spine_preview::component_button(ui,&doc.text);
+                    });
+                    if title_clicked {header.set_open(!header.is_open());}
+                    let (_,header_response,_) = header.body(|ui| {
                         editing::publish(&ctx, session.clone(), range.clone());
                         ui.small(crate::lf!("{0}  ·  fileID: {1}  ·  YAML 第 {2} 行", self.display_name(&doc), doc.file_id, doc.start_line));
                         let yaml_key = ui.make_persistent_id("show_yaml");
@@ -853,7 +865,7 @@ impl ViewerApp {
                             script_properties::show_sprite_renderer_properties_content(ui, &doc.text, &self.query);
                         } else if matches!(doc.type_name.as_str(), "ParticleSystem" | "ParticleSystemRenderer") {
                             script_properties::show_particle_properties_content(ui, &doc.type_name, &doc.text, &self.query);
-                        } else if doc.type_name == "MeshRenderer" {
+                        } else if matches!(doc.type_name.as_str(), "MeshRenderer" | "SkinnedMeshRenderer") {
                             script_properties::show_mesh_renderer_properties_content(ui, &doc.text, &self.query);
                         } else if ui_preview::graphic(&doc).is_some() {
                             script_properties::show_ui_graphic_properties_content(ui, &doc.text, &self.query);
@@ -867,10 +879,10 @@ impl ViewerApp {
                             ui.add(egui::Label::new(RichText::new(doc.text.as_ref()).monospace()).wrap());
                         }
                     });
-                    let mut header_rect = response.header_response.rect;
-                    header_rect.max.x += 8.0;
+                    let mut header_rect = header_response.response.rect;
+                    header_rect.max.x = title_rect.right()+4.0;
                     ui.painter().set(header_background, egui::Shape::rect_filled(header_rect, 4.0, header_fill));
-                    if focused { response.header_response.scroll_to_me(Some(egui::Align::Center)); }
+                    if focused { header_response.response.scroll_to_me(Some(egui::Align::Center)); }
                     ui.separator();
                 });
             }
@@ -1119,7 +1131,11 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(path)=ctx.data_mut(|data|data.remove_temp::<PathBuf>(egui::Id::new("spine_window_request"))) {
+            self.open_file_with_directory_tracking(path,false);
+        }
         self.poll_file_load(ctx);
+        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("spine_reload_request"))).unwrap_or(false) {self.reload_current_file(ctx);}
         if let Some(inbox) = &mut self.command_inbox {
             let requests = inbox.receive();
             for paths in requests {
@@ -1290,7 +1306,7 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
-        let reference_tab = self.path.as_ref().is_some_and(|path| asset_viewer::is_image(path) || asset_viewer::is_text(path));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| asset_viewer::is_image(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -1373,7 +1389,7 @@ impl eframe::App for ViewerApp {
                                     for root in roots {
                                         if let Some(data)=&expanded {
                                             self.show_linked_node(ui,root,&data.documents,&children,linked_flags.as_ref().unwrap(),0);
-                                        } else {self.show_game_object(ui, root, &children, &components);}
+                                        } else {self.show_game_object(ui, root, &children, &components,0);}
                                     }
                                 });
                             });
@@ -1438,7 +1454,8 @@ impl eframe::App for ViewerApp {
         egui::CentralPanel::default().frame(egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill)).show(ctx, |ui| {
             if reference_tab {
                 editing::publish(ctx, None, 0..0);
-                if self.path.as_ref().is_some_and(|path| asset_viewer::is_text(path)) && ui.button(crate::localization::tr("重载")).clicked() {
+                if !spine_preview::is_data_asset(&self.raw) && self.path.as_ref().is_some_and(|path| asset_viewer::is_text(path) && !spine_preview::is_spine(path)) && ui.button(crate::localization::tr("重载")).clicked() {
+                    if let Some(path)=&self.path {self.assets.forget(path);}
                     self.reload_current_file(ctx);
                 }
                 if let Some(path) = self.path.clone() { self.assets.show(ui, &path, &self.raw); }
@@ -1551,7 +1568,7 @@ impl eframe::App for ViewerApp {
 				let is_transform = matches!(doc.type_name.as_str(), "Transform" | "RectTransform");
 				let is_script = doc.type_name == "MonoBehaviour";
 				let is_sprite_renderer = doc.type_name == "SpriteRenderer";
-                let is_mesh_renderer = doc.type_name == "MeshRenderer";
+                let is_mesh_renderer = matches!(doc.type_name.as_str(), "MeshRenderer" | "SkinnedMeshRenderer");
                 let is_particle = matches!(doc.type_name.as_str(), "ParticleSystem" | "ParticleSystemRenderer");
                 let is_tilemap = matches!(doc.type_name.as_str(), "Tilemap" | "TilemapRenderer" | "Grid");
 				let is_collider = script_properties::is_collider_type(&doc.type_name);
@@ -1570,7 +1587,7 @@ impl eframe::App for ViewerApp {
                     })
 				};
                 let metadata_top_left = ui.cursor().min;
-				ui.label(crate::lf!("{0}  ·  fileID: {1}  ·  YAML 第 {2} 行", self.display_name(doc), doc.file_id, doc.start_line));
+				ui.horizontal_wrapped(|ui| {ui.label(crate::lf!("{0}  ·  fileID: {1}  ·  YAML 第 {2} 行", self.display_name(doc), doc.file_id, doc.start_line)); model_preview::component_button(ui,&doc.text); spine_preview::component_button(ui,&doc.text); });
 				let guid_entries = guid_entries_from_text(&doc.text);
 				ui.horizontal(|ui| {
 					ui.menu_button(crate::localization::tr("复制 GUID"), |ui| {
@@ -1765,7 +1782,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if asset_viewer::is_image(&path) || asset_viewer::is_text(&path) {
+                    if asset_viewer::is_image(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();

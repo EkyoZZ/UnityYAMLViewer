@@ -605,11 +605,11 @@ struct NumberDrag { start: f64, pixels: f64 }
 fn integer_kind(kind: &str) -> bool {
     matches!(kind.rsplit('.').next().unwrap_or(kind), "int" | "Int32" | "uint" | "UInt32" | "long" | "Int64" | "ulong" | "UInt64" | "short" | "Int16" | "ushort" | "UInt16" | "byte" | "Byte" | "sbyte" | "SByte")
 }
-/// A focused text box scrubs horizontally; a click still permits keyboard entry.
-fn scrub_number(ui: &egui::Ui, response: &egui::Response, was_focused: bool, input: &mut String, kind: &str) -> bool {
+/// Scrub from the component label; text boxes keep native text selection.
+fn scrub_number(ui: &egui::Ui, response: &egui::Response, input: &mut String, kind: &str) -> bool {
     let drag_id = response.id.with("number_scrub");
     let mut drag = ui.ctx().data(|data| data.get_temp::<NumberDrag>(drag_id));
-    if response.drag_started_by(egui::PointerButton::Primary) && was_focused && validate(kind, input) {
+    if response.drag_started_by(egui::PointerButton::Primary) && validate(kind, input) {
         if let Ok(start) = input.parse::<f64>() {
             // Larger integral values cannot be represented exactly by f64.
             if !integer_kind(kind) || start.abs() <= 9_007_199_254_740_991.0 { drag = Some(NumberDrag { start, pixels: 0.0 }); }
@@ -621,14 +621,13 @@ fn scrub_number(ui: &egui::Ui, response: &egui::Response, was_focused: bool, inp
         return false;
     }
     let multiplier = ui.input(|i| if i.modifiers.shift { 0.1 } else if i.modifiers.ctrl { 10.0 } else { 1.0 });
-    drag.pixels += response.drag_delta().x as f64 * multiplier;
+    drag.pixels += ui.input(|i|i.pointer.delta().x) as f64 * multiplier;
     let value = drag.start + drag.pixels * if integer_kind(kind) { 1.0 } else { 0.1 };
     let candidate = if integer_kind(kind) { format!("{:.0}", value.round()) }
         else if matches!(kind, "double" | "Double") { ((value * 1e6).round() / 1e6).to_string() }
         else { (((value * 1e6).round() / 1e6) as f32).to_string() };
     if validate(kind, &candidate) { *input = candidate; }
     ui.ctx().data_mut(|data| data.insert_temp(drag_id, drag));
-    response.request_focus();
     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     true
 }
@@ -641,12 +640,11 @@ fn text_inner(ui: &mut egui::Ui, bind: &Binding, kind: &str, width: f32, exact_w
     let displayed = if is_string { crate::yaml_strings::display(&current).into_owned() } else { current.clone() };
     let mut draft = bind.source.session.lock().unwrap().drafts.get(&bind.range.start).cloned().unwrap_or(displayed.clone());
     let editor_id = ui.id().with(("edit_value", bind.range.start));
-    let was_focused = ui.memory(|memory| memory.has_focus(editor_id));
     let editor = TextEdit::singleline(&mut draft).id(editor_id).desired_width(width);
     let response = if exact_width {
         ui.add_sized(egui::vec2(width, ui.spacing().interact_size.y), editor)
     } else { ui.add(editor) };
-    let scrubbing = !is_string && scrub_number(ui, &response, was_focused, &mut draft, kind);
+    let scrubbing = false;
     if scrubbing {
         let mut session = bind.source.session.lock().unwrap();
         session.drafts.remove(&bind.range.start);
@@ -768,14 +766,15 @@ fn control_inner(ui: &mut egui::Ui, name: &str, raw: &str, kind: &str, enums: Op
         let mut scrubbing_vector = false;
         let width = ((ui.available_width() - axes.len() as f32 * 20.0 - 50.0) / axes.len() as f32).clamp(48.0, 96.0);
         for (component, (axis, v)) in axes.iter().zip(&mut values).enumerate() {
-            ui.label(if kind == "MaterialVector4" { ["x", "y", "z", "w"][component] } else { *axis });
+            let label=ui.add(egui::Label::new(if kind == "MaterialVector4" { ["x", "y", "z", "w"][component] } else { *axis }).sense(egui::Sense::drag()))
+                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+                .on_hover_text("按住左键左右拖动调整数值；Shift 精调，Ctrl 加速");
             let mut input = v.to_string();
             let draft_id = ui.id().with(("vector_draft", bind.range.start, axis));
-            let was_focused = ui.memory(|memory| memory.has_focus(draft_id));
             if let Some(draft) = bind.source.session.lock().unwrap().component_drafts.get(&(bind.range.start, component)).cloned() { input = draft; }
-            let response = ui.add(TextEdit::singleline(&mut input).id(draft_id).desired_width(width));
             let scalar_kind = if kind.ends_with("Int") { "int" } else { "float" };
-            let scrubbing = scrub_number(ui, &response, was_focused, &mut input, scalar_kind);
+            let scrubbing = scrub_number(ui, &label, &mut input, scalar_kind);
+            let response = ui.add(TextEdit::singleline(&mut input).id(draft_id).desired_width(width));
             if scrubbing {
                 bind.source.session.lock().unwrap().component_drafts.remove(&(bind.range.start, component));
                 if let Ok(next) = input.parse::<f64>() { changed |= next != *v; *v = next; }

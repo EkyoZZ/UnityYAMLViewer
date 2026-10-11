@@ -71,7 +71,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
             if number(&doc.text,"m_DrawMode",0.0)!=0.0 {missing+=1;issues.push(format!("{} · fileID {} · {}: {}",path.display(),doc.file_id,tr("暂不支持此 Sprite 绘制模式"),field(&doc.text,"m_DrawMode").unwrap_or("")));continue}
             let c=vector(&doc.text,"m_Color",&["r","g","b","a"],&[1.0;4]);
             let byte=|v:f64|(v.clamp(0.0,1.0)*255.0).round() as u8;
-            sprites.push(Sprite{ui:None,component: doc.file_id.clone(), selectable: doc.game_object.as_deref().and_then(|id|flags.get(id)).is_none_or(|flags|flags.selectable),name: crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_ref()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color([byte(c[0]),byte(c[1]),byte(c[2]),byte(c[3])]),flip:[number(&doc.text,"m_FlipX",0.0)!=0.0,number(&doc.text,"m_FlipY",0.0)!=0.0],order:renderer_order(doc,matrix,axis)});
+            sprites.push(Sprite{baked:None,ui:None,component: doc.file_id.clone(), selectable: doc.game_object.as_deref().and_then(|id|flags.get(id)).is_none_or(|flags|flags.selectable),name: crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_ref()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color([byte(c[0]),byte(c[1]),byte(c[2]),byte(c[3])]),flip:[number(&doc.text,"m_FlipX",0.0)!=0.0,number(&doc.text,"m_FlipY",0.0)!=0.0],order:renderer_order(doc,matrix,axis)});
         }
         for doc in documents.iter().filter(|d|d.type_name=="Tilemap") {
             let Some(object)=doc.game_object.as_deref() else {continue};
@@ -128,10 +128,67 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
                 let matrix=base.mul(translation).mul(data.orientation).mul(data.matrices.get(cell.matrix).copied().unwrap_or_else(Matrix::identity));
                 let color=data.colors.get(cell.color).copied().unwrap_or([1.0;4]);
                 let rgba=std::array::from_fn(|i|(color[i]*data.tint[i]).clamp(0.0,1.0).mul_add(255.0,0.0).round() as u8);
-                sprites.push(Sprite{ui:None,component:doc.file_id.clone(),selectable,name:doc.file_id.clone(),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color(rgba),flip:[false;2],order:renderer_order(renderer,base,axis)});
+                sprites.push(Sprite{baked:None,ui:None,component:doc.file_id.clone(),selectable,name:doc.file_id.clone(),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color(rgba),flip:[false;2],order:renderer_order(renderer,base,axis)});
             }
             if failed>0 {missing+=failed;issues.push(format!("{}: {failed} unresolved Tile/Sprite references (indexing or loading may still be in progress)",doc.file_id));}
         }
+    let mut spine_cache:HashMap<String,Result<(PathBuf,Arc<crate::spine_preview::Baked>),String>>=HashMap::new();
+    let mut baked_bytes=0usize;
+    for doc in documents.iter().filter(|d|d.type_name=="MonoBehaviour" && field(&d.text,"skeletonDataAsset").is_some()) {
+        if !checkpoint(cancelled,paused) {return Prepared::default();}
+        let Some(object)=doc.game_object.as_deref() else {continue};
+        if flags.get(object).is_some_and(|f|!f.visible) || number(&doc.text,"m_Enabled",1.0)==0.0 {continue;}
+        let Some(transform)=by_object.get(object) else {continue};
+        let Some(matrix)=world(transform,&transforms,&objects,&mut HashSet::new()) else {continue};
+        let Some(catalog)=catalog else {missing+=1;issues.push(format!("{}: Spine 资源索引尚未完成",doc.file_id));continue;};
+        let key=format!("{}|{}",field(&doc.text,"skeletonDataAsset").unwrap_or(""),field(&doc.text,"initialSkinName").unwrap_or(""));
+        let baked=spine_cache.entry(key).or_insert_with(|| {
+            let (path,baked)=crate::spine_preview::bake(&doc.text,catalog,cancelled,paused)?;
+            baked_bytes+=baked.image.pixels.len()*4;
+            if baked_bytes>256*1024*1024 {return Err("Spine 静态缓存超过 256 MiB".into());}
+            Ok((path,Arc::new(baked)))
+        });
+        let (path,baked)=match baked {Ok(value)=>value,Err(error)=>{missing+=1;issues.push(format!("{}: {error}",doc.file_id));continue;}};
+        if baked.approximate {missing+=1;issues.push(format!("{}: Spine 特殊混合 / 双色染色为近似显示",doc.file_id));}
+        let renderer=documents.iter().find(|d|d.type_name=="MeshRenderer" && d.game_object==doc.game_object).unwrap_or(doc);
+        if number(&renderer.text,"m_Enabled",1.0)==0.0 {continue;}
+        sprites.push(Sprite{baked:Some(baked.clone()),ui:None,component:doc.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:crate::name_from_text(&objects.get(object).map_or("",|d|d.text.as_ref())).unwrap_or_else(||doc.file_id.clone()),path:path.clone(),id:"spine".into(),matrix:matrix.into(),tint:Color32::WHITE,flip:[number(&doc.text,"initialFlipX",0.0)!=0.0,number(&doc.text,"initialFlipY",0.0)!=0.0],order:renderer_order(renderer,matrix,axis)});
+    }
+    for doc in documents.iter().filter(|d|matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer")) {
+        if !checkpoint(cancelled,paused){return Prepared::default();}
+        let Some(object)=doc.game_object.as_deref() else{continue};
+        if flags.get(object).is_some_and(|f|!f.visible){continue;}
+        let renderer=if doc.type_name=="SkinnedMeshRenderer" {Some(doc)}else{documents.iter().find(|r|r.type_name=="MeshRenderer" && r.game_object==doc.game_object)};
+        let Some(renderer)=renderer else{continue};if number(&renderer.text,"m_Enabled",1.0)==0.0{continue;}
+        let Some(mesh)=field(&doc.text,"m_Mesh").filter(|v|reference(v,"fileID").is_some_and(|id|id!="0")) else{continue};
+        let Some(matrix)=by_object.get(object).and_then(|id|world(id,&transforms,&objects,&mut HashSet::new())) else{continue};
+        let Some(catalog)=catalog else{missing+=1;issues.push(format!("{}: 模型资源索引尚未完成",doc.file_id));continue;};
+        let mut bones=HashMap::new();let mut duplicate_bones=HashSet::new();
+        if doc.type_name=="SkinnedMeshRenderer" {
+            if let Some((_,tail))=doc.text.split_once("  m_Bones:") {
+                for line in tail.lines().skip(1).take_while(|l|l.trim_start().starts_with("- ")) {
+                    let Some(id)=reference(line.trim().trim_start_matches('-').trim(),"fileID") else{continue};
+                    let Some(bone)=transforms.get(id.as_str()) else{continue};
+                    let Some(name)=bone.game_object.as_deref().and_then(|id|objects.get(id)).and_then(|o|crate::name_from_text(&o.text)) else{continue};
+                    let Some(matrix)=world(&id,&transforms,&objects,&mut HashSet::new()) else{continue};
+                    if bones.insert(name.clone(),matrix).is_some(){duplicate_bones.insert(name);}
+                }
+            }
+            for name in duplicate_bones {bones.remove(&name);}
+        }
+        match crate::model_preview::bake(mesh,&renderer.text,catalog,matrix,&bones) {
+            Ok((baked,warnings))=>{
+                baked_bytes+=baked.image.pixels.len()*4;
+                if baked_bytes>256*1024*1024{missing+=1;issues.push("静态模型 / Spine 缓存超过 256 MiB".into());continue;}
+                for w in warnings{missing+=1;issues.push(format!("{}: {w}",doc.file_id));}
+                use std::hash::{Hash,Hasher};
+                let mut image_hash=std::collections::hash_map::DefaultHasher::new();baked.image.pixels.hash(&mut image_hash);
+                let path=PathBuf::from(format!("__model_preview_{}_{:x}",doc.file_id,image_hash.finish()));
+                sprites.push(Sprite{baked:Some(Arc::new(baked)),ui:None,component:renderer.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:crate::name_from_text(objects.get(object).map_or("",|d|d.text.as_ref())).unwrap_or_else(||doc.file_id.clone()),path,id:"model".into(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:renderer_order(renderer,matrix,axis)});
+            }
+            Err(e)=>{missing+=1;issues.push(format!("{}: {e}",doc.file_id));}
+        }
+    }
     sprites.sort_by_key(|s|s.order);
     Prepared {sprites,missing,issues}
 }
@@ -193,9 +250,9 @@ impl Projection {
     fn point(self,x:f64,y:f64) -> [f64;2] {self.0.map(|r|r[0]*x+r[1]*y+r[2])}
     fn full(self) -> Matrix {let mut m=Matrix::identity();for i in 0..2 {m.0[i][0]=self.0[i][0];m.0[i][1]=self.0[i][1];m.0[i][3]=self.0[i][2];}m}
 }
-struct Sprite { ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Projection, tint: Color32, flip: [bool;2], order: (i64,i64,i64), }
+struct Sprite { baked: Option<Arc<crate::spine_preview::Baked>>, ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Projection, tint: Color32, flip: [bool;2], order: (i64,i64,i64), }
 #[derive(Clone, Copy)]
-pub(crate) struct Region { pub(crate) rect: [f64;4], pub(crate) pivot: [f64;2], pub(crate) ppu: f64, border: [f64;4] }
+pub(crate) struct Region { pub(crate) rect: [f64;4], pub(crate) pivot: [f64;2], pub(crate) ppu: f64, pub(crate) border: [f64;4] }
 struct Quad {
     texture: egui::TextureId, points: [[f64;2];4], outline: [[f64;2];4], uv: [Pos2;4], tint: Color32,
     path: Option<PathBuf>, component: String, selectable: bool, order: (i64,i64,i64),
@@ -396,8 +453,11 @@ fn paint_zoom_badge(painter:&egui::Painter,rect:egui::Rect,zoom:f64) {
     painter.galley(badge.min+egui::vec2(12.0,6.0),galley,Color32::WHITE);
 }
 fn paint_background(painter:&egui::Painter,rect:egui::Rect,background:&str,rgb:[u8;3]) {
+    painter.add(background_shape(rect,background,rgb));
+}
+pub(crate) fn background_shape(rect:egui::Rect,background:&str,rgb:[u8;3]) -> egui::Shape {
     if background=="gray" || background=="custom" {
-        let [r,g,b]=if background=="gray" {[128,128,128]} else {rgb};painter.rect_filled(rect,0.0,Color32::from_rgb(r,g,b));
+        let [r,g,b]=if background=="gray" {[128,128,128]} else {rgb};egui::Shape::rect_filled(rect,0.0,Color32::from_rgb(r,g,b))
     } else {
         let cell=12.0;
         let mut mesh=egui::Mesh::default();
@@ -405,7 +465,7 @@ fn paint_background(painter:&egui::Painter,rect:egui::Rect,background:&str,rgb:[
             let tile=egui::Rect::from_min_size(rect.min+egui::vec2(x as f32*cell,y as f32*cell),Vec2::splat(cell)).intersect(rect);
             mesh.add_colored_rect(tile,Color32::from_gray(if (x+y)%2==0 {190} else {230}));
         }}
-        painter.add(egui::Shape::mesh(mesh));
+        egui::Shape::mesh(mesh)
     }
 }
 impl Preview {
@@ -415,7 +475,7 @@ impl Preview {
     }
     pub fn available(documents: &[Document], path: Option<&std::path::Path>) -> bool {
         path.is_some_and(|p|p.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab") || e.eq_ignore_ascii_case("unity"))) && documents.iter().any(|d|
-            d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
+            d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer") || (d.type_name=="MonoBehaviour" && field(&d.text,"skeletonDataAsset").is_some()) || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
     }
     pub fn release(&mut self) {
         self.preparation=None;self.preparation_pending=false;self.world.release();
@@ -520,7 +580,7 @@ impl Preview {
         let last=documents.last().map_or(0,|d|d.text.as_ptr() as usize);
         let has_ui=match self.ui_presence {
             Some((a,b,n,value)) if a==first && b==last && n==documents.len()=>value,
-            _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some());self.ui_presence=Some((first,last,documents.len(),value));value},
+            _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some() || (doc.type_name=="MonoBehaviour" && field(&doc.text,"skeletonDataAsset").is_some() && documents.iter().any(|t|t.type_name=="RectTransform" && t.game_object==doc.game_object)));self.ui_presence=Some((first,last,documents.len(),value));value},
         };
         if !has_ui {
             let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),selected,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]),self.show_guides,expanding,&mut self.open);
@@ -627,7 +687,7 @@ impl Preview {
             }
             let path=reference(reference_text,"guid").and_then(|guid|catalog.as_ref()?.get(&guid.to_lowercase()).cloned());
             let Some(path)=path else {missing+=1;issues.push(format!("{} · {} · {}",doc.file_id,tr("资源 GUID 未找到"),reference_text));continue};
-            sprites.push(Sprite{ui:Some(image),component:doc.file_id.clone(),selectable,name:crate::name_from_text(&objects.get(object).map(|doc|doc.text.as_ref()).unwrap_or("")).unwrap_or_else(||doc.file_id.clone()),path,id,matrix:layout.matrix.into(),tint:color,flip:[false;2],order});
+            sprites.push(Sprite{baked:None,ui:Some(image),component:doc.file_id.clone(),selectable,name:crate::name_from_text(&objects.get(object).map(|doc|doc.text.as_ref()).unwrap_or("")).unwrap_or_else(||doc.file_id.clone()),path,id,matrix:layout.matrix.into(),tint:color,flip:[false;2],order});
         }
         sprites.sort_by_key(|s|s.order);
         let used: HashSet<_>=sprites.iter().chain(prepared.sprites.iter()).map(|s|s.path.clone()).collect();
@@ -640,6 +700,33 @@ impl Preview {
         let mut reported_errors=HashSet::new();
         let resource_budget=std::time::Instant::now();let mut uploaded=false;
         for sprite in sprites.iter().chain(prepared.sprites.iter()) {
+            if let Some(baked)=&sprite.baked {
+                if !self.textures.contains_key(&sprite.path) {
+                    if self.paused.load(std::sync::atomic::Ordering::Relaxed) || uploaded || resource_budget.elapsed().as_millis()>=4 {loading=true;continue;}
+                    let cache_bytes:usize=self.textures.values().filter_map(|t|t.handle.as_ref()).map(|h|h.size()[0]*h.size()[1]*5).sum();
+                    if cache_bytes+baked.image.pixels.len()*5>256*1024*1024 {missing+=1;issues.push("Spine 贴图超过预览缓存预算".into());continue;}
+                    let handle=ui.ctx().load_texture(sprite.path.display().to_string(),baked.image.clone(),egui::TextureOptions::LINEAR);
+                    self.textures.insert(sprite.path.clone(),Texture{stamp:(None,None),receiver:None,handle:Some(handle),meta:String::new(),alpha:baked.image.pixels.iter().map(|p|p.a()).collect(),error:None,regions:HashMap::new()});
+                    uploaded=true;
+                }
+                let handle=self.textures[&sprite.path].handle.as_ref().unwrap();let region=baked.region;
+                let mut matrix=sprite.matrix;let mut order=sprite.order;let mut color=sprite.tint;
+                if let Some(doc)=documents.iter().find(|d|d.file_id==sprite.component) {
+                    if let Some(object)=doc.game_object.as_deref() {
+                        if let Some(transform)=by_object.get(object).filter(|id|transforms.get(**id).is_some_and(|t|t.type_name=="RectTransform")) {
+                            let Some(layout)=crate::ui_preview::layout(transform,&transforms,&objects,viewport,&mut layout_cache,&mut HashSet::new()) else {continue};
+                            matrix=layout.matrix.into();order=(1_000_000_000,*ui_order.get(object).unwrap_or(&0),0);
+                            color=tint(&doc.text,"m_Color").gamma_multiply(crate::ui_preview::opacity(transform,documents,&transforms) as f32);
+                        }
+                    }
+                }
+                let [_,_,w,h]=region.rect;
+                let corners=[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]];
+                let points=corners.map(|[a,b]|matrix.point((a-region.pivot[0])*w/region.ppu*if sprite.flip[0]{-1.0}else{1.0},(b-region.pivot[1])*h/region.ppu*if sprite.flip[1]{-1.0}else{1.0}));
+                let uv=corners.map(|[a,b]|egui::pos2(a as f32,(1.0-b) as f32));
+                quads.push(Quad{texture:handle.id(),points,outline:points,uv,tint:color,path:Some(sprite.path.clone()),component:sprite.component.clone(),selectable:sprite.selectable,order});
+                continue;
+            }
             if self.paused.load(std::sync::atomic::Ordering::Relaxed) && self.textures.get(&sprite.path).is_none_or(|t|t.handle.is_none()) {continue;}
             if checked_paths.contains(&sprite.path) && !self.textures.contains_key(&sprite.path) {continue;}
             let meta_path=PathBuf::from(format!("{}.meta",sprite.path.display()));
@@ -964,6 +1051,15 @@ mod tests {
         assert!((point[0]+6.0).abs()<1e-8 && (point[1]-2.0).abs()<1e-8);
     }
     #[test]
+    fn bone_world_accumulates_all_parent_x_rotations() {
+        let make=|id,parent,degrees:f64| {let angle=degrees.to_radians()*0.5;transform(id,parent,"{x: 0, y: 0, z: 0}",&format!("{{x: {}, y: 0, z: 0, w: {}}}",angle.sin(),angle.cos()),"{x: 1, y: 1, z: 1}")};
+        let root=make("1",None,-40.0);let body=make("2",Some("1"),-90.0);let bone=make("3",Some("2"),90.0);
+        let transforms=HashMap::from([("1",&root),("2",&body),("3",&bone)]);
+        let matrix=world("3",&transforms,&HashMap::new(),&mut HashSet::new()).unwrap();
+        assert!((matrix.0[1][1]-(-40.0f64).to_radians().cos()).abs()<1e-8);
+        assert!((matrix.0[2][1]-(-40.0f64).to_radians().sin()).abs()<1e-8);
+    }
+    #[test]
     fn picking_handles_rotated_mirrored_and_degenerate_rectangles() {
         let points=[egui::pos2(10.0,10.0),egui::pos2(0.0,20.0),egui::pos2(10.0,30.0),egui::pos2(20.0,20.0)];
         assert_eq!(quad_coordinates(points,egui::pos2(10.0,20.0)),Some([0.5,0.5]));
@@ -993,7 +1089,7 @@ mod tests {
     #[test]
     fn sliced_image_preserves_corners_and_skips_center() {
         let doc=transform("1",None,"{x: 0, y: 0, z: 0}","{x: 0, y: 0, z: 0, w: 1}","{x: 1, y: 1, z: 1}");
-        let sprite=Sprite{ui:None,component:"20".into(),selectable:true,name:"panel".into(),path:"panel.png".into(),id:"21300000".into(),matrix:local(&doc,true).into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
+        let sprite=Sprite{baked:None,ui:None,component:"20".into(),selectable:true,name:"panel".into(),path:"panel.png".into(),id:"21300000".into(),matrix:local(&doc,true).into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
         let image=UiImage{size:[200.0,100.0],pivot:[0.5,0.5],mode:1,fill_center:false,preserve_aspect:false,ppu_multiplier:1.0,reference_ppu:100.0,raw:false,uv_rect:[0.0,0.0,1.0,1.0],fill:1.0,fill_method:0,fill_origin:0};
         let region=Region{rect:[0.0,0.0,100.0,100.0],pivot:[0.5,0.5],ppu:100.0,border:[10.0;4]};
         let quads=ui_quads(&sprite,&image,&region,egui::TextureId::default(),[100,100]);
