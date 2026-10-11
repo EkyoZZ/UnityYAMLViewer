@@ -6,9 +6,27 @@ mod sdf;
 pub(crate) mod prefab;
 const AUTO_PREFAB_LIMIT:usize=20;
 
+// A component selection remains precise; object/transform selections cover all
+// renderable components on that object, without selecting unrelated descendants.
+fn selection_components(documents:&[Document],selected:Option<&str>,expanded:Option<&prefab::Expanded>) -> HashSet<String> {
+    let Some(selected)=selected else {return HashSet::new()};
+    let selected_doc=documents.iter().find(|doc|doc.file_id==selected);
+    let object=selected_doc.and_then(|doc|match doc.type_name.as_str() {
+        "GameObject"=>Some(doc.file_id.as_str()),
+        "Transform"|"RectTransform"=>doc.game_object.as_deref(),
+        _=>None,
+    });
+    documents.iter().filter(|doc| {
+        doc.file_id==selected || object.is_some_and(|object|doc.game_object.as_deref()==Some(object))
+            || (selected_doc.is_none_or(|doc|doc.type_name=="PrefabInstance") && expanded.is_some_and(|data|data.picks.get(&doc.file_id).is_some_and(|proxy|proxy==selected)))
+    }).map(|doc|doc.file_id.clone()).collect()
+}
+
 #[derive(Default)]
 pub struct Preview {
     pub open: bool,
+    three_dimensional: bool,
+    scene3d: Option<(u64, crate::model_preview::Preview)>,
     textures: HashMap<PathBuf, Texture>,
     identity: String,
     zoom: f32,
@@ -71,7 +89,8 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
             if number(&doc.text,"m_DrawMode",0.0)!=0.0 {missing+=1;issues.push(format!("{} · fileID {} · {}: {}",path.display(),doc.file_id,tr("暂不支持此 Sprite 绘制模式"),field(&doc.text,"m_DrawMode").unwrap_or("")));continue}
             let c=vector(&doc.text,"m_Color",&["r","g","b","a"],&[1.0;4]);
             let byte=|v:f64|(v.clamp(0.0,1.0)*255.0).round() as u8;
-            sprites.push(Sprite{baked:None,ui:None,component: doc.file_id.clone(), selectable: doc.game_object.as_deref().and_then(|id|flags.get(id)).is_none_or(|flags|flags.selectable),name: crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_ref()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color([byte(c[0]),byte(c[1]),byte(c[2]),byte(c[3])]),flip:[number(&doc.text,"m_FlipX",0.0)!=0.0,number(&doc.text,"m_FlipY",0.0)!=0.0],order:renderer_order(doc,matrix,axis)});
+
+            sprites.push(Sprite{baked:None,ui:None,component: doc.file_id.clone(), selectable: doc.game_object.as_deref().and_then(|id|flags.get(id)).is_none_or(|flags|flags.selectable),name: crate::name_from_text(doc.game_object.as_deref().and_then(|id|objects.get(id)).map(|d|d.text.as_ref()).unwrap_or("")).unwrap_or_else(|| doc.file_id.clone()),path,id,spatial:matrix,matrix:matrix.into(),tint:crate::asset_viewer::preview_color([byte(c[0]),byte(c[1]),byte(c[2]),byte(c[3])]),flip:[number(&doc.text,"m_FlipX",0.0)!=0.0,number(&doc.text,"m_FlipY",0.0)!=0.0],order:renderer_order(doc,matrix,axis)});
         }
         for doc in documents.iter().filter(|d|d.type_name=="Tilemap") {
             let Some(object)=doc.game_object.as_deref() else {continue};
@@ -81,6 +100,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
             let renderer=documents.iter().find(|d|d.type_name=="TilemapRenderer" && d.game_object==doc.game_object);
             if renderer.is_none_or(|r|number(&r.text,"m_Enabled",1.0)==0.0) {continue;}
             let renderer=renderer.unwrap();
+
             let mut ancestor=Some(*transform);
             let mut grid=None;
             let mut visited=HashSet::new();
@@ -128,7 +148,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
                 let matrix=base.mul(translation).mul(data.orientation).mul(data.matrices.get(cell.matrix).copied().unwrap_or_else(Matrix::identity));
                 let color=data.colors.get(cell.color).copied().unwrap_or([1.0;4]);
                 let rgba=std::array::from_fn(|i|(color[i]*data.tint[i]).clamp(0.0,1.0).mul_add(255.0,0.0).round() as u8);
-                sprites.push(Sprite{baked:None,ui:None,component:doc.file_id.clone(),selectable,name:doc.file_id.clone(),path,id,matrix:matrix.into(),tint:crate::asset_viewer::preview_color(rgba),flip:[false;2],order:renderer_order(renderer,base,axis)});
+                sprites.push(Sprite{baked:None,ui:None,component:doc.file_id.clone(),selectable,name:doc.file_id.clone(),path,id,spatial:matrix,matrix:matrix.into(),tint:crate::asset_viewer::preview_color(rgba),flip:[false;2],order:renderer_order(renderer,base,axis)});
             }
             if failed>0 {missing+=failed;issues.push(format!("{}: {failed} unresolved Tile/Sprite references (indexing or loading may still be in progress)",doc.file_id));}
         }
@@ -152,7 +172,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
         if baked.approximate {missing+=1;issues.push(format!("{}: Spine 特殊混合 / 双色染色为近似显示",doc.file_id));}
         let renderer=documents.iter().find(|d|d.type_name=="MeshRenderer" && d.game_object==doc.game_object).unwrap_or(doc);
         if number(&renderer.text,"m_Enabled",1.0)==0.0 {continue;}
-        sprites.push(Sprite{baked:Some(baked.clone()),ui:None,component:doc.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:crate::name_from_text(&objects.get(object).map_or("",|d|d.text.as_ref())).unwrap_or_else(||doc.file_id.clone()),path:path.clone(),id:"spine".into(),matrix:matrix.into(),tint:Color32::WHITE,flip:[number(&doc.text,"initialFlipX",0.0)!=0.0,number(&doc.text,"initialFlipY",0.0)!=0.0],order:renderer_order(renderer,matrix,axis)});
+        sprites.push(Sprite{baked:Some(baked.clone()),ui:None,component:doc.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:crate::name_from_text(&objects.get(object).map_or("",|d|d.text.as_ref())).unwrap_or_else(||doc.file_id.clone()),path:path.clone(),id:"spine".into(),spatial:matrix,matrix:matrix.into(),tint:Color32::WHITE,flip:[number(&doc.text,"initialFlipX",0.0)!=0.0,number(&doc.text,"initialFlipY",0.0)!=0.0],order:renderer_order(renderer,matrix,axis)});
     }
     for doc in documents.iter().filter(|d|matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer")) {
         if !checkpoint(cancelled,paused){return Prepared::default();}
@@ -184,7 +204,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
                 use std::hash::{Hash,Hasher};
                 let mut image_hash=std::collections::hash_map::DefaultHasher::new();baked.image.pixels.hash(&mut image_hash);
                 let path=PathBuf::from(format!("__model_preview_{}_{:x}",doc.file_id,image_hash.finish()));
-                sprites.push(Sprite{baked:Some(Arc::new(baked)),ui:None,component:renderer.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:crate::name_from_text(objects.get(object).map_or("",|d|d.text.as_ref())).unwrap_or_else(||doc.file_id.clone()),path,id:"model".into(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:renderer_order(renderer,matrix,axis)});
+                sprites.push(Sprite{baked:Some(Arc::new(baked)),ui:None,component:renderer.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:crate::name_from_text(objects.get(object).map_or("",|d|d.text.as_ref())).unwrap_or_else(||doc.file_id.clone()),path,id:"model".into(),spatial:Matrix::identity(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:renderer_order(renderer,matrix,axis)});
             }
             Err(e)=>{missing+=1;issues.push(format!("{}: {e}",doc.file_id));}
         }
@@ -250,7 +270,7 @@ impl Projection {
     fn point(self,x:f64,y:f64) -> [f64;2] {self.0.map(|r|r[0]*x+r[1]*y+r[2])}
     fn full(self) -> Matrix {let mut m=Matrix::identity();for i in 0..2 {m.0[i][0]=self.0[i][0];m.0[i][1]=self.0[i][1];m.0[i][3]=self.0[i][2];}m}
 }
-struct Sprite { baked: Option<Arc<crate::spine_preview::Baked>>, ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Projection, tint: Color32, flip: [bool;2], order: (i64,i64,i64), }
+struct Sprite { spatial: Matrix, baked: Option<Arc<crate::spine_preview::Baked>>, ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Projection, tint: Color32, flip: [bool;2], order: (i64,i64,i64), }
 #[derive(Clone, Copy)]
 pub(crate) struct Region { pub(crate) rect: [f64;4], pub(crate) pivot: [f64;2], pub(crate) ppu: f64, pub(crate) border: [f64;4] }
 struct Quad {
@@ -478,6 +498,7 @@ impl Preview {
             d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer") || (d.type_name=="MonoBehaviour" && field(&d.text,"skeletonDataAsset").is_some()) || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
     }
     pub fn release(&mut self) {
+        self.scene3d=None;
         self.preparation=None;self.preparation_pending=false;self.world.release();
         if self.sdf.has_state() {let sdf=std::mem::take(&mut self.sdf);std::thread::spawn(move || drop(sdf));}
         let prepared=std::mem::take(&mut self.prepared);let textures=std::mem::take(&mut self.textures);
@@ -517,7 +538,7 @@ impl Preview {
             Some((first,last,len,count)) if !changed_identity && first==first_document && last==last_document && len==documents.len()=>count,
             _=>documents.iter().filter(|doc|doc.type_name=="PrefabInstance").count(),
         };
-        if self.identity!=identity {self.clear_prefabs();self.identity=identity.into();self.release();self.ui_presence=None;self.expand_prefabs=prefab_count<=AUTO_PREFAB_LIMIT;self.zoom=1.0;self.pan=Vec2::ZERO;self.next_asset_check=None;self.ui_viewport=None;}
+        if self.identity!=identity {self.clear_prefabs();self.identity=identity.into();self.release();self.three_dimensional=false;self.ui_presence=None;self.expand_prefabs=prefab_count<=AUTO_PREFAB_LIMIT;self.zoom=1.0;self.pan=Vec2::ZERO;self.next_asset_check=None;self.ui_viewport=None;}
         self.prefab_count=Some((first_document,last_document,documents.len(),prefab_count));
         prefab_count
     }
@@ -543,18 +564,19 @@ impl Preview {
         let prefab_count=self.initialize_document(documents,identity);
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("静态预览"));
-            if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;self.world.fit();}
-            for (label,zoom) in [("50%",0.5),("100%",1.0),("200%",2.0)] {
-                if ui.button(label).clicked() {self.zoom=zoom;self.pan=Vec2::ZERO;self.world.set_zoom(zoom as f64);}
-            }
+            crate::theme::preview_space_selector(ui,&mut self.three_dimensional);
+            if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;self.world.fit();if let Some((_,preview))=&mut self.scene3d {preview.fit();}}
+            if self.three_dimensional && ui.button(tr("重置视角")).clicked(){if let Some((_,preview))=&mut self.scene3d {preview.reset();}}
             ui.label(tr("背景色"));
             ui.push_id("preview_background", |ui| crate::theme::background_selector(ui, &mut self.background));
             let rgb = self.background_rgb.get_or_insert([190,190,190]);
             ui.color_edit_button_srgb(rgb);
+            if !self.three_dimensional {
             ui.label(tr("排序轴"));
             let axis=self.sort_axis.get_or_insert(1);
             ui.selectable_value(axis,0,"X");ui.selectable_value(axis,1,"Y");ui.selectable_value(axis,2,"Z");
             crate::theme::toggle_switch(ui,tr("辅助线"),&mut self.show_guides);
+            }
         });
         let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
         let (expanded,expanding)=if self.expand_prefabs {
@@ -573,8 +595,24 @@ impl Preview {
         let resolved_flags=expanded.as_ref().map(|data|data.flags(flags));
         let flags=resolved_flags.as_deref().unwrap_or(flags);
         let documents=expanded.as_ref().map_or(documents,|data|data.documents.as_slice());
+        // Hierarchy selects objects, while preview geometry is keyed by component.
+        let selected_components=selection_components(documents,selected,expanded.as_deref());
         if let Some(data)=&expanded {
             if !data.issues.is_empty() {ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {}",tr("Prefab 展开存在限制"),data.issues.len())).on_hover_text(data.issues.iter().take(32).cloned().collect::<Vec<_>>().join("\n"));}
+        }
+        if self.three_dimensional {
+            use std::hash::{Hash,Hasher};
+            let mut hash=std::collections::hash_map::DefaultHasher::new();
+            for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
+            let mut keys:Vec<_>=flags.iter().collect();keys.sort_by_key(|(id,_)|*id);
+            for (id,value) in keys {id.hash(&mut hash);value.visible.hash(&mut hash);}
+            if let Some(catalog)=&catalog {catalog.len().hash(&mut hash);Arc::as_ptr(catalog).hash(&mut hash);}
+            let key=hash.finish();
+            if self.scene3d.as_ref().is_none_or(|(previous,_)|*previous!=key) {
+                self.scene3d=Some((key,crate::model_preview::Preview::new_scene(ui.ctx(),documents.to_vec(),flags.clone(),catalog.unwrap_or_default())));
+            }
+            self.scene3d.as_mut().unwrap().1.show_scene(ui,&self.background,self.background_rgb.unwrap_or([190;3]));
+            return None;
         }
         let first=documents.first().map_or(0,|d|d.text.as_ptr() as usize);
         let last=documents.last().map_or(0,|d|d.text.as_ptr() as usize);
@@ -583,7 +621,7 @@ impl Preview {
             _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some() || (doc.type_name=="MonoBehaviour" && field(&doc.text,"skeletonDataAsset").is_some() && documents.iter().any(|t|t.type_name=="RectTransform" && t.game_object==doc.game_object)));self.ui_presence=Some((first,last,documents.len(),value));value},
         };
         if !has_ui {
-            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),selected,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]),self.show_guides,expanding,&mut self.open);
+            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),&selected_components,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]),self.show_guides,expanding,&mut self.open);
             if !self.open {self.release();ui.ctx().request_repaint();}
             return picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())));
         }
@@ -687,7 +725,7 @@ impl Preview {
             }
             let path=reference(reference_text,"guid").and_then(|guid|catalog.as_ref()?.get(&guid.to_lowercase()).cloned());
             let Some(path)=path else {missing+=1;issues.push(format!("{} · {} · {}",doc.file_id,tr("资源 GUID 未找到"),reference_text));continue};
-            sprites.push(Sprite{baked:None,ui:Some(image),component:doc.file_id.clone(),selectable,name:crate::name_from_text(&objects.get(object).map(|doc|doc.text.as_ref()).unwrap_or("")).unwrap_or_else(||doc.file_id.clone()),path,id,matrix:layout.matrix.into(),tint:color,flip:[false;2],order});
+            sprites.push(Sprite{baked:None,ui:Some(image),component:doc.file_id.clone(),selectable,name:crate::name_from_text(&objects.get(object).map(|doc|doc.text.as_ref()).unwrap_or("")).unwrap_or_else(||doc.file_id.clone()),path,id,spatial:layout.matrix,matrix:layout.matrix.into(),tint:color,flip:[false;2],order});
         }
         sprites.sort_by_key(|s|s.order);
         let used: HashSet<_>=sprites.iter().chain(prepared.sprites.iter()).map(|s|s.path.clone()).collect();
@@ -892,7 +930,7 @@ impl Preview {
             }
         }
         self.sdf.begin();
-        let highlighted=picked.as_deref().or(selected);
+        let highlighted=|id:&str|picked.as_deref().map_or_else(||selected_components.contains(id),|picked|picked==id);
         let mut batch: Option<egui::Mesh> = None;
         for (_,item) in drawing {
             match item {
@@ -939,7 +977,7 @@ impl Preview {
         }
         if let Some(mesh)=batch {painter.add(egui::Shape::mesh(mesh));}
         let mut outlined=HashSet::new();
-        let highlighted_quads: Vec<_>=quads.iter().filter(|quad|Some(quad.component.as_str())==highlighted).collect();
+        let highlighted_quads: Vec<_>=quads.iter().filter(|quad|highlighted(&quad.component)).collect();
         if highlighted_quads.len()>64 {
             let bounds=highlighted_quads.iter().fold(egui::Rect::NOTHING,|bounds,quad|bounds.union(egui::Rect::from_points(&quad.outline.map(screen))));
             painter.rect_stroke(bounds,0.0,egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235)),egui::StrokeKind::Inside);
@@ -948,7 +986,7 @@ impl Preview {
                 if outlined.insert(&quad.component) {painter.add(egui::Shape::closed_line(quad.outline.map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));}
             }
         }
-        for text in texts.iter().filter(|text|Some(text.component.as_str())==highlighted) {
+        for text in texts.iter().filter(|text|highlighted(&text.component)) {
             painter.add(egui::Shape::closed_line(ui_rect_points(text.layout).map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));
         }
         paint_zoom_badge(&painter,rect,self.zoom as f64);
@@ -1089,7 +1127,7 @@ mod tests {
     #[test]
     fn sliced_image_preserves_corners_and_skips_center() {
         let doc=transform("1",None,"{x: 0, y: 0, z: 0}","{x: 0, y: 0, z: 0, w: 1}","{x: 1, y: 1, z: 1}");
-        let sprite=Sprite{baked:None,ui:None,component:"20".into(),selectable:true,name:"panel".into(),path:"panel.png".into(),id:"21300000".into(),matrix:local(&doc,true).into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
+        let sprite=Sprite{baked:None,ui:None,component:"20".into(),selectable:true,name:"panel".into(),path:"panel.png".into(),id:"21300000".into(),spatial:local(&doc,true),matrix:local(&doc,true).into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
         let image=UiImage{size:[200.0,100.0],pivot:[0.5,0.5],mode:1,fill_center:false,preserve_aspect:false,ppu_multiplier:1.0,reference_ppu:100.0,raw:false,uv_rect:[0.0,0.0,1.0,1.0],fill:1.0,fill_method:0,fill_origin:0};
         let region=Region{rect:[0.0,0.0,100.0,100.0],pivot:[0.5,0.5],ppu:100.0,border:[10.0;4]};
         let quads=ui_quads(&sprite,&image,&region,egui::TextureId::default(),[100,100]);
@@ -1113,4 +1151,35 @@ mod tests {
         assert!(region(meta,"21300000",[100,100]).is_none());
         assert!(region(meta,"21300002",[20,20]).is_none());
     }
+}
+
+/// Preserve complete world transforms for textured planes in the orbit preview.
+pub(crate) fn scene_planes(documents:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:&Arc<HashMap<String,PathBuf>>)->Result<(Vec<crate::model_preview::ScenePlane>,Vec<String>),String> {
+    let docs:Vec<_>=documents.iter().filter(|d|!matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer")).cloned().collect();
+    let prepared=prepare(&docs,flags,Some(catalog),&std::sync::atomic::AtomicBool::new(false),1,None);
+    let mut warnings=prepared.issues;let mut planes=Vec::new();let mut bytes=0usize;
+    if documents.iter().any(|d|crate::ui_preview::graphic(d).is_some()) {warnings.push("3D模式暂不显示UI Canvas图形，请切换2D查看UI布局。".into());}
+    for sprite in prepared.sprites {
+        let loaded=(|| -> Result<_,String> {
+            if let Some(baked)=&sprite.baked {return Ok((baked.image.clone(),baked.region));}
+            if std::fs::metadata(&sprite.path).map_err(|e|e.to_string())?.len()>64*1024*1024 {return Err("贴图超过64 MiB".into());}
+            let mut reader=image::ImageReader::open(&sprite.path).map_err(|e|e.to_string())?.with_guessed_format().map_err(|e|e.to_string())?;
+            let mut limits=image::Limits::default();limits.max_image_width=Some(8192);limits.max_image_height=Some(8192);limits.max_alloc=Some(128*1024*1024);reader.limits(limits);
+            let image=reader.decode().map_err(|e|e.to_string())?.into_rgba8();let size=[image.width() as usize,image.height() as usize];
+            let meta=std::fs::read_to_string(format!("{}.meta",sprite.path.display())).unwrap_or_default();
+            let region=region(&meta,&sprite.id,size).ok_or("Sprite区域未找到")?;
+            Ok((egui::ColorImage::from_rgba_unmultiplied(size,image.as_raw()),region))
+        })();
+        let (image,region)=match loaded {Ok(value)=>value,Err(error)=>{warnings.push(format!("{}: {error}",sprite.path.display()));continue;}};
+        bytes+=image.pixels.len()*4;if bytes>128*1024*1024 {return Err("3D精灵贴图超过128 MiB".into());}
+        let corners=[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]];
+        let points=corners.map(|corner|{
+            let x=(corner[0]-region.pivot[0])*region.rect[2]/region.ppu*if sprite.flip[0]{-1.0}else{1.0};
+            let y=(corner[1]-region.pivot[1])*region.rect[3]/region.ppu*if sprite.flip[1]{-1.0}else{1.0};
+            std::array::from_fn(|axis|(sprite.spatial.0[axis][0]*x+sprite.spatial.0[axis][1]*y+sprite.spatial.0[axis][3]) as f32)
+        });
+        let uv=corners.map(|c|[((region.rect[0]+c[0]*region.rect[2])/image.size[0] as f64) as f32,((region.rect[1]+c[1]*region.rect[3])/image.size[1] as f64) as f32]);
+        planes.push(crate::model_preview::ScenePlane{image,points,uv,tint:sprite.tint});
+    }
+    Ok((planes,warnings))
 }

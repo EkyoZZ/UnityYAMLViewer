@@ -14,7 +14,7 @@ impl RecentFiles {
     pub fn record(&mut self, path: PathBuf) {
         self.paths.retain(|entry| !same_path(entry, &path));
         self.paths.insert(0, path);
-        self.paths.truncate(10);
+        self.paths.truncate(30);
     }
     pub fn persist(&self) {
         let Some(path) = config() else { return; };
@@ -31,12 +31,12 @@ fn config() -> Option<PathBuf> { crate::last_open_dir_config_path().map(|path| p
 mod tests {
     use super::*;
     #[test]
-    fn recent_files_deduplicate_move_to_front_and_keep_ten() {
+    fn recent_files_deduplicate_move_to_front_and_keep_thirty() {
         let mut recent = RecentFiles::default();
-        for index in 0..12 { recent.record(PathBuf::from(format!("file{index}.prefab"))); }
-        assert_eq!(recent.paths().len(), 10);
+        for index in 0..32 { recent.record(PathBuf::from(format!("file{index}.prefab"))); }
+        assert_eq!(recent.paths().len(), 30);
         recent.record(PathBuf::from("file5.prefab"));
         assert_eq!(recent.paths()[0], PathBuf::from("file5.prefab"));
-        assert_eq!(recent.paths().len(), 10);
+        assert_eq!(recent.paths().len(), 30);
     }
 }

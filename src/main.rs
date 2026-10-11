@@ -668,7 +668,7 @@ impl ViewerApp {
             }
             false
         });
-        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(format!("go-{id}")), depth<2);
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(format!("go-{id}")), depth<3);
         if force_open { state.set_open(true); }
         let has_visible_children = children.get(&id).is_some_and(|items| items.iter()
             .any(|child| self.game_object_has_match(*child, children, components)));
@@ -723,6 +723,7 @@ impl ViewerApp {
         if self.locate_target.is_some_and(|target| target == game_object || components.get(&id).is_some_and(|items| items.contains(&target))) {
             response.response.scroll_to_me(Some(egui::Align::Center));
             self.locate_target = None;
+            ui.ctx().data_mut(|d|d.remove::<String>(egui::Id::new("preview_hierarchy_locate")));
         }
     }
 
@@ -742,14 +743,27 @@ impl ViewerApp {
         }
         let own=flags.get(id).copied().unwrap_or_default();
         let original=self.documents.iter().position(|item|item.file_id==*id);
-        let selected=original.is_some_and(|index|self.selected==Some(index)) || self.nested_selected.as_ref().is_some_and(|(path,key)|Some(path)==self.path.as_ref() && key==id);
-        let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id(("linked_node",id)),depth<2);
-        if !self.query.trim().is_empty() {state.set_open(true);}
+        let selected=self.selected.and_then(|index|self.documents.get(index)).is_some_and(|doc|doc.file_id==*id || doc.game_object.as_deref()==Some(id.as_str())) || self.nested_selected.as_ref().is_some_and(|(path,key)|Some(path)==self.path.as_ref() && key==id);
+        let locate=ui.ctx().data_mut(|d|d.get_temp::<String>(egui::Id::new("preview_hierarchy_locate")));
+        let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id(("linked_node",id)),depth<3);
+        let mut ancestor=locate.clone();let mut seen=std::collections::HashSet::new();let mut force_open=false;
+        while let Some(key)=ancestor {
+            if !seen.insert(key.clone()){break;}
+            if key==*id {force_open=true;break;}
+            ancestor=docs.iter().find(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform") && d.game_object.as_deref()==Some(key.as_str()))
+                .and_then(|t|t.parent_transform.as_ref()).and_then(|parent|docs.iter().find(|d|d.file_id==*parent)).and_then(|t|t.game_object.clone());
+        }
+        if !self.query.trim().is_empty() || force_open {state.set_open(true);}
         let row=ui.horizontal(|ui| {
             if children.get(id).is_some_and(|items|!items.is_empty()) {state.show_toggle_button(ui,egui::collapsing_header::paint_default_icon);}
             else {ui.allocate_exact_size(egui::vec2(ui.spacing().indent,20.0),egui::Sense::hover());}
             let label=if own.visible && own.selectable {RichText::new(title).strong()} else {RichText::new(title).weak()};
             let response=ui.add_enabled(own.selectable,egui::SelectableLabel::new(selected,label));
+            if locate.as_deref()==Some(id.as_str()) {
+                response.scroll_to_me(Some(egui::Align::Center));
+                ui.ctx().data_mut(|d|d.remove::<String>(egui::Id::new("preview_hierarchy_locate")));
+                self.locate_target=None;
+            }
             let clip=ui.ctx().data_mut(|data|data.get_temp::<egui::Rect>(egui::Id::new("hierarchy_controls_clip"))).unwrap_or(ui.clip_rect());
             let x=ui.ctx().data_mut(|data|data.get_temp::<f32>(egui::Id::new("hierarchy_controls_x"))).unwrap_or(clip.left());
             let hovered=ui.input(|input|input.pointer.hover_pos().is_some_and(|point|clip.contains(point) && point.y>=response.rect.top() && point.y<=response.rect.bottom()));
@@ -828,6 +842,7 @@ impl ViewerApp {
                         let title=ui.add(egui::Label::new(self.display_name(&doc)).sense(egui::Sense::click()));
                         title_clicked=title.clicked();
                         title_rect=title.rect;
+                        ui.add_space(4.0);
                         model_preview::component_button(ui,&doc.text);
                         spine_preview::component_button(ui,&doc.text);
                     });
@@ -880,7 +895,7 @@ impl ViewerApp {
                         }
                     });
                     let mut header_rect = header_response.response.rect;
-                    header_rect.max.x = title_rect.right()+4.0;
+                    header_rect.max.x = title_rect.right()+8.0;
                     ui.painter().set(header_background, egui::Shape::rect_filled(header_rect, 4.0, header_fill));
                     if focused { header_response.response.scroll_to_me(Some(egui::Align::Center)); }
                     ui.separator();
@@ -1275,7 +1290,9 @@ impl eframe::App for ViewerApp {
                 ui.separator();
                 let mut activate = None;
                 let mut close = None;
-                ui.horizontal_wrapped(|ui| {
+                let mut tab_rects=Vec::new();
+                let strip=ui.horizontal_wrapped(|ui| {
+                    ui.set_min_width(ui.available_width());
                     for (index, tab) in self.tabs.iter().enumerate() {
                         let title = tab
                             .path
@@ -1285,7 +1302,14 @@ impl eframe::App for ViewerApp {
                         let is_active = self.active_tab == index;
                         let dirty = self.edits.get(&tab.path).is_some_and(|session| session.lock().unwrap().has_changes());
                         let title = if dirty { format!("{title} *") } else { title.to_string() };
-                        let (open_clicked, close_clicked) = unified_tab(ui, &title, is_active);
+                        let (open_clicked, close_clicked, response, slot) = ui.push_id(&tab.path,|ui|unified_tab(ui, &title, is_active, &tab.path)).inner;
+                        tab_rects.push(slot);
+                        if response.drag_started_by(egui::PointerButton::Primary) {
+                            let origin=ui.input(|i|i.pointer.press_origin()).unwrap_or(slot.center());
+                            if origin.x<slot.right()-24.0 {
+                                ctx.data_mut(|d|{d.insert_temp(egui::Id::new("tab_drag_path"),tab.path.clone());d.insert_temp(egui::Id::new("tab_drag_offset"),origin-slot.min);});
+                            }
+                        }
                         if open_clicked {
                             activate = Some(index);
                         }
@@ -1294,7 +1318,29 @@ impl eframe::App for ViewerApp {
                         }
                     }
                 });
-                if let Some(index) = close {
+                let dragged=ctx.data_mut(|d|d.get_temp::<PathBuf>(egui::Id::new("tab_drag_path")));
+                if let Some(path)=dragged {
+                    if let Some(pointer)=ctx.input(|i|i.pointer.hover_pos()).filter(|p|strip.response.rect.contains(*p)) {
+                        let slot=tab_drop_slot(&tab_rects,pointer);
+                        if let Some(rect)=tab_rects.get(slot).or_else(||tab_rects.last()) {
+                            let x=if slot<tab_rects.len(){rect.left()-2.0}else{rect.right()+2.0};
+                            ui.painter().line_segment([egui::pos2(x,rect.top()),egui::pos2(x,rect.bottom())],egui::Stroke::new(2.0_f32,egui::Color32::from_rgb(0,122,255)));
+                        }
+                        if let Some(from)=self.tabs.iter().position(|t|t.path==path) {
+                            let to=if slot>from {slot-1}else{slot};
+                            if from!=to {
+                                self.save_active_tab();
+                                let active=self.path.clone();let tab=self.tabs.remove(from);self.tabs.insert(to,tab);
+                                if let Some(index)=self.tabs.iter().position(|t|Some(&t.path)==active.as_ref()){self.active_tab=index;}
+                                ctx.request_repaint();
+                            }
+                        }
+                    }
+                    if !ctx.input(|i|i.pointer.primary_down()) {
+                        ctx.data_mut(|d|{d.remove::<PathBuf>(egui::Id::new("tab_drag_path"));d.remove::<egui::Vec2>(egui::Id::new("tab_drag_offset"));});
+                        self.persist_open_tabs();
+                    }
+                } else if let Some(index) = close {
                     self.close_tab(index,ctx);
                 } else if let Some(index) = activate {
                     self.save_active_tab();
@@ -1432,11 +1478,15 @@ impl eframe::App for ViewerApp {
                 let preview_rect=ui.available_rect_before_wrap();
                 let mut preview_ui=ui.new_child(egui::UiBuilder::new().id_salt("bounded_preview").max_rect(preview_rect));
                 preview_ui.set_clip_rect(ui.clip_rect().intersect(preview_rect));
-                let selected_id=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone());
+                let selected_id=self.nested_selected.as_ref().filter(|(path,_)|Some(path)==self.path.as_ref()).map(|(_,id)|id.clone())
+                    .or_else(||self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()));
                 if let Some(component_id)=self.preview.show(&mut preview_ui, &self.preview_documents, &self.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(), &self.node_flags, selected_id.as_deref()) {
                     if let Some(index)=self.documents.iter().position(|doc|doc.file_id==component_id) {
                         self.selected=Some(index);self.nested_selected=None;
                         self.locate_target=Some(index);
+                        let doc=&self.documents[index];
+                        let object=doc.game_object.clone().unwrap_or_else(||doc.file_id.clone());
+                        ctx.data_mut(|d|d.insert_temp(egui::Id::new("preview_hierarchy_locate"),object));
                         match self.documents[index].type_name.as_str() {
                             "SpriteRenderer" => self.show_sprite_renderer_yaml=false,
                             "MonoBehaviour" => self.show_script_yaml=false,
@@ -1444,6 +1494,14 @@ impl eframe::App for ViewerApp {
                         }
                         self.query.clear();
                         ctx.request_repaint();
+                    } else if let Some(expanded)=self.preview.hierarchy_documents(&self.path.as_ref().map(|p|p.display().to_string()).unwrap_or_default()) {
+                        if let Some(doc)=expanded.documents.iter().find(|d|d.file_id==component_id) {
+                            let object=doc.game_object.clone().unwrap_or_else(||doc.file_id.clone());
+                            self.selected=None;self.locate_target=None;
+                            self.nested_selected=self.path.clone().map(|path|(path,object.clone()));
+                            ctx.data_mut(|d|d.insert_temp(egui::Id::new("preview_hierarchy_locate"),object));
+                            self.query.clear();ctx.request_repaint();
+                        }
                     }
                 }
                 ui.allocate_rect(preview_rect,egui::Sense::hover());
@@ -3500,7 +3558,28 @@ fn settings_control<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -
     ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::right_to_left(egui::Align::Center), contents)
 }
 
-fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) {
+fn tab_drop_slot(rects:&[egui::Rect],pointer:egui::Pos2)->usize {
+    let Some(nearest)=rects.iter().min_by(|a,b|(a.center().y-pointer.y).abs().total_cmp(&(b.center().y-pointer.y).abs())) else{return 0};
+    let row_y=nearest.center().y;
+    let mut end=0;
+    for (index,rect) in rects.iter().enumerate().filter(|(_,r)|(r.center().y-row_y).abs()<1.0) {
+        if pointer.x<rect.center().x{return index;}end=index+1;
+    }end
+}
+#[cfg(test)]
+mod tab_reorder_tests {
+    use super::*;
+    #[test]
+    fn insertion_handles_gaps_end_and_wrapped_rows() {
+        let rect=|x,y|egui::Rect::from_min_size(egui::pos2(x,y),egui::vec2(100.0,24.0));
+        let rects=[rect(0.0,0.0),rect(108.0,0.0),rect(0.0,28.0)];
+        assert_eq!(tab_drop_slot(&rects,egui::pos2(5.0,12.0)),0);
+        assert_eq!(tab_drop_slot(&rects,egui::pos2(104.0,12.0)),1);
+        assert_eq!(tab_drop_slot(&rects,egui::pos2(300.0,12.0)),2);
+        assert_eq!(tab_drop_slot(&rects,egui::pos2(300.0,40.0)),3);
+    }
+}
+fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::Path) -> (bool, bool,egui::Response,egui::Rect) {
     let font = egui::FontId::proportional(14.0);
     let text_color = ui.visuals().text_color();
     let text_width = ui
@@ -3508,8 +3587,18 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) 
         .layout_no_wrap(title.to_owned(), font.clone(), text_color)
         .size()
         .x;
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(text_width + 38.0, 24.0), egui::Sense::click());
+    let (slot, _) = ui.allocate_exact_size(egui::vec2(text_width + 38.0, 24.0), egui::Sense::hover());
+    let mut min=egui::pos2(ui.ctx().animate_value_with_time(ui.id().with("tab_x"),slot.left(),0.12),ui.ctx().animate_value_with_time(ui.id().with("tab_y"),slot.top(),0.12));
+    let dragged=ui.ctx().data_mut(|d|d.get_temp::<PathBuf>(egui::Id::new("tab_drag_path"))).is_some_and(|p|p==path);
+    if dragged {
+        if let Some(pointer)=ui.input(|i|i.pointer.hover_pos()) {
+            let offset=ui.ctx().data_mut(|d|d.get_temp::<egui::Vec2>(egui::Id::new("tab_drag_offset"))).unwrap_or(slot.size()*0.5);
+            min=pointer-offset;
+        }
+    }
+    let rect=egui::Rect::from_min_size(min,slot.size());
+    let response=ui.interact(rect,ui.id().with("tab_button"),egui::Sense::click_and_drag());
+    let painter=if dragged {ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground,ui.id().with("dragged_tab")))}else{ui.painter().clone()};
     let close_rect = egui::Rect::from_min_size(
         egui::pos2(rect.right() - 24.0, rect.top()),
         egui::vec2(24.0, rect.height()),
@@ -3535,12 +3624,12 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) 
     } else {
         (Color32::TRANSPARENT, egui::Stroke::NONE)
     };
-    ui.painter().rect_filled(rect, 4.0, fill);
+    painter.rect_filled(rect, 4.0, fill);
     if is_active || tab_hovered {
-        ui.painter()
+        painter
             .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
     }
-    ui.painter().text(
+    painter.text(
         egui::pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         title,
@@ -3549,13 +3638,13 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) 
     );
     if show_close {
         if close_hovered {
-            ui.painter().rect_filled(
+            painter.rect_filled(
                 close_rect.shrink(3.0),
                 3.0,
                 ui.visuals().widgets.active.bg_fill,
             );
         }
-        ui.painter().text(
+        painter.text(
             close_rect.center(),
             egui::Align2::CENTER_CENTER,
             "×",
@@ -3570,6 +3659,8 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool) -> (bool, bool) 
     (
         response.clicked() && !close_hovered,
         show_close && response.clicked() && close_hovered,
+        response,
+        slot,
     )
 }
 

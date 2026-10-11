@@ -118,7 +118,7 @@ pub fn component_button(ui: &mut egui::Ui, text: &str) {
     let direct_reference = crate::static_preview::field(text,"skeletonJSON");
     if data_reference.is_none() && direct_reference.is_none() {return;}
     let catalog = ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
-    let clicked=ui.add_enabled(catalog.is_some(),crate::theme::preview_navigation_button("前往Spine预览>")).on_hover_text("在独立只读页签预览骨骼与动画；不包含节点父级变换或 UI 遮罩").clicked();
+    let clicked=ui.add_enabled(catalog.is_some(),crate::theme::preview_navigation_button(">前往Spine预览")).on_hover_text("在独立只读页签预览骨骼与动画；不包含节点父级变换或 UI 遮罩").clicked();
     if clicked {
         let result = (|| -> Result<PathBuf,String> {
             let catalog = catalog.as_ref().ok_or("资源索引尚未完成")?;

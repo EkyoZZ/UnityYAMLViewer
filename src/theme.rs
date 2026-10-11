@@ -92,7 +92,7 @@ pub fn background_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("", "棋盘格"), ("gray", "灰色"), ("custom", "自定义")]);
 }
 pub fn model_background_selector(ui:&mut egui::Ui,preference:&mut String) {
-    selector_inner(ui,preference,true,[("checker","棋盘格"),("gray","灰色")]);
+    selector_inner(ui,preference,true,[("checker","棋盘格"),("gray","灰色"),("custom","自定义")]);
 }
 
 /// Filled toolbar actions use the same height and text padding as theme tabs.
@@ -194,4 +194,10 @@ pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Respo
     ui.painter().galley(egui::pos2(rect.left(),rect.center().y-galley.size().y*0.5),galley,color);
     if response.has_focus() {ui.painter().rect_stroke(rail.expand(2.0),14.0,Stroke::new(1.0_f32,BLUE),egui::StrokeKind::Outside);}
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+pub fn preview_space_selector(ui:&mut egui::Ui,three_dimensional:&mut bool) {
+    let mut value=if *three_dimensional {"3d"} else {"2d"}.to_owned();
+    selector_inner(ui,&mut value,true,[("2d","2D"),("3d","3D")]);
+    *three_dimensional=value=="3d";
 }

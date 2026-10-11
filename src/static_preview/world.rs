@@ -77,7 +77,7 @@ impl World {
         self.view=View::default();self.last_view_change=None;
     }
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn show(&mut self, ui:&mut egui::Ui, documents:&[Document], flags:&HashMap<String,crate::hierarchy_controls::Flags>, catalog:Option<Arc<HashMap<String,PathBuf>>>, axis:usize, paused:Arc<AtomicBool>, selected:Option<&str>, focus:&mut Option<(HashSet<String>,Instant)>, background:&str, rgb:[u8;3],show_guides:bool,expanding:bool,open:&mut bool) -> Option<String> {
+    pub(super) fn show(&mut self, ui:&mut egui::Ui, documents:&[Document], flags:&HashMap<String,crate::hierarchy_controls::Flags>, catalog:Option<Arc<HashMap<String,PathBuf>>>, axis:usize, paused:Arc<AtomicBool>, selected:&HashSet<String>, focus:&mut Option<(HashSet<String>,Instant)>, background:&str, rgb:[u8;3],show_guides:bool,expanding:bool,open:&mut bool) -> Option<String> {
         use std::hash::{Hash,Hasher};
         let mut hash=std::collections::hash_map::DefaultHasher::new();
         for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
@@ -172,7 +172,7 @@ impl World {
             }
             // Guides sit above the background and beneath scene content, like UI previews.
             painter.image(texture.id(),image_rect,egui::Rect::from_min_max(Pos2::ZERO,Pos2::new(1.0,1.0)),Color32::WHITE);
-            if let Some(area)=picked.as_deref().or(selected).and_then(|id|frame.boxes.get(id)) {
+            for (_,area) in frame.boxes.iter().filter(|(id,_)|picked.as_ref().map_or_else(||selected.contains(*id),|picked|picked==*id)) {
 
                 painter.rect_stroke(egui::Rect::from_two_pos(screen(area[0],area[1]),screen(area[2],area[3])),0.0,egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235)),egui::StrokeKind::Inside);
             }
@@ -180,9 +180,6 @@ impl World {
         super::paint_zoom_badge(&painter,rect,self.view.zoom);
         ui.ctx().request_repaint_after(Duration::from_millis(100));
         picked
-    }
-    pub(super) fn set_zoom(&mut self,zoom:f64) {
-        self.view.zoom=zoom;self.view.pan=[0.0;2];self.last_view_change=Some(Instant::now());
     }
     pub(super) fn fit(&mut self) {self.view.zoom=1.0;self.view.pan=[0.0;2];self.view.focus.clear();}
 }
