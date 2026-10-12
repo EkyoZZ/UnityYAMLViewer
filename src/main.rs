@@ -2062,22 +2062,20 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
-                        ui.label(RichText::new("1.1.8").strong());
+                        ui.label(RichText::new("1.1.7").strong());
                         ui.label(localization::tr("• 最近记录支持 10～50 条与清空；联网更新跟随 Windows 系统代理"));
                         ui.label(localization::tr("• 弹窗使用独立系统窗口，优化多语言设置布局与关于窗口高度"));
                         ui.label(localization::tr("• 检查更新结果显示在设置底部，有新版本时打开统一更新窗口"));
-                        ui.add_space(8.0);
-                        ui.label(RichText::new("1.1.7").strong());
                         ui.label(localization::tr("• 音视频支持空格播放、视频全屏与音频峰值拖尾"));
                         ui.label(localization::tr("• 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.6").strong());
+                        ui.label(localization::tr("• 音视频预览与播放、视频逐帧与硬解选项，改善资源索引及界面响应"));
                         ui.add_space(8.0);
                         if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
                             self.show_older_history = !self.show_older_history;
                         }
                         if self.show_older_history {
-                        ui.label(RichText::new("1.1.6").strong());
-                        ui.label(localization::tr("• 音视频预览与播放、视频逐帧与硬解选项，改善资源索引及界面响应"));
-                        ui.add_space(8.0);
                         ui.label(RichText::new("1.1.5").strong());
                         ui.label(localization::tr("• Spine 3.8、FBX / OBJ 模型及场景 2D / 3D 预览；页签拖拽排序"));
                         ui.add_space(8.0);
