@@ -89,6 +89,9 @@ pub fn hierarchy_depth_selector(ui: &mut egui::Ui, preference: &mut String) {
 pub fn video_decoder_selector(ui:&mut egui::Ui,preference:&mut String) {
     selector_inner(ui,preference,true,[("auto","自动"),("none","软解"),("d3d11va","硬解")]);
 }
+pub fn video_scale_selector(ui:&mut egui::Ui,preference:&mut String) {
+    selector_inner(ui,preference,true,[("fit","适应窗口"),("native","原尺寸"),("free","自由缩放")]);
+}
 
 pub fn toolbar_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("light", "浅色"), ("dark", "深色"), ("system", "系统")]);

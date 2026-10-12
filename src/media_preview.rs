@@ -241,9 +241,9 @@ fn persist_volume() {
     }
 }
 pub struct Preview { info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
-    waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,fit:bool,aspect:Option<f32>,flip_x:bool,flip_y:bool,decoder:String,
+    waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,fit:true,aspect:None,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
 impl Preview {
     pub fn header_controls(&mut self,ui:&mut egui::Ui,path:&Path) {
         if !self.info.as_ref().is_some_and(|info|info.video.is_some()){return;}
@@ -251,6 +251,14 @@ impl Preview {
         crate::theme::video_decoder_selector(ui,&mut self.decoder);
         let mirror=match (self.flip_x,self.flip_y){(false,false)=>"无镜像",(true,false)=>"左右镜像",(false,true)=>"上下镜像",(true,true)=>"上下左右镜像"};
         ui.small(crate::localization::tr(mirror));
+        let previous_scale=self.scale_mode.clone();
+        crate::theme::video_scale_selector(ui,&mut self.scale_mode);
+        if previous_scale!=self.scale_mode {
+            self.pan=egui::Vec2::ZERO;
+            if self.scale_mode=="native"{self.zoom=Some(1.0);}
+            if self.scale_mode=="fit"{self.zoom=None;}
+        }
+        if let Some(zoom)=self.zoom {ui.small(format!("{:.1}%",zoom*100.0));}
         if self.index_job.is_some(){ui.spinner();ui.label(crate::localization::tr("正在索引视频帧…"));}
         if previous!=self.decoder {let playing=self.is_playing();self.stop_playback();self.cache=Arc::new(Mutex::new(FrameCache::default()));if playing{self.play(ui.ctx(),path);}else{self.error=None;}}
     }
@@ -368,16 +376,35 @@ impl Preview {
         if let Some(texture)=&self.texture {
             let uv=egui::Rect::from_min_max(egui::pos2(if self.flip_x{1.0}else{0.0},if self.flip_y{1.0}else{0.0}),egui::pos2(if self.flip_x{0.0}else{1.0},if self.flip_y{0.0}else{1.0}));
             let available=egui::vec2(ui.available_width(),(ui.available_height()-32.0).max(1.0));let native=self.info.as_ref().and_then(|info|info.video).map_or(texture.size_vec2(),|[w,h]|egui::vec2(w as f32,h as f32));
-            let display_size=self.aspect.map_or(native,|ratio|egui::vec2(native.y*ratio,native.y));
-            let scale=if self.fit {fit_scale(display_size,available)}else{1.0};
-            egui::ScrollArea::both().id_salt("media_video_view").max_height(available.y).auto_shrink([false,false]).show(ui,|ui| {
-                let image_size=display_size*scale;let canvas_size=available.max(image_size);
-                let (canvas,response)=ui.allocate_exact_size(canvas_size,egui::Sense::click());
-                let image_rect=egui::Rect::from_center_size(canvas.center(),image_size);
-                video_clicked=response.clicked_by(egui::PointerButton::Primary) && response.interact_pointer_pos().is_some_and(|point|image_rect.contains(point));
-                egui::Image::new(texture).uv(uv).fit_to_exact_size(image_size).paint_at(ui,image_rect);
-                if let Some(info)=&self.info {response.context_menu(|ui|{display_menu(ui,&mut self.fit,&mut self.aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio);});}
-            });
+            let free=self.scale_mode=="free";
+            let (canvas,response)=ui.allocate_exact_size(available,if free{egui::Sense::drag()}else{egui::Sense::click()});
+            let mut zoom=match self.scale_mode.as_str(){
+                "native"=>1.0,
+                "free"=>self.zoom.unwrap_or_else(||fit_scale(native,canvas.size()).clamp(0.01,64.0)),
+                _=>fit_scale(native,canvas.size()),
+            };
+            if self.zoom!=Some(zoom){self.zoom=Some(zoom);ui.ctx().request_repaint();}
+            if !free{self.pan=egui::Vec2::ZERO;}
+            if free && response.dragged_by(egui::PointerButton::Primary){self.pan+=response.drag_delta();}
+            if free && response.hovered() {
+                let scroll=ui.input_mut(|input|{let scroll=input.smooth_scroll_delta.y;input.smooth_scroll_delta=egui::Vec2::ZERO;input.raw_scroll_delta=egui::Vec2::ZERO;scroll});
+                if scroll!=0.0 {
+                    let next=(zoom*(scroll*0.002).exp()).clamp(0.01,64.0);
+                    if let Some(pointer)=response.hover_pos(){let relative=pointer-canvas.center();self.pan=relative-(relative-self.pan)*(next/zoom);}
+                    zoom=next;self.zoom=Some(zoom);ui.ctx().request_repaint();
+                }
+            }
+            let mut image_rect=egui::Rect::from_center_size(canvas.center()+self.pan,native*zoom);
+            // Avoid blending adjacent texels just because centering lands between screen pixels.
+            if (zoom-1.0).abs()<f32::EPSILON {
+                let pixels_per_point=ui.ctx().pixels_per_point();
+                let aligned=egui::pos2((image_rect.min.x*pixels_per_point).round()/pixels_per_point,(image_rect.min.y*pixels_per_point).round()/pixels_per_point);
+                image_rect=egui::Rect::from_min_size(aligned,image_rect.size());
+            }
+            video_clicked=!free && response.clicked_by(egui::PointerButton::Primary) && response.interact_pointer_pos().is_some_and(|point|image_rect.contains(point));
+            ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect())).image(texture.id(),image_rect,uv,egui::Color32::WHITE);
+            if free && response.dragged_by(egui::PointerButton::Primary){ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);}
+            if let Some(info)=&self.info {response.context_menu(|ui|{display_menu(ui,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio);});}
         }
         else if self.info.as_ref().is_some_and(|info|info.video.is_some()) {
             let size=egui::vec2(ui.available_width(),(ui.available_height()-32.0).max(1.0));
@@ -386,7 +413,7 @@ impl Preview {
                 // Only show loading on an empty canvas when no preview is available.
                 let spinner=egui::Rect::from_center_size(canvas.center(),egui::vec2(24.0,24.0));
                 ui.put(spinner,egui::Spinner::new());
-            } else {
+            } else if self.scale_mode!="free" {
             let diameter=128.0_f32.min(size.x.min(size.y)).max(1.0);
             let button_rect=egui::Rect::from_center_size(canvas.center(),egui::vec2(diameter,diameter));
             let button=ui.interact(button_rect,ui.make_persistent_id("video_initial_play"),egui::Sense::click());
@@ -397,7 +424,7 @@ impl Preview {
             paint_rounded_play(ui,triangle,color,diameter*0.025);
             video_clicked=button.clicked();
             }
-            if let Some(info)=&self.info {response.context_menu(|ui|{display_menu(ui,&mut self.fit,&mut self.aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio);});}
+            if let Some(info)=&self.info {response.context_menu(|ui|{display_menu(ui,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio);});}
         }
         else if self.waveform.is_none() {ui.label(crate::localization::tr("音频播放"));}
         if previous_audio!=self.selected_audio {let playing=self.is_playing();let position=self.position_now();self.stop_playback();self.position=position;if playing{self.play(ui.ctx(),path);}}
@@ -487,14 +514,7 @@ impl Preview {
 
 }
 impl Drop for Preview {fn drop(&mut self){persist_volume();}}
-fn display_menu(ui:&mut egui::Ui,fit:&mut bool,aspect:&mut Option<f32>,flip_x:&mut bool,flip_y:&mut bool) {
-    ui.menu_button(crate::localization::tr("显示模式"),|ui| {
-        if ui.selectable_label(*fit && aspect.is_none(),crate::localization::tr("适应窗口")).clicked(){*fit=true;*aspect=None;ui.close_menu();}
-        if ui.selectable_label(!*fit,crate::localization::tr("原尺寸")).clicked(){*fit=false;*aspect=None;ui.close_menu();}
-        for (label,ratio) in [("4:3",4.0_f32/3.0),("16:9",16.0_f32/9.0)] {
-            if ui.selectable_label(*aspect==Some(ratio),label).clicked(){*fit=true;*aspect=Some(ratio);ui.close_menu();}
-        }
-    });
+fn display_menu(ui:&mut egui::Ui,flip_x:&mut bool,flip_y:&mut bool) {
     ui.menu_button(crate::localization::tr("镜像"),|ui| {
         ui.checkbox(flip_x,crate::localization::tr("左右镜像"));
         ui.checkbox(flip_y,crate::localization::tr("上下镜像"));
