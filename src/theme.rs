@@ -83,6 +83,12 @@ pub fn set_preference(ctx: &egui::Context, preference: &str) {
 pub fn selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, false, [("light", "浅色"), ("dark", "深色"), ("system", "系统")]);
 }
+pub fn hierarchy_depth_selector(ui: &mut egui::Ui, preference: &mut String) {
+    selector_inner(ui, preference, false, [("1", "1"), ("2", "2"), ("3", "3"), ("all", "全部")]);
+}
+pub fn video_decoder_selector(ui:&mut egui::Ui,preference:&mut String) {
+    selector_inner(ui,preference,true,[("auto","自动"),("none","软解"),("d3d11va","硬解")]);
+}
 
 pub fn toolbar_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("light", "浅色"), ("dark", "深色"), ("system", "系统")]);
@@ -142,6 +148,29 @@ fn selector_inner<const N:usize>(ui: &mut egui::Ui, preference: &mut String, com
 }
 
 /// Settings button using the shared, theme-tinted SVG asset.
+pub fn preview_warning_details(ui:&mut egui::Ui,key:&str,label:&str,issues:&[String]) {
+    if issues.is_empty() {return;}
+    let id=ui.make_persistent_id(key);
+    let mut open=ui.ctx().data_mut(|data|data.get_temp::<bool>(id)).unwrap_or(false);
+    let color=ui.visuals().warn_fg_color;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x=4.0;
+        let label=ui.add(egui::Label::new(RichText::new(format!("{label}: {}",issues.len())).color(color)).sense(egui::Sense::click()));
+        let (rect,arrow)=ui.allocate_exact_size(egui::vec2(20.0,20.0),egui::Sense::click());
+        crate::icons::paint(ui,if open {crate::icons::Icon::TriangleDown}else{crate::icons::Icon::TriangleRight},rect.shrink(2.0),color);
+        if label.clicked() || arrow.clicked() {open=!open;}
+    });
+    ui.ctx().data_mut(|data|data.insert_temp(id,open));
+    if open {
+        let height=(ui.available_height()*0.25).clamp(40.0,160.0);
+        egui::Frame::group(ui.style()).show(ui,|ui| {
+            egui::ScrollArea::vertical().id_salt((key,"details")).max_height(height).show(ui,|ui| {
+                for issue in issues {ui.add(egui::Label::new(RichText::new(issue).color(color)).wrap().selectable(true));}
+            });
+        });
+    }
+}
+
 pub fn settings_button(ui: &mut egui::Ui) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::localization::tr("设置")));

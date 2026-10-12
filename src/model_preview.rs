@@ -197,7 +197,8 @@ impl Preview {
         ui.small(if controls {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；无光照主贴图预览，暂不还原 Shader、骨骼动画及 Prefab 骨骼姿势。FBX 多网格显示整个模型。"} else {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；网格保留父级变换与静态骨骼姿势，精灵和Spine使用静态平面。"});
         if let Some(result)=self.pending.as_ref().and_then(|r|r.try_recv().ok()){self.pending=None;match result {Ok(m)=>self.model=Some(m),Err(e)=>self.error=Some(e)}}
         if self.pending.is_some(){ui.spinner();return reload;}if let Some(e)=&self.error{ui.colored_label(Color32::RED,e);return reload;}
-        let Some(model)=&self.model else{return reload};for w in &model.warnings{ui.colored_label(ui.visuals().warn_fg_color,w);}
+        let Some(model)=&self.model else{return reload};
+        crate::theme::preview_warning_details(ui,"model_preview_warnings",crate::localization::tr("预览问题详情"),&model.warnings);
         let (rect,response)=ui.allocate_exact_size(ui.available_size().max(egui::vec2(1.0,1.0)),egui::Sense::drag());
         if response.dragged_by(egui::PointerButton::Primary){let d=ui.input(|i|i.pointer.delta());self.yaw+=d.x*0.01;self.pitch=(self.pitch+d.y*0.01).clamp(-1.5,1.5);self.dirty=true;}
         if response.dragged_by(egui::PointerButton::Secondary){self.pan+=ui.input(|i|i.pointer.delta());self.dirty=true;}

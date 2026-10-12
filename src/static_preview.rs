@@ -562,6 +562,15 @@ impl Preview {
     }
     pub fn show(&mut self, ui: &mut egui::Ui, documents: &[Document], identity: &str, flags: &HashMap<String, crate::hierarchy_controls::Flags>, selected: Option<&str>) -> Option<String> {
         let prefab_count=self.initialize_document(documents,identity);
+        if ui.ctx().data_mut(|data|data.get_temp::<bool>(egui::Id::new("asset_catalog_loading"))).unwrap_or(false) {
+            // Indexing runs independently of preview workers. Offering their pause
+            // control here can leave future preparation paused before it starts.
+            let count=ui.ctx().data_mut(|data|data.get_temp::<usize>(egui::Id::new("asset_catalog_progress"))).unwrap_or(0);
+            ui.horizontal(|ui| {ui.spinner();ui.label(format!("{} {}: {count}",tr("正在索引预览资源…"),tr("已索引资源")));});
+            if ui.button(tr("退出预览")).clicked() {self.open=false;self.release();}
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            return None;
+        }
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("静态预览"));
             crate::theme::preview_space_selector(ui,&mut self.three_dimensional);
@@ -598,7 +607,7 @@ impl Preview {
         // Hierarchy selects objects, while preview geometry is keyed by component.
         let selected_components=selection_components(documents,selected,expanded.as_deref());
         if let Some(data)=&expanded {
-            if !data.issues.is_empty() {ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {}",tr("Prefab 展开存在限制"),data.issues.len())).on_hover_text(data.issues.iter().take(32).cloned().collect::<Vec<_>>().join("\n"));}
+            crate::theme::preview_warning_details(ui,"prefab_expansion_warnings",tr("Prefab 展开存在限制"),&data.issues);
         }
         if self.three_dimensional {
             use std::hash::{Hash,Hasher};
@@ -813,15 +822,34 @@ impl Preview {
             quads.push(Quad{texture:handle.id(),points,outline:points,uv,tint:sprite.tint,path:Some(sprite.path.clone()),component:sprite.component.clone(),selectable:sprite.selectable,order:sprite.order});
         }
         let pending=expanding || self.preparation_pending || loading || self.textures.values().any(|texture|texture.receiver.is_some());
+        if pending {ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));}
         let status=tr(if expanding {"正在展开 Prefab…"} else if self.preparation_pending {"正在准备预览…"} else if pending {"正在加载预览资源…"} else {"合成预览已完成"});
         if preview_status_row(ui,status,!pending,&self.paused,None) {self.open=false;self.release();ui.ctx().request_repaint();return None;}
+        let mut issue_target=None;
         if missing>0 {
             ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {missing}",tr("部分资源缺失或暂不支持"))).on_hover_text(issues.join("\n"));
             ui.collapsing(tr("预览问题详情"), |ui| {
                 egui::ScrollArea::vertical().id_salt("preview_issues").max_height(160.0).show(ui, |ui| {
-                    for issue in &issues { ui.add(egui::Label::new(issue).wrap().selectable(true)); }
+                    for (row,issue) in issues.iter().enumerate() {
+                        // Only IDs explicitly at the start of a diagnostic refer to
+                        // scene documents. Asset GUIDs and Sprite fileIDs do not.
+                        let target=documents.iter().find(|doc|issue.strip_prefix(&doc.file_id).is_some_and(|tail|tail.starts_with(" · ") || tail.starts_with(": ")));
+                        if let Some(doc)=target {
+                            ui.push_id(("preview_issue",row),|ui|ui.horizontal_wrapped(|ui| {
+                                let label=format!("{} · {}",doc.type_name,doc.file_id);
+                                if ui.button(label).clicked() {issue_target=Some(doc.file_id.clone());}
+                                let detail=issue[doc.file_id.len()..].trim_start_matches([' ', '·', ':']);
+                                ui.add(egui::Label::new(detail).wrap().selectable(true));
+                            }));
+                        } else {ui.add(egui::Label::new(issue).wrap().selectable(true));}
+                    }
                 });
             });
+        }
+        if let Some(id)=issue_target {
+            ui.ctx().data_mut(|data|data.insert_temp(egui::Id::new("preview_issue_component"),id.clone()));
+            ui.ctx().request_repaint();
+            return Some(id);
         }
         if builtin_ui_approximation {ui.small(tr("UI 内置 Sprite 暂用颜色矩形近似显示。"));}
         if has_ui && documents.iter().filter(|doc|doc.type_name=="MonoBehaviour" && doc.text.len()<128*1024).any(|doc|field(&doc.text,"m_HorizontalFit").is_some() || field(&doc.text,"m_ChildControlWidth").is_some() || field(&doc.text,"m_ShowMaskGraphic").is_some() || field(&doc.text,"m_Softness").is_some()) {

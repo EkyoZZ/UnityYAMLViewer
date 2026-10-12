@@ -22,6 +22,8 @@ mod localized_format;
 mod theme;
 mod icons;
 mod asset_viewer;
+mod media_tools;
+mod media_preview;
 mod spine_preview;
 mod model_preview;
 mod preview_fonts;
@@ -39,14 +41,20 @@ use script_properties::ScriptProperties;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool }
+struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool, auto_open_preview: bool, hierarchy_depth: String }
 impl Default for AppSettings {
-    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true } }
+    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true, auto_open_preview: true, hierarchy_depth: "3".into() } }
 }
 impl AppSettings {
     fn load() -> Self {
         let mut settings = Self::default();
         if let Some(path) = last_open_dir_config_path() {
+            if let Ok(value) = fs::read_to_string(path.with_file_name("hierarchy_depth.txt")) {
+                if matches!(value.trim(), "1" | "2" | "3" | "all") {settings.hierarchy_depth = value.trim().into();}
+            }
+            if let Ok(value) = fs::read_to_string(path.with_file_name("auto_open_preview.txt")) {
+                settings.auto_open_preview = value.trim() != "false";
+            }
             if let Ok(value) = fs::read_to_string(path.with_file_name("auto_check_updates.txt")) {
                 settings.auto_check_updates = value.trim() != "false";
             }
@@ -65,6 +73,14 @@ impl AppSettings {
         settings
     }
     fn persist(&self) {
+        if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("hierarchy_depth.txt")) {
+            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            let _ = fs::write(path, self.hierarchy_depth.as_bytes());
+        }
+        if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("auto_open_preview.txt")) {
+            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            let _ = fs::write(path, self.auto_open_preview.to_string());
+        }
         if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("auto_check_updates.txt")) {
             if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
             let _ = fs::write(path, self.auto_check_updates.to_string());
@@ -172,6 +188,7 @@ struct ViewerApp {
     pending_close_tab: Option<PathBuf>,
     show_settings: bool,
     settings: AppSettings,
+    decoder_settings: media_tools::DecoderSettings,
     updater: updater::Updater,
     preview: static_preview::Preview,
     preview_text: Arc<str>,
@@ -460,7 +477,7 @@ impl ViewerApp {
     }
 
     fn show_open_dialog(&mut self) {
-        let dialog = rfd::FileDialog::new().add_filter(
+        let dialog = rfd::FileDialog::new().add_filter("All files", &["*"]).add_filter(
             "Unity YAML",
             &[
                 "prefab",
@@ -501,7 +518,7 @@ impl ViewerApp {
             self.remember_recent_file();
             return;
         }
-        if (asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
+        if (media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -520,7 +537,7 @@ impl ViewerApp {
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
@@ -554,12 +571,15 @@ impl ViewerApp {
     }
 
     fn activate_tab(&mut self, index: usize) {
+        self.assets.pause_media();
         self.locate_target = None;
         let tab = self.tabs[index].clone();
         self.active_tab = index;
         self.path = Some(tab.path);
         self.raw = tab.raw;
         self.documents = tab.documents;
+        self.preview.open = self.settings.auto_open_preview
+            && static_preview::Preview::available(&self.documents, self.path.as_deref());
         self.selected = tab.selected;
         self.last_selected = tab.selected;
         self.status = tab.status;
@@ -668,7 +688,7 @@ impl ViewerApp {
             }
             false
         });
-        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(format!("go-{id}")), depth<3);
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id((format!("go-{id}"), &self.settings.hierarchy_depth)), hierarchy_default_open(&self.settings.hierarchy_depth, depth));
         if force_open { state.set_open(true); }
         let has_visible_children = children.get(&id).is_some_and(|items| items.iter()
             .any(|child| self.game_object_has_match(*child, children, components)));
@@ -745,7 +765,7 @@ impl ViewerApp {
         let original=self.documents.iter().position(|item|item.file_id==*id);
         let selected=self.selected.and_then(|index|self.documents.get(index)).is_some_and(|doc|doc.file_id==*id || doc.game_object.as_deref()==Some(id.as_str())) || self.nested_selected.as_ref().is_some_and(|(path,key)|Some(path)==self.path.as_ref() && key==id);
         let locate=ui.ctx().data_mut(|d|d.get_temp::<String>(egui::Id::new("preview_hierarchy_locate")));
-        let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id(("linked_node",id)),depth<3);
+        let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id(("linked_node",id,&self.settings.hierarchy_depth)),hierarchy_default_open(&self.settings.hierarchy_depth,depth));
         let mut ancestor=locate.clone();let mut seen=std::collections::HashSet::new();let mut force_open=false;
         while let Some(key)=ancestor {
             if !seen.insert(key.clone()){break;}
@@ -1146,6 +1166,7 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_settings_request"))).unwrap_or(false) {self.show_settings=true;}
         if let Some(path)=ctx.data_mut(|data|data.remove_temp::<PathBuf>(egui::Id::new("spine_window_request"))) {
             self.open_file_with_directory_tracking(path,false);
         }
@@ -1241,6 +1262,7 @@ impl eframe::App for ViewerApp {
                             ui.close_menu();
                         }
                         ui.menu_button(crate::localization::tr("最近打开"), |ui| {
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                             if self.recent_files.paths().is_empty() { ui.label(crate::localization::tr("暂无最近文件")); }
                             for path in self.recent_files.paths() {
                                 let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -1352,7 +1374,7 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
-        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| asset_viewer::is_image(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -1482,6 +1504,7 @@ impl eframe::App for ViewerApp {
                     .or_else(||self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()));
                 if let Some(component_id)=self.preview.show(&mut preview_ui, &self.preview_documents, &self.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(), &self.node_flags, selected_id.as_deref()) {
                     if let Some(index)=self.documents.iter().position(|doc|doc.file_id==component_id) {
+                        ctx.data_mut(|data|data.remove::<String>(egui::Id::new("preview_issue_component")));
                         self.selected=Some(index);self.nested_selected=None;
                         self.locate_target=Some(index);
                         let doc=&self.documents[index];
@@ -1509,7 +1532,9 @@ impl eframe::App for ViewerApp {
             if !self.preview.open {self.preview_documents.clear();self.preview_text=Arc::from("");}
         }
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("inspector_hide_property_types"), self.preview.open));
-        egui::CentralPanel::default().frame(egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill)).show(ctx, |ui| {
+        let mut content_frame=egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill);
+        if self.path.as_ref().is_some_and(|path|media_preview::is_media(path)) {content_frame=content_frame.inner_margin(egui::Margin::same(8));}
+        egui::CentralPanel::default().frame(content_frame).show(ctx, |ui| {
             if reference_tab {
                 editing::publish(ctx, None, 0..0);
                 if !spine_preview::is_data_asset(&self.raw) && self.path.as_ref().is_some_and(|path| asset_viewer::is_text(path) && !spine_preview::is_spine(path)) && ui.button(crate::localization::tr("重载")).clicked() {
@@ -1612,7 +1637,11 @@ impl eframe::App for ViewerApp {
                 let documents=std::mem::replace(&mut self.documents,data.documents.clone());
                 let path=self.path.take();
                 editing::publish(ctx,None,0..0);
+                let selected=self.selected;
+                let issue_component=ctx.data_mut(|data|data.remove_temp::<String>(egui::Id::new("preview_issue_component")));
+                if let Some(id)=issue_component {self.selected=self.documents.iter().position(|doc|doc.file_id==id);}
                 self.show_game_object_inspector(ui,index);
+                self.selected=selected;
                 self.path=path;self.documents=documents;
                 editing::publish(ctx,None,0..0);
             } else if let Some(object) = selected_object {
@@ -1840,7 +1869,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if asset_viewer::is_image(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
+                    if media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();
@@ -1909,6 +1938,26 @@ impl eframe::App for ViewerApp {
                         persist_theme(&self.settings.theme);
                     }
                     ui.end_row();
+                    settings_label(ui, localization::tr("Hierarchy 默认展开层级"));
+                    let previous_depth = self.settings.hierarchy_depth.clone();
+                    settings_control(ui, |ui| theme::hierarchy_depth_selector(ui, &mut self.settings.hierarchy_depth));
+                    if previous_depth != self.settings.hierarchy_depth {self.settings.persist();}
+                    ui.end_row();
+                    settings_label(ui, localization::tr("预览"));
+                    settings_control(ui, |ui| {
+                        if theme::toggle_switch(ui, localization::tr("可预览默认展开"), &mut self.settings.auto_open_preview).changed() {
+                            self.settings.persist();
+                        }
+                    });
+                    ui.end_row();
+                    settings_label(ui, localization::tr("视频解码"));
+                    settings_group(ui, "decoder_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        ui.style_mut().wrap_mode=Some(egui::TextWrapMode::Wrap);
+                        self.decoder_settings.show(ui);
+                    });
+                    ui.end_row();
+                    // Keep these final two rows last; insert new settings above this block (AGENTS.md).
                     settings_label(ui, crate::localization::tr("单个文件缓存撤销步骤"));
                     let previous = self.settings.undo_steps;
                     settings_group(ui, "undo_settings_group", |ui| {
@@ -3532,6 +3581,10 @@ fn build_tree(
     (roots, children, components, unlinked)
 }
 
+fn hierarchy_default_open(preference: &str, depth: usize) -> bool {
+    preference == "all" || depth < preference.parse::<usize>().unwrap_or(3)
+}
+
 fn settings_label(ui: &mut egui::Ui, label: &str) {
     // Allocate a cell-sized label directly, so the grid centers it against the whole right group.
     let height = 30.0;
@@ -3688,6 +3741,7 @@ fn main() -> eframe::Result {
                 command_inbox,
                 last_open_dir: load_last_open_dir(),
                 settings: AppSettings::load(),
+                decoder_settings: media_tools::DecoderSettings::default(),
                 recent_files: recent_files::RecentFiles::load(),
                 ..Default::default()
             };

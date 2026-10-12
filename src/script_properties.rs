@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, mpsc::{self, Receiver}},
+    sync::{Arc, atomic::{AtomicUsize, Ordering}, mpsc::{self, Receiver}},
 };
 
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
@@ -17,9 +17,18 @@ pub struct ScriptProperties {
 }
 
 enum ProjectState {
-    Loading(Receiver<ProjectIndex>),
+    Loading(ScanJob),
     Ready(ProjectIndex),
 }
+
+enum ScanResult { Assets(Arc<HashMap<String, PathBuf>>), Complete(ProjectIndex) }
+struct ScanJob {
+    receiver: Receiver<ScanResult>,
+    assets: Option<Arc<HashMap<String, PathBuf>>>,
+    progress: Arc<ScanProgress>,
+}
+#[derive(Default)]
+struct ScanProgress { resources: AtomicUsize, parsed: AtomicUsize, total: AtomicUsize }
 
 #[derive(Default)]
 struct ProjectIndex {
@@ -62,19 +71,39 @@ impl ScriptProperties {
     pub fn update(&mut self, path: Option<&Path>, ctx: &egui::Context) {
         self.current_root = path.and_then(project_root);
         ctx.data_mut(|data| data.remove::<Arc<HashMap<String, PathBuf>>>(egui::Id::new("asset_catalog")));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("asset_catalog_loading"), false));
         ctx.data_mut(|data| data.remove::<Arc<HashMap<String, HashMap<String, String>>>>(egui::Id::new("shader_properties")));
         let Some(root) = self.current_root.clone() else { return };
         if !self.projects.contains_key(&root) {
             self.start_scan(root.clone(), ctx.clone());
         }
-        if let Some(ProjectState::Loading(receiver)) = self.projects.get(&root) {
-        match receiver.try_recv() {
-            Ok(index) => { self.projects.insert(root.clone(), ProjectState::Ready(index)); }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.projects.insert(root.clone(), ProjectState::Ready(ProjectIndex { issues: 1, ..Default::default() }));
+        let mut completed = None;
+        if let Some(ProjectState::Loading(job)) = self.projects.get_mut(&root) {
+            loop {
+                match job.receiver.try_recv() {
+                    Ok(ScanResult::Assets(assets)) => { job.assets = Some(assets); ctx.request_repaint(); }
+                    Ok(ScanResult::Complete(index)) => { completed = Some(index); break; }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        completed = Some(ProjectIndex { assets: job.assets.clone().unwrap_or_default(), issues: 1, ..Default::default() });
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                }
             }
-            Err(mpsc::TryRecvError::Empty) => {}
+            if let Some(assets) = &job.assets {
+                ctx.data_mut(|data| data.insert_temp(egui::Id::new("asset_catalog"), assets.clone()));
+            } else {
+                ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::new("asset_catalog_loading"), true);
+                    data.insert_temp(egui::Id::new("asset_catalog_progress"), job.progress.resources.load(Ordering::Relaxed));
+                });
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
+        if let Some(index) = completed {
+            self.projects.insert(root.clone(), ProjectState::Ready(index));
+            ctx.data_mut(|data| data.insert_temp(egui::Id::new("asset_catalog_loading"), false));
+            ctx.request_repaint();
         }
         if let Some(ProjectState::Ready(index)) = self.projects.get(&root) {
             ctx.data_mut(|data| data.insert_temp(egui::Id::new("asset_catalog"), index.assets.clone()));
@@ -84,10 +113,14 @@ impl ScriptProperties {
 
     fn start_scan(&mut self, root: PathBuf, ctx: egui::Context) {
         let (sender, receiver) = mpsc::channel();
-        self.projects.insert(root.clone(), ProjectState::Loading(receiver));
+        let progress = Arc::new(ScanProgress::default());
+        self.projects.insert(root.clone(), ProjectState::Loading(ScanJob { receiver, assets: None, progress: progress.clone() }));
         std::thread::spawn(move || {
-            let index = scan_project(&root);
-            let _ = sender.send(index);
+            let index = scan_project(&root, &progress, |assets| {
+                let _ = sender.send(ScanResult::Assets(assets));
+                ctx.request_repaint();
+            });
+            let _ = sender.send(ScanResult::Complete(index));
             ctx.request_repaint();
         });
     }
@@ -106,6 +139,14 @@ impl ScriptProperties {
         let script_guid = fields.iter().find(|field| field.name == "m_Script")
             .and_then(|field| guid_from_meta(&field.value));
         let index = root.as_ref().and_then(|root| self.projects.get(root));
+        if let Some(ProjectState::Loading(job)) = index {
+            if job.assets.is_some() {
+                let done = job.progress.parsed.load(Ordering::Relaxed);
+                let total = job.progress.total.load(Ordering::Relaxed);
+                ui.small(format!("{} {done}/{total}", crate::localization::tr("正在解析脚本与 Shader…")));
+                if total > 0 {ui.add(egui::ProgressBar::new(done as f32 / total as f32).desired_width(ui.available_width()));}
+            }
+        }
         let resolved = match index {
             Some(ProjectState::Ready(index)) => script_guid.as_ref()
                 .and_then(|guid| index.scripts.get(guid))
@@ -177,7 +218,7 @@ fn guid_from_meta(text: &str) -> Option<String> {
         .captures(text).map(|capture| capture[1].to_ascii_lowercase())
 }
 
-fn scan_project(root: &Path) -> ProjectIndex {
+fn scan_project(root: &Path, progress: &ScanProgress, publish_assets: impl FnOnce(Arc<HashMap<String, PathBuf>>)) -> ProjectIndex {
     let mut index = ProjectIndex::default();
     let mut stack = vec![root.join("Assets"), root.join("Packages"), root.join("Library/PackageCache")];
     let mut visited = HashSet::new();
@@ -208,18 +249,28 @@ fn scan_project(root: &Path) -> ProjectIndex {
                 continue;
             }
             Arc::make_mut(&mut index.assets).insert(guid.clone(), script_path.clone());
-            if script_path.extension().and_then(|ext| ext.to_str()) == Some("shader") {
-                if let Ok(source) = fs::read_to_string(&script_path) {
-                    Arc::make_mut(&mut index.shader_properties).insert(guid.clone(), parse_shader_properties(&source));
-                }
-            }
-            if script_path.extension().and_then(|ext| ext.to_str()) != Some("cs") { continue; }
-            let Ok(source) = fs::read_to_string(&script_path) else { index.issues += 1; continue };
-            index.scripts.insert(guid, script_path.clone());
-            let (classes, enums) = parse_source(&source, &script_path);
-            for class in classes { index.classes.entry(class.name.clone()).or_default().push(class); }
-            for (name, values) in enums { index.enums.entry(name).or_default().push(values); }
+            progress.resources.store(index.assets.len(), Ordering::Relaxed);
         }
+    }
+    // Freeze the complete GUID catalog before parsing source files. Both phases
+    // share this exact Arc so preview cache keys stay stable when scripts finish.
+    let sources: Vec<_> = index.assets.iter().filter(|(_, path)|
+        matches!(path.extension().and_then(|ext| ext.to_str()), Some("cs" | "shader")))
+        .map(|(guid,path)|(guid.clone(),path.clone())).collect();
+    progress.total.store(sources.len(), Ordering::Relaxed);
+    publish_assets(index.assets.clone());
+    for (position, (guid, script_path)) in sources.into_iter().enumerate() {
+        if let Ok(source) = fs::read_to_string(&script_path) {
+            if script_path.extension().and_then(|ext| ext.to_str()) == Some("shader") {
+                Arc::make_mut(&mut index.shader_properties).insert(guid, parse_shader_properties(&source));
+            } else {
+                index.scripts.insert(guid, script_path.clone());
+                let (classes, enums) = parse_source(&source, &script_path);
+                for class in classes { index.classes.entry(class.name.clone()).or_default().push(class); }
+                for (name, values) in enums { index.enums.entry(name).or_default().push(values); }
+            }
+        } else { index.issues += 1; }
+        progress.parsed.store(position + 1, Ordering::Relaxed);
     }
     index
 }

@@ -104,17 +104,29 @@ impl ImageTab {
 }
 #[derive(Default)]
 pub struct Assets {
+    media: HashMap<PathBuf, crate::media_preview::Preview>,
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
     spine: HashMap<PathBuf, Result<crate::spine_preview::Preview,String>>,
 
 }
 impl Assets {
-    pub fn forget(&mut self, path: &Path) { self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
+    pub fn pause_media(&mut self) {for tab in self.media.values_mut(){tab.deactivate();}}
+    pub fn forget(&mut self, path: &Path) { self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
             if other != path { tab.original = None; tab.texture = None; tab.pending = None; }
+        }
+        if crate::media_preview::is_media(path) {
+            let preview=self.media.entry(path.to_owned()).or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
+                if let Some(bytes)=preview.file_size() {ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}
+                preview.header_controls(ui,path);
+            });
+            preview.show(ui,path);
+            return;
         }
         ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
         self.models.retain(|other,_|other==path);

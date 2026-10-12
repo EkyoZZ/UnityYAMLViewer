@@ -12,7 +12,11 @@
 
 ### 当前状态
 
-当前开发版本 **1.1.5** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前开发版本 **1.1.6** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+
+### 1.1.6 开发方向
+
+下一阶段开发渲染系统，目前仅升级版本并建立记录，渲染系统尚未实现，已生成 1.1.6 Release 开发构建，运行效果待验证。详见 [1.1.6 功能记录](docs/versions/1.1.6.md)。
 
 ### 1.1.5 更新（开发中，待测试）
 
@@ -142,7 +146,11 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Development version **1.1.5** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Development version **1.1.6** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+
+### 1.1.6 development direction
+
+The next phase focuses on the rendering system. This update only bumps the version and establishes its record; the rendering system is not implemented and a 1.1.6 Release development build is available, awaiting runtime validation. See the [1.1.6 feature record](docs/versions/1.1.6.md).
 
 ### 1.1.5 release notes (in development, awaiting testing)
 

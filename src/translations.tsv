@@ -317,3 +317,65 @@ Prefab 展开存在限制	Prefab 展開存在限制	Prefab expansion limitations
 当前文件中的 Prefab 实例	目前檔案中的 Prefab 實例	Prefab instances in this file	このファイルの Prefab インスタンス	현재 파일의 Prefab 인스턴스	Prefab-Instanzen in dieser Datei	Instances Prefab dans ce fichier
 自动展开上限	自動展開上限	Auto-expand limit	自動展開の上限	자동 펼치기 한도	Grenze für automatische Auflösung	Limite de développement automatique
 未展开的 Prefab 实例	未展開的 Prefab 實例	Unexpanded prefab instances	未展開の Prefab インスタンス	펼치지 않은 Prefab 인스턴스	Nicht aufgelöste Prefab-Instanzen	Instances Prefab non développées
+可预览默认展开	可預覽預設展開	Expand available previews by default	プレビュー可能な場合は既定で展開	미리 보기 가능 시 기본으로 펼치기	Verfügbare Vorschauen standardmäßig öffnen	Ouvrir les aperçus disponibles par défaut
+正在索引预览资源…	正在索引預覽資源…	Indexing preview assets…	プレビューリソースを索引中…	미리 보기 리소스 인덱싱 중…	Vorschauressourcen werden indiziert…	Indexation des ressources d’aperçu…
+正在解析脚本与 Shader…	正在解析腳本與 Shader…	Parsing scripts and shaders…	スクリプトと Shader を解析中…	스크립트 및 Shader 분석 중…	Skripte und Shader werden analysiert…	Analyse des scripts et Shader…
+已索引资源	已索引資源	Indexed assets	索引済みリソース	인덱싱된 리소스	Indizierte Ressourcen	Ressources indexées
+Hierarchy 默认展开层级	Hierarchy 預設展開層級	Default hierarchy expansion depth	Hierarchy の既定展開階層	Hierarchy 기본 펼침 깊이	Standard-Aufklapptiefe der Hierarchie	Profondeur d’ouverture de la hiérarchie
+全部	全部	All	すべて	전체	Alle	Tout
+视频解码	影片解碼	Video decoding	動画デコード	비디오 디코딩	Videodekodierung	Décodage vidéo
+安装 FFmpeg	安裝 FFmpeg	Install FFmpeg	FFmpeg をインストール	FFmpeg 설치	FFmpeg installieren	Installer FFmpeg
+重新检测	重新偵測	Check again	再検出	다시 확인	Erneut prüfen	Vérifier à nouveau
+未安装	未安裝	Not installed	未インストール	설치되지 않음	Nicht installiert	Non installé
+已安装	已安裝	Installed	インストール済み	설치됨	Installiert	Installé
+正在检测…	正在偵測…	Checking…	確認中…	확인 중…	Wird geprüft…	Vérification…
+正在安装…	正在安裝…	Installing…	インストール中…	설치 중…	Wird installiert…	Installation…
+解码组件检测或安装失败	解碼元件偵測或安裝失敗	Decoder check or installation failed	デコーダーの確認またはインストールに失敗	디코더 확인 또는 설치 실패	Decoderprüfung oder Installation fehlgeschlagen	Échec de la vérification ou de l’installation du décodeur
+解码组件检测失败	解碼元件偵測失敗	Decoder check failed	デコーダー確認に失敗	디코더 확인 실패	Decoderprüfung fehlgeschlagen	Échec de la vérification du décodeur
+安装后尚未检测到解码组件，请重新检测或重启程序。	安裝後尚未偵測到解碼元件，請重新偵測或重新啟動程式。	Decoder not detected after installation. Check again or restart the app.	インストール後にデコーダーが検出されません。再検出または再起動してください。	설치 후 디코더를 찾지 못했습니다. 다시 확인하거나 앱을 재시작하세요.	Decoder nach Installation nicht erkannt. Erneut prüfen oder App neu starten.	Décodeur non détecté après installation. Vérifiez à nouveau ou redémarrez l’application.
+通过 Windows 包管理器安装 FFmpeg，需要联网；点击安装即同意第三方软件许可。	透過 Windows 套件管理員安裝 FFmpeg，需要連網；點擊安裝即同意第三方軟體授權。	Install FFmpeg via Windows Package Manager. Internet required; installing accepts third-party licenses.	Windows パッケージマネージャーで FFmpeg をインストールします。ネット接続が必要で、クリックすると第三者ライセンスに同意します。	Windows 패키지 관리자로 FFmpeg를 설치합니다. 인터넷이 필요하며 설치 시 타사 라이선스에 동의합니다.	FFmpeg über Windows-Paketmanager installieren. Internet erforderlich; Installation akzeptiert Drittanbieter-Lizenzen.	Installez FFmpeg via le gestionnaire de paquets Windows. Internet requis ; l’installation accepte les licences tierces.
+手动安装	手動安裝	Manual installation	手動インストール	수동 설치	Manuell installieren	Installation manuelle
+软解	軟解	Software	ソフトウェア	소프트웨어	Software	Logiciel
+硬解	硬解	Hardware	ハードウェア	하드웨어	Hardware	Matériel
+原尺寸	原尺寸	Original size	元のサイズ	원본 크기	Originalgröße	Taille originale
+左右镜像	左右鏡像	Flip horizontal	左右反転	좌우 반전	Horizontal spiegeln	Miroir horizontal
+上下镜像	上下鏡像	Flip vertical	上下反転	상하 반전	Vertikal spiegeln	Miroir vertical
+正在读取媒体信息…	正在讀取媒體資訊…	Reading media information…	メディア情報を取得中…	미디어 정보 읽는 중…	Medieninformationen werden gelesen…	Lecture des informations du média…
+前往视频解码设置	前往影片解碼設定	Video decoding settings	動画デコード設定へ	비디오 디코딩 설정	Videodekodierung einstellen	Paramètres de décodage vidéo
+正在生成音频波形…	正在產生音訊波形…	Generating audio waveform…	音声波形を生成中…	오디오 파형 생성 중…	Audiowellenform wird erzeugt…	Génération de la forme d’onde audio…
+音量	音量	Volume	音量	음량	Lautstärke	Volume
+解码	解碼	Decoding	デコード	디코딩	Dekodierung	Décodage
+音频播放	音訊播放	Audio playback	音声再生	오디오 재생	Audiowiedergabe	Lecture audio
+点击播放预览视频	點擊播放預覽影片	Play to preview the video	再生して動画をプレビュー	재생하여 비디오 미리 보기	Video zur Vorschau abspielen	Lancez la lecture pour prévisualiser la vidéo
+
+上一帧	上一幀	Previous frame	前のフレーム	이전 프레임	Vorheriges Bild	Image précédente
+下一帧	下一幀	Next frame	次のフレーム	다음 프레임	Nächstes Bild	Image suivante
+正在索引视频帧…	正在索引影片幀…	Indexing video frames…	動画フレームを索引中…	동영상 프레임 색인 중…	Videobilder werden indiziert…	Indexation des images vidéo…
+
+单声道	單聲道	Mono	モノラル	모노	Mono	Mono
+双声道	雙聲道	Stereo	ステレオ	스테레오	Stereo	Stéréo
+点击或拖动跳转	點擊或拖動跳轉	Click or drag to seek	クリックまたはドラッグして移動	클릭하거나 드래그하여 탐색	Zum Springen klicken oder ziehen	Cliquez ou faites glisser pour avancer
+
+音轨	音軌	Audio tracks	音声トラック	오디오 트랙	Audiospuren	Pistes audio
+内嵌字幕	內嵌字幕	Embedded subtitles	内蔵字幕	내장 자막	Eingebettete Untertitel	Sous-titres intégrés
+音轨 / 语言	音軌 / 語言	Audio track / language	音声トラック / 言語	오디오 트랙 / 언어	Audiospur / Sprache	Piste audio / langue
+关闭音频	關閉音訊	Disable audio	音声を無効にする	오디오 끄기	Audio deaktivieren	Désactiver l’audio
+没有音轨	沒有音軌	No audio tracks	音声トラックなし	오디오 트랙 없음	Keine Audiospuren	Aucune piste audio
+
+视频信息	影片資訊	Video information	動画情報	비디오 정보	Videoinformationen	Informations vidéo
+视频编码	影片編碼	Video codec	動画コーデック	비디오 코덱	Videocodec	Codec vidéo
+音频信息	音訊資訊	Audio information	音声情報	오디오 정보	Audioinformationen	Informations audio
+当前音轨	目前音軌	Current audio track	現在の音声トラック	현재 오디오 트랙	Aktuelle Audiospur	Piste audio actuelle
+
+像素宽高比	像素寬高比	Pixel aspect ratio	ピクセル縦横比	픽셀 종횡비	Pixel-Seitenverhältnis	Rapport des pixels
+容器格式	容器格式	Container format	コンテナ形式	컨테이너 형식	Containerformat	Format du conteneur
+像素格式	像素格式	Pixel format	ピクセル形式	픽셀 형식	Pixelformat	Format des pixels
+传递特性	傳遞特性	Transfer characteristics	伝達特性	전달 특성	Übertragungsfunktion	Fonction de transfert
+详细信息	詳細資訊	Details	詳細情報	세부 정보	Details	Détails
+文件大小	檔案大小	File size	ファイルサイズ	파일 크기	Dateigröße	Taille du fichier
+
+dBFS 为源音频近似峰值，不受播放音量影响	dBFS 為來源音訊近似峰值，不受播放音量影響	dBFS is an approximate source peak, independent of playback volume	dBFS は元音声の概算ピーク値で、再生音量には依存しません	dBFS는 재생 볼륨과 무관한 원본 오디오의 근사 피크입니다	dBFS ist ein ungefährer Quellpegel, unabhängig von der Wiedergabelautstärke	Le dBFS indique une crête approximative de la source, indépendante du volume de lecture
+
+显示模式	顯示模式	Display mode	表示モード	표시 모드	Anzeigemodus	Mode d’affichage
+无镜像	無鏡像	No mirroring	反転なし	미러링 없음	Keine Spiegelung	Sans miroir
+上下左右镜像	上下左右鏡像	Horizontal and vertical mirroring	上下左右反転	상하좌우 미러링	Horizontal und vertikal gespiegelt	Miroir horizontal et vertical
