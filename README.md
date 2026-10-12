@@ -10,47 +10,23 @@
 
 项目现已支持**属性编辑**：通过 Inspector 控件修改已识别的值，确认保存后写回原文件。类型校验、引用保护和精确片段写回帮助减少手动编辑 YAML 时的缩进、引用或格式损坏问题。
 
-### 当前状态
+### 已支持
 
-当前版本 **1.1.7** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
-
-### 1.1.7 更新
-
-新增视频全屏与悬浮控制、空格播放 / 暂停、音频白色峰值拖尾，并改善 FFmpeg 安装后识别及媒体页自动刷新。统一 Shader 渲染系统和粒子渲染仍未实现。详见 [1.1.7 功能记录](docs/versions/1.1.7.md) 与 [发布说明](docs/releases/1.1.7.md)；准备发布中，尚未上传。
-
-### 1.1.5 更新（开发中，待测试）
-
-Spine 3.8 独立骨骼渲染与多轨动画预览、场景 / Prefab 静态 Spine 合成，以及左下轨道列表和底部中央缩放 / 播放悬浮控件。完整限制与验证状态见 [1.1.5 功能记录](docs/versions/1.1.5.md)。已生成 1.1.5 Release 开发构建，实际运行效果待测试，尚未正式发布。
-
-### 1.1.4 更新（开发中）
-
-新增组件折叠 Inspector、脚本语法高亮、图片通道与缩放查看、工程字体预览、最近文件菜单及 SVG 图标。完整更新日志草稿见 [CHANGELOG.md](CHANGELOG.md)，正式版尚未发布。
-
-### 1.1.3 更新
-
-- 支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持。
-
-### 1.1.2 更新
-
-- 新增 GitHub Releases 在线更新；设置底部提供“启动时自动检查更新”（默认开启）与“检查更新”按钮。
-- 检测到新版本时，设置按钮前显示红色 New；点击查看版本与发行说明。确认已是最新版后清除 New，手动检查会提示。
-- 后台下载并显示进度，必须通过附件大小、SHA-256 和 Windows 程序架构校验；失败不会替换现有程序。
-- 下载完成后提醒保存；未保存修改会阻止更新。二次确认后退出、备份旧程序、替换并重启，替换失败尝试恢复备份。
-
-更新源为本仓库最新正式 Release，标签采用 `v1.1.2` 等语义版本，附件采用 `UnityYAMLViewer-v1.1.2-windows-x64.exe`（对应架构也支持 x86 / arm64）或 `unity_yaml_viewer.exe`，并须由 GitHub 提供 SHA-256 digest。支持包含程序的同名 Windows ZIP；GitHub 自动生成的源码包不用于更新。当前更新器只替换单个可执行文件，不安装其他依赖或资源。
-
-### 1.1.1 更新
-
-- 更新深浅主题配色，优化界面与设置体验。
-- 新增简中、繁中、英语、日语、韩语、德语、法语，支持即时切换并记住选择。
-- 优化编辑模式视觉提示和更新历史展示。
-- 新增 AnimationClip 时间轴编辑功能。
-
-### 已有功能
+- 场景 / Prefab 静态 2D 与 3D 预览：Sprite、Tilemap、常见 UI、模型及 Spine 静态合成；支持嵌套 Prefab 展开和常见覆盖，引用节点属性只读。
+- Spine 3.8 独立骨骼预览：动画、皮肤、多轨播放、速度、时间轴、缩放和平移。
+- FBX / OBJ 模型预览：贴图、颜色、实体 / 线框、网格统计、静态蒙皮与视角操作。
+- 图片通道查看、缩放和平移；常见脚本 / 文本查看、基础语法高亮及工程字体预览。
+- 音频 / 视频播放：播放、暂停、停止、进度跳转、音量及空格键控制；视频支持音轨选择、暂停方向键逐帧及自动 / 软解 / 硬解选项。
+- 视频适应窗口、原尺寸、自由缩放与全屏播放：F11 切换、Esc 退出，全屏悬浮控件在鼠标静止 1 秒后隐藏。自由缩放支持鼠标锚点缩放、拖动及轻点播放 / 暂停。
+- 音频波形、dBFS 电平条及白色峰值拖尾，峰值线以每秒 5 dB 回落；电平为源音频近似峰值。
+- 设置安装 / 检测外部 FFmpeg，安装就绪后关闭设置自动刷新当前失败媒体页。
+- 页签拖拽排序、启动恢复及最近 30 个文件；后台文件加载与资源索引、可配置的预览默认展开及 Hierarchy 展开层级。
+- 简中、繁中、英语、日语、韩语、德语、法语与系统 / 浅色 / 深色主题。
+- GitHub Releases 在线更新：自动 / 手动检查、发行说明、下载进度、大小 / SHA-256 / 架构校验，未保存修改保护及备份替换重启。
 
 - Prefab 静态 Sprite 组合预览：按层级 Transform 叠加位置、缩放和旋转，支持源图切片、颜色和翻转；可拖动调整预览宽度、缩放及平移。选中 SpriteRenderer 时同时查看和编辑所属节点的 Transform/RectTransform。
 - UI Prefab 预览支持 Image 普通/九宫格及横向/纵向填充、RawImage、Text/TextMeshPro 静态文字；按 RectTransform 锚点、pivot、尺寸及层级变换计算布局，点击选中对应 Graphic，同时查看 RectTransform。UI 根尺寸缺失时可调整参考尺寸。
-- 首批预览为 XY 正交视图；UI 文字使用系统字体近似，内置 Sprite 使用颜色矩形近似。嵌套 Prefab、平铺/径向填充、动态布局、自定义材质及遮罩尚未完整支持。
+- UI 预览使用 XY 正交视图；字体优先尝试工程引用，无法加载时回退默认字体，内置 Sprite 使用颜色矩形近似。
 
 - 支持打开或拖放 `.prefab`、`.unity`、`.asset`、`.mat`、`.controller`、`.overrideController`、`.anim`、`.spriteatlas`、`.guiskin`、`.yaml` 和 `.yml`
 - 按 `GameObject` / `Transform` 关系重建 Prefab 和场景层级，并列出组件
@@ -79,7 +55,7 @@ MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/
 - 确认输入（Enter 或失去焦点）时验证整数范围、有限浮点数、向量分量和已识别枚举；无效值警告并回退。未知类型、原始 YAML、fileID 引用保持只读。
 - 切换标签页保留各文件的暂存修改；处于编辑模式时，关闭标签或退出应用前须先保存或放弃。未保存修改和撤销记录不会跨启动恢复。
 - 未确认输入或警告会阻止保存；保存前检查外部改动，通过同目录临时文件替换原文件，写入失败保留原文件。
-- “设置”弹窗依次包含“关于”按钮、主题下拉菜单和单个文件缓存撤销步骤；主题与步数在下次启动时恢复。
+- 设置支持主题、语言、预览、Hierarchy 展开层级、视频解码及撤销容量等选项；最后两项固定为“单个文件缓存撤销步骤”和“检查更新”。
 
 ### 使用方法
 
@@ -114,6 +90,15 @@ target\release\unity_yaml_viewer.exe
 
 构建时会自动将 `assets/app_icon.png` 转换并嵌入为 Windows 应用图标。
 
+### 待支持与当前限制
+
+- 统一 Shader 渲染系统、完整 Unity 材质效果、粒子模拟 / 渲染及场景整体动态播放。
+- Spine 4.1 / 4.2、完整 SkeletonGraphic 缩放与特殊混合、Unity Mask / RectMask2D 裁剪。
+- 完整 UI 动态布局、平铺 / 径向填充、复杂嵌套 Prefab 数组覆盖及 AtlasCache 打包图预览。
+- Unity Mesh.asset、FBX 子网格 fileID 精确选择、Blend Shape 与 3D 点选层级联动。
+- 字幕渲染、HDR 输出与精确声卡时钟同步；音视频格式和硬解能力依赖外部 FFmpeg 与设备。
+- 非整数倍率缩放仍有插值，高 DPI 下 100% 沿用逻辑尺寸；大文件完整读入内存，尚未采用磁盘分页。
+
 ### 支持范围与限制
 
 - 工具仅面向 Unity 的**文本序列化** YAML 资源，无法读取二进制序列化资源。
@@ -144,45 +129,23 @@ cargo check
 
 The project now supports **property editing**: change recognized values through Inspector controls and save them back to the original file. Type validation, reference protection, and targeted text updates help reduce indentation, reference, and formatting errors from manual YAML editing.
 
-### Current status
+### Supported features
 
-Version **1.1.7** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
-
-### 1.1.7 update
-
-Adds fullscreen video with floating controls, Space playback controls, audio peak trails, and improved FFmpeg detection and media retry after installation. The unified Shader rendering system and particle rendering remain unimplemented. See the [1.1.7 feature record](docs/versions/1.1.7.md) and [release notes](docs/releases/1.1.7.md). Release preparation is in progress; no upload has been made.
-
-### 1.1.5 release notes (in development, awaiting testing)
-
-Spine 3.8 standalone rendering and multi-track animation preview, static Spine composition in scenes / prefabs, and floating track and zoom / playback controls. See the [1.1.5 feature record](docs/versions/1.1.5.md) for limitations and validation status. A 1.1.5 Release development build is available; runtime validation and official release remain pending.
-
-### 1.1.4 release notes (in development)
-
-Adds collapsible component inspectors, script syntax highlighting, image channels and zoom, project font previews, recent files, and SVG icons. See [CHANGELOG.md](CHANGELOG.md) for the draft release notes. The final release has not been published.
-
-### 1.1.3 release notes
-
-- Added Prefab preview. Currently supports 2D only; Spine and 3D objects are not supported yet.
-
-### 1.1.2 release notes
-
-- Added GitHub Releases updates, enabled startup checks, a manual check button and a red New badge.
-- View release notes and download progress. Downloads require size, SHA-256 and executable architecture validation.
-- Save pending edits before confirming replacement and restart. The updater backs up the old executable and attempts rollback on failure.
-- Publish a stable semantic version tag and a matching `UnityYAMLViewer-v1.1.2-windows-x64.exe` asset with GitHub's SHA-256 digest. The updater replaces only the executable; source archives are not update packages.
-
-### 1.1.1 release notes
-
-- Refreshed light and dark themes, with improved interface and settings.
-- Added Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German and French, with instant switching and saved preferences.
-- Improved visual cues in edit mode and release history display.
-- Added AnimationClip timeline editing.
-
-### Available features
+- Static 2D / 3D scene and Prefab previews with Sprites, Tilemaps, common UI, models and Spine poses; nested Prefab expansion and common overrides, with read-only referenced nodes.
+- Standalone Spine 3.8 previews with animation, skins, multiple tracks, playback speed, timeline, zoom and pan.
+- FBX / OBJ previews with textures, colors, solid / wireframe display, mesh statistics, static skinning and camera controls.
+- Image channels, zoom and pan; script / text viewing, basic syntax highlighting and project font previews.
+- Audio / video playback with pause, stop, seeking, volume and Space controls; video audio-track selection, paused arrow-key frame stepping and automatic / software / hardware decoding options.
+- Fit, native-size and free-scale video modes, plus fullscreen via F11 and exit via F11 / Esc. Floating fullscreen controls hide after 1 second without mouse movement. Free scale supports pointer-centered zoom, dragging and click playback controls.
+- Audio waveforms, approximate source dBFS levels and white peak trails falling at 5 dB per second.
+- External FFmpeg installation / detection in Settings; failed media automatically retries after closing Settings once the decoder is ready.
+- Tab reordering and session restoration, 30 recent files, background loading / resource indexing and configurable preview / hierarchy expansion.
+- Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German and French; system, light and dark themes.
+- GitHub Releases updates with automatic / manual checks, release notes, download progress, size / SHA-256 / architecture verification, unsaved-edit protection and backup / replacement / restart.
 
 - Static Prefab Sprite preview with hierarchical transforms, source texture slicing, tint and flips; resize the preview pane, zoom and pan. Selecting a SpriteRenderer also displays its owning Transform/RectTransform for inspection and editing.
 - UI Prefab previews support Simple/Sliced and linear Filled Images, RawImage and static Text/TextMeshPro, with RectTransform anchors, pivots, size and hierarchical transforms. Clicking selects the Graphic with its RectTransform shown alongside it. Reference dimensions can be adjusted when the root size is missing.
-- The preview uses an XY orthographic view, system font approximations and colored rectangles for built-in UI Sprites. Nested Prefabs, tiling/radial fills, driven layouts, custom materials and masks are not fully supported.
+- UI previews use an XY orthographic view, project fonts where available with fallback fonts, and colored rectangles for built-in UI Sprites.
 
 - Open or drag and drop `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.overrideController`, `.anim`, `.spriteatlas`, `.guiskin`, `.yaml`, and `.yml` files
 - Rebuild Prefab and scene hierarchies from `GameObject` / `Transform` relationships and list components
@@ -208,7 +171,7 @@ The MonoBehaviour inspector indexes `.cs.meta` files in `Assets`, `Packages`, an
 - Ctrl+Z keeps separate histories per file. Default: 200 steps; configurable range: 50–1000. The oldest entries expire beyond the limit. Saving exits Edit Mode and retains undo history. Ctrl+Z re-enters Edit Mode and restores a previous value; save again to write it to disk. Closing the file or choosing Discard Edits clears its history. Discard restores the latest saved contents.
 - Committed input validates numeric widths, finite floats, vector components and recognized enums. Invalid input warns and reverts. Unknown types, raw YAML and fileID references remain locked.
 - Switching tabs preserves staged edits for each file. Save or discard before closing an editing tab or exiting the application. Unsaved edits and undo histories are not restored after restarting. and replaces the asset using a temporary file in the same directory. Failed writes preserve the original.
-- Settings contains About, a theme selector and undo history capacity. Theme and undo settings persist across restarts.
+- Settings includes theme, language, preview, hierarchy expansion, video decoder and undo options. Undo history capacity and Check for Updates remain the final two items.
 
 ### Usage
 
@@ -232,6 +195,15 @@ target\release\unity_yaml_viewer.exe
 ```
 
 During Windows builds, `assets/app_icon.png` is converted and embedded as the application icon.
+
+### Pending support and current limitations
+
+- A unified Shader renderer, complete Unity material effects, particle simulation / rendering and scene-wide animation playback.
+- Spine 4.1 / 4.2, complete SkeletonGraphic scaling / special blending and Unity Mask / RectMask2D clipping.
+- Complete driven UI layouts, tiled / radial fills, complex nested Prefab array overrides and AtlasCache packed-image previews.
+- Unity Mesh.asset, precise FBX submesh fileID selection, Blend Shapes and 3D picking linked to the hierarchy.
+- Subtitle rendering, HDR output and precise audio-device clock synchronization. Media formats and hardware decoding depend on external FFmpeg and the device.
+- Non-integer scaling still interpolates; 100% uses logical sizing at high DPI. Large files remain fully loaded into memory without disk paging.
 
 ### Scope and limitations
 
