@@ -154,7 +154,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
         if crate::editing::dirty_scope(ui) && ui.small_button(crate::localization::tr("还原")).clicked() { crate::editing::restore_scope(ui); }
     });
     if open {
-        egui::Window::new(name).id(id.with("window")).open(&mut open).resizable(false)
+        crate::native_window::Window::new(name).id(id.with("window")).open(&mut open).resizable(false)
             .default_width(300.0).min_width(300.0).max_width(300.0).show(ui.ctx(), |ui| {
             ui.set_width(300.0);
             ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑渐变关键点，保存编辑后写入文件。") } else { crate::localization::tr("只读渐变，不修改资源文件。") });

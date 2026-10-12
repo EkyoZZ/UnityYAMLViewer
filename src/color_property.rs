@@ -38,7 +38,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
     response.on_hover_text(crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]));
     if state.open {
         let mut open = true;
-        egui::Window::new(name)
+        crate::native_window::Window::new(name)
             .id(id.with("window")).open(&mut open).resizable(false)
             .default_width(220.0).min_width(220.0).max_width(220.0)
             .show(ui.ctx(), |ui| {

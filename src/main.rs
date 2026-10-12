@@ -28,6 +28,7 @@ mod spine_preview;
 mod model_preview;
 mod preview_fonts;
 mod recent_files;
+mod native_window;
 mod timeline_edit;
 mod animation_curves;
 mod updater;
@@ -296,7 +297,7 @@ impl ViewerApp {
         }
         if let Some(job)=&self.loading {
             if job.started.elapsed()>=std::time::Duration::from_secs(1) {
-            egui::Window::new(crate::localization::tr("正在加载文件")).id(egui::Id::new("file_loading"))
+            crate::native_window::Window::new(crate::localization::tr("正在加载文件")).id(egui::Id::new("file_loading"))
                 .title_bar(false).collapsible(false).resizable(false).movable(false)
                 .anchor(egui::Align2::CENTER_CENTER,egui::Vec2::ZERO).fixed_size(egui::vec2(420.0,72.0)).show(ctx,|ui| {
                 let cancelled=job.cancelled.load(Ordering::Relaxed);
@@ -338,7 +339,7 @@ impl ViewerApp {
     fn update_windows(&mut self, ctx: &egui::Context) {
         if self.updater.show {
             let mut open = true;
-            egui::Window::new(localization::tr("软件更新")).id(egui::Id::new("update_release"))
+            crate::native_window::Window::new(localization::tr("软件更新")).id(egui::Id::new("update_release")).fit_height()
                 .open(&mut open).collapsible(false).default_width(480.0).show(ctx, |ui| {
                     if let Some(release) = self.updater.release.clone() {
                         ui.label(format!("{} {} → {}", localization::tr("版本"), APP_VERSION, release.tag_name));
@@ -376,7 +377,7 @@ impl ViewerApp {
         if self.updater.confirm {
             let mut open = true;
             let dirty: Vec<_> = self.edits.iter().filter(|(_, session)| session.lock().unwrap().has_changes()).map(|(path, _)| path.clone()).collect();
-            egui::Window::new(localization::tr("确认更新并重启")).id(egui::Id::new("confirm_update_restart"))
+            crate::native_window::Window::new(localization::tr("确认更新并重启")).id(egui::Id::new("confirm_update_restart"))
                 .open(&mut open).collapsible(false).resizable(false).default_width(320.0).min_width(320.0).max_width(320.0).show(ctx, |ui| {
                     ui.set_width(320.0);
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -407,7 +408,7 @@ impl ViewerApp {
         }
         if let Some(message) = self.updater.message.clone() {
             let mut open = true;
-            egui::Window::new(localization::tr("检查更新")).id(egui::Id::new("update_message"))
+            crate::native_window::Window::new(localization::tr("软件更新")).id(egui::Id::new("update_message"))
                 .open(&mut open).collapsible(false).resizable(false).default_width(260.0).min_width(260.0).max_width(260.0).show(ctx, |ui| {
                     ui.add_space(16.0);
                     ui.set_width(260.0);
@@ -1924,7 +1925,7 @@ impl eframe::App for ViewerApp {
         }
 
         if self.show_settings {
-            egui::Window::new(crate::localization::tr("设置")).id(egui::Id::new("settings_window")).open(&mut self.show_settings).collapsible(false).resizable(false).default_width(348.0).min_width(348.0).max_width(348.0).default_height(0.0).show(ctx, |ui| {
+            crate::native_window::Window::new(crate::localization::tr("设置")).id(egui::Id::new("settings_window")).open(&mut self.show_settings).collapsible(false).resizable(false).default_width(348.0).min_width(348.0).max_width(348.0).default_height(560.0).show(ctx, |ui| {
                 egui::Grid::new("application_settings").num_columns(2).spacing(egui::vec2(12.0, 16.0)).show(ui, |ui| {
                     settings_label(ui, crate::localization::tr("关于"));
                     if settings_control(ui, |ui| ui.add_sized([208.0, 30.0], egui::Button::new(crate::localization::tr("关于 Unity YAML Viewer")).wrap())).inner.clicked() {
@@ -1983,6 +1984,23 @@ impl eframe::App for ViewerApp {
                         self.decoder_settings.show(ui);
                     });
                     ui.end_row();
+                    settings_label(ui, localization::tr("最近打开记录"));
+                    let mut recent_limit = self.recent_files.limit();
+                    settings_group(ui, "recent_files_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.add_sized([40.0, ui.spacing().interact_size.y], egui::DragValue::new(&mut recent_limit)
+                                .range(recent_files::MIN_LIMIT..=recent_files::MAX_LIMIT).speed(1.0));
+                            // Lay out the localized button from the right first, then fill the remaining width.
+                            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), ui.spacing().interact_size.y), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(egui::Button::new(localization::tr("清空记录")).wrap_mode(egui::TextWrapMode::Extend)).clicked() { self.recent_files.clear(); }
+                                ui.spacing_mut().slider_width = ui.available_width().max(1.0);
+                                theme::slider(ui, true, egui::Slider::new(&mut recent_limit, recent_files::MIN_LIMIT..=recent_files::MAX_LIMIT).integer().show_value(false));
+                            });
+                        });
+                    });
+                    if recent_limit != self.recent_files.limit() { self.recent_files.set_limit(recent_limit); }
+                    ui.end_row();
                     // Keep these final two rows last; insert new settings above this block (AGENTS.md).
                     settings_label(ui, crate::localization::tr("单个文件缓存撤销步骤"));
                     let previous = self.settings.undo_steps;
@@ -2018,6 +2036,12 @@ impl eframe::App for ViewerApp {
                             self.updater.check(ctx, true);
                         }
                         if self.updater.checking { ui.horizontal(|ui| { ui.spinner(); ui.label(localization::tr("正在检查更新…")); }); }
+                        if let Some(message) = &self.updater.check_message {
+                            ui.add(egui::Label::new(localization::retranslate(message)).wrap());
+                            if self.updater.check_failed {
+                                ui.hyperlink_to(localization::tr("打开发布页面，手动更新"), "https://github.com/EkyoZZ/UnityYAMLViewer/releases/latest");
+                            }
+                        }
                     });
                     ui.end_row();
                 });
@@ -2027,7 +2051,7 @@ impl eframe::App for ViewerApp {
         if !self.show_settings && ctx.data(|data|data.get_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {ctx.request_repaint();}
         self.update_windows(ctx);
         if self.show_about {
-            egui::Window::new(crate::localization::tr("关于 Unity YAML Viewer"))
+            crate::native_window::Window::new(crate::localization::tr("关于 Unity YAML Viewer")).id(egui::Id::new("about_window")).fit_height()
                 .open(&mut self.show_about)
                 .resizable(true)
                 .default_width(460.0)
@@ -2038,9 +2062,30 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
-                        ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(RichText::new("1.1.8").strong());
+                        ui.label(localization::tr("• 最近记录支持 10～50 条与清空；联网更新跟随 Windows 系统代理"));
+                        ui.label(localization::tr("• 弹窗使用独立系统窗口，优化多语言设置布局与关于窗口高度"));
+                        ui.label(localization::tr("• 检查更新结果显示在设置底部，有新版本时打开统一更新窗口"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.7").strong());
                         ui.label(localization::tr("• 音视频支持空格播放、视频全屏与音频峰值拖尾"));
                         ui.label(localization::tr("• 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页"));
+                        ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
+                        ui.label(RichText::new("1.1.6").strong());
+                        ui.label(localization::tr("• 音视频预览与播放、视频逐帧与硬解选项，改善资源索引及界面响应"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.5").strong());
+                        ui.label(localization::tr("• Spine 3.8、FBX / OBJ 模型及场景 2D / 3D 预览；页签拖拽排序"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.4").strong());
+                        ui.label(localization::tr("• 场景 / Tilemap 与嵌套 Prefab 预览、后台加载及 Inspector 优化"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.1.3").strong());
+                        ui.label(localization::tr("• Prefab 静态 2D 与部分 UI 预览，支持选择定位、平移与缩放"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.1.2").strong());
                         ui.label(localization::tr("• 新增在线更新：启动自动检查、New 提示、更新说明与下载进度"));
@@ -2052,10 +2097,6 @@ impl eframe::App for ViewerApp {
                         ui.label(crate::localization::tr("• 优化编辑模式视觉提示和更新历史展示"));
                         ui.label(crate::localization::tr("• 新增 AnimationClip 时间轴编辑功能"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.add_space(6.0);
                         ui.label(RichText::new("1.1.0").strong());
                         ui.label(crate::localization::tr("• 属性与表格编辑，显式保存与放弃，修改整行高亮和逐项还原"));
@@ -2104,7 +2145,7 @@ impl eframe::App for ViewerApp {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or(crate::localization::tr("未命名"));
             let mut discard = false;
             let mut cancel = false;
-            egui::Modal::new(egui::Id::new("discard_edit_on_close")).show(ctx, |ui| {
+            crate::native_window::Window::new(crate::localization::tr("⚠ 放弃编辑？")).id(egui::Id::new("discard_edit_on_close")).modal().resizable(false).default_width(420.0).show(ctx, |ui| {
                 ui.heading(crate::localization::tr("⚠ 放弃编辑？"));
                 ui.label(crate::lf!("“{0}”有未保存的修改。是否放弃编辑并关闭文件？", name));
                 ui.label(crate::localization::tr("选择“是”将直接关闭，不写入文件；选择“否”继续编辑。"));
@@ -2128,7 +2169,7 @@ impl eframe::App for ViewerApp {
         for session in self.edits.values() {
             let message = session.lock().unwrap().warning.clone();
             if let Some(message) = message {
-                egui::Window::new(crate::localization::tr("⚠ 编辑提示")).collapsible(false).resizable(false).show(ctx, |ui| {
+                crate::native_window::Window::new(crate::localization::tr("⚠ 编辑提示")).id(egui::Id::new("edit_warning")).collapsible(false).resizable(false).show(ctx, |ui| {
                     ui.label(message);
                     ui.add_space(10.0);
                     ui.vertical_centered(|ui| {
@@ -3617,6 +3658,8 @@ fn settings_label(ui: &mut egui::Ui, label: &str) {
     // Allocate a cell-sized label directly, so the grid centers it against the whole right group.
     let height = 30.0;
     ui.allocate_ui_with_layout(egui::vec2(128.0, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_width(128.0);
+        ui.set_max_width(128.0);
         ui.add(egui::Label::new(label).wrap());
     });
 }

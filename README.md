@@ -20,9 +20,9 @@
 - 视频适应窗口、原尺寸、自由缩放与全屏播放：F11 切换、Esc 退出，全屏悬浮控件在鼠标静止 1 秒后隐藏。自由缩放支持鼠标锚点缩放、拖动及轻点播放 / 暂停。
 - 音频波形、dBFS 电平条及白色峰值拖尾，峰值线以每秒 5 dB 回落；电平为源音频近似峰值。
 - 设置安装 / 检测外部 FFmpeg，安装就绪后关闭设置自动刷新当前失败媒体页。
-- 页签拖拽排序、启动恢复及最近 30 个文件；后台文件加载与资源索引、可配置的预览默认展开及 Hierarchy 展开层级。
+- 页签拖拽排序、启动恢复及最近打开记录（10～50 条，默认 30 条，可在设置中清空）；后台文件加载与资源索引、可配置的预览默认展开及 Hierarchy 展开层级。
 - 简中、繁中、英语、日语、韩语、德语、法语与系统 / 浅色 / 深色主题。
-- GitHub Releases 在线更新：自动 / 手动检查、发行说明、下载进度、大小 / SHA-256 / 架构校验，未保存修改保护及备份替换重启。
+- GitHub Releases 在线更新（自动读取 Windows 系统手动代理及代理环境变量；不支持 PAC / 自动代理发现）：自动 / 手动检查（结果显示在设置底部，检查失败提供手动更新链接；有新版本时手动检查与 New 共用更新窗口）、发行说明、下载进度、大小 / SHA-256 / 架构校验，未保存修改保护及备份替换重启。
 
 - Prefab 静态 Sprite 组合预览：按层级 Transform 叠加位置、缩放和旋转，支持源图切片、颜色和翻转；可拖动调整预览宽度、缩放及平移。选中 SpriteRenderer 时同时查看和编辑所属节点的 Transform/RectTransform。
 - UI Prefab 预览支持 Image 普通/九宫格及横向/纵向填充、RawImage、Text/TextMeshPro 静态文字；按 RectTransform 锚点、pivot、尺寸及层级变换计算布局，点击选中对应 Graphic，同时查看 RectTransform。UI 根尺寸缺失时可调整参考尺寸。
@@ -55,7 +55,7 @@ MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/
 - 确认输入（Enter 或失去焦点）时验证整数范围、有限浮点数、向量分量和已识别枚举；无效值警告并回退。未知类型、原始 YAML、fileID 引用保持只读。
 - 切换标签页保留各文件的暂存修改；处于编辑模式时，关闭标签或退出应用前须先保存或放弃。未保存修改和撤销记录不会跨启动恢复。
 - 未确认输入或警告会阻止保存；保存前检查外部改动，通过同目录临时文件替换原文件，写入失败保留原文件。
-- 设置支持主题、语言、预览、Hierarchy 展开层级、视频解码及撤销容量等选项；最后两项固定为“单个文件缓存撤销步骤”和“检查更新”。
+- 设置、关于、更新、加载进度、编辑确认及颜色 / 渐变面板使用独立系统窗口，可移出主窗口，内容超出窗口时可滚动；设置支持主题、语言、预览、Hierarchy 展开层级、视频解码及撤销容量等选项；最后两项固定为“单个文件缓存撤销步骤”和“检查更新”。
 
 ### 使用方法
 
@@ -139,9 +139,9 @@ The project now supports **property editing**: change recognized values through 
 - Fit, native-size and free-scale video modes, plus fullscreen via F11 and exit via F11 / Esc. Floating fullscreen controls hide after 1 second without mouse movement. Free scale supports pointer-centered zoom, dragging and click playback controls.
 - Audio waveforms, approximate source dBFS levels and white peak trails falling at 5 dB per second.
 - External FFmpeg installation / detection in Settings; failed media automatically retries after closing Settings once the decoder is ready.
-- Tab reordering and session restoration, 30 recent files, background loading / resource indexing and configurable preview / hierarchy expansion.
+- Tab reordering and session restoration, configurable recent file history (10–50 entries, default 30, with a clear button in Settings), background loading / resource indexing and configurable preview / hierarchy expansion.
 - Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German and French; system, light and dark themes.
-- GitHub Releases updates with automatic / manual checks, release notes, download progress, size / SHA-256 / architecture verification, unsaved-edit protection and backup / replacement / restart.
+- GitHub Releases updates (automatically follows Windows manual system proxies and proxy environment variables; PAC / automatic proxy discovery is unsupported) with automatic / manual checks (results appear in Settings; failed checks provide a manual update link, and new releases use the same dialog as the New badge), release notes, download progress, size / SHA-256 / architecture verification, unsaved-edit protection and backup / replacement / restart.
 
 - Static Prefab Sprite preview with hierarchical transforms, source texture slicing, tint and flips; resize the preview pane, zoom and pan. Selecting a SpriteRenderer also displays its owning Transform/RectTransform for inspection and editing.
 - UI Prefab previews support Simple/Sliced and linear Filled Images, RawImage and static Text/TextMeshPro, with RectTransform anchors, pivots, size and hierarchical transforms. Clicking selects the Graphic with its RectTransform shown alongside it. Reference dimensions can be adjusted when the root size is missing.
@@ -171,7 +171,7 @@ The MonoBehaviour inspector indexes `.cs.meta` files in `Assets`, `Packages`, an
 - Ctrl+Z keeps separate histories per file. Default: 200 steps; configurable range: 50–1000. The oldest entries expire beyond the limit. Saving exits Edit Mode and retains undo history. Ctrl+Z re-enters Edit Mode and restores a previous value; save again to write it to disk. Closing the file or choosing Discard Edits clears its history. Discard restores the latest saved contents.
 - Committed input validates numeric widths, finite floats, vector components and recognized enums. Invalid input warns and reverts. Unknown types, raw YAML and fileID references remain locked.
 - Switching tabs preserves staged edits for each file. Save or discard before closing an editing tab or exiting the application. Unsaved edits and undo histories are not restored after restarting. and replaces the asset using a temporary file in the same directory. Failed writes preserve the original.
-- Settings includes theme, language, preview, hierarchy expansion, video decoder and undo options. Undo history capacity and Check for Updates remain the final two items.
+- Settings, About, update dialogs, loading progress, edit confirmations and color / gradient panels use separate native windows with scrolling when needed. Settings includes theme, language, preview, hierarchy expansion, video decoder and undo options. Undo history capacity and Check for Updates remain the final two items.
 
 ### Usage
 

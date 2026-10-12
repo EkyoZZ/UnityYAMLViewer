@@ -42,6 +42,8 @@ pub struct Updater {
     pub progress: (u64, u64),
     pub staged: Option<PathBuf>,
     pub message: Option<String>,
+    pub check_message: Option<String>,
+    pub check_failed: bool,
     pub confirm: bool,
     manual: bool,
     cancel: Arc<AtomicBool>,
@@ -63,7 +65,8 @@ impl Updater {
         if self.checking || self.downloading { return; }
         self.checking = true;
         self.manual = manual;
-        self.message = None;
+        self.check_message = None;
+        self.check_failed = false;
         let (sender, receiver) = mpsc::channel();
         self.receiver = Some(receiver);
         let ctx = ctx.clone();
@@ -83,12 +86,17 @@ impl Updater {
                                 self.confirm = false;
                             }
                             self.release = release;
-                            if self.manual {
-                                if self.release.is_some() { self.show = true; }
-                                else { self.show = false; self.message = Some("目前已是最新版本。".into()); }
+                            if self.release.is_none() {
+                                self.check_message = Some("目前已是最新版本。".into());
+                                self.show = false;
+                            } else if self.manual {
+                                self.show = true;
                             }
                         }
-                        Err(error) => if self.manual { self.message = Some(format!("检查更新失败：{error}")); },
+                        Err(error) => {
+                            self.check_failed = true;
+                            self.check_message = Some(format!("检查更新失败：{error}"));
+                        },
                     }
                 }
                 Event::Progress(done, total) => self.progress = (done, total),

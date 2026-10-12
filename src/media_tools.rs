@@ -122,7 +122,7 @@ impl DecoderSettings {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             ui.horizontal(|ui| {
-                ui.label(tr(if self.installed==Some(true) {"已安装"}else{"未安装"}));
+                ui.label(tr(if self.installed==Some(true) {"FFmpeg 已安装"}else{"未安装"}));
                 if self.installed!=Some(true) && ui.button(tr("安装 FFmpeg")).clicked() {self.start(ui.ctx(),true);}
                 if ui.button(tr("重新检测")).clicked() {self.start(ui.ctx(),false);}
             });
