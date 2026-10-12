@@ -492,7 +492,11 @@ impl ViewerApp {
                 "yaml",
                 "yml",
             ],
-        ).add_filter("Spine 3.8", &["skel", "bytes", "json", "txt"]);
+        ).add_filter("Spine 3.8", &["skel", "bytes", "json", "txt"])
+        .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp"])
+        .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
+        .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
+        .add_filter(crate::localization::tr("视频"), &["mp4", "m4v", "mkv", "webm", "mov", "avi", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts", "3gp", "bytes"]);
         let dialog = if let Some(directory) = &self.last_open_dir {
             dialog.set_directory(directory)
         } else {
@@ -1313,8 +1317,18 @@ impl eframe::App for ViewerApp {
                 let mut activate = None;
                 let mut close = None;
                 let mut tab_rects=Vec::new();
-                let strip=ui.horizontal_wrapped(|ui| {
-                    ui.set_min_width(ui.available_width());
+                let tab_width=(ctx.screen_rect().right()-ui.min_rect().left()-8.0).max(1.0);
+                let spacing=ui.spacing().item_spacing;
+                let mut slots=Vec::new();let mut x=0.0;let mut y=0.0;
+                for tab in &self.tabs {
+                    let title=tab.path.file_name().and_then(|name|name.to_str()).unwrap_or(crate::localization::tr("未命名"));
+                    let dirty=self.edits.get(&tab.path).is_some_and(|session|session.lock().unwrap().has_changes());
+                    let title=if dirty{format!("{title} *")}else{title.to_owned()};
+                    let width=(ui.painter().layout_no_wrap(title,egui::FontId::proportional(14.0),ui.visuals().text_color()).size().x+38.0).min(tab_width);
+                    if x>0.0 && x+width>tab_width {x=0.0;y+=24.0+spacing.y;}
+                    slots.push(egui::Rect::from_min_size(egui::pos2(x,y),egui::vec2(width,24.0)));x+=width+spacing.x;
+                }
+                let (strip_rect,strip_response)=ui.allocate_exact_size(egui::vec2(tab_width,y+24.0),egui::Sense::hover());
                     for (index, tab) in self.tabs.iter().enumerate() {
                         let title = tab
                             .path
@@ -1324,7 +1338,8 @@ impl eframe::App for ViewerApp {
                         let is_active = self.active_tab == index;
                         let dirty = self.edits.get(&tab.path).is_some_and(|session| session.lock().unwrap().has_changes());
                         let title = if dirty { format!("{title} *") } else { title.to_string() };
-                        let (open_clicked, close_clicked, response, slot) = ui.push_id(&tab.path,|ui|unified_tab(ui, &title, is_active, &tab.path)).inner;
+                        let slot=slots[index].translate(strip_rect.min.to_vec2());
+                        let (open_clicked, close_clicked, response, slot) = unified_tab(ui, &title, is_active, &tab.path,slot);
                         tab_rects.push(slot);
                         if response.drag_started_by(egui::PointerButton::Primary) {
                             let origin=ui.input(|i|i.pointer.press_origin()).unwrap_or(slot.center());
@@ -1339,10 +1354,10 @@ impl eframe::App for ViewerApp {
                             close = Some(index);
                         }
                     }
-                });
+                let strip=strip_response;
                 let dragged=ctx.data_mut(|d|d.get_temp::<PathBuf>(egui::Id::new("tab_drag_path")));
                 if let Some(path)=dragged {
-                    if let Some(pointer)=ctx.input(|i|i.pointer.hover_pos()).filter(|p|strip.response.rect.contains(*p)) {
+                    if let Some(pointer)=ctx.input(|i|i.pointer.hover_pos()).filter(|p|strip.rect.contains(*p)) {
                         let slot=tab_drop_slot(&tab_rects,pointer);
                         if let Some(rect)=tab_rects.get(slot).or_else(||tab_rects.last()) {
                             let x=if slot<tab_rects.len(){rect.left()-2.0}else{rect.right()+2.0};
@@ -3632,16 +3647,11 @@ mod tab_reorder_tests {
         assert_eq!(tab_drop_slot(&rects,egui::pos2(300.0,40.0)),3);
     }
 }
-fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::Path) -> (bool, bool,egui::Response,egui::Rect) {
+fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::Path,slot:egui::Rect) -> (bool, bool,egui::Response,egui::Rect) {
+    let tab_id=ui.id().with(path);
     let font = egui::FontId::proportional(14.0);
     let text_color = ui.visuals().text_color();
-    let text_width = ui
-        .painter()
-        .layout_no_wrap(title.to_owned(), font.clone(), text_color)
-        .size()
-        .x;
-    let (slot, _) = ui.allocate_exact_size(egui::vec2(text_width + 38.0, 24.0), egui::Sense::hover());
-    let mut min=egui::pos2(ui.ctx().animate_value_with_time(ui.id().with("tab_x"),slot.left(),0.12),ui.ctx().animate_value_with_time(ui.id().with("tab_y"),slot.top(),0.12));
+    let mut min=egui::pos2(ui.ctx().animate_value_with_time(tab_id.with("tab_x"),slot.left(),0.12),ui.ctx().animate_value_with_time(tab_id.with("tab_y"),slot.top(),0.12));
     let dragged=ui.ctx().data_mut(|d|d.get_temp::<PathBuf>(egui::Id::new("tab_drag_path"))).is_some_and(|p|p==path);
     if dragged {
         if let Some(pointer)=ui.input(|i|i.pointer.hover_pos()) {
@@ -3650,8 +3660,8 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
         }
     }
     let rect=egui::Rect::from_min_size(min,slot.size());
-    let response=ui.interact(rect,ui.id().with("tab_button"),egui::Sense::click_and_drag());
-    let painter=if dragged {ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground,ui.id().with("dragged_tab")))}else{ui.painter().clone()};
+    let response=ui.interact(rect,tab_id.with("tab_button"),egui::Sense::click_and_drag());
+    let painter=if dragged {ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground,tab_id.with("dragged_tab")))}else{ui.painter().clone()};
     let close_rect = egui::Rect::from_min_size(
         egui::pos2(rect.right() - 24.0, rect.top()),
         egui::vec2(24.0, rect.height()),
@@ -3682,7 +3692,8 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
         painter
             .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
     }
-    painter.text(
+    let text_rect=egui::Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.top()),egui::pos2(close_rect.left(),rect.bottom()));
+    painter.with_clip_rect(painter.clip_rect().intersect(text_rect)).text(
         egui::pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         title,
