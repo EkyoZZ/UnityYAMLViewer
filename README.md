@@ -12,11 +12,11 @@
 
 ### 当前状态
 
-当前开发版本 **1.1.6** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
+当前版本 **1.1.7** 默认只读，支持显式进入编辑模式，在属性控件和列表表格中修改已识别类型的值；原始 YAML 保持只读。只有点击“保存编辑”才会写入文件。
 
-### 1.1.6 开发方向
+### 1.1.7 更新
 
-下一阶段开发渲染系统，目前仅升级版本并建立记录，渲染系统尚未实现，已生成 1.1.6 Release 开发构建，运行效果待验证。详见 [1.1.6 功能记录](docs/versions/1.1.6.md)。
+新增视频全屏与悬浮控制、空格播放 / 暂停、音频白色峰值拖尾，并改善 FFmpeg 安装后识别及媒体页自动刷新。统一 Shader 渲染系统和粒子渲染仍未实现。详见 [1.1.7 功能记录](docs/versions/1.1.7.md) 与 [发布说明](docs/releases/1.1.7.md)；准备发布中，尚未上传。
 
 ### 1.1.5 更新（开发中，待测试）
 
@@ -146,11 +146,11 @@ The project now supports **property editing**: change recognized values through 
 
 ### Current status
 
-Development version **1.1.6** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
+Version **1.1.7** starts in read-only mode and provides explicit property and table editing for recognized types. Raw YAML stays read-only; only Save Edits writes to disk.
 
-### 1.1.6 development direction
+### 1.1.7 update
 
-The next phase focuses on the rendering system. This update only bumps the version and establishes its record; the rendering system is not implemented and a 1.1.6 Release development build is available, awaiting runtime validation. See the [1.1.6 feature record](docs/versions/1.1.6.md).
+Adds fullscreen video with floating controls, Space playback controls, audio peak trails, and improved FFmpeg detection and media retry after installation. The unified Shader rendering system and particle rendering remain unimplemented. See the [1.1.7 feature record](docs/versions/1.1.7.md) and [release notes](docs/releases/1.1.7.md). Release preparation is in progress; no upload has been made.
 
 ### 1.1.5 release notes (in development, awaiting testing)
 

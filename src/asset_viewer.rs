@@ -111,6 +111,25 @@ pub struct Assets {
 
 }
 impl Assets {
+    pub fn retry_media_decoder(&mut self,path:&Path) {
+        if let Some(preview)=self.media.get_mut(path){preview.retry_missing_decoder();}
+    }
+    pub fn media_fullscreen(&mut self,ctx:&egui::Context,path:Option<&Path>)->bool {
+        let video=path.and_then(|path|self.media.get(path)).is_some_and(|preview|preview.has_video());
+        let fullscreen=crate::media_preview::is_fullscreen(ctx);
+        let owner_id=egui::Id::new("media_fullscreen_path");
+        let owner=ctx.data(|data|data.get_temp::<PathBuf>(owner_id));
+        let changed=fullscreen && owner.as_deref().is_some_and(|owner|Some(owner)!=path);
+        let toggle=video && ctx.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::F11));
+        let escape=fullscreen && ctx.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
+        if toggle || escape || changed || (fullscreen && !video) {crate::media_preview::set_fullscreen(ctx,video && !fullscreen && !escape && !changed);}
+        let fullscreen=crate::media_preview::is_fullscreen(ctx);
+        ctx.data_mut(|data|{if fullscreen {if let Some(path)=path{data.insert_temp(owner_id,path.to_owned());}}else{data.remove::<PathBuf>(owner_id);}});
+        fullscreen
+    }
+    pub fn show_media_fullscreen(&mut self,ui:&mut egui::Ui,path:&Path) {
+        if let Some(preview)=self.media.get_mut(path){preview.show(ui,path);}
+    }
     pub fn pause_media(&mut self) {for tab in self.media.values_mut(){tab.deactivate();}}
     pub fn forget(&mut self, path: &Path) { self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {

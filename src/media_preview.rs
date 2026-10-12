@@ -3,6 +3,24 @@ use std::{io::{Read,BufRead}, path::{Path,PathBuf}, process::{Child,Stdio}, sync
 use eframe::egui;
 use crate::media_tools::{command,find_tool};
 
+pub fn is_fullscreen(ctx:&egui::Context)->bool {ctx.data(|data|data.get_temp::<bool>(egui::Id::new("media_fullscreen"))).unwrap_or(false)}
+pub fn set_fullscreen(ctx:&egui::Context,fullscreen:bool) {
+    let now=ctx.input(|input|input.time);
+    ctx.data_mut(|data|{data.insert_temp(egui::Id::new("media_fullscreen"),fullscreen);data.insert_temp(egui::Id::new("media_last_motion"),now);});
+    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));ctx.request_repaint();
+}
+fn fullscreen_button(ui:&mut egui::Ui,fullscreen:bool)->bool {
+    let (rect,response)=ui.allocate_exact_size(egui::vec2(28.0,28.0),egui::Sense::click());
+    let color=ui.visuals().text_color();let bounds=rect.shrink(6.0);let length=4.0;
+    for (corner,dx,dy) in [(bounds.left_top(),1.0,1.0),(bounds.right_top(),-1.0,1.0),(bounds.left_bottom(),1.0,-1.0),(bounds.right_bottom(),-1.0,-1.0)] {
+        let corner=if fullscreen{corner+egui::vec2(dx,dy)*length}else{corner};
+        let direction=if fullscreen{-1.0}else{1.0};
+        ui.painter().line_segment([corner+egui::vec2(dx*length*direction,0.0),corner],egui::Stroke::new(1.5_f32,color));
+        ui.painter().line_segment([corner,corner+egui::vec2(0.0,dy*length*direction)],egui::Stroke::new(1.5_f32,color));
+    }
+    response.on_hover_text(crate::localization::tr(if fullscreen{"退出全屏 (F11 / Esc)"}else{"全屏播放 (F11)"})).clicked()
+}
+
 pub fn is_media(path:&Path)->bool {
     let known=matches!(path.extension().and_then(|e|e.to_str()).unwrap_or("").to_ascii_lowercase().as_str(),
         "mp3"|"wav"|"ogg"|"oga"|"flac"|"aac"|"m4a"|"wma"|"opus"|"aiff"|"aif"|"mp4"|"m4v"|"mkv"|"webm"|"mov"|"avi"|"wmv"|"flv"|"mpeg"|"mpg"|"ts"|"mts"|"m2ts"|"3gp");
@@ -240,27 +258,45 @@ fn persist_volume() {
         if std::fs::write(path,format!("{} {}",preference.volume,preference.remembered)).is_ok(){preference.dirty=false;}
     }
 }
-pub struct Preview { info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
+struct VideoGesture {origin:egui::Pos2,last:egui::Pos2,dragging:bool,on_image:bool}
+impl VideoGesture {
+    fn move_to(&mut self,point:egui::Pos2)->egui::Vec2 {
+        // Latch dragging so returning to the press position never becomes a click.
+        let was_dragging=self.dragging;
+        self.dragging|=point.distance(self.origin)>=5.0;
+        let delta=if was_dragging{point-self.last}else if self.dragging{point-self.origin}else{egui::Vec2::ZERO};
+        self.last=point;delta
+    }
+}
+pub struct Preview { meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
     waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
 impl Preview {
+    pub fn retry_missing_decoder(&mut self) {
+        if self.info.is_none() && self.error.is_some(){self.error=None;self.probe=None;}
+    }
+    pub fn has_video(&self)->bool {self.info.as_ref().is_some_and(|info|info.video.is_some())}
     pub fn header_controls(&mut self,ui:&mut egui::Ui,path:&Path) {
         if !self.info.as_ref().is_some_and(|info|info.video.is_some()){return;}
         let previous=self.decoder.clone();
         crate::theme::video_decoder_selector(ui,&mut self.decoder);
         let mirror=match (self.flip_x,self.flip_y){(false,false)=>"无镜像",(true,false)=>"左右镜像",(false,true)=>"上下镜像",(true,true)=>"上下左右镜像"};
         ui.small(crate::localization::tr(mirror));
+        self.scale_controls(ui);
+        if self.index_job.is_some(){ui.spinner();ui.label(crate::localization::tr("正在索引视频帧…"));}
+        if previous!=self.decoder {let playing=self.is_playing();self.stop_playback();self.cache=Arc::new(Mutex::new(FrameCache::default()));if playing{self.play(ui.ctx(),path);}else{self.error=None;}}
+    }
+    fn scale_controls(&mut self,ui:&mut egui::Ui) {
         let previous_scale=self.scale_mode.clone();
         crate::theme::video_scale_selector(ui,&mut self.scale_mode);
         if previous_scale!=self.scale_mode {
+            self.video_gesture=None;
             self.pan=egui::Vec2::ZERO;
             if self.scale_mode=="native"{self.zoom=Some(1.0);}
             if self.scale_mode=="fit"{self.zoom=None;}
         }
         if let Some(zoom)=self.zoom {ui.small(format!("{:.1}%",zoom*100.0));}
-        if self.index_job.is_some(){ui.spinner();ui.label(crate::localization::tr("正在索引视频帧…"));}
-        if previous!=self.decoder {let playing=self.is_playing();self.stop_playback();self.cache=Arc::new(Mutex::new(FrameCache::default()));if playing{self.play(ui.ctx(),path);}else{self.error=None;}}
     }
     pub fn file_size(&self)->Option<u64> {self.info.as_ref().map(|info|info.file_size)}
     fn is_playing(&self)->bool {self.playback.as_ref().is_some_and(|job|!job.control.paused.load(Ordering::Relaxed))}
@@ -274,10 +310,25 @@ impl Preview {
     }
     fn stop_playback(&mut self){self.pause();self.playback=None;self.started=None;self.resume_position=None;}
     pub fn deactivate(&mut self) {
+        self.meter_trails=[0.0;2];
+        self.video_gesture=None;
         self.stop_playback();
         if let Some(frame)=self.current_frame.and_then(|index|self.cache.lock().unwrap().get(index)){self.poster=Some(preview_poster(&frame));}
         self.texture=None;self.wave_job=None;self.index_job=None;self.frame_job=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path) {
+        let fullscreen=is_fullscreen(ui.ctx());
+        let controls_visible=if fullscreen {
+            let (now,moved,down)=ui.input(|input|(input.time,input.events.iter().any(|event|matches!(event,egui::Event::PointerMoved(_))),input.pointer.any_down()));
+            let last=ui.ctx().data_mut(|data|{
+                let id=egui::Id::new("media_last_motion");
+                let last=if moved || down{now}else{data.get_temp::<f64>(id).unwrap_or(now)};
+                data.insert_temp(id,last);last
+            });
+            let visible=now-last<1.0;
+            if visible {ui.ctx().request_repaint_after(Duration::from_secs_f64((1.0-(now-last)).max(0.001)));}
+            else {ui.ctx().set_cursor_icon(egui::CursorIcon::None);}
+            visible
+        }else{true};
         let preference=*volume_preference().lock().unwrap();self.volume=preference.volume;self.remembered_volume=preference.remembered;
         if self.info.is_none() && self.probe.is_none() && self.error.is_none() {
             let (tx,rx)=mpsc::channel();self.probe=Some(rx);let path=path.to_owned();let ctx=ui.ctx().clone();
@@ -325,7 +376,7 @@ impl Preview {
         }}
         if indexed_now && self.is_playing() {let position=self.position_now();self.stop_playback();self.cache=Arc::new(Mutex::new(FrameCache::default()));self.position=position;self.current_frame=None;self.play(ui.ctx(),path);}
         let mut position=self.seek_drag.map_or(self.position_now(),|seek|seek.0);if duration>0.0 {position=position.min(duration);}
-        if let Some(info)=&self.info {if let Some([w,h])=info.video {
+        if !fullscreen {if let Some(info)=&self.info {if let Some([w,h])=info.video {
             ui.horizontal_wrapped(|ui| {
                 let bitrate=if info.bit_rate>0{format!("{:.0} kb/s",info.bit_rate as f64/1000.0)}else{crate::localization::tr("未知").to_owned()};
                 let bits=info.video_bits.map_or_else(||crate::localization::tr("未知").to_owned(),|bits|format!("{bits} bit"));
@@ -342,10 +393,10 @@ impl Preview {
             let depth=if info.bits>0{format!("{} bit",info.bits)}else{"bit: —".into()};
             let channels=match info.source_channels {1=>crate::localization::tr("单声道").to_owned(),2=>crate::localization::tr("双声道").to_owned(),n=>format!("{n} ch")};
             ui.small(format!("{} Hz · {depth} · {channels}",info.sample_rate));
-        }}
+        }}}
         if let Some(job)=&self.playback {job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);let fps=self.info.as_ref().map_or(30.0,|i|i.fps);ui.ctx().request_repaint_after(Duration::from_secs_f64((0.5/fps).clamp(0.001,0.03)));}
         if self.info.as_ref().is_some_and(|i|i.video.is_none()) {
-            paint_level_meter(ui,self.waveform.as_deref(),position,duration);
+            paint_level_meter(ui,self.waveform.as_deref(),position,duration,&mut self.meter_trails);
         }
         if self.info.as_ref().is_some_and(|i|i.video.is_some()) {
             let mut step=0i32;
@@ -360,7 +411,7 @@ impl Preview {
                 self.display_frame(ui.ctx(),path,target);
             }}
             if self.index_job.is_some() || self.frame_job.is_some(){ui.ctx().request_repaint_after(Duration::from_millis(50));}
-            if let Some(error)=&self.index_error {ui.small(error);}
+            if !fullscreen {if let Some(error)=&self.index_error {ui.small(error);}}
 
         }
         let wave_seek=self.waveform.as_ref().and_then(|wave|paint_waveform(ui,wave,position,duration));
@@ -375,7 +426,7 @@ impl Preview {
         let mut video_clicked=false;
         if let Some(texture)=&self.texture {
             let uv=egui::Rect::from_min_max(egui::pos2(if self.flip_x{1.0}else{0.0},if self.flip_y{1.0}else{0.0}),egui::pos2(if self.flip_x{0.0}else{1.0},if self.flip_y{0.0}else{1.0}));
-            let available=egui::vec2(ui.available_width(),(ui.available_height()-32.0).max(1.0));let native=self.info.as_ref().and_then(|info|info.video).map_or(texture.size_vec2(),|[w,h]|egui::vec2(w as f32,h as f32));
+            let available=egui::vec2(ui.available_width(),(ui.available_height()-if fullscreen{0.0}else{32.0}).max(1.0));let native=self.info.as_ref().and_then(|info|info.video).map_or(texture.size_vec2(),|[w,h]|egui::vec2(w as f32,h as f32));
             let free=self.scale_mode=="free";
             let (canvas,response)=ui.allocate_exact_size(available,if free{egui::Sense::drag()}else{egui::Sense::click()});
             let mut zoom=match self.scale_mode.as_str(){
@@ -385,7 +436,27 @@ impl Preview {
             };
             if self.zoom!=Some(zoom){self.zoom=Some(zoom);ui.ctx().request_repaint();}
             if !free{self.pan=egui::Vec2::ZERO;}
-            if free && response.dragged_by(egui::PointerButton::Primary){self.pan+=response.drag_delta();}
+            if free {
+                let press_image=egui::Rect::from_center_size(canvas.center()+self.pan,native*zoom);
+                for event in ui.input(|input|input.events.clone()) {
+                    match event {
+                        egui::Event::PointerButton {pos,button:egui::PointerButton::Primary,pressed:true,..}=>{
+                            if response.contains_pointer() && canvas.intersect(ui.clip_rect()).contains(pos) {
+                                self.video_gesture=Some(VideoGesture {origin:pos,last:pos,dragging:false,on_image:press_image.contains(pos)});
+                            }
+                        },
+                        egui::Event::PointerMoved(pos)=>if let Some(gesture)=&mut self.video_gesture {self.pan+=gesture.move_to(pos);},
+                        egui::Event::PointerButton {pos,button:egui::PointerButton::Primary,pressed:false,..}=>{
+                            if let Some(mut gesture)=self.video_gesture.take() {
+                                self.pan+=gesture.move_to(pos);
+                                video_clicked=!gesture.dragging && gesture.on_image && canvas.intersect(ui.clip_rect()).contains(pos) && press_image.contains(pos);
+                            }
+                        },
+                        egui::Event::PointerGone|egui::Event::WindowFocused(false)=>self.video_gesture=None,
+                        _=>{},
+                    }
+                }
+            } else {self.video_gesture=None;}
             if free && response.hovered() {
                 let scroll=ui.input_mut(|input|{let scroll=input.smooth_scroll_delta.y;input.smooth_scroll_delta=egui::Vec2::ZERO;input.raw_scroll_delta=egui::Vec2::ZERO;scroll});
                 if scroll!=0.0 {
@@ -396,18 +467,18 @@ impl Preview {
             }
             let mut image_rect=egui::Rect::from_center_size(canvas.center()+self.pan,native*zoom);
             // Avoid blending adjacent texels just because centering lands between screen pixels.
-            if (zoom-1.0).abs()<f32::EPSILON {
+            if fullscreen || (zoom-1.0).abs()<f32::EPSILON {
                 let pixels_per_point=ui.ctx().pixels_per_point();
                 let aligned=egui::pos2((image_rect.min.x*pixels_per_point).round()/pixels_per_point,(image_rect.min.y*pixels_per_point).round()/pixels_per_point);
                 image_rect=egui::Rect::from_min_size(aligned,image_rect.size());
             }
-            video_clicked=!free && response.clicked_by(egui::PointerButton::Primary) && response.interact_pointer_pos().is_some_and(|point|image_rect.contains(point));
+            if !free {video_clicked=response.clicked_by(egui::PointerButton::Primary) && response.interact_pointer_pos().is_some_and(|point|image_rect.contains(point));}
             ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect())).image(texture.id(),image_rect,uv,egui::Color32::WHITE);
             if free && response.dragged_by(egui::PointerButton::Primary){ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);}
             if let Some(info)=&self.info {response.context_menu(|ui|{display_menu(ui,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio);});}
         }
         else if self.info.as_ref().is_some_and(|info|info.video.is_some()) {
-            let size=egui::vec2(ui.available_width(),(ui.available_height()-32.0).max(1.0));
+            let size=egui::vec2(ui.available_width(),(ui.available_height()-if fullscreen{0.0}else{32.0}).max(1.0));
             let (canvas,response)=ui.allocate_exact_size(size,egui::Sense::hover());
             if self.is_playing() {
                 // Only show loading on an empty canvas when no preview is available.
@@ -429,9 +500,20 @@ impl Preview {
         else if self.waveform.is_none() {ui.label(crate::localization::tr("音频播放"));}
         if previous_audio!=self.selected_audio {let playing=self.is_playing();let position=self.position_now();self.stop_playback();self.position=position;if playing{self.play(ui.ctx(),path);}}
         // Keep transport controls below the preview, with a full-width timeline.
-        let spare=(ui.available_height()-28.0-ui.spacing().item_spacing.y).max(0.0);ui.add_space(spare);
-        let mut toggle=video_clicked;let mut stop=false;let mut seek=wave_seek.as_ref().is_some_and(|gesture|gesture.finished);
-        ui.horizontal(|ui| {
+        if !fullscreen {let spare=(ui.available_height()-28.0-ui.spacing().item_spacing.y).max(0.0);ui.add_space(spare);}
+        let space_toggle=!ui.ctx().wants_keyboard_input() && ui.input_mut(|input|{
+            let pressed=input.events.iter().any(|event|matches!(event,egui::Event::Key {key:egui::Key::Space,pressed:true,repeat:false,modifiers,..} if *modifiers==egui::Modifiers::NONE));
+            let consumed=input.consume_key(egui::Modifiers::NONE,egui::Key::Space);
+            pressed && consumed
+        });
+        let mut toggle=video_clicked || space_toggle;let mut stop=false;let mut seek=wave_seek.as_ref().is_some_and(|gesture|gesture.finished);
+        let screen=ui.ctx().screen_rect();
+        if fullscreen && controls_visible {
+            egui::Area::new(egui::Id::new("fullscreen_video_scale")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_TOP,egui::vec2(0.0,12.0)).show(ui.ctx(),|ui|{
+                egui::Frame::NONE.fill(egui::Color32::from_black_alpha(128)).inner_margin(8.0).corner_radius(6.0).show(ui,|ui|{ui.horizontal(|ui|{self.scale_controls(ui);});});
+            });
+        }
+        let mut transport=|ui:&mut egui::Ui| {ui.horizontal(|ui| {
             let playing=self.is_playing();
             toggle|=transport_button(ui,if playing{crate::icons::Icon::Pause}else{crate::icons::Icon::Play},crate::localization::tr(if playing{"暂停"}else{"播放"}));
             stop=transport_button(ui,crate::icons::Icon::Stop,crate::localization::tr("停止"));
@@ -463,7 +545,8 @@ impl Preview {
                 else {ui.ctx().request_repaint_after(Duration::from_millis(50));}
             }
             if let Some(job)=&self.playback {job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);}
-            let (rect,response)=ui.allocate_exact_size(egui::vec2(ui.available_width().max(30.0),28.0),egui::Sense::click_and_drag());
+            let video=self.has_video();
+            let (rect,response)=ui.allocate_exact_size(egui::vec2((ui.available_width()-if video{28.0+ui.spacing().item_spacing.x}else{0.0}).max(1.0),28.0),egui::Sense::click_and_drag());
             ui.painter().rect_filled(rect,3.0,ui.visuals().extreme_bg_color);
             if duration>0.0 {let mut fill=rect;fill.max.x=rect.left()+rect.width()*(position/duration).clamp(0.0,1.0) as f32;ui.painter().rect_filled(fill,3.0,ui.visuals().selection.bg_fill);
                 if response.drag_started(){let playing=self.is_playing();self.pause();self.frame_job=None;self.seek_drag=Some((self.position,playing));}
@@ -477,7 +560,13 @@ impl Preview {
             }else{format!("{} / {}",time(position),time(duration))};
             ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,time_label,egui::FontId::proportional(13.0),ui.visuals().text_color());
             response.on_hover_text(crate::localization::tr("点击或拖动跳转"));
-        });
+            if video && fullscreen_button(ui,fullscreen){set_fullscreen(ui.ctx(),!fullscreen);}
+        });};
+        if fullscreen {
+            if controls_visible {egui::Area::new(egui::Id::new("fullscreen_video_transport")).order(egui::Order::Foreground).anchor(egui::Align2::LEFT_BOTTOM,egui::vec2(12.0,-12.0)).show(ui.ctx(),|ui|{
+                egui::Frame::NONE.fill(egui::Color32::from_black_alpha(128)).inner_margin(8.0).corner_radius(6.0).show(ui,|ui|{ui.set_width((screen.width()-40.0).max(100.0));transport(ui);});
+            });}
+        }else{transport(ui);}
         if seek {let drag=self.seek_drag.take();let playing=drag.map_or(self.is_playing(),|seek|seek.1);if let Some(drag)=drag{position=drag.0;}self.pause();self.position=position;self.current_frame=None;if playing {
             let cached=self.frame_times.as_ref().map(|times|times.partition_point(|t|*t<=self.position).saturating_sub(1).min(times.len()-1)).filter(|target|self.cache.lock().unwrap().frames.iter().any(|(index,_)|index==target));
             if let Some(target)=cached{self.display_frame(ui.ctx(),path,target);}
@@ -657,7 +746,8 @@ fn waveform(info:&Info,path:&Path,ctx:&egui::Context)->WaveJob {
     WaveJob{control,receiver}
 }
 // The meter uses the source waveform envelope; it is not an output-device meter.
-fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,position:f64,duration:f64) {
+fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,position:f64,duration:f64,trails:&mut [f32;2]) {
+    let decay=ui.input(|input|input.stable_dt.clamp(0.0,0.1))*(5.0/60.0);
     let channels=wave.map_or(1,|wave|wave.len());
     for channel in 0..channels {
         ui.horizontal(|ui| {
@@ -676,13 +766,21 @@ fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,position:f64,dura
                 let fraction=segment as f32/100.0;
                 if fraction>=level {break;}
                 let color=if fraction<0.75{egui::Color32::from_rgb(35,200,35)}else if fraction<0.9{egui::Color32::from_rgb(230,195,25)}else{egui::Color32::from_rgb(235,50,35)};
-                let bar=egui::Rect::from_min_max(egui::pos2(rect.left()+rect.width()*fraction,rect.top()),egui::pos2(rect.left()+rect.width()*((segment+1) as f32/100.0),rect.bottom()));
+                let bar=egui::Rect::from_min_max(egui::pos2(rect.left()+rect.width()*fraction,rect.top()),egui::pos2(rect.left()+rect.width()*((segment+1) as f32/100.0).min(level),rect.bottom()));
                 painter.rect_filled(bar,0.0,color);
             }
             for db in [-60.0_f32,-30.0,-12.0,-6.0,0.0] {
                 let x=rect.left()+rect.width()*(db+60.0)/60.0;
                 painter.line_segment([egui::pos2(x,rect.bottom()-4.0),egui::pos2(x,rect.bottom())],egui::Stroke::new(1.0_f32,ui.visuals().text_color()));
             }
+            if wave.is_some() {
+                trails[channel]=level.max(trails[channel]-decay);
+                if trails[channel]>level {ui.ctx().request_repaint_after(Duration::from_millis(16));}
+                let pixels_per_point=ui.ctx().pixels_per_point();let width=2.0/pixels_per_point;
+                let x=((rect.left()+rect.width()*trails[channel])*pixels_per_point).round()/pixels_per_point;
+                let x=x.clamp(rect.left(),(rect.right()-width).max(rect.left()));
+                painter.rect_filled(egui::Rect::from_min_size(egui::pos2(x,rect.top()),egui::vec2(width,rect.height())),0.0,egui::Color32::WHITE);
+            } else {trails[channel]=0.0;}
             response.on_hover_text(crate::localization::tr("dBFS 为源音频近似峰值，不受播放音量影响"));
             ui.small(label);
         });

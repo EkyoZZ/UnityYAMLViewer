@@ -383,3 +383,8 @@ dBFS 为源音频近似峰值，不受播放音量影响	dBFS 為來源音訊近
 模型	模型	Models	モデル	모델	Modelle	Modèles
 
 自由缩放	自由縮放	FreeScale	自由ズーム	자유 확대/축소	Freier Zoom	Zoom libre
+全屏播放 (F11)	全螢幕播放 (F11)	Fullscreen playback (F11)	全画面再生 (F11)	전체 화면 재생 (F11)	Vollbildwiedergabe (F11)	Lecture plein écran (F11)
+退出全屏 (F11 / Esc)	退出全螢幕 (F11 / Esc)	Exit fullscreen (F11 / Esc)	全画面を終了 (F11 / Esc)	전체 화면 종료 (F11 / Esc)	Vollbild verlassen (F11 / Esc)	Quitter le plein écran (F11 / Esc)
+
+• 音视频支持空格播放、视频全屏与音频峰值拖尾	• 音視訊支援空白鍵播放、視訊全螢幕與音訊峰值拖尾	• Space playback, fullscreen video and audio peak trails	• スペース再生、動画全画面表示と音声ピークトレイル	• 스페이스 재생, 동영상 전체 화면 및 오디오 피크 표시	• Wiedergabe per Leertaste, Vollbildvideo und Audio-Spitzenanzeige	• Lecture par Espace, vidéo plein écran et crêtes audio
+• 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页	• 改善 FFmpeg 安裝識別，關閉設定自動重新整理失敗媒體頁	• Improved FFmpeg detection and media retry after closing settings	• FFmpeg 検出と設定を閉じた後のメディア再試行を改善	• FFmpeg 감지 및 설정 종료 후 미디어 재시도 개선	• Verbesserte FFmpeg-Erkennung und Medienwiederholung nach Schließen der Einstellungen	• Détection FFmpeg et nouvelle tentative média après fermeture des paramètres

@@ -1170,6 +1170,10 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
+            if let Some(path)=self.path.as_deref(){self.assets.retry_media_decoder(path);}
+            ctx.request_repaint();
+        }
         if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_settings_request"))).unwrap_or(false) {self.show_settings=true;}
         if let Some(path)=ctx.data_mut(|data|data.remove_temp::<PathBuf>(egui::Id::new("spine_window_request"))) {
             self.open_file_with_directory_tracking(path,false);
@@ -1242,6 +1246,13 @@ impl eframe::App for ViewerApp {
             self.open_file(path);
         }
 
+        if self.assets.media_fullscreen(ctx,self.path.as_deref()) {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ctx,|ui| {
+                ui.visuals_mut().clone_from(&egui::Visuals::dark());
+                if let Some(path)=self.path.clone(){self.assets.show_media_fullscreen(ui,&path);}
+            });
+            return;
+        }
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2013,6 +2024,7 @@ impl eframe::App for ViewerApp {
                 ui.add_space(8.0);
             });
         }
+        if !self.show_settings && ctx.data(|data|data.get_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {ctx.request_repaint();}
         self.update_windows(ctx);
         if self.show_about {
             egui::Window::new(crate::localization::tr("关于 Unity YAML Viewer"))
@@ -2027,7 +2039,8 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
-                        ui.label(localization::tr("• 支持 Prefab 预览，目前仅支持 2D，Spine 和 3D 对象暂不支持"));
+                        ui.label(localization::tr("• 音视频支持空格播放、视频全屏与音频峰值拖尾"));
+                        ui.label(localization::tr("• 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.1.2").strong());
                         ui.label(localization::tr("• 新增在线更新：启动自动检查、New 提示、更新说明与下载进度"));

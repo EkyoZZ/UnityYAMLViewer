@@ -16,13 +16,63 @@ pub fn find_tool(name:&str) -> Option<PathBuf> {
     let mut directories=Vec::new();
     if let Some(parent)=std::env::current_exe().ok().and_then(|p|p.parent().map(|p|p.to_owned())) {directories.push(parent);}
     if let Some(paths)=std::env::var_os("PATH") {directories.extend(std::env::split_paths(&paths));}
+    // Installers update registry PATH, not the environment of this running process.
+    #[cfg(windows)] for paths in fresh_windows_paths() {directories.extend(std::env::split_paths(&paths));}
     if let Some(local)=std::env::var_os("LOCALAPPDATA") {directories.push(PathBuf::from(local).join("Microsoft/WinGet/Links"));}
     for variable in ["ProgramFiles","ProgramFiles(x86)"] {
         if let Some(root)=std::env::var_os(variable) {directories.push(PathBuf::from(root).join("ffmpeg/bin"));}
     }
+    #[cfg(windows)] {
+        let mut roots=Vec::new();
+        if let Some(local)=std::env::var_os("LOCALAPPDATA") {roots.push(PathBuf::from(local).join("Microsoft/WinGet/Packages"));}
+        if let Some(programs)=std::env::var_os("ProgramFiles") {roots.push(PathBuf::from(programs).join("WinGet/Packages"));}
+        for root in roots {
+            if let Ok(packages)=std::fs::read_dir(root) {
+                for package in packages.flatten() {
+                    if package.file_name().to_string_lossy().to_ascii_lowercase().starts_with("gyan.ffmpeg_") {
+                        let mut budget=256;collect_package_directories(&package.path(),4,&mut budget,&mut directories);
+                    }
+                }
+            }
+        }
+    }
     directories.into_iter().map(|dir|dir.join(&file)).find(|path| {
         path.is_file() && command(path).arg("-version").output().is_ok_and(|output|output.status.success())
     })
+}
+
+#[cfg(windows)]
+fn collect_package_directories(root:&std::path::Path,depth:usize,budget:&mut usize,output:&mut Vec<PathBuf>) {
+    if *budget==0{return;}*budget-=1;output.push(root.to_owned());
+    if depth==0{return;}
+    if let Ok(entries)=std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            if *budget==0{break;}
+            if entry.file_type().is_ok_and(|kind|kind.is_dir()) {collect_package_directories(&entry.path(),depth-1,budget,output);}
+        }
+    }
+}
+
+#[cfg(windows)]
+fn fresh_windows_paths()->Vec<std::ffi::OsString> {
+    use std::{ffi::c_void,os::windows::ffi::OsStringExt};
+    #[link(name="advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(key:*mut c_void,subkey:*const u16,value:*const u16,flags:u32,kind:*mut u32,data:*mut c_void,size:*mut u32)->i32;
+    }
+    let value:Vec<u16>="Path\0".encode_utf16().collect();
+    let mut paths=Vec::new();
+    for (key,subkey) in [(0x80000001u32,"Environment"),(0x80000002u32,"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")] {
+        let subkey:Vec<u16>=subkey.encode_utf16().chain(Some(0)).collect();
+        let mut buffer=vec![0u16;32768];let mut size=(buffer.len()*2) as u32;
+        // REG_SZ / REG_EXPAND_SZ; RegGetValueW expands variables for the latter.
+        let status=unsafe {RegGetValueW((key as i32 as isize) as *mut c_void,subkey.as_ptr(),value.as_ptr(),0x6,std::ptr::null_mut(),buffer.as_mut_ptr().cast(),&mut size)};
+        if status==0 {
+            let length=buffer.iter().position(|value|*value==0).unwrap_or(buffer.len());
+            paths.push(std::ffi::OsString::from_wide(&buffer[..length]));
+        }
+    }
+    paths
 }
 
 #[derive(Default)]
@@ -37,6 +87,7 @@ impl DecoderSettings {
         if self.pending.is_some() {return;}
         self.error=None;
         self.installing=install;
+        let notify_ready=self.installed!=Some(true);
         let (sender,receiver)=mpsc::channel();self.pending=Some(receiver);
         let ctx=ctx.clone();
         std::thread::spawn(move|| {
@@ -50,6 +101,9 @@ impl DecoderSettings {
                 }
                 Ok(find_tool("ffmpeg").is_some() && find_tool("ffprobe").is_some())
             })();
+            if notify_ready && matches!(&result,Ok(true)) {
+                ctx.data_mut(|data|data.insert_temp(egui::Id::new("media_decoder_ready"),true));
+            }
             let _=sender.send(result);ctx.request_repaint();
         });
     }
