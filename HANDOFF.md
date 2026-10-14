@@ -1,3 +1,13 @@
+# 正式发布：1.1.9（2026-10-15）
+
+本节优先于下方未发布描述。用户验收通过并自行提交推送 master 后，已发布 GitHub v1.1.9 为最新正式版（非草稿、非预发布）。标签指向 fdcc3f3a691c060ce20342c2f2fdabae1cc80ffc。附件 UnityYAMLViewer-v1.1.9-windows-x64.exe，20600832 字节；GitHub asset.digest 与本地 SHA-256 均为 4A2B07EDD772D5FC7CA0BE6801F22B1E6CDD29AE1E3A377980A2AC00D15ACEB2，未因发布重新构建。
+
+发布页：https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.1.9，最新正式版接口、标签和附件已核对。用户验收不等于所有资源 / 显卡 / DPI / 七语言全面验证，测试断言未执行，手动宽高比调整仍暂缓。详情见 docs/releases/1.1.9.md 和 docs/versions/1.1.9.md。
+
+本轮发布后仅维护本地发布状态文档，未自动提交 / 推送这些文档；交由用户后续提交。后续构建仍需明确授权与占用检查。
+
+---
+
 # 最新构建：弹窗唤醒与设置换行（2026-10-15）
 
 本节优先于下方未构建说明。用户明确授权，进程及 EXE 独占检查通过，Release 构建成功（15.30 秒）。target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.1.9，20600832 字节；SHA-256：4A2B07EDD772D5FC7CA0BE6801F22B1E6CDD29AE1E3A377980A2AC00D15ACEB2。
