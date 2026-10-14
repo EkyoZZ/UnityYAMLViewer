@@ -101,9 +101,7 @@ pub(crate) fn bake(component: &str, catalog: &HashMap<String,PathBuf>, cancelled
                     let u=(0..3).map(|i|uv[i][0]*w[i]).sum::<f32>();let v=(0..3).map(|i|uv[i][1]*w[i]).sum::<f32>();
                     let pixel=texture.get_pixel((u*texture.width() as f32).floor().clamp(0.0,(texture.width()-1) as f32) as u32,(v*texture.height() as f32).floor().clamp(0.0,(texture.height()-1) as f32) as u32);
                     let source=crate::asset_viewer::preview_color(pixel.0);let dest=image.pixels[y*size[0]+x];
-                    let alpha=(source.a() as u32*tint.a() as u32+127)/255;
-                    let channel=|s:u8,t:u8,d:u8|((s as u32*t as u32+127)/255+(d as u32*(255-alpha)+127)/255).min(255) as u8;
-                    image.pixels[y*size[0]+x]=Color32::from_rgba_premultiplied(channel(source.r(),tint.r(),dest.r()),channel(source.g(),tint.g(),dest.g()),channel(source.b(),tint.b(),dest.b()),(alpha+(dest.a() as u32*(255-alpha)+127)/255).min(255) as u8);
+                    image.pixels[y*size[0]+x]=crate::render_system::source_over(source,tint,dest);
                 }
             }
         }

@@ -12,7 +12,9 @@
 
 ### 已支持
 
-- 场景 / Prefab 静态 2D 与 3D 预览：Sprite、Tilemap、常见 UI、模型及 Spine 静态合成；支持嵌套 Prefab 展开和常见覆盖，引用节点属性只读。
+- 场景 / Prefab 静态 2D 与 3D 预览：Sprite、Tilemap、常见 UI、模型及 Spine 静态合成；支持同文件 fileID 引用的未压缩文本三角 Mesh（线拓扑暂不支持）；支持嵌套 Prefab 展开和常见覆盖，按层索引实例引用并共享同源模板（模板 / 展开文本各 512 MiB，每层最多 50 万文档）；展开状态下场景点选嵌套 Prefab 会展开祖先、滚动并高亮对应节点；引用节点属性只读；展开限制详情可一键复制。
+- GPU 场景预览首次渲染完成后，鼠标离开画面或程序失去焦点时冻结最后一帧，返回后恢复；冻结画面在窗口缩放时保持比例。
+- GPU 场景预览首次渲染完成后，鼠标离开画面或程序失去焦点时冻结最后一帧，返回后恢复；冻结画面在窗口缩放时保持比例。
 - Spine 3.8 独立骨骼预览：动画、皮肤、多轨播放、速度、时间轴、缩放和平移。
 - FBX / OBJ 模型预览：贴图、颜色、实体 / 线框、网格统计、静态蒙皮与视角操作。
 - 图片通道查看、缩放和平移；常见脚本 / 文本查看、基础语法高亮及工程字体预览。
@@ -29,7 +31,7 @@
 - UI 预览使用 XY 正交视图；字体优先尝试工程引用，无法加载时回退默认字体，内置 Sprite 使用颜色矩形近似。
 
 - 支持打开或拖放 `.prefab`、`.unity`、`.asset`、`.mat`、`.controller`、`.overrideController`、`.anim`、`.spriteatlas`、`.guiskin`、`.yaml` 和 `.yml`
-- 按 `GameObject` / `Transform` 关系重建 Prefab 和场景层级，并列出组件
+- 按 `GameObject` / `Transform` 关系重建 Prefab 和场景层级，并列出组件；对象名称中的 Unicode 转义显示为实际文字
 - 搜索对象名称、组件、字段值、`fileID` 或 GUID，并高亮匹配项
 - 多标签页浏览，并记住上一次打开的文件夹
 - 自动保存未关闭的文件标签与当前标签，下次启动恢复；手动关闭的标签和已删除的文件不会恢复
@@ -44,7 +46,7 @@
 - MonoBehaviour 根据 `m_Script.guid` 在 Unity 工程中定位脚本，按字段声明显示属性（整数、浮点数、布尔值、字符串、颜色、向量和简单枚举），支持编辑已识别字段，并折叠组件公共信息
 - 跟随系统、浅色与深色主题
 
-MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/PackageCache` 中的 `.cs.meta`，并缓存 GUID 索引；修改脚本后可点击“重新扫描脚本”。支持可唯一定位的父类和嵌套类型，以及 `SerializeField`、`FormerlySerializedAs` 等常见声明。该解析器不是 C# 编译器：条件编译区域、泛型或 partial 类、歧义类型及无法读取的脚本不保证识别，未知字段保留原值；已识别的列表和数组通过表格查看与编辑，不支持的复杂结构可展开查看原文。文件脱离 Unity 工程或脚本来自 DLL 时，可能无法确定字段类型。未知类型及原始复杂结构保持只读。
+MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/PackageCache` 中的 `.cs.meta`，并将资源 GUID、脚本类型和 Shader 属性索引保存到 `%APPDATA%/UnityYAMLViewer/project_indexes`。下次打开同一项目优先在后台载入上次缓存并立即提供查询，再后台扫描更新；每个项目每次启动自动扫描一次，切换同项目文件复用索引，修改资源后可点击“重新扫描项目索引”（扫描中禁用）。缓存损坏或版本不兼容时重新建立；扫描有异常时不覆盖已有磁盘缓存，更新完成前可能暂时看到旧引用。支持可唯一定位的父类和嵌套类型，以及 `SerializeField`、`FormerlySerializedAs` 等常见声明。该解析器不是 C# 编译器：条件编译区域、泛型或 partial 类、歧义类型及无法读取的脚本不保证识别，未知字段保留原值；已识别的列表和数组通过表格查看与编辑，不支持的复杂结构可展开查看原文。文件脱离 Unity 工程或脚本来自 DLL 时，可能无法确定字段类型。未知类型及原始复杂结构保持只读。
 
 ### 属性编辑与设置
 
@@ -92,10 +94,14 @@ target\release\unity_yaml_viewer.exe
 
 ### 待支持与当前限制
 
-- 统一 Shader 渲染系统、完整 Unity 材质效果、粒子模拟 / 渲染及场景整体动态播放。
+- GameObject 属性视图显示名称、Active、Layer、Tag，保留 YAML 切换；编辑模式可修改本地节点 Active，名称 / Layer / Tag 和展开的 Prefab / FBX 节点暂只读。父节点失活不批量改写子节点 Active。
+
+- 嵌套 FBX Model Prefab 可展开已验证的单网格节点模型，沿场景 fileID / stripped 引用应用父节点、变换、名称、排序和材质槽覆盖；单一未蒙皮网格可将原始三角形、UV0、颜色与法线传入受限的 GPU Shader 路径。多节点、缺少唯一源映射、蒙皮暂不支持，完整导入器与切线还原仍有限制。
+
+- 纯 2D 场景提供有限 Built-in 单 Pass Sprite / 网格 Shader GPU 路径，运行时读取Assets、Packages 和 Library/PackageCache 内引用源码及相对 / 项目路径 Include（解析后的真实路径须位于这些资源目录；Packages 虚拟引用可匹配缓存包，同名多版本无法唯一确定时报错），绑定多纹理、标量、颜色 / 向量、世界矩阵与时间；Blend Off 或未声明时采用 One/Zero 不透明默认值，支持材质参数及 Shader 属性默认值；支持不依赖实例化条件分支的 multi_compile_instancing Shader 按独立绘制执行及 rsqrt，主纹理 TexelSize 按实际绑定纹理提供，片元 clip 保留负分量丢弃语义；TEXCOORD1/2 的标量及 2～4 分量顶点输入暂填零，未还原粒子自定义顶点流；兼容简单外层 Include Guard、2×2 / 3×3 矩阵类型及函数内 uniform 局部副本修改，Cull / ZWrite / ZTest 参数解析后仍限于当前支持组合（Cull Off/Back、ZWrite Off，完整深度未支持；Stencil 遮罩忽略并提示，其他兼容条件满足时继续执行 Shader）；场景纹理总预算为 2 GiB（CPU 缓存与 GPU 源纹理分别计量，并非进程总内存上限）。预览无雾；未使用的标量声明不要求赋值，未知已引用标量默认 1 并提示，无法读取 Unity 脚本运行时 Global 值。昼夜全局颜色默认白色（RGBA 均为 1）；支持含 UTF-8 BOM 的 Shader Include。预览左上角悬浮显示提交绘制帧率 FPS，滚轮以鼠标位置为中心缩放。不支持的 Shader 报告诊断并回退普通贴图或烘焙图。CG 到 GLSL 仅支持部分语法与 Unity 函数，不保证与 Unity 完全一致；混合 UI 场景、URP / LWRP、ShaderGraph、完整光照、粒子模拟及场景整体动画暂不支持此路径。
 - Spine 4.1 / 4.2、完整 SkeletonGraphic 缩放与特殊混合、Unity Mask / RectMask2D 裁剪。
 - 完整 UI 动态布局、平铺 / 径向填充、复杂嵌套 Prefab 数组覆盖及 AtlasCache 打包图预览。
-- Unity Mesh.asset、FBX 子网格 fileID 精确选择、Blend Shape 与 3D 点选层级联动。
+- 场景内 Unity 文本 Mesh.asset 支持未压缩、单 stream 的 Float32 / UNorm8 通道、UV0、法线、切线、颜色、16 / 32 位三角形索引及 fileID 选择；静态合成按子网格使用材质，GPU 自定义 Shader 按材质槽匹配子网格，多余材质按顺序叠加最后一个子网格（最多 64 槽）；不可用材质槽跳过并提示，材质少于子网格时未匹配部分不绘制；CPU 回退与 3D 预览尚未补齐多余材质叠加。二进制 / 压缩 / 外部分流 Mesh、多 stream、UV1 及更高 UV、FBX 子网格 fileID 精确选择、Blend Shape 与 3D 点选联动仍有限制或未支持。
 - 字幕渲染、HDR 输出与精确声卡时钟同步；音视频格式和硬解能力依赖外部 FFmpeg 与设备。
 - 非整数倍率缩放仍有插值，高 DPI 下 100% 沿用逻辑尺寸；大文件完整读入内存，尚未采用磁盘分页。
 
@@ -131,7 +137,8 @@ The project now supports **property editing**: change recognized values through 
 
 ### Supported features
 
-- Static 2D / 3D scene and Prefab previews with Sprites, Tilemaps, common UI, models and Spine poses; nested Prefab expansion and common overrides, with read-only referenced nodes.
+- Static 2D / 3D scene and Prefab previews with Sprites, Tilemaps, common UI, models and Spine poses; support uncompressed text triangle Meshes referenced by local fileID (line topology is unsupported); nested Prefab expansion and common overrides, with per-level reference indexing and shared source templates (512 MiB each for templates and expanded text, up to 500,000 documents per level); picking a nested Prefab in the scene while expansion is enabled reveals, scrolls to and highlights its Hierarchy node; referenced nodes are read-only; expansion diagnostics can be copied with one click.
+- GPU scene previews complete their first render, then freeze when the pointer leaves the canvas or the app loses focus; returning resumes updates. Frozen images retain their aspect ratio on resize.
 - Standalone Spine 3.8 previews with animation, skins, multiple tracks, playback speed, timeline, zoom and pan.
 - FBX / OBJ previews with textures, colors, solid / wireframe display, mesh statistics, static skinning and camera controls.
 - Image channels, zoom and pan; script / text viewing, basic syntax highlighting and project font previews.
@@ -162,7 +169,7 @@ The project now supports **property editing**: change recognized values through 
 - Resolve MonoBehaviour scripts through `m_Script.guid` and display declared field types with editable controls for recognized numbers, booleans, strings, colors, vectors, and simple enums; collapse common component metadata
 - System, light, and dark themes
 
-The MonoBehaviour inspector indexes `.cs.meta` files in `Assets`, `Packages`, and `Library/PackageCache` in the background. Use the rescan button after changing scripts. Unambiguous inheritance, nested types, and common attributes such as `SerializeField` and `FormerlySerializedAs` are supported. This source parser is not a C# compiler: conditional sections, generic or partial classes, ambiguous types, and unavailable scripts may remain unresolved. Unknown values are preserved. Recognized lists and arrays can be viewed and edited in tables; unsupported complex structures can be expanded as raw text. Assets outside a Unity project and scripts from DLLs may have unknown field types. Unknown types and unsupported raw structures remain read-only.
+The MonoBehaviour inspector indexes `.cs.meta` files in `Assets`, `Packages`, and `Library/PackageCache` in the background. Resource GUIDs, script types and shader properties are persisted under `%APPDATA%/UnityYAMLViewer/project_indexes`. On the next launch, the saved cache is loaded in the background and served first while a fresh scan runs. Each project is scanned automatically once per launch; opening another file in that project reuses the index. Use “Rescan project index” after resource changes (disabled during scanning). Corrupt or incompatible caches are rebuilt; scans with issues preserve the existing disk cache. References may temporarily be stale until refresh completes. Unambiguous inheritance, nested types, and common attributes such as `SerializeField` and `FormerlySerializedAs` are supported. This source parser is not a C# compiler: conditional sections, generic or partial classes, ambiguous types, and unavailable scripts may remain unresolved. Unknown values are preserved. Recognized lists and arrays can be viewed and edited in tables; unsupported complex structures can be expanded as raw text. Assets outside a Unity project and scripts from DLLs may have unknown field types. Unknown types and unsupported raw structures remain read-only.
 
 ### Property editing and settings
 
@@ -198,10 +205,14 @@ During Windows builds, `assets/app_icon.png` is converted and embedded as the ap
 
 ### Pending support and current limitations
 
-- A unified Shader renderer, complete Unity material effects, particle simulation / rendering and scene-wide animation playback.
+- GameObject properties show Name, Active, Layer and Tag with a YAML switch. Edit mode can change Active on locally serialized objects; Name/Layer/Tag and expanded Prefab/FBX objects remain read-only. Disabling a parent does not rewrite its children's Active flags.
+
+- Nested FBX Model Prefabs can expand verified single-mesh-node models, using scene fileID/stripped references for parenting, transforms, names, sorting and material-slot overrides. A single unskinned mesh can pass raw triangles, UV0, colors and normals to the limited GPU shader path. Multiple nodes, missing unique source mappings, skinning are unsupported; full importer and tangent fidelity remain limited.
+
+- Pure 2D scenes have a limited GPU path for single-pass Built-in Sprite/mesh shaders. Referenced source in Assets, Packages and Library/PackageCache and relative/project includes are read at runtime (resolved paths must remain within these resource directories; virtual Packages references can resolve cached packages, while ambiguous versions report errors), with multiple textures, scalar/color/vector properties, world matrices and time bound to the program. Blend Off or absent Blend uses the opaque One/Zero default. Shaders declaring multi_compile_instancing can use individual draws when their code does not require instancing branches; rsqrt and bound main-texture TexelSize are supported; fragment clip discards fragments with negative components. Simple outer include guards, 2×2/3×3 matrix types and local copies for function-level uniform writes are supported. Blend supports material properties and shader property defaults; parameterized Cull/ZWrite/ZTest remain limited to supported combinations (Cull Off/Back and ZWrite Off; full depth is unsupported; Stencil masks are ignored with diagnostics, while otherwise compatible shaders continue). Scene textures have a 2 GiB budget (CPU cache and GPU source textures are counted separately; this is not a process memory limit). The preview has no fog; unused scalar declarations need no binding, while unresolved referenced scalars default to 1 with diagnostics. Unity script runtime globals cannot be read from these files. Global day/night colors default to white (RGBA all 1); UTF-8 BOMs in shader includes are supported. A floating FPS overlay shows submitted preview frames, and wheel zoom is centered on the pointer. Unsupported shaders report diagnostics and fall back to ordinary textures or baked images. CG-to-GLSL syntax and Unity function compatibility are partial; full fidelity is not guaranteed. Mixed UI scenes, URP/LWRP, ShaderGraph, full lighting, particle simulation and scene-wide animation are outside this path.
 - Spine 4.1 / 4.2, complete SkeletonGraphic scaling / special blending and Unity Mask / RectMask2D clipping.
 - Complete driven UI layouts, tiled / radial fills, complex nested Prefab array overrides and AtlasCache packed-image previews.
-- Unity Mesh.asset, precise FBX submesh fileID selection, Blend Shapes and 3D picking linked to the hierarchy.
+- Scene-referenced text Mesh assets support uncompressed single-stream Float32/UNorm8 channels, UV0, normals, tangents, colors, 16/32-bit triangle indices and fileID selection. Static composition maps submeshes to materials; custom GPU shaders match material slots to submeshes and draw extra slots on the last submesh in order (up to 64 slots). Unavailable slots are skipped with diagnostics; unmatched submeshes are omitted when there are fewer material slots. Extra-material layering in CPU fallback and 3D preview is not yet implemented. Binary/compressed/external-stream Mesh data, multiple streams, UV1 and higher, precise FBX submesh fileID selection, Blend Shapes and linked 3D picking remain limited or unsupported.
 - Subtitle rendering, HDR output and precise audio-device clock synchronization. Media formats and hardware decoding depend on external FFmpeg and the device.
 - Non-integer scaling still interpolates; 100% uses logical sizing at high DPI. Large files remain fully loaded into memory without disk paging.
 
@@ -233,3 +244,11 @@ cargo check
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+GPU preview accepts scalar and two- to four-component TEXCOORD1/2 vertex inputs with zero values as a temporary fallback. Particle custom vertex streams and their actual data are not yet reproduced.
+
+Quoted Unicode escapes in object names are decoded for display and name searches without rewriting source YAML.
+
+支持单蒙皮网格嵌套 FBX 的静态导入姿态（需唯一根 Transform / Renderer 源 ID），应用根变换、材质与排序；内部骨骼节点、单骨骼覆盖和动画暂未还原。
+
+Nested FBX models with one skinned mesh can display their static imported pose when root Transform and Renderer source IDs are unambiguous. Root transforms, materials and sorting apply; internal bone nodes, per-bone overrides and animations are not reproduced.

@@ -1,5 +1,6 @@
 //! CPU scene composition runs off the UI thread. Only a bounded canvas image is uploaded.
 use super::*;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -7,7 +8,7 @@ use std::time::{Duration, Instant};
 const MAX_CANVAS: f32 = 1024.0;
 const VIEW_IDLE: Duration = Duration::from_millis(500);
 const ZOOM_REFRESH_RATIO: f64 = 1.5;
-const TEXTURE_BUDGET: usize = 256 * 1024 * 1024;
+const TEXTURE_BUDGET: usize = super::PREVIEW_TEXTURE_BUDGET;
 
 #[derive(Clone, PartialEq)]
 struct View {
@@ -22,6 +23,7 @@ impl Default for View {
 #[derive(Default)]
 struct Status { loaded: usize, total: usize, stage: usize, errors: Vec<String>, cached:usize, load_ms:u128, build_ms:u128, slowest:Vec<(PathBuf,u128)> }
 struct Shared {
+    gpu_scene: Mutex<Option<Arc<crate::render_system::scene::Scene>>>,
     cancelled: AtomicBool,
     paused: Arc<AtomicBool>,
     revision: AtomicU64,
@@ -56,6 +58,7 @@ impl Drop for Job {
 }
 #[derive(Default)]
 pub(super) struct World {
+    gpu_error: Arc<Mutex<Option<String>>>,
     job: Option<Job>,
     texture: Option<egui::TextureHandle>,
     frame: Option<Frame>,
@@ -67,6 +70,7 @@ pub(super) struct World {
     resource_details: String,
     last_view_change: Option<Instant>,
     textures: Option<Arc<Mutex<TextureCache>>>,
+    fps: PreviewFps,
 }
 impl World {
     pub(super) fn release(&mut self) {
@@ -75,6 +79,7 @@ impl World {
         self.texture=None;self.frame_key=None;self.errors.clear();
         if let Some(frame)=self.frame.take() {std::thread::spawn(move || drop(frame));}
         self.view=View::default();self.last_view_change=None;
+        self.fps=PreviewFps::default();
     }
     #[allow(clippy::too_many_arguments)]
     pub(super) fn show(&mut self, ui:&mut egui::Ui, documents:&[Document], flags:&HashMap<String,crate::hierarchy_controls::Flags>, catalog:Option<Arc<HashMap<String,PathBuf>>>, axis:usize, paused:Arc<AtomicBool>, selected:&HashSet<String>, focus:&mut Option<(HashSet<String>,Instant)>, background:&str, rgb:[u8;3],show_guides:bool,expanding:bool,open:&mut bool) -> Option<String> {
@@ -90,7 +95,8 @@ impl World {
         if self.job.as_ref().is_none_or(|job|job.key!=key) {
             // Cancel the old worker while retaining the displayed frame and camera.
             self.job=None;self.status_stage=0;self.status_text=tr("正在准备预览…").into();
-            let shared=Arc::new(Shared {cancelled:AtomicBool::new(false),paused,revision:AtomicU64::new(1),view:Mutex::new(self.view.clone()),status:Mutex::new(Status::default()),frame:Mutex::new(None)});
+            *self.gpu_error.lock().unwrap()=None;
+            let shared=Arc::new(Shared {gpu_scene:Mutex::new(None),cancelled:AtomicBool::new(false),paused,revision:AtomicU64::new(1),view:Mutex::new(self.view.clone()),status:Mutex::new(Status::default()),frame:Mutex::new(None)});
             let worker=shared.clone();let docs=documents.to_vec();let flags=flags.clone();let ctx=ui.ctx().clone();
             let textures=self.textures.get_or_insert_with(||Arc::new(Mutex::new(TextureCache::default()))).clone();
             std::thread::spawn(move || run(&docs,&flags,catalog.as_ref(),axis,&worker,&ctx,textures));
@@ -111,11 +117,22 @@ impl World {
             if self.frame.is_none() || status.stage==3 { self.errors.clone_from(&status.errors); }
         }
         let complete=!expanding && self.status_stage==3 && self.frame_key==Some(key) && self.frame.as_ref().is_some_and(|frame|frame.revision==shared.revision.load(Ordering::Relaxed));
+        let ready=shared.gpu_scene.lock().unwrap().is_some() && crate::render_system::available() && self.gpu_error.lock().unwrap().is_none();
+        super::preview_path_row(ui,tr(if ready {"GPU Shader 预览"} else {"普通贴图预览（GPU Shader 未启用）"}));
         let status=if expanding {tr("正在展开 Prefab…")} else if complete {tr("合成预览已完成")} else if self.status_stage==3 {tr("正在合成预览…")} else {&self.status_text};
         if super::preview_status_row(ui,status,complete,&shared.paused,Some(&self.resource_details)) {*open=false;return None;}
-        if !self.errors.is_empty() {
-            ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {}",tr("部分资源缺失或暂不支持"),self.errors.len())).on_hover_text(self.errors.iter().take(32).cloned().collect::<Vec<_>>().join("\n"));
+        let gpu_warnings=crate::render_system::warnings();
+        if !self.errors.is_empty() || !gpu_warnings.is_empty() {
+            ui.colored_label(ui.visuals().warn_fg_color,format!("{}: {}",tr("部分资源缺失或暂不支持"),self.errors.len()+gpu_warnings.len()));
+            ui.collapsing(tr("预览错误详情"),|ui|{
+                let mut seen=HashSet::new();
+                let details=gpu_warnings.iter().chain(self.errors.iter()).filter(|e|seen.insert(e.as_str())).cloned().collect::<Vec<_>>().join("\n\n");
+                if ui.button(tr("复制错误详情")).clicked(){ui.ctx().copy_text(details.clone());}
+                egui::ScrollArea::vertical().max_height(160.0).show(ui,|ui|{ui.label(details);});
+            });
         }
+        if let Some(error)=self.gpu_error.lock().unwrap().as_ref(){ui.colored_label(ui.visuals().warn_fg_color,format!("Shader GPU: {error}"));}
+        if let Some(error)=self.errors.iter().find(|e|e.starts_with("Shader GPU:")){ui.colored_label(ui.visuals().warn_fg_color,error);}
         ui.small(tr("XY 正交视图 · 滚轮缩放 · 拖动平移"));
         let (rect,response)=ui.allocate_exact_size(ui.available_size().max(Vec2::splat(1.0)),egui::Sense::click_and_drag());
         let previous_view=self.view.clone();
@@ -123,7 +140,10 @@ impl World {
         self.view.size=[(rect.width()*factor).round().max(1.0) as usize,(rect.height()*factor).round().max(1.0) as usize];
         if response.dragged() {let delta=response.drag_delta();self.view.pan[0]+=delta.x as f64/rect.width() as f64;self.view.pan[1]+=delta.y as f64/rect.height() as f64;}
         let scroll=if response.hovered() {ui.input(|i|i.smooth_scroll_delta.y)} else {0.0};
-        if scroll!=0.0 {self.view.zoom=(self.view.zoom*(scroll as f64*0.002).exp()).clamp(0.05,50.0);}
+        if scroll!=0.0 {
+            let pointer=ui.input(|i|i.pointer.hover_pos()).unwrap_or(rect.center());
+            zoom_at_pointer(&mut self.view,rect,pointer,scroll);
+        }
         if let Some((ids,_))=focus.take() {self.view.focus=ids.into_iter().collect();self.view.pan=[0.0;2];}
         // Every input restarts the full quiet period, even at the zoom limit.
         if response.dragged() || scroll!=0.0 || self.view!=previous_view {self.last_view_change=Some(Instant::now());}
@@ -137,6 +157,7 @@ impl World {
                 *view=self.view.clone();shared.revision.fetch_add(1,Ordering::Relaxed);
             }
         }
+        let mut composed_frame_changed=false;
         if !shared.paused.load(Ordering::Relaxed) {
             let incoming=shared.frame.try_lock().ok().and_then(|mut latest|latest.take());
             if let Some(mut frame)=incoming {
@@ -144,11 +165,14 @@ impl World {
                     let image=std::mem::replace(&mut frame.image,egui::ColorImage::new([0,0],Color32::TRANSPARENT));
                     if let Some(texture)=&mut self.texture {texture.set(image,egui::TextureOptions::LINEAR);} else {self.texture=Some(ui.ctx().load_texture("scene_composite",image,egui::TextureOptions::LINEAR));}
                     self.frame_key=Some(key);
+                    composed_frame_changed=true;
                     if let Some(old)=self.frame.replace(frame) {std::thread::spawn(move || drop(old));}
                 } else {std::thread::spawn(move || drop(frame));}
             }
         }
         let painter=ui.painter_at(rect);
+        let preview_active=response.hovered() && ui.input(|input|input.focused) && !shared.paused.load(Ordering::Relaxed);
+        let mut live_frame=preview_active;
         super::paint_background(&painter,rect,background,rgb);
         let mut picked=None;
         if let (Some(texture),Some(frame))=(&self.texture,&self.frame) {
@@ -171,17 +195,62 @@ impl World {
             painter.line_segment([Pos2::new(origin.x,rect.top()),Pos2::new(origin.x,rect.bottom())],axis);
             }
             // Guides sit above the background and beneath scene content, like UI previews.
-            painter.image(texture.id(),image_rect,egui::Rect::from_min_max(Pos2::ZERO,Pos2::new(1.0,1.0)),Color32::WHITE);
+            let gpu_scene=shared.gpu_scene.lock().unwrap().clone();
+            if let Some(scene)=gpu_scene.filter(|_|self.frame_key==Some(key) && crate::render_system::available() && self.gpu_error.lock().unwrap().is_none()) {
+                let w=size[0] as f64;let h=size[1] as f64;
+                let projection=[[(2.0*frame.scale/w) as f32,0.0,0.0,(2.0*frame.pan[0]-2.0*frame.center[0]*frame.scale/w) as f32],
+                    [0.0,(2.0*frame.scale/h) as f32,0.0,(-2.0*frame.pan[1]-2.0*frame.center[1]*frame.scale/h) as f32],
+                    [0.0,0.0,0.0,0.0],[0.0,0.0,0.0,1.0]];
+                let projection=crate::render_system::fixed_viewport_projection(projection,image_rect,rect);
+                let first_frame=!crate::render_system::snapshot_ready(&scene);
+                live_frame=preview_active || first_frame || composed_frame_changed;
+                let mut style=std::collections::hash_map::DefaultHasher::new();background.hash(&mut style);rgb.hash(&mut style);show_guides.hash(&mut style);
+                let camera_input=self.view.pan!=previous_view.pan || self.view.zoom!=previous_view.zoom || self.view.focus!=previous_view.focus;
+                painter.add(crate::render_system::callback(rect,scene,projection,self.gpu_error.clone(),preview_active || camera_input || composed_frame_changed,style.finish()));
+                if live_frame {ui.ctx().request_repaint_after(Duration::from_millis(16));}
+            } else {
+                painter.image(texture.id(),image_rect,egui::Rect::from_min_max(Pos2::ZERO,Pos2::new(1.0,1.0)),Color32::WHITE);
+            }
             for (_,area) in frame.boxes.iter().filter(|(id,_)|picked.as_ref().map_or_else(||selected.contains(*id),|picked|picked==*id)) {
 
                 painter.rect_stroke(egui::Rect::from_two_pos(screen(area[0],area[1]),screen(area[2],area[3])),0.0,egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235)),egui::StrokeKind::Inside);
             }
         }
         super::paint_zoom_badge(&painter,rect,self.view.zoom);
-        ui.ctx().request_repaint_after(Duration::from_millis(100));
+        if self.frame.is_some() {
+            if live_frame {self.fps.sample(ui.input(|i|i.time));}else{self.fps.start=None;self.fps.frames=0;}
+            let text=if live_frame {format!("FPS: {:.0}",self.fps.value)}else{"FPS: —".into()};
+            let pos=rect.left_top()+egui::vec2(8.0,8.0);
+            let font=egui::FontId::proportional(16.0);
+            let galley=painter.layout_no_wrap(text,font,Color32::WHITE);
+            let badge=egui::Rect::from_min_size(pos,galley.size()+egui::vec2(12.0,6.0));
+            painter.rect_filled(badge,4.0,Color32::from_black_alpha(150));
+            painter.galley(pos+egui::vec2(6.0,3.0),galley,Color32::WHITE);
+        }
+        if self.status_stage!=3 || !idle {ui.ctx().request_repaint_after(Duration::from_millis(100));}
         picked
     }
     pub(super) fn fit(&mut self) {self.view.zoom=1.0;self.view.pan=[0.0;2];self.view.focus.clear();}
+}
+
+#[derive(Default)]
+struct PreviewFps { start: Option<f64>, frames: u32, value: f64 }
+impl PreviewFps {
+    fn sample(&mut self, now:f64) {
+        let Some(start)=self.start else {self.start=Some(now);return;};
+        self.frames+=1;
+        let elapsed=now-start;
+        if elapsed>=0.5 {self.value=self.frames as f64/elapsed;self.frames=0;self.start=Some(now);}
+    }
+}
+
+fn zoom_at_pointer(view:&mut View,rect:egui::Rect,pointer:Pos2,scroll:f32) {
+    let next=(view.zoom*(scroll as f64*0.002).exp()).clamp(0.05,50.0);
+    let ratio=next/view.zoom;
+    let anchor=[(pointer.x-rect.center().x) as f64/rect.width() as f64,
+        (pointer.y-rect.center().y) as f64/rect.height() as f64];
+    for (pan,anchor) in view.pan.iter_mut().zip(anchor) {*pan=anchor+(*pan-anchor)*ratio;}
+    view.zoom=next;
 }
 
 // Apply the desired camera to the cached viewport without composing pixels again.
@@ -237,13 +306,13 @@ fn reserve_bytes(reserved:&std::sync::atomic::AtomicUsize,size:usize) -> bool {
 fn load_cached(path:&std::path::Path,reserved:&std::sync::atomic::AtomicUsize,cache:&Mutex<TextureCache>,shared:&Shared) -> Result<(Arc<CpuTexture>,bool),String> {
     let version=stamp(path)?;
     if let Some(texture)=cache.lock().unwrap().get(path,&version) {
-        if !reserve_bytes(reserved,texture_bytes(&texture)) {return Err("Preview texture cache exceeds 256 MiB".into());}
+        if !reserve_bytes(reserved,texture_bytes(&texture)) {return Err("Preview texture cache exceeds 2 GiB".into());}
         return Ok((texture,true));
     }
     let (width,height)=image::ImageReader::open(path).map_err(|e|e.to_string())?.with_guessed_format().map_err(|e|e.to_string())?.into_dimensions().map_err(|e|e.to_string())?;
     if width>8192 || height>8192 || version.meta.1>8*1024*1024 {return Err("Preview texture or Sprite metadata exceeds size limit".into());}
     let pixels=width as usize*height as usize*4;let bytes=pixels+version.meta.1 as usize;
-    if !reserve_bytes(reserved,bytes) {return Err("Preview texture cache exceeds 256 MiB".into());}
+    if !reserve_bytes(reserved,bytes) {return Err("Preview texture cache exceeds 2 GiB".into());}
     match load(path,pixels,shared) {
         Ok(texture)=> {
             let texture=Arc::new(texture);
@@ -264,7 +333,7 @@ fn load(path:&std::path::Path,remaining:usize,shared:&Shared) -> Result<CpuTextu
     limits.max_alloc=Some(remaining.saturating_add(8*1024*1024).min(TEXTURE_BUDGET) as u64);reader.limits(limits);
     let image=reader.decode().map_err(|e|e.to_string())?.into_rgba8();
     let size=[image.width() as usize,image.height() as usize];
-    if size[0]*size[1]*4>remaining {return Err("Preview texture cache exceeds 256 MiB".into());}
+    if size[0]*size[1]*4>remaining {return Err("Preview texture cache exceeds 2 GiB".into());}
     let meta_path=PathBuf::from(format!("{}.meta",path.display()));
     if std::fs::metadata(&meta_path).is_ok_and(|m|m.len()>8*1024*1024) {return Err("Sprite metadata exceeds 8 MiB".into());}
     let meta=std::fs::read_to_string(meta_path).unwrap_or_default();
@@ -301,7 +370,7 @@ fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,
                 if !shared.checkpoint() {return;}
                 let index=next.fetch_add(1,Ordering::Relaxed);let Some(path)=paths.get(index) else {return;};
                 let started=Instant::now();let result=if let Some(baked)=baked.get(path) {
-                    if reserve_bytes(reserved,baked.image.pixels.len()*4) {Ok((Arc::new(CpuTexture{size:baked.image.size,pixels:baked.image.pixels.clone(),meta:String::new(),regions:Mutex::default()}),false))} else {Err("Preview texture cache exceeds 256 MiB".into())}
+                    if reserve_bytes(reserved,baked.image.pixels.len()*4) {Ok((Arc::new(CpuTexture{size:baked.image.size,pixels:baked.image.pixels.clone(),meta:String::new(),regions:Mutex::default()}),false))} else {Err("Preview texture cache exceeds 2 GiB".into())}
                 } else {load_cached(path,reserved,cache,shared)};
                 let elapsed=started.elapsed();
                 if sender.send((index,result,elapsed)).is_err() {return;}
@@ -344,6 +413,10 @@ fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,
     }
     for ((texture,id),region) in regions {if region.is_none() {shared.status.lock().unwrap().errors.push(format!("Sprite fileID {id}, texture {texture}: {}",tr("无法定位 Sprite 切片，或切片数据无效")));}}
     shared.status.lock().unwrap().build_ms=building_started.elapsed().as_millis();
+    match gpu_scene(&prepared.sprites,&instances,&textures,&paths,&components,docs,catalog,shared) {
+        Ok(scene)=>*shared.gpu_scene.lock().unwrap()=scene,
+        Err(error)=>shared.status.lock().unwrap().errors.push(format!("Shader GPU: {error}")),
+    }
     drop(prepared);drop(indices);drop(component_ids);
     let components=Arc::new(components);let boxes=Arc::new(boxes);let mut rendered_revision=0;
     loop {
@@ -360,9 +433,206 @@ fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,
     }
 }
 fn over(source:Color32,tint:Color32,dest:Color32) -> Color32 {
-    let a=(source.a() as u32*tint.a() as u32+127)/255;
-    let c=|s:u8,t:u8,d:u8|((s as u32*t as u32+127)/255+(d as u32*(255-a)+127)/255).min(255) as u8;
-    Color32::from_rgba_premultiplied(c(source.r(),tint.r(),dest.r()),c(source.g(),tint.g(),dest.g()),c(source.b(),tint.b(),dest.b()),(a+(dest.a() as u32*(255-a)+127)/255).min(255) as u8)
+    crate::render_system::source_over(source,tint,dest)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTexture>>],paths:&[PathBuf],components:&[String],docs:&[Document],catalog:Option<&Arc<HashMap<String,PathBuf>>>,shared:&Shared)->Result<Option<Arc<crate::render_system::scene::Scene>>,String> {
+    use crate::render_system::scene::{self as rs, BlendFactor as B, Uniform as U};
+    use std::collections::BTreeMap;
+    fn nested_field<'a>(text:&'a str,key:&str)->Option<&'a str>{let prefix=format!("{key}:");text.lines().find_map(|line|line.trim_start().strip_prefix(&prefix).map(str::trim))}
+    let Some(catalog)=catalog else {return Ok(None)};
+    let docs:HashMap<_,_>=docs.iter().map(|d|(d.file_id.as_str(),d)).collect();
+    let identity=[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+    let ordinary=Arc::new(rs::Material { program:Arc::new(rs::Program { pipeline:rs::UnityPipeline::BuiltIn,revision:1,
+        vertex:Arc::from("#version 330 core\nlayout(location=0) in vec3 a_position;layout(location=1) in vec2 a_uv;layout(location=2) in vec4 a_color;uniform mat4 unity_MatrixVP;uniform mat4 unity_ObjectToWorld;out vec2 v_uv;out vec4 v_color;void main(){gl_Position=unity_MatrixVP*unity_ObjectToWorld*vec4(a_position,1);v_uv=a_uv;v_color=a_color;}"),
+        fragment:Arc::from("#version 330 core\nin vec2 v_uv;in vec4 v_color;uniform sampler2D _MainTex;out vec4 output_color;void main(){vec4 c=texture(_MainTex,v_uv)*v_color;output_color=vec4(c.rgb*c.a,c.a);}") }),
+        state:rs::RenderState{source:B::One,destination:B::OneMinusSourceAlpha,color_mask:[true;4],depth_write:false,cull_back:false},uniforms:BTreeMap::new(),textures:BTreeMap::new() });
+    let read=|path:&PathBuf|->Result<String,String>{
+        if std::fs::metadata(path).map_err(|e|e.to_string())?.len()>2*1024*1024 {return Err(format!("Shader/material exceeds 2 MiB: {}",path.display()));}
+        std::fs::read_to_string(path).map_err(|e|e.to_string())
+    };
+    let guid=regex::Regex::new(r"guid:\s*([0-9a-fA-F]{32})").unwrap();
+    let values=regex::Regex::new(r"(?m)^\s*-\s*(_\w+):\s*([-+0-9.eE]+)\s*$").unwrap();
+    let defaults=regex::Regex::new(r#"(?m)^\s*(?:\[\w+\]\s*)?(_\w+)\s*\([^\n]*\)\s*=\s*([-+0-9.eE]+)"#).unwrap();
+    let mut materials:HashMap<PathBuf,Result<Arc<rs::Material>,String>>=HashMap::new();
+    let mut material_sources:HashMap<PathBuf,Arc<rs::Texture>>=HashMap::new();
+    let mut material_source_bytes=0usize;
+    let mut custom=HashMap::new();
+    for sprite in sprites {
+        if !shared.checkpoint() {return Err("Preview cancelled".into());}
+        let Some(doc)=docs.get(sprite.component.as_str()).filter(|d|matches!(d.type_name.as_str(),"SpriteRenderer"|"MeshRenderer")) else {continue;};
+        let Some(tail)=doc.text.split_once("  m_Materials:").map(|(_,v)|v) else {continue;};
+        let mut slots=Vec::new();
+        let limit=if doc.type_name=="MeshRenderer" {64}else{1};
+        let lines:Vec<_>=tail.lines().skip_while(|line|line.trim().is_empty()).take_while(|line|line.trim_start().starts_with('-')).take(65).collect();
+        if doc.type_name=="MeshRenderer" && lines.len()>64 {shared.status.lock().unwrap().errors.push(format!("Mesh {}: material slot limit 64 exceeded",doc.file_id));}
+        for line in lines.into_iter().take(limit) {
+        let Some(path)=guid.captures(line).and_then(|c|catalog.get(&c[1].to_lowercase())) else {
+            if doc.type_name=="MeshRenderer" {shared.status.lock().unwrap().errors.push(format!("Mesh {}: material slot {} reference unavailable",doc.file_id,slots.len()));}
+            slots.push(None);continue;
+        };
+        let material=materials.entry(path.clone()).or_insert_with(||{
+            let text=read(path)?;
+            let reference=field(&text,"m_Shader").ok_or("Missing material shader")?;
+            let shader_path=guid.captures(reference).and_then(|c|catalog.get(&c[1].to_lowercase())).ok_or("Shader GUID not found")?;
+            let shader=read(shader_path)?;
+            let (program,state)=crate::render_system::shader::translate_material_file(shader_path,&text)?;
+            let mut uniforms=BTreeMap::new();
+            uniforms.insert("_MainTex_ST".into(),U::Vector([1.0,1.0,0.0,0.0]));
+            uniforms.insert("_LightIntensity".into(),U::Float(0.0));
+            uniforms.insert("_ToneMappingMin".into(),U::Float(0.0));uniforms.insert("_ToneMappingMax".into(),U::Float(1.0));
+            let vector_defaults=regex::Regex::new(r"(?m)^\s*(?:\[\w+\]\s*)?(_\w+)\s*\([^\n]*\)\s*=\s*\(([^)]+)\)").unwrap();
+            for c in vector_defaults.captures_iter(&shader) {
+                let parsed=c[2].split(',').map(|v|v.trim().parse::<f32>().map_err(|_|"Invalid Shader vector default")).collect::<Result<Vec<_>,_>>()?;
+                if !(2..=4).contains(&parsed.len()){return Err("Invalid Shader vector component count".into());}
+                uniforms.insert(c[1].to_owned(),U::Vector(std::array::from_fn(|i|parsed.get(i).copied().unwrap_or(0.0))));
+            }
+            for c in defaults.captures_iter(&shader).chain(values.captures_iter(&text)) {
+                if let Ok(value)=c[2].parse::<f32>() {uniforms.insert(c[1].to_owned(),U::Float(value));}
+            }
+            let vectors=regex::Regex::new(r"(?m)^\s*-\s*(_\w+):\s*\{r:\s*([^,]+),\s*g:\s*([^,]+),\s*b:\s*([^,]+),\s*a:\s*([^}]+)\}").unwrap();
+            for c in vectors.captures_iter(&text) {let values=(1..=4).map(|i|c[i+1].trim().parse::<f32>().map_err(|_|"Invalid material vector")).collect::<Result<Vec<_>,_>>()?;uniforms.insert(c[1].to_owned(),U::Vector(std::array::from_fn(|i|values[i])));}
+            let mut bound_textures=BTreeMap::new();
+            let texture_blocks=regex::Regex::new(r"(?m)^\s*-\s*(_\w+):\s*$").unwrap();
+            let starts:Vec<_>=texture_blocks.captures_iter(&text).map(|c|(c[1].to_owned(),c.get(0).unwrap().end())).collect();
+            for (i,(name,start)) in starts.iter().enumerate() {
+                let block=&text[*start..starts.get(i+1).map_or(text.len(),|(_,p)|*p)];
+                let scale=nested_field(block,"m_Scale").and_then(|v|crate::inline_vector(v,&["x","y"])).unwrap_or(vec![1.0;2]);
+                let offset=nested_field(block,"m_Offset").and_then(|v|crate::inline_vector(v,&["x","y"])).unwrap_or(vec![0.0;2]);
+                uniforms.insert(format!("{name}_ST"),U::Vector([scale[0] as f32,scale[1] as f32,offset[0] as f32,offset[1] as f32]));
+                if name=="_MainTex" && doc.type_name=="SpriteRenderer" {continue;}
+                let Some(reference)=nested_field(block,"m_Texture") else{continue;};
+                let Some(texture_path)=guid.captures(reference).and_then(|c|catalog.get(&c[1].to_lowercase())) else{continue;};
+                if let Some(texture)=material_sources.get(texture_path) {bound_textures.insert(name.clone(),texture.clone());continue;}
+                let mut reader=image::ImageReader::open(texture_path).map_err(|e|e.to_string())?.with_guessed_format().map_err(|e|e.to_string())?;
+                let mut limits=image::Limits::default();limits.max_image_width=Some(8192);limits.max_image_height=Some(8192);limits.max_alloc=Some(256*1024*1024);reader.limits(limits);
+                let mut image=reader.decode().map_err(|e|e.to_string())?.into_rgba8();
+                material_source_bytes+=image.len();if material_source_bytes>64*1024*1024 {return Err("Shared material textures exceed 64 MiB".into());}
+                image::imageops::flip_vertical_in_place(&mut image);
+                let meta=std::fs::read_to_string(format!("{}.meta",texture_path.display())).unwrap_or_default();
+                let fallback_wrap=nested_field(&meta,"wrapMode").and_then(|v|v.parse::<i32>().ok()).unwrap_or(0);
+                let wraps=["wrapU","wrapV"].map(|axis|nested_field(&meta,axis).and_then(|v|v.parse::<i32>().ok()).filter(|v|*v>=0).unwrap_or(fallback_wrap));
+                if wraps.iter().any(|v|!matches!(v,0|1)){return Err("Mirror texture wrapping is not implemented".into());}
+                let repeat=wraps.map(|v|v==0);
+                let texture=rs::Texture{size:[image.width(),image.height()],rgba:Arc::from(image.into_raw()),revision:1,repeat};
+                let texture=Arc::new(texture);material_sources.insert(texture_path.clone(),texture.clone());bound_textures.insert(name.clone(),texture);
+            }
+            for c in regex::Regex::new(r"uniform\s+float\s+(_\w+)\s*;").unwrap().captures_iter(&program.fragment) {
+                if !uniforms.contains_key(&c[1]) && (crate::render_system::shader::scalar_is_referenced(&program.fragment,&c[1]) || crate::render_system::shader::scalar_is_referenced(&program.vertex,&c[1])) {
+                    uniforms.insert(c[1].to_owned(),U::Float(1.0));
+                    shared.status.lock().unwrap().errors.push(format!("{}: unresolved scalar {} defaults to 1 in preview",path.display(),&c[1]));
+                }
+            }
+            if let Some(tail)=text.split_once("- _MainTex:").map(|(_,v)|v) {
+                let scale=nested_field(tail,"m_Scale").and_then(|v|crate::inline_vector(v,&["x","y"])).unwrap_or(vec![1.0;2]);let offset=nested_field(tail,"m_Offset").and_then(|v|crate::inline_vector(v,&["x","y"])).unwrap_or(vec![0.0;2]);
+                uniforms.insert("_MainTex_ST".into(),U::Vector([scale[0] as f32,scale[1] as f32,offset[0] as f32,offset[1] as f32]));
+            }
+            for c in regex::Regex::new(r"uniform\s+sampler2D\s+(_\w+)\s*;").unwrap().captures_iter(&program.fragment) {
+                if &c[1]=="_MainTex" && doc.type_name=="SpriteRenderer" {continue;}
+                if bound_textures.contains_key(&c[1]) {continue;}
+                let texture_defaults=regex::Regex::new(r#"(_\w+)\s*\("[^"\n]*",\s*2D\s*\)\s*=\s*"(\w+)""#).unwrap();
+                let default=texture_defaults.captures_iter(&shader).find(|v|v[1]==c[1]).map(|v|v[2].to_owned()).ok_or_else(||format!("Missing material texture: {}",&c[1]))?;
+                let pixel=match default.as_str(){"white"=>[255;4],"black"=>[0,0,0,255],"gray"=>[128,128,128,255],"bump"=>[128,128,255,255],_=>return Err(format!("Unsupported Shader default texture: {default}"))};
+                bound_textures.insert(c[1].to_owned(),Arc::new(rs::Texture{size:[1,1],rgba:Arc::from(pixel),revision:1,repeat:[false;2]}));
+            }
+            // Unity sets these through the scene controller, not saved material
+            // properties. Without that controller, use neutral white last.
+            neutral_day_night_colors(&mut uniforms);
+            if regex::Regex::new(r"(?i)\bStencil\s*\{").unwrap().is_match(&shader) {
+                shared.status.lock().unwrap().errors.push(format!("{}: Stencil ignored in preview (mask not reproduced)",path.display()));
+            }
+            Ok(Arc::new(rs::Material { program:Arc::new(program),state,uniforms,textures:bound_textures }))
+        });
+        match material {
+            Ok(material)=>{slots.push(Some(material.clone()));}
+            Err(error)=>{shared.status.lock().unwrap().errors.push(format!("{}: {error}; material slot {} unavailable",path.display(),slots.len()));slots.push(None);},
+        }
+        }
+        if slots.iter().any(Option::is_some) {custom.insert(sprite.component.clone(),slots);}
+    }
+    if custom.is_empty() {return Ok(None);}
+    let mut gpu_textures=HashMap::new();let mut bytes=0usize;
+    for instance in instances {
+        if gpu_textures.contains_key(&instance.texture) {continue;}
+        if !shared.checkpoint() {return Err("Preview cancelled".into());}
+        let cpu=textures[instance.texture].as_ref().unwrap();
+        let length=cpu.size[0]*cpu.size[1]*4;
+        bytes=bytes.checked_add(length).ok_or("GPU source texture budget overflow")?;
+        if bytes>TEXTURE_BUDGET {return Err("GPU source textures exceed 2 GiB; CPU fallback".into());}
+        let rgba=if sprites.iter().any(|s|s.path==paths[instance.texture] && s.baked.is_some()) {
+            cpu.pixels.iter().flat_map(|p|straight_gamma(*p)).collect::<Vec<u8>>()
+        } else {
+            let mut reader=image::ImageReader::open(&paths[instance.texture]).map_err(|e|e.to_string())?.with_guessed_format().map_err(|e|e.to_string())?;
+            let mut limits=image::Limits::default();limits.max_image_width=Some(8192);limits.max_image_height=Some(8192);limits.max_alloc=Some(256*1024*1024);reader.limits(limits);
+            let decoded=reader.decode().map_err(|e|e.to_string())?.into_rgba8();
+            if [decoded.width() as usize,decoded.height() as usize]!=cpu.size {return Err("Texture changed during preparation".into());}
+            decoded.into_raw()
+        };
+        gpu_textures.insert(instance.texture,Arc::new(rs::Texture{size:cpu.size.map(|v|v as u32),rgba:Arc::from(rgba),revision:1,repeat:[false;2]}));
+    }
+    let mut draws=Vec::new();
+    for instance in instances {
+        let id=components[instance.component as usize].as_str();
+        let tint=docs.get(id).filter(|d|d.type_name=="SpriteRenderer").map(|d|{let c=vector(&d.text,"m_Color",&["r","g","b","a"],&[1.0;4]);std::array::from_fn(|i|c[i] as f32)}).unwrap_or_else(||straight_gamma(instance.tint).map(|v|v as f32/255.0));
+        let mut vertices=instance.points.iter().zip(instance.uv).map(|(p,uv)|rs::Vertex{position:[p[0] as f32,p[1] as f32,0.0],uv:[uv[0] as f32,uv[1] as f32],color:tint,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
+        let mut submeshes=vec![vec![0,1,2,0,2,3]];let mut object_to_world=identity;
+        if custom.contains_key(id) && docs.get(id).is_some_and(|d|d.type_name=="MeshRenderer") {
+            let renderer=docs[id];
+            let geometry=(||->Result<_,String>{
+                let mesh_filter=docs.values().find(|d|d.type_name=="MeshFilter" && d.game_object==renderer.game_object).ok_or("MeshRenderer has no MeshFilter")?;
+                let reference_text=field(&mesh_filter.text,"m_Mesh").ok_or("Missing Mesh reference")?;
+                let mesh=if reference(reference_text,"fileID").as_deref()==Some("10210") && reference(reference_text,"guid").as_deref()==Some("0000000000000000e000000000000000") {
+                    crate::render_system::mesh::quad()
+                }else if reference(reference_text,"guid").is_none() {
+                    let id=reference(reference_text,"fileID").ok_or("Missing local Mesh fileID")?;
+                    let source=docs.get(id.as_str()).filter(|doc|doc.type_name=="Mesh").ok_or("Scene-local Mesh fileID not found")?;
+                    crate::render_system::mesh::decode(&source.text)?
+                }else{
+                    let path=reference(reference_text,"guid").and_then(|g|catalog.get(&g.to_lowercase())).ok_or("Native Mesh GUID missing")?;
+                    if std::fs::metadata(path).map_err(|e|e.to_string())?.len()>64*1024*1024 {return Err("Unity Mesh asset exceeds 64 MiB".into());}
+                    if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("fbx")) {
+                        crate::render_system::mesh::fbx(path)?
+                    }else if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("asset")) {
+                        crate::render_system::mesh::decode_reference(&std::fs::read_to_string(path).map_err(|e|e.to_string())?,&reference(reference_text,"fileID").ok_or("Missing Mesh fileID")?)?
+                    }else{return Err("Unsupported GPU mesh format".into());}
+                };
+                if mesh.submeshes.is_empty() {return Err("Mesh has no submeshes".into());}
+                let transforms:HashMap<_,_>=docs.values().copied().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
+                let objects:HashMap<_,_>=docs.values().copied().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
+                let transform=transforms.values().find(|d|d.game_object==renderer.game_object).ok_or("Mesh Transform missing")?;
+                let matrix=world(&transform.file_id,&transforms,&objects,&mut HashSet::new()).ok_or("Mesh world transform missing")?;
+                Ok((mesh,matrix))
+            })();
+            match geometry {
+                Ok((mesh,matrix))=>{vertices=mesh.vertices;submeshes=mesh.submeshes;object_to_world=matrix.0.map(|row|row.map(|v|v as f32));}
+                Err(error)=>{shared.status.lock().unwrap().errors.push(format!("Mesh {id}: {error}; baked fallback"));custom.remove(id);}
+            }
+        }
+        let vertices:Arc<[rs::Vertex]>=Arc::from(vertices);
+        let submeshes:Vec<Arc<[u32]>>=submeshes.into_iter().map(Arc::from).collect();
+        if let Some(slots)=custom.get(id) {
+            if slots.len()<submeshes.len() {shared.status.lock().unwrap().errors.push(format!("Mesh {id}: {} submeshes but {} material slots; unmatched submeshes not rendered",submeshes.len(),slots.len()));}
+            for (slot,material) in slots.iter().enumerate() {
+                let Some(material)=material else {continue;};
+                let main=material.textures.get("_MainTex").cloned().unwrap_or_else(||gpu_textures[&instance.texture].clone());
+                draws.push(rs::Draw{component:Arc::from(id),vertices:vertices.clone(),indices:submeshes[slot.min(submeshes.len()-1)].clone(),object_to_world,material:material.clone(),main_texture:main});
+            }
+        }else{
+            draws.push(rs::Draw{component:Arc::from(id),vertices,indices:submeshes[0].clone(),object_to_world,material:ordinary.clone(),main_texture:gpu_textures[&instance.texture].clone()});
+        }
+    }
+    Ok(Some(Arc::new(rs::Scene{draws:Arc::from(draws),revision:1})))
+}
+fn neutral_day_night_colors(uniforms:&mut BTreeMap<String,crate::render_system::scene::Uniform>) {
+    for name in ["_GlobalDayNightColor","_GlobalDayNightFogColor","_GlobalDayNightWaterColor"] {
+        uniforms.insert(name.into(),crate::render_system::scene::Uniform::Vector([1.0;4]));
+    }
+}
+fn straight_gamma(color:Color32)->[u8;4] {
+    let a=color.a() as u32;
+    let channel=|v:u8|if a==0 {0}else{((v as u32*255+a/2)/a).min(255) as u8};
+    [channel(color.r()),channel(color.g()),channel(color.b()),color.a()]
 }
 fn sample(texture:&CpuTexture,uv:[f64;2]) -> Color32 {
     let x=(uv[0]*texture.size[0] as f64-0.5).clamp(0.0,(texture.size[0]-1) as f64);
@@ -400,7 +670,7 @@ fn compose(instances:&[Instance],textures:&[Option<Arc<CpuTexture>>],view:&View,
                 let uv=std::array::from_fn(|i|instance.uv[0][i]+(instance.uv[1][i]-instance.uv[0][i])*a+(instance.uv[3][i]-instance.uv[0][i])*b);
                 let source=sample(texture,uv);let position=y*width+x;
                 image.pixels[position]=over(source,instance.tint,image.pixels[position]);
-                if instance.selectable && source.a() as u32*instance.tint.a() as u32>8*255 {hits[position]=instance.component;}
+                if instance.selectable && crate::render_system::pickable(source,instance.tint) {hits[position]=instance.component;}
             }
         }
     }
@@ -409,9 +679,81 @@ fn compose(instances:&[Instance],textures:&[Option<Arc<CpuTexture>>],view:&View,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn one_submesh_draws_both_material_slots_in_order() {
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("material-slots-test-{}",std::process::id()));
+        let assets=root.join("Assets");std::fs::create_dir_all(&assets).unwrap();
+        let shader=assets.join("test.shader");std::fs::write(&shader,include_str!("../../tests/fixtures/pf_sprite_overlay.shader")).unwrap();
+        let shader_guid="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let red_guid="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";let blue_guid="cccccccccccccccccccccccccccccccc";
+        let red=assets.join("red.mat");let blue=assets.join("blue.mat");
+        for (path,color) in [(&red,"{r: 1, g: 0, b: 0, a: 1}"),(&blue,"{r: 0, g: 0, b: 1, a: 1}")] {
+            std::fs::write(path,format!("Material:\n  m_Shader: {{fileID: 4800000, guid: {shader_guid}, type: 3}}\n  m_Colors:\n  - _Color: {color}\n")).unwrap();
+        }
+        let image_path=assets.join("white.png");image::RgbaImage::from_pixel(1,1,image::Rgba([255;4])).save(&image_path).unwrap();
+        let docs=crate::parse_unity_yaml(&format!("--- !u!1 &1\nGameObject:\n  m_Name: mesh\n  m_IsActive: 1\n--- !u!4 &2\nTransform:\n  m_GameObject: {{fileID: 1}}\n  m_LocalScale: {{x: 1, y: 1, z: 1}}\n  m_Father: {{fileID: 0}}\n--- !u!33 &3\nMeshFilter:\n  m_GameObject: {{fileID: 1}}\n  m_Mesh: {{fileID: 10210, guid: 0000000000000000e000000000000000, type: 0}}\n--- !u!23 &4\nMeshRenderer:\n  m_GameObject: {{fileID: 1}}\n  m_Materials:\n  - {{fileID: 2100000, guid: {red_guid}, type: 2}}\n  - {{fileID: 2100000, guid: {blue_guid}, type: 2}}\n"));
+        let sprite=Sprite{spatial:Matrix::identity(),baked:None,ui:None,component:"4".into(),selectable:true,name:"mesh".into(),path:image_path.clone(),id:String::new(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
+        let instance=Instance{points:[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]],uv:[[0.0,0.0];4],tint:Color32::WHITE,texture:0,component:0,selectable:true};
+        let texture=Arc::new(CpuTexture{size:[1,1],pixels:vec![Color32::WHITE],meta:String::new(),regions:Mutex::default()});
+        let catalog=Arc::new(HashMap::from([(shader_guid.into(),shader.clone()),(red_guid.into(),red.clone()),(blue_guid.into(),blue.clone())]));
+        let state=shared();
+        let scene=gpu_scene(&[sprite],&[instance],&[Some(texture)],&[image_path.clone()],&["4".into()],&docs,Some(&catalog),&state).unwrap().unwrap();
+        assert_eq!(scene.draws.len(),2,"{:?}",state.status.lock().unwrap().errors);
+        assert_eq!(scene.draws[0].material.uniforms["_Color"],crate::render_system::scene::Uniform::Vector([1.0,0.0,0.0,1.0]));
+        assert_eq!(scene.draws[1].material.uniforms["_Color"],crate::render_system::scene::Uniform::Vector([0.0,0.0,1.0,1.0]));
+        assert!(Arc::ptr_eq(&scene.draws[0].vertices,&scene.draws[1].vertices));
+        assert!(Arc::ptr_eq(&scene.draws[0].indices,&scene.draws[1].indices));
+        for path in [&shader,&red,&blue,&image_path] {std::fs::remove_file(path).unwrap();}
+        std::fs::remove_dir(assets).unwrap();std::fs::remove_dir(root).unwrap();
+    }
+    #[test]
+    fn preview_neutral_colors_and_pointer_zoom() {
+        let mut uniforms=BTreeMap::new();
+        uniforms.insert("_GlobalDayNightColor".into(),crate::render_system::scene::Uniform::Vector([0.0;4]));
+        neutral_day_night_colors(&mut uniforms);
+        for name in ["_GlobalDayNightColor","_GlobalDayNightFogColor","_GlobalDayNightWaterColor"] {
+            assert!(matches!(uniforms[name],crate::render_system::scene::Uniform::Vector(v) if v==[1.0;4]));
+        }
+        let rect=egui::Rect::from_min_size(Pos2::new(20.0,40.0),egui::vec2(800.0,600.0));
+        let mut view=View {size:[800,600],pan:[0.2,-0.1],..View::default()};
+        let cached=view.clone();
+        let pointer=Pos2::new(650.0,190.0);
+        zoom_at_pointer(&mut view,rect,pointer,150.0);
+        let image=cached_image_rect(rect,&view,&cached);
+        let anchored=image.min+(pointer-rect.min)/rect.size()*image.size();
+        assert!((anchored-pointer).length()<0.001);
+        let mut fps=PreviewFps::default();
+        for i in 0..=30 {fps.sample(i as f64/60.0);}
+        assert!((fps.value-60.0).abs()<0.001);
+    }
     use super::*;
+    #[test]
+    #[ignore = "Requires UNITY_SHADER_TEST_PROJECT pointing to a local Unity project"]
+    fn real_project_material_preparation() {
+        let root=PathBuf::from(std::env::var("UNITY_SHADER_TEST_PROJECT").unwrap());
+        let mut pending=vec![root.join("Assets")];let mut catalog=HashMap::new();
+        while let Some(directory)=pending.pop() {
+            for entry in std::fs::read_dir(directory).unwrap().flatten() {
+                let path=entry.path();if path.is_dir(){pending.push(path);continue;}
+                if path.extension().is_some_and(|e|e=="meta") {
+                    if let Ok(text)=std::fs::read_to_string(&path) {
+                        if let Some(guid)=text.lines().find_map(|l|l.strip_prefix("guid: ")) {
+                            let asset=path.with_extension("");catalog.insert(guid.trim().to_lowercase(),asset);
+                        }
+                    }
+                }
+            }
+        }
+        let docs=crate::parse_unity_yaml(&std::fs::read_to_string(root.join("Assets/Res/Prefabs/Map/Level101/map_land.prefab")).unwrap());
+        let sprites:Vec<_>=docs.iter().filter(|d|matches!(d.type_name.as_str(),"SpriteRenderer"|"MeshRenderer")).map(|d|Sprite{spatial:Matrix::identity(),baked:None,ui:None,component:d.file_id.clone(),selectable:true,name:String::new(),path:PathBuf::new(),id:String::new(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)}).collect();
+        let state=shared();
+        let scene=gpu_scene(&sprites,&[],&[],&[],&[],&docs,Some(&Arc::new(catalog)),&state).unwrap();
+        let errors=&state.status.lock().unwrap().errors;
+        let unique:HashSet<_>=errors.iter().collect();for error in unique {println!("{error}");}
+        assert!(scene.is_some(),"All custom shaders were rejected");
+    }
     fn shared() -> Shared {
-        Shared {cancelled:AtomicBool::new(false),paused:Arc::new(AtomicBool::new(false)),revision:AtomicU64::new(1),view:Mutex::new(View::default()),status:Mutex::new(Status::default()),frame:Mutex::new(None)}
+        Shared {gpu_scene:Mutex::new(None),cancelled:AtomicBool::new(false),paused:Arc::new(AtomicBool::new(false)),revision:AtomicU64::new(1),view:Mutex::new(View::default()),status:Mutex::new(Status::default()),frame:Mutex::new(None)}
     }
     #[test]
     fn small_tile_decodes_with_exact_pixel_reservation() {

@@ -167,6 +167,7 @@ pub fn preview_warning_details(ui:&mut egui::Ui,key:&str,label:&str,issues:&[Str
     if open {
         let height=(ui.available_height()*0.25).clamp(40.0,160.0);
         egui::Frame::group(ui.style()).show(ui,|ui| {
+            if ui.button(crate::localization::tr("复制错误详情")).clicked() {ui.ctx().copy_text(issues.join("\n"));}
             egui::ScrollArea::vertical().id_salt((key,"details")).max_height(height).show(ui,|ui| {
                 for issue in issues {ui.add(egui::Label::new(RichText::new(issue).color(color)).wrap().selectable(true));}
             });

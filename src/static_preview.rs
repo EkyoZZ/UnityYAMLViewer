@@ -5,6 +5,7 @@ mod world;
 mod sdf;
 pub(crate) mod prefab;
 const AUTO_PREFAB_LIMIT:usize=20;
+const PREVIEW_TEXTURE_BUDGET:usize=2 * 1024 * 1024 * 1024;
 
 // A component selection remains precise; object/transform selections cover all
 // renderable components on that object, without selecting unrelated descendants.
@@ -165,7 +166,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
         let baked=spine_cache.entry(key).or_insert_with(|| {
             let (path,baked)=crate::spine_preview::bake(&doc.text,catalog,cancelled,paused)?;
             baked_bytes+=baked.image.pixels.len()*4;
-            if baked_bytes>256*1024*1024 {return Err("Spine 静态缓存超过 256 MiB".into());}
+            if baked_bytes>PREVIEW_TEXTURE_BUDGET {return Err("Spine 静态缓存超过 2 GiB".into());}
             Ok((path,Arc::new(baked)))
         });
         let (path,baked)=match baked {Ok(value)=>value,Err(error)=>{missing+=1;issues.push(format!("{}: {error}",doc.file_id));continue;}};
@@ -196,10 +197,11 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
             }
             for name in duplicate_bones {bones.remove(&name);}
         }
-        match crate::model_preview::bake(mesh,&renderer.text,catalog,matrix,&bones) {
+        let local=if reference(mesh,"guid").is_none() {reference(mesh,"fileID").and_then(|id|documents.iter().find(|d|d.file_id==id && d.type_name=="Mesh")).map(|d|d.text.as_ref())}else{None};
+        match crate::model_preview::bake(mesh,&renderer.text,catalog,matrix,&bones,local) {
             Ok((baked,warnings))=>{
                 baked_bytes+=baked.image.pixels.len()*4;
-                if baked_bytes>256*1024*1024{missing+=1;issues.push("静态模型 / Spine 缓存超过 256 MiB".into());continue;}
+                if baked_bytes>PREVIEW_TEXTURE_BUDGET{missing+=1;issues.push("静态模型 / Spine 缓存超过 2 GiB".into());continue;}
                 for w in warnings{missing+=1;issues.push(format!("{}: {w}",doc.file_id));}
                 use std::hash::{Hash,Hasher};
                 let mut image_hash=std::collections::hash_map::DefaultHasher::new();baked.image.pixels.hash(&mut image_hash);
@@ -453,7 +455,15 @@ pub(crate) fn checkpoint(cancelled:&std::sync::atomic::AtomicBool,paused:Option<
     }
     !cancelled.load(std::sync::atomic::Ordering::Relaxed)
 }
+fn preview_path_row(ui:&mut egui::Ui,label:&str) {
+    let height=ui.text_style_height(&egui::TextStyle::Small);
+    let (rect,_)=ui.allocate_exact_size(Vec2::new(ui.available_width(),height),egui::Sense::hover());
+    let mut row=ui.new_child(egui::UiBuilder::new().id_salt("preview_path_row").max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    row.set_clip_rect(ui.clip_rect().intersect(rect));
+    row.add(egui::Label::new(egui::RichText::new(label).small()).wrap_mode(egui::TextWrapMode::Extend)).on_hover_text(label);
+}
 fn preview_status_row(ui:&mut egui::Ui,status:&str,complete:bool,paused:&std::sync::atomic::AtomicBool,details:Option<&str>) -> bool {
+    let actions_ready=preview_actions_ready(ui,complete,paused.load(std::sync::atomic::Ordering::Relaxed));
     let height=ui.spacing().interact_size.y.max(ui.text_style_height(&egui::TextStyle::Body));
     let (rect,_)=ui.allocate_exact_size(Vec2::new(ui.available_width(),height),egui::Sense::hover());
     let mut row=ui.new_child(egui::UiBuilder::new().id_salt("preview_status_row").max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -461,9 +471,18 @@ fn preview_status_row(ui:&mut egui::Ui,status:&str,complete:bool,paused:&std::sy
     let is_paused=paused.load(std::sync::atomic::Ordering::Relaxed);
     let label=row.add(egui::Label::new(if !complete && is_paused {tr("已暂停合成预览")} else {status}).wrap_mode(egui::TextWrapMode::Extend));
     if let Some(details)=details {label.on_hover_text(details);}
-    if complete {return false;}
+    if !actions_ready {return false;}
     if row.button(tr(if is_paused {"继续"} else {"暂停"})).clicked() {paused.store(!is_paused,std::sync::atomic::Ordering::Relaxed);}
     row.button(tr("退出预览")).clicked()
+}
+fn preview_actions_ready(ui:&egui::Ui,complete:bool,paused:bool)->bool {
+    let key=ui.make_persistent_id("preview_status_started");
+    let now=ui.input(|input|input.time);
+    let started=ui.ctx().data_mut(|data|{
+        if complete {data.remove_temp::<f64>(key);return now;}
+        if let Some(started)=data.get_temp::<f64>(key){started}else{data.insert_temp(key,now);now}
+    });
+    !complete && (paused || now-started>=5.0)
 }
 fn paint_zoom_badge(painter:&egui::Painter,rect:egui::Rect,zoom:f64) {
     let galley=painter.layout_no_wrap(format!("{} {:.0}%",tr("缩放"),zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE);
@@ -751,7 +770,7 @@ impl Preview {
                 if !self.textures.contains_key(&sprite.path) {
                     if self.paused.load(std::sync::atomic::Ordering::Relaxed) || uploaded || resource_budget.elapsed().as_millis()>=4 {loading=true;continue;}
                     let cache_bytes:usize=self.textures.values().filter_map(|t|t.handle.as_ref()).map(|h|h.size()[0]*h.size()[1]*5).sum();
-                    if cache_bytes+baked.image.pixels.len()*5>256*1024*1024 {missing+=1;issues.push("Spine 贴图超过预览缓存预算".into());continue;}
+                    if cache_bytes+baked.image.pixels.len()*5>PREVIEW_TEXTURE_BUDGET {missing+=1;issues.push("Spine 贴图超过预览缓存预算".into());continue;}
                     let handle=ui.ctx().load_texture(sprite.path.display().to_string(),baked.image.clone(),egui::TextureOptions::LINEAR);
                     self.textures.insert(sprite.path.clone(),Texture{stamp:(None,None),receiver:None,handle:Some(handle),meta:String::new(),alpha:baked.image.pixels.iter().map(|p|p.a()).collect(),error:None,regions:HashMap::new()});
                     uploaded=true;
@@ -803,7 +822,7 @@ impl Preview {
             let texture=self.textures.get_mut(&sprite.path).unwrap();
             if let Some(receiver)=texture.receiver.as_ref().filter(|_|!uploaded && !self.paused.load(std::sync::atomic::Ordering::Relaxed)) {
                 match receiver.try_recv() {
-                    Ok(Ok((image,meta)))=>{uploaded=true;if cache_bytes + image.size[0]*image.size[1]*5 > 256*1024*1024 {texture.error=Some("Preview texture cache exceeds 256 MiB".into());texture.receiver=None;missing+=1;continue;} texture.alpha=image.pixels.iter().map(|pixel|pixel.a()).collect(); texture.handle=Some(ui.ctx().load_texture(sprite.path.display().to_string(),image,egui::TextureOptions::LINEAR));texture.meta=meta;texture.receiver=None;},
+                    Ok(Ok((image,meta)))=>{uploaded=true;if cache_bytes + image.size[0]*image.size[1]*5 > PREVIEW_TEXTURE_BUDGET {texture.error=Some("Preview texture cache exceeds 2 GiB".into());texture.receiver=None;missing+=1;continue;} texture.alpha=image.pixels.iter().map(|pixel|pixel.a()).collect(); texture.handle=Some(ui.ctx().load_texture(sprite.path.display().to_string(),image,egui::TextureOptions::LINEAR));texture.meta=meta;texture.receiver=None;},
                     Ok(Err(e))=>{texture.error=Some(e);texture.receiver=None;},
                     Err(mpsc::TryRecvError::Disconnected)=>{texture.error=Some("decode worker stopped".into());texture.receiver=None;},
                     Err(mpsc::TryRecvError::Empty)=>{loading=true;},
@@ -1026,6 +1045,41 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_actions_wait_five_seconds_and_reset_when_complete() {
+        let ctx=egui::Context::default();
+        let sample=|time:f64,complete:bool,paused:bool|{
+            let mut ready=false;
+            let _=ctx.run(egui::RawInput{time:Some(time),..Default::default()},|ctx|{
+                egui::CentralPanel::default().show(ctx,|ui|{ready=preview_actions_ready(ui,complete,paused);});
+            });ready
+        };
+        assert!(!sample(10.0,false,false));
+        assert!(!sample(14.99,false,false));
+        assert!(sample(15.0,false,false));
+        assert!(!sample(16.0,true,false));
+        assert!(!sample(16.1,false,false));
+        assert!(sample(16.2,false,true));
+    }
+    #[test]
+    fn preview_status_rows_keep_canvas_position_during_refresh() {
+        let measure=|path:&str,complete:bool|{
+            let ctx=egui::Context::default();let mut y=0.0;
+            let _=ctx.run(egui::RawInput::default(),|ctx|{
+                egui::CentralPanel::default().show(ctx,|ui|{
+                    ui.set_max_width(120.0);
+                    preview_path_row(ui,path);
+                    preview_status_row(ui,if complete {"合成预览已完成"}else{"正在合成预览…"},complete,&std::sync::atomic::AtomicBool::new(false),None);
+                    y=ui.cursor().min.y;
+                });
+            });y
+        };
+        let completed=measure("GPU Shader 预览",true);
+        let refreshing=measure("GPU Shader 预览",false);
+        let fallback=measure("Ordinary texture preview (GPU Shader inactive)",false);
+        assert!((completed-refreshing).abs()<0.01);
+        assert!((completed-fallback).abs()<0.01);
+    }
     #[test]
     fn outline_detection_accepts_custom_names_and_respects_enabled_and_color() {
         let mut doc=Document {file_id:"1".into(),type_name:"MonoBehaviour".into(),start_line:0,start_offset:0,

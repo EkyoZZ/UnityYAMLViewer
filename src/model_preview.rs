@@ -46,7 +46,8 @@ fn scene_model(documents:&[crate::Document],flags:&HashMap<String,crate::hierarc
             if let Some(m)=world(&id,&transforms,&objects,&mut Default::default()){if bones.insert(name.clone(),m).is_some(){duplicate.insert(name);}}
         }}}
         for name in duplicate{bones.remove(&name);}
-        match component_model(mesh,&renderer.text,catalog,matrix,&bones){Ok(m)=>append_model(&mut model,m)?,Err(e)=>model.warnings.push(format!("{}: {e}",doc.file_id))}
+        let local=if reference(mesh,"guid").is_none() {reference(mesh,"fileID").and_then(|id|documents.iter().find(|d|d.file_id==id && d.type_name=="Mesh")).map(|d|d.text.as_ref())}else{None};
+        match component_model(mesh,&renderer.text,catalog,matrix,&bones,local){Ok(m)=>append_model(&mut model,m)?,Err(e)=>model.warnings.push(format!("{}: {e}",doc.file_id))}
     }
     let (planes,warnings)=crate::static_preview::scene_planes(documents,flags,catalog)?;model.warnings.extend(warnings);
     for plane in planes {
@@ -86,7 +87,7 @@ fn material(path:&Path,catalog:&HashMap<String,PathBuf>)->Result<Material,String
 fn unity_point(matrix:crate::static_preview::Matrix,p:ufbx::Vec3)->[f32;3] {
     let v=[-p.x,p.y,p.z,1.0];std::array::from_fn(|a|(0..4).map(|i|matrix.0[a][i]*v[i]).sum::<f64>() as f32)
 }
-fn importer_scale(meta:&str,unit_meters:f64)->Result<f64,String> {
+pub(crate) fn importer_scale(meta:&str,unit_meters:f64)->Result<f64,String> {
     let value=|key:&str|meta.lines().find_map(|l|l.trim().strip_prefix(&format!("{key}:"))).map(str::trim);
     let global=value("globalScale").and_then(|v|v.parse::<f64>().ok()).unwrap_or(1.0);
     let scale=global*if value("useFileScale")==Some("0") {1.0}else{unit_meters};
@@ -250,7 +251,7 @@ fn sample(material:Option<&Material>,uv:[f32;2])->Color32 {
     if let Some(t)=&m.texture {let u=(uv[0]*m.scale[0]+m.offset[0]).rem_euclid(1.0);let v=(uv[1]*m.scale[1]+m.offset[1]).rem_euclid(1.0);let x=(u*t.width() as f32).floor() as u32;let y=((1.0-v)*t.height() as f32).floor() as u32;pixel=t.get_pixel(x.min(t.width()-1),y.min(t.height()-1)).0;}
     crate::asset_viewer::preview_color(std::array::from_fn(|i|((pixel[i] as u16*m.color[i] as u16+127)/255) as u8))
 }
-fn component_model(mesh:&str,renderer:&str,catalog:&HashMap<String,PathBuf>,matrix:crate::static_preview::Matrix,bones:&HashMap<String,crate::static_preview::Matrix>)->Result<Model,String> {
+fn component_model(mesh:&str,renderer:&str,catalog:&HashMap<String,PathBuf>,matrix:crate::static_preview::Matrix,bones:&HashMap<String,crate::static_preview::Matrix>,local_mesh:Option<&str>)->Result<Model,String> {
     let builtin_quad=crate::static_preview::reference(mesh,"fileID").as_deref()==Some("10210") && crate::static_preview::reference(mesh,"guid").as_deref()==Some("0000000000000000e000000000000000");
     let model=if builtin_quad {
         let points=[[-0.5,-0.5],[0.5,-0.5],[0.5,0.5],[-0.5,0.5]].map(|p|std::array::from_fn(|a|(matrix.0[a][0]*p[0]+matrix.0[a][1]*p[1]+matrix.0[a][3]) as f32));
@@ -259,15 +260,40 @@ fn component_model(mesh:&str,renderer:&str,catalog:&HashMap<String,PathBuf>,matr
         let mut warnings=Vec::new();let materials=material_paths(renderer,catalog).iter().map(|p|match p.as_ref().ok_or("Quad 材质引用未找到".into()).and_then(|p|material(p,catalog)) {Ok(m)=>m,Err(e)=>{warnings.push(e);Material::default()}}).collect();
         Model{vertex_count:4,triangles,materials,warnings}
     }else{
-        let path=crate::static_preview::reference(mesh,"guid").and_then(|g|catalog.get(&g.to_ascii_lowercase())).ok_or("模型 GUID 未找到")?;
+        let path=crate::static_preview::reference(mesh,"guid").and_then(|g|catalog.get(&g.to_ascii_lowercase()));
+        let local;
+        let text=if let Some(text)=local_mesh {Some(text)}else if let Some(path)=path.filter(|path|path.extension().is_some_and(|e|e.eq_ignore_ascii_case("asset"))) {
+            if std::fs::metadata(path).map_err(|e|e.to_string())?.len()>64*1024*1024 {return Err("Unity Mesh asset exceeds 64 MiB".into());}
+            local=std::fs::read_to_string(path).map_err(|e|e.to_string())?;Some(local.as_str())
+        }else{None};
+        if let Some(text)=text {
+            let mesh=if local_mesh.is_some() {crate::render_system::mesh::decode(text).map_err(|e|format!("Scene-local Mesh: {e}"))?}else{crate::render_system::mesh::decode_reference(text,&crate::static_preview::reference(mesh,"fileID").ok_or("Missing Mesh fileID")?)?};
+            let points:Vec<[f32;3]>=mesh.vertices.iter().map(|v|std::array::from_fn(|a|(matrix.0[a][0]*v.position[0] as f64+matrix.0[a][1]*v.position[1] as f64+matrix.0[a][2]*v.position[2] as f64+matrix.0[a][3]) as f32)).collect();
+            let triangles=mesh.submeshes.iter().enumerate().flat_map(|(slot,indices)|indices.chunks_exact(3).map(move |t|(slot,[t[0] as usize,t[1] as usize,t[2] as usize]))).map(|(slot,t)|Triangle{points:t.map(|i|points[i]),uv:t.map(|i|mesh.vertices[i].uv),material:slot}).collect();
+            let mut warnings=Vec::new();let materials=material_paths(renderer,catalog).iter().map(|p|match p.as_ref().ok_or("Mesh 材质引用未找到".into()).and_then(|p|material(p,catalog)){Ok(m)=>m,Err(e)=>{warnings.push(e);Material::default()}}).collect();
+            return Ok(Model{vertex_count:mesh.vertices.len(),triangles,materials,warnings});
+        }
+        let path=path.ok_or("Mesh reference not resolved (external GUID or scene-local fileID)")?;
         if !is_model(path){return Err("暂不支持此 Mesh 资源格式".into());}
         // Prefab supplies node transforms: never apply the FBX hierarchy a second time.
-        load(path,&material_paths(renderer,catalog),catalog,Some((bones,matrix)))?
+        if crate::static_preview::number(renderer,"preview_FbxStaticPose",0.0)==1.0 {
+            let mut model=load(path,&material_paths(renderer,catalog),catalog,None)?;
+            let meta=std::fs::read_to_string(format!("{}.meta",path.display())).unwrap_or_default();
+            let mut opts=ufbx::LoadOpts::default();opts.ignore_animation=true;opts.ignore_embedded=true;
+            opts.temp_allocator.memory_limit=256*1024*1024;opts.result_allocator.memory_limit=256*1024*1024;
+            let scene=ufbx::load_file(path.to_str().ok_or("Invalid FBX path")?,opts).map_err(|e|format!("FBX import failed: {e:?}"))?;
+            let scale=importer_scale(&meta,scene.settings.unit_meters)?;
+            for triangle in &mut model.triangles {for point in &mut triangle.points {
+                *point=unity_point(matrix,ufbx::Vec3{x:point[0] as f64*scale,y:point[1] as f64*scale,z:point[2] as f64*scale});
+            }}
+            model.warnings.push("FBX static imported pose; animation and bone overrides are not reproduced".into());
+            model
+        }else{load(path,&material_paths(renderer,catalog),catalog,Some((bones,matrix)))?}
     };
     Ok(model)
 }
-pub(crate) fn bake(mesh:&str,renderer:&str,catalog:&HashMap<String,PathBuf>,matrix:crate::static_preview::Matrix,bones:&HashMap<String,crate::static_preview::Matrix>)->Result<(crate::spine_preview::Baked,Vec<String>),String> {
-    let mut model=component_model(mesh,renderer,catalog,matrix,bones)?;
+pub(crate) fn bake(mesh:&str,renderer:&str,catalog:&HashMap<String,PathBuf>,matrix:crate::static_preview::Matrix,bones:&HashMap<String,crate::static_preview::Matrix>,local_mesh:Option<&str>)->Result<(crate::spine_preview::Baked,Vec<String>),String> {
+    let mut model=component_model(mesh,renderer,catalog,matrix,bones,local_mesh)?;
     if model.triangles.iter().flat_map(|t|&t.points).flatten().any(|v|!v.is_finite()){return Err("模型变换包含无效坐标".into());}
     let mut lo=[f32::INFINITY;2];let mut hi=[f32::NEG_INFINITY;2];for p in model.triangles.iter().flat_map(|t|&t.points){for a in 0..2{lo[a]=lo[a].min(p[a]);hi[a]=hi[a].max(p[a]);}}
     let extent=(hi[0]-lo[0]).max(hi[1]-lo[1]).max(0.001);let ppu=1024.0/extent;
@@ -307,10 +333,7 @@ fn wire_pixel(base:Color32,distance:f32,zoom:f32,mode:&str)->Color32 {
     let coverage=(half_width+0.5-distance).clamp(0.0,1.0);
     let line=crate::asset_viewer::preview_color([30,170,255,(coverage*255.0).round() as u8]);
     if mode=="wire" {return line;}
-    let a=line.a() as u32;
-    let source=line.to_array();let target=base.to_array();
-    let pixel:[u8;4]=std::array::from_fn(|i|(source[i] as u32+(target[i] as u32*(255-a)+127)/255).min(255) as u8);
-    Color32::from_rgba_premultiplied(pixel[0],pixel[1],pixel[2],pixel[3])
+    crate::render_system::source_over(line,Color32::WHITE,base)
 }
 #[allow(clippy::too_many_arguments)]
 fn render_antialiased(model:&Model,size:[usize;2],yaw:f32,pitch:f32,zoom:f32,pan:egui::Vec2,mode:&str,direction:f32)->egui::ColorImage {
@@ -329,6 +352,15 @@ fn downsample_twice(high:&egui::ColorImage)->egui::ColorImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scene_local_triangle_mesh_needs_no_guid() {
+        let source=include_str!("../tests/fixtures/l9584_river1.asset");
+        let model=component_model("{fileID: 1}","",&HashMap::new(),crate::static_preview::Matrix::identity(),&HashMap::new(),Some(source)).unwrap();
+        assert!(model.vertex_count>0 && !model.triangles.is_empty());
+        let line_mesh=source.replace("topology: 0","topology: 3");
+        let error=component_model("{fileID: 1}","",&HashMap::new(),crate::static_preview::Matrix::identity(),&HashMap::new(),Some(&line_mesh)).err().unwrap();
+        assert!(error.contains("Scene-local Mesh") && error.contains("triangle"));
+    }
     #[test]
     fn zoom_preserves_point_under_mouse_after_pan() {
         let pan=egui::vec2(20.0,-30.0);let anchor=egui::vec2(-60.0,-120.0);

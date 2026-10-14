@@ -26,6 +26,7 @@ mod media_tools;
 mod media_preview;
 mod spine_preview;
 mod model_preview;
+mod render_system;
 mod preview_fonts;
 mod recent_files;
 mod native_window;
@@ -167,6 +168,7 @@ struct ViewerApp {
     selected_animation_track: Option<AnimationTrackSelection>,
     show_custom_table: bool,
     show_transform_yaml: bool,
+    show_game_object_yaml: bool,
     show_script_yaml: bool,
     show_sprite_renderer_yaml: bool,
     show_collider_yaml: bool,
@@ -771,13 +773,7 @@ impl ViewerApp {
         let selected=self.selected.and_then(|index|self.documents.get(index)).is_some_and(|doc|doc.file_id==*id || doc.game_object.as_deref()==Some(id.as_str())) || self.nested_selected.as_ref().is_some_and(|(path,key)|Some(path)==self.path.as_ref() && key==id);
         let locate=ui.ctx().data_mut(|d|d.get_temp::<String>(egui::Id::new("preview_hierarchy_locate")));
         let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),ui.make_persistent_id(("linked_node",id,&self.settings.hierarchy_depth)),hierarchy_default_open(&self.settings.hierarchy_depth,depth));
-        let mut ancestor=locate.clone();let mut seen=std::collections::HashSet::new();let mut force_open=false;
-        while let Some(key)=ancestor {
-            if !seen.insert(key.clone()){break;}
-            if key==*id {force_open=true;break;}
-            ancestor=docs.iter().find(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform") && d.game_object.as_deref()==Some(key.as_str()))
-                .and_then(|t|t.parent_transform.as_ref()).and_then(|parent|docs.iter().find(|d|d.file_id==*parent)).and_then(|t|t.game_object.clone());
-        }
+        let force_open=ui.ctx().data_mut(|d|d.get_temp::<Arc<std::collections::HashSet<String>>>(egui::Id::new("preview_hierarchy_ancestors"))).is_some_and(|ancestors|ancestors.contains(id));
         if !self.query.trim().is_empty() || force_open {state.set_open(true);}
         let row=ui.horizontal(|ui| {
             if children.get(id).is_some_and(|items|!items.is_empty()) {state.show_toggle_button(ui,egui::collapsing_header::paint_default_icon);}
@@ -846,8 +842,16 @@ impl ViewerApp {
         });
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("inspector_component_sections"), true));
         ScrollArea::both().id_salt(("game_object_inspector", &inspector_path, &object_id)).auto_shrink([false, false]).show(ui, |ui| {
-            ui.collapsing("GameObject · YAML", |ui| {
-                ui.add(egui::Label::new(RichText::new(self.documents[object].text.as_ref()).monospace()).wrap());
+            let object_start=prefix+self.documents[..object].iter().map(|d|d.text.len()).sum::<usize>();
+            let object_doc=self.documents[object].clone();
+            editing::publish(&ctx,session.clone(),object_start..object_start+object_doc.text.len());
+            egui::CollapsingHeader::new("GameObject").id_salt("game_object_properties").default_open(true).show(ui,|ui|{
+                ui.horizontal(|ui|{
+                    ui.selectable_value(&mut self.show_game_object_yaml,false,localization::tr("显示属性"));
+                    ui.selectable_value(&mut self.show_game_object_yaml,true,localization::tr("显示 YAML"));
+                });
+                if self.show_game_object_yaml {ui.add(egui::Label::new(RichText::new(object_doc.text.as_ref()).monospace()).wrap());}
+                else {show_game_object_properties(ui,&object_doc.text);}
             });
             for (index, range) in sections {
                 let doc = self.documents[index].clone();
@@ -1170,6 +1174,9 @@ impl ViewerApp {
 }
 
 impl eframe::App for ViewerApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        render_system::shutdown();
+    }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
             if let Some(path)=self.path.as_deref(){self.assets.retry_media_decoder(path);}
@@ -1463,6 +1470,9 @@ impl eframe::App for ViewerApp {
                         } else {
                             let expanded=self.preview.hierarchy_documents(&self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default());
                             let tree_docs=expanded.as_ref().map_or(self.documents.as_slice(),|data|data.documents.as_slice());
+                            let locate=ctx.data_mut(|data|data.get_temp::<String>(egui::Id::new("preview_hierarchy_locate")));
+                            let ancestors=expanded.as_ref().zip(locate.as_deref()).map(|(data,id)|data.hierarchy_ancestors(id)).unwrap_or_default();
+                            ctx.data_mut(|data|data.insert_temp(egui::Id::new("preview_hierarchy_ancestors"),Arc::new(ancestors)));
                             let (roots, children, components, unlinked) = build_tree(tree_docs);
                             let linked_flags=expanded.as_ref().map(|data|self.path.as_ref().and_then(|path|self.node_controls.get(path)).map(|controls|controls.effective(&data.documents)).unwrap_or_default());
                             let has_roots = !roots.is_empty();
@@ -1535,7 +1545,9 @@ impl eframe::App for ViewerApp {
                         self.selected=Some(index);self.nested_selected=None;
                         self.locate_target=Some(index);
                         let doc=&self.documents[index];
-                        let object=doc.game_object.clone().unwrap_or_else(||doc.file_id.clone());
+                        let linked=self.preview.hierarchy_documents(&self.path.as_ref().map(|p|p.display().to_string()).unwrap_or_default()).and_then(|data|data.hierarchy_object(&component_id));
+                        let object=linked.clone().unwrap_or_else(||doc.game_object.clone().unwrap_or_else(||doc.file_id.clone()));
+                        if linked.is_some() && (doc.type_name=="PrefabInstance" || doc.text.lines().next().is_some_and(|line|line.ends_with(" stripped"))) {self.nested_selected=self.path.clone().map(|path|(path,object.clone()));self.locate_target=None;}
                         ctx.data_mut(|d|d.insert_temp(egui::Id::new("preview_hierarchy_locate"),object));
                         match self.documents[index].type_name.as_str() {
                             "SpriteRenderer" => self.show_sprite_renderer_yaml=false,
@@ -2062,6 +2074,18 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.1.8").strong());
+                        ui.label(localization::tr("• 场景接入有限 Built-in Sprite Shader GPU 预览；URP 与复杂 Shader 暂不支持"));
+                        ui.label(localization::tr("• GPU 网格按材质槽绘制，支持同一子网格多材质叠加"));
+                        ui.label(localization::tr("• 支持单蒙皮 FBX 静态导入姿态，骨骼覆盖与动画暂未还原"));
+                        ui.label(localization::tr("• 项目索引磁盘缓存优先加载，每次启动后台刷新一次"));
+                        ui.label(localization::tr("• 场景点选嵌套 Prefab 自动定位 Hierarchy 节点"));
+                        ui.label(localization::tr("• 提高 Prefab 展开预算；GPU 首次渲染后离焦冻结，返回恢复"));
+                        ui.label(localization::tr("• 修复夜色参数绑定；预览增加悬浮 FPS 与鼠标位置缩放"));
+                        ui.label(localization::tr("• TEXCOORD1/2 输入暂填零，粒子顶点流数据待接入"));
+                        ui.label(localization::tr("• 对象名称的 Unicode 转义显示为实际文字"));
+                        ui.label(localization::tr("• Prefab 展开限制详情支持一键复制"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.1.7").strong());
                         ui.label(localization::tr("• 最近记录支持 10～50 条与清空；联网更新跟随 Windows 系统代理"));
                         ui.label(localization::tr("• 弹窗使用独立系统窗口，优化多语言设置布局与关于窗口高度"));
@@ -2069,13 +2093,14 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 音视频支持空格播放、视频全屏与音频峰值拖尾"));
                         ui.label(localization::tr("• 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页"));
                         ui.add_space(8.0);
-                        ui.label(RichText::new("1.1.6").strong());
-                        ui.label(localization::tr("• 音视频预览与播放、视频逐帧与硬解选项，改善资源索引及界面响应"));
-                        ui.add_space(8.0);
+
                         if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
                             self.show_older_history = !self.show_older_history;
                         }
                         if self.show_older_history {
+                        ui.label(RichText::new("1.1.6").strong());
+                        ui.label(localization::tr("• 音视频预览与播放、视频逐帧与硬解选项，改善资源索引及界面响应"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.1.5").strong());
                         ui.label(localization::tr("• Spine 3.8、FBX / OBJ 模型及场景 2D / 3D 预览；页签拖拽排序"));
                         ui.add_space(8.0);
@@ -2271,7 +2296,7 @@ fn parse_unity_yaml_with_progress(text: &str, cancelled: Option<&AtomicBool>, pr
 
 fn name_from_text(text: &str) -> Option<String> {
     text.lines().find_map(|line| line.trim_start().strip_prefix("m_Name:"))
-        .map(|value| value.trim().to_string())
+        .map(|value| {let value=value.trim(); if value.starts_with('"') && value.contains("\\u") {serde_json::from_str::<String>(value).unwrap_or_else(|_|value.to_owned())}else{value.to_owned()}})
         .filter(|name| !name.is_empty())
 }
 
@@ -3782,6 +3807,21 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
     )
 }
 
+fn show_game_object_properties(ui:&mut egui::Ui,text:&str) {
+    egui::Grid::new("game_object_fields").num_columns(2).show(ui,|ui|{
+        for (key,label,kind) in [("m_Name","名称","string"),("m_IsActive","激活（Active）","bool"),("m_Layer","Layer","int"),("m_TagString","Tag","string")] {
+            let Some(raw)=static_preview::field(text,key) else {continue;};
+            ui.label(localization::tr(label));
+            if key=="m_IsActive" {
+                if !editing::control(ui,key,raw,kind,None) {
+                    let mut active=raw=="1" || raw=="true";ui.add_enabled(false,egui::Checkbox::without_text(&mut active));
+                }
+            } else {ui.label(raw);}
+            ui.end_row();
+        }
+    });
+}
+
 fn main() -> eframe::Result {
     let (command_inbox, startup_paths) = match command_line::start() {
         Ok(command_line::Startup::Primary(inbox, paths)) => (inbox, paths),
@@ -3796,10 +3836,12 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Unity YAML Viewer",
         eframe::NativeOptions {
+            renderer: eframe::Renderer::Glow,
             viewport: egui::ViewportBuilder::default().with_icon(application_icon()),
             ..Default::default()
         },
         Box::new(move |creation_context| {
+            render_system::initialize(creation_context.gl.as_ref());
             configure_system_fonts(&creation_context.egui_ctx);
             restore_theme(&creation_context.egui_ctx);
             let mut app = ViewerApp {

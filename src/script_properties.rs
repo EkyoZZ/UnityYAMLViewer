@@ -20,18 +20,24 @@ enum ProjectState {
     Loading(ScanJob),
     Ready(ProjectIndex),
 }
+impl ProjectState {
+    fn index(&self)->Option<&ProjectIndex> {match self {Self::Ready(index)=>Some(index),Self::Loading(job)=>job.cached.as_ref()}}
+}
 
-enum ScanResult { Assets(Arc<HashMap<String, PathBuf>>), Complete(ProjectIndex) }
+enum ScanResult { Cached(ProjectIndex), Assets(Arc<HashMap<String, PathBuf>>), Complete(ProjectIndex) }
 struct ScanJob {
     receiver: Receiver<ScanResult>,
     assets: Option<Arc<HashMap<String, PathBuf>>>,
+    cached: Option<ProjectIndex>,
     progress: Arc<ScanProgress>,
 }
 #[derive(Default)]
 struct ScanProgress { resources: AtomicUsize, parsed: AtomicUsize, total: AtomicUsize }
 
-#[derive(Default)]
+#[derive(Default,serde::Serialize,serde::Deserialize)]
 struct ProjectIndex {
+    #[serde(skip)]
+    cache_error:Option<String>,
     shader_properties: Arc<HashMap<String, HashMap<String, String>>>,
     assets: Arc<HashMap<String, PathBuf>>,
     scripts: HashMap<String, PathBuf>,
@@ -40,7 +46,7 @@ struct ProjectIndex {
     issues: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,serde::Serialize,serde::Deserialize)]
 struct ClassInfo {
     path: PathBuf,
     name: String,
@@ -51,7 +57,7 @@ struct ClassInfo {
 
 impl ScriptProperties {
     pub fn resolve_table_types(&self, text: &str, table: &mut crate::YamlTable) {
-        let Some(ProjectState::Ready(index)) = self.current_root.as_ref().and_then(|root| self.projects.get(root)) else { return };
+        let Some(index) = self.current_root.as_ref().and_then(|root| self.projects.get(root)).and_then(ProjectState::index) else { return };
         let Some(guid) = text.lines().find_map(|line| line.strip_prefix("  m_Script:")).and_then(guid_from_meta) else { return };
         let Some(class) = index.scripts.get(&guid).and_then(|path| index.script_class(path)) else { return };
         let fields = index.inherited_fields(class, &mut HashSet::new());
@@ -61,7 +67,7 @@ impl ScriptProperties {
     }
     pub fn script_name(&self, text: &str) -> Option<&str> {
         let root = self.current_root.as_ref()?;
-        let ProjectState::Ready(index) = self.projects.get(root)? else { return None };
+        let index = self.projects.get(root)?.index()?;
         let reference = text.lines().find_map(|line| line.strip_prefix("  m_Script:"))?;
         let guid = guid_from_meta(reference)?;
         let path = index.scripts.get(&guid)?;
@@ -81,10 +87,11 @@ impl ScriptProperties {
         if let Some(ProjectState::Loading(job)) = self.projects.get_mut(&root) {
             loop {
                 match job.receiver.try_recv() {
-                    Ok(ScanResult::Assets(assets)) => { job.assets = Some(assets); ctx.request_repaint(); }
+                    Ok(ScanResult::Cached(index)) => {job.assets=Some(index.assets.clone());job.cached=Some(index);ctx.request_repaint();}
+                    Ok(ScanResult::Assets(assets)) => { if job.cached.is_none() {job.assets = Some(assets);} ctx.request_repaint(); }
                     Ok(ScanResult::Complete(index)) => { completed = Some(index); break; }
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        completed = Some(ProjectIndex { assets: job.assets.clone().unwrap_or_default(), issues: 1, ..Default::default() });
+                        completed = Some(job.cached.take().unwrap_or_else(||ProjectIndex { assets: job.assets.clone().unwrap_or_default(), issues: 1, ..Default::default() }));
                         break;
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
@@ -92,6 +99,7 @@ impl ScriptProperties {
             }
             if let Some(assets) = &job.assets {
                 ctx.data_mut(|data| data.insert_temp(egui::Id::new("asset_catalog"), assets.clone()));
+                if let Some(index)=&job.cached {ctx.data_mut(|data|data.insert_temp(egui::Id::new("shader_properties"),index.shader_properties.clone()));}
             } else {
                 ctx.data_mut(|data| {
                     data.insert_temp(egui::Id::new("asset_catalog_loading"), true);
@@ -114,12 +122,18 @@ impl ScriptProperties {
     fn start_scan(&mut self, root: PathBuf, ctx: egui::Context) {
         let (sender, receiver) = mpsc::channel();
         let progress = Arc::new(ScanProgress::default());
-        self.projects.insert(root.clone(), ProjectState::Loading(ScanJob { receiver, assets: None, progress: progress.clone() }));
+        let cached=self.projects.remove(&root).and_then(|state|match state {ProjectState::Ready(index)=>Some(index),ProjectState::Loading(job)=>job.cached});
+        let assets=cached.as_ref().map(|index|index.assets.clone());
+        let load_disk=cached.is_none();
+        self.projects.insert(root.clone(), ProjectState::Loading(ScanJob { receiver, assets, cached, progress: progress.clone() }));
         std::thread::spawn(move || {
-            let index = scan_project(&root, &progress, |assets| {
+            let cache_path=index_cache_path(&root);
+            if load_disk {if let Some(index)=cache_path.as_ref().and_then(|path|read_index_cache(path,&root)) {let _=sender.send(ScanResult::Cached(index));ctx.request_repaint();}}
+            let mut index = scan_project(&root, &progress, |assets| {
                 let _ = sender.send(ScanResult::Assets(assets));
                 ctx.request_repaint();
             });
+            if let Some(path)=cache_path {if let Err(error)=write_index_cache(&path,&root,&index) {index.cache_error=Some(error);}}
             let _ = sender.send(ScanResult::Complete(index));
             ctx.request_repaint();
         });
@@ -130,7 +144,7 @@ impl ScriptProperties {
         if let Some(root) = &root {
             ui.horizontal(|ui| {
                 ui.small(crate::lf!("Unity 工程：{0}", root.display()));
-                if ui.button(crate::localization::tr("重新扫描脚本")).clicked() {
+                if ui.add_enabled(!matches!(self.projects.get(root),Some(ProjectState::Loading(_))),egui::Button::new(crate::localization::tr("重新扫描项目索引"))).clicked() {
                     self.start_scan(root.clone(), ui.ctx().clone());
                 }
             });
@@ -139,6 +153,9 @@ impl ScriptProperties {
         let script_guid = fields.iter().find(|field| field.name == "m_Script")
             .and_then(|field| guid_from_meta(&field.value));
         let index = root.as_ref().and_then(|root| self.projects.get(root));
+        if let Some(error)=index.and_then(ProjectState::index).and_then(|index|index.cache_error.as_ref()) {
+            ui.small(crate::localization::tr("索引缓存无法写入，下次启动将重新扫描。")).on_hover_text(error);
+        }
         if let Some(ProjectState::Loading(job)) = index {
             if job.assets.is_some() {
                 let done = job.progress.parsed.load(Ordering::Relaxed);
@@ -147,8 +164,8 @@ impl ScriptProperties {
                 if total > 0 {ui.add(egui::ProgressBar::new(done as f32 / total as f32).desired_width(ui.available_width()));}
             }
         }
-        let resolved = match index {
-            Some(ProjectState::Ready(index)) => script_guid.as_ref()
+        let resolved = match index.and_then(ProjectState::index) {
+            Some(index) => script_guid.as_ref()
                 .and_then(|guid| index.scripts.get(guid))
                 .and_then(|path| index.script_class(path))
                 .map(|class| (index, class)),
@@ -210,6 +227,47 @@ fn project_root(path: &Path) -> Option<PathBuf> {
     path.parent()?.ancestors()
         .find(|dir| dir.join("Assets").is_dir() && dir.join("ProjectSettings").is_dir())
         .map(Path::to_path_buf)
+}
+
+const INDEX_CACHE_SCHEMA:u32=1;
+#[derive(serde::Serialize,serde::Deserialize)]
+struct CachedProjectIndex {schema:u32,app_version:String,root:String,index:ProjectIndex}
+#[derive(serde::Serialize)]
+struct CachedProjectIndexRef<'a> {schema:u32,app_version:&'a str,root:String,index:&'a ProjectIndex}
+fn root_identity(root:&Path)->String {
+    let text=root.to_string_lossy().replace('\\',"/");
+    if cfg!(windows) {text.to_lowercase()}else{text}
+}
+fn index_cache_path(root:&Path)->Option<PathBuf> {
+    use sha2::{Digest,Sha256};
+    let directory=crate::last_open_dir_config_path()?.parent()?.join("project_indexes");
+    Some(directory.join(format!("{:x}.json",Sha256::digest(root_identity(root).as_bytes()))))
+}
+fn read_index_cache(path:&Path,root:&Path)->Option<ProjectIndex> {
+    if fs::metadata(path).ok()?.len()>256*1024*1024 {return None;}
+    let cache:CachedProjectIndex=serde_json::from_reader(std::io::BufReader::new(fs::File::open(path).ok()?)).ok()?;
+    if cache.schema!=INDEX_CACHE_SCHEMA || cache.app_version!=env!("CARGO_PKG_VERSION") || cache.root!=root_identity(root) {return None;}
+    let prefix=format!("{}/",root_identity(root).trim_end_matches('/'));
+    let valid=|path:&Path|root_identity(path).starts_with(&prefix) && !path.components().any(|p|matches!(p,std::path::Component::ParentDir));
+    if !cache.index.assets.values().chain(cache.index.scripts.values()).all(|path|valid(path)) || !cache.index.classes.values().flatten().all(|class|valid(&class.path)) {return None;}
+    Some(cache.index)
+}
+fn write_index_cache(path:&Path,root:&Path,index:&ProjectIndex)->Result<(),String> {
+    // An incomplete scan must not replace a usable cache.
+    if index.issues>0 && path.exists() {return Ok(());}
+    fs::create_dir_all(path.parent().ok_or("Missing cache directory")?).map_err(|e|e.to_string())?;
+    let temporary=path.with_extension(format!("{}.tmp",std::process::id()));
+    let result=(|| {
+        use std::io::Write;
+        let mut writer=std::io::BufWriter::new(fs::File::create(&temporary).map_err(|e|e.to_string())?);
+        serde_json::to_writer(&mut writer,&CachedProjectIndexRef{schema:INDEX_CACHE_SCHEMA,app_version:env!("CARGO_PKG_VERSION"),root:root_identity(root),index}).map_err(|e|e.to_string())?;
+        writer.flush().map_err(|e|e.to_string())?;
+        writer.get_ref().sync_all().map_err(|e|e.to_string())?;
+        drop(writer);
+        fs::rename(&temporary,path).map_err(|e|e.to_string())
+    })();
+    if result.is_err() {let _=fs::remove_file(&temporary);}
+    result
 }
 
 fn guid_from_meta(text: &str) -> Option<String> {
@@ -1579,6 +1637,33 @@ fn property_label(ui: &mut egui::Ui, name: &str, field_type: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn disk_index_roundtrip_replacement_and_invalid_cache() {
+        let folder=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("unity-yaml-index-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&folder).unwrap();
+        let root=folder.join("project");let path=folder.join("index.json");
+        let mut index=ProjectIndex::default();
+        Arc::make_mut(&mut index.assets).insert("guid".into(),root.join("Assets/a.prefab"));
+        index.scripts.insert("script".into(),root.join("Assets/a.cs"));
+        Arc::make_mut(&mut index.shader_properties).insert("shader".into(),HashMap::from([("_Color".into(),"Color".into())]));
+        index.classes.insert("Thing".into(),vec![ClassInfo{path:root.join("Assets/a.cs"),name:"Thing".into(),base:None,fields:BTreeMap::from([("active".into(),"bool".into())]),ranges:BTreeMap::new()}]);
+        write_index_cache(&path,&root,&index).unwrap();
+        let loaded=read_index_cache(&path,&root).unwrap();
+        assert_eq!(loaded.assets,index.assets);
+        assert_eq!(loaded.shader_properties,index.shader_properties);
+        assert_eq!(loaded.classes["Thing"][0].fields["active"],"bool");
+        assert!(read_index_cache(&path,&folder.join("other")).is_none());
+        Arc::make_mut(&mut index.assets).insert("new".into(),root.join("Assets/b.prefab"));
+        write_index_cache(&path,&root,&index).unwrap();
+        assert_eq!(read_index_cache(&path,&root).unwrap().assets.len(),2);
+        index.issues=1;Arc::make_mut(&mut index.assets).clear();
+        write_index_cache(&path,&root,&index).unwrap();
+        assert_eq!(read_index_cache(&path,&root).unwrap().assets.len(),2);
+        let state=ProjectState::Loading(ScanJob{receiver:mpsc::channel().1,assets:Some(loaded.assets.clone()),cached:Some(loaded),progress:Arc::new(ScanProgress::default())});
+        assert!(state.index().unwrap().classes.contains_key("Thing"));
+        fs::write(&path,"invalid").unwrap();assert!(read_index_cache(&path,&root).is_none());
+        fs::remove_file(&path).unwrap();fs::remove_dir(&folder).unwrap();
+    }
     #[test]
     fn particle_modules_split_nested_fields_and_keep_unconfirmed_types_readonly() {
         let fields=yaml_fields("ParticleSystem:\n  looping: 1\n  InitialModule:\n    enabled: 1\n    startLifetime:\n      scalar: 5\n");

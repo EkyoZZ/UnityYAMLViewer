@@ -3,10 +3,32 @@ use super::*;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration,Instant};
 type Source=(String,String);
+const SOURCE_BUDGET:usize=512*1024*1024;
+const EXPANSION_BUDGET:usize=512*1024*1024;
+const EXPANSION_DOCUMENT_LIMIT:usize=500_000;
 #[derive(Default)]
 pub(crate) struct Expanded {pub documents:Vec<Document>,pub picks:HashMap<String,String>,pub issues:Vec<String>,flags_cache:std::sync::Mutex<Option<(u64,Arc<HashMap<String,crate::hierarchy_controls::Flags>>)>>,deps:Vec<(PathBuf,Option<SystemTime>,u64)>}
 impl Expanded {
     pub(super) fn selection(&self,id:String) -> String {self.picks.get(&id).unwrap_or(&id).clone()}
+    pub(crate) fn hierarchy_object(&self,picked:&str)->Option<String> {
+        if let Some(doc)=self.documents.iter().find(|doc|doc.file_id==picked) {
+            return doc.game_object.clone().or_else(||(doc.type_name=="GameObject").then(||doc.file_id.clone()));
+        }
+        let candidates:HashSet<_>=self.documents.iter().filter(|doc|doc.type_name=="GameObject" && self.picks.get(&doc.file_id).is_some_and(|proxy|proxy==picked)).map(|doc|doc.file_id.as_str()).collect();
+        let transforms:HashMap<_,_>=self.documents.iter().filter(|doc|matches!(doc.type_name.as_str(),"Transform"|"RectTransform")).map(|doc|(doc.file_id.as_str(),doc)).collect();
+        let by_object:HashMap<_,_>=transforms.values().filter_map(|doc|Some((doc.game_object.as_deref()?,*doc))).collect();
+        self.documents.iter().filter(|doc|doc.type_name=="GameObject" && candidates.contains(doc.file_id.as_str())).find(|doc|{
+            let parent=by_object.get(doc.file_id.as_str()).and_then(|t|t.parent_transform.as_deref()).and_then(|id|transforms.get(id)).and_then(|t|t.game_object.as_deref());
+            parent.is_none_or(|id|!candidates.contains(id))
+        }).map(|doc|doc.file_id.clone())
+    }
+    pub(crate) fn hierarchy_ancestors(&self,object:&str)->HashSet<String> {
+        let transforms:HashMap<_,_>=self.documents.iter().filter(|doc|matches!(doc.type_name.as_str(),"Transform"|"RectTransform")).map(|doc|(doc.file_id.as_str(),doc)).collect();
+        let by_object:HashMap<_,_>=transforms.values().filter_map(|doc|Some((doc.game_object.as_deref()?,*doc))).collect();
+        let mut result=HashSet::new();let mut current=Some(object);
+        while let Some(id)=current {if !result.insert(id.to_owned()){break;} current=by_object.get(id).and_then(|t|t.parent_transform.as_deref()).and_then(|id|transforms.get(id)).and_then(|t|t.game_object.as_deref());}
+        result
+    }
     pub(super) fn flags(&self,base:&HashMap<String,crate::hierarchy_controls::Flags>) -> Arc<HashMap<String,crate::hierarchy_controls::Flags>> {
         use std::hash::{Hash,Hasher};
         let mut key=base.len() as u64;
@@ -73,40 +95,58 @@ impl Cache {
 struct Level {docs:Vec<Document>,sources:HashMap<Source,String>,ambiguous:HashSet<Source>,picks:HashMap<String,String>}
 struct Resolver<'a> {
     catalog:Option<&'a HashMap<String,PathBuf>>,stop:&'a AtomicBool,paused:&'a AtomicBool,
-    templates:HashMap<String,Vec<Document>>,stack:HashSet<String>,used:HashSet<String>,next:i64,
+    templates:HashMap<String,Arc<Vec<Document>>>,stack:HashSet<String>,used:HashSet<String>,next:i64,
     issues:Vec<String>,deps:Vec<(PathBuf,Option<SystemTime>,u64)>,bytes:usize,generated:usize,
+    generated_limit:usize,
 }
 impl<'a> Resolver<'a> {
     fn new(catalog:Option<&'a HashMap<String,PathBuf>>,stop:&'a AtomicBool,paused:&'a AtomicBool,docs:&[Document]) -> Self {
-        Self{catalog,stop,paused,templates:HashMap::new(),stack:HashSet::new(),used:docs.iter().map(|d|d.file_id.clone()).collect(),next:i64::MIN,issues:Vec::new(),deps:Vec::new(),bytes:0,generated:0}
+        Self{catalog,stop,paused,templates:HashMap::new(),stack:HashSet::new(),used:docs.iter().map(|d|d.file_id.clone()).collect(),next:i64::MIN,issues:Vec::new(),deps:Vec::new(),bytes:0,generated:0,generated_limit:EXPANSION_BUDGET}
     }
     fn id(&mut self) -> String {loop {let id=self.next.to_string();self.next+=1;if self.used.insert(id.clone()) {return id;}}}
-    fn template(&mut self,guid:&str) -> Option<Vec<Document>> {
+    fn template(&mut self,guid:&str,instance:&Document,level_docs:&[Document]) -> Option<Arc<Vec<Document>>> {
         if let Some(docs)=self.templates.get(guid) {return Some(docs.clone());}
         let path=self.catalog?.get(guid)?.clone();
+        if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("fbx")) {
+            let metadata=std::fs::metadata(&path).ok()?;
+            self.deps.push((path.clone(),metadata.modified().ok(),metadata.len()));
+            let meta=PathBuf::from(format!("{}.meta",path.display()));
+            if let Ok(m)=std::fs::metadata(&meta){self.deps.push((meta,m.modified().ok(),m.len()));}
+            match model_template(&path,guid,instance,level_docs) {
+                Ok(docs)=>{let docs=Arc::new(docs);self.templates.insert(guid.into(),docs.clone());return Some(docs);}
+                Err(error)=>{self.issues.push(format!("Model Prefab {}: {error}",path.display()));return None;}
+            }
+        }
         if !path.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab")) {return None;}
         let metadata=match std::fs::metadata(&path) {Ok(metadata)=>metadata,Err(_)=>{self.deps.push((path,None,0));return None;}};
-        if metadata.len()>64*1024*1024 || self.bytes+metadata.len() as usize>256*1024*1024 {return None;}
+        if metadata.len()>64*1024*1024 || self.bytes+metadata.len() as usize>SOURCE_BUDGET {self.issues.push(format!("Prefab template budget exceeded: {} (single file limit 64 MiB, total 512 MiB)",path.display()));return None;}
         self.deps.push((path.clone(),metadata.modified().ok(),metadata.len()));
         let text=std::fs::read_to_string(path).ok()?;self.bytes+=text.len();
-        let docs=crate::parse_unity_yaml_cancellable(&text,Some(self.stop));self.templates.insert(guid.into(),docs.clone());Some(docs)
+        let docs=Arc::new(crate::parse_unity_yaml_cancellable(&text,Some(self.stop)));self.templates.insert(guid.into(),docs.clone());Some(docs)
     }
     fn level(&mut self,docs:&[Document],guid:Option<&str>,pick:Option<&str>,depth:usize) -> Level {
         let mut result=Level::default();let mut ids=HashMap::new();
         for doc in docs {ids.insert(doc.file_id.clone(),if guid.is_some() {self.id()}else {doc.file_id.clone()});}
         let mut aliases=HashMap::new();
+        // Index once per level rather than scanning every document for each instance.
+        let mut instance_refs:HashMap<String,Vec<&Document>>=HashMap::new();
+        for item in docs {
+            if let Some(instance)=reference_field(&item.text,"m_PrefabInstance").and_then(|v|reference(&v,"fileID")).filter(|id|id!="0") {
+                instance_refs.entry(instance).or_default().push(item);
+            }
+        }
         for doc in docs.iter().filter(|d|d.type_name=="PrefabInstance") {
             if !checkpoint(self.stop,Some(self.paused)) {return result;}
             let source=reference_field(&doc.text,"m_SourcePrefab").and_then(|v|reference(&v,"guid")).map(|s|s.to_lowercase());
             let Some(source)=source else {self.issues.push(format!("PrefabInstance {}: missing source GUID",doc.file_id));continue;};
             if depth>=16 || self.stack.contains(&source) {self.issues.push(format!("PrefabInstance {}: recursive reference or depth limit",doc.file_id));continue;}
-            let Some(template)=self.template(&source) else {self.issues.push(format!("PrefabInstance {}: source {} unavailable or exceeds preview budget",doc.file_id,source));continue;};
+            let Some(template)=self.template(&source,doc,docs) else {self.issues.push(format!("PrefabInstance {}: source {} unavailable or exceeds preview budget",doc.file_id,source));continue;};
             self.stack.insert(source.clone());
             let proxy=pick.unwrap_or(&doc.file_id);
             let mut child=self.level(&template,Some(&source),Some(proxy),depth+1);
             self.stack.remove(&source);
             let mut renamed=HashMap::new();
-            for stripped in docs.iter().filter(|d|reference_field(&d.text,"m_PrefabInstance").and_then(|v|reference(&v,"fileID")).as_deref()==Some(doc.file_id.as_str())) {
+            for stripped in instance_refs.get(&doc.file_id).into_iter().flatten() {
                 if let Some((g,id))=reference_field(&stripped.text,"m_CorrespondingSourceObject").and_then(|v|source_ref(&v)) {
                     if let Some(actual)=child.sources.get(&(g,id)) {
                         let alias=ids[&stripped.file_id].clone();renamed.insert(actual.clone(),alias.clone());aliases.insert(stripped.file_id.clone(),alias);
@@ -120,7 +160,11 @@ impl<'a> Resolver<'a> {
             }
             let lookup:HashMap<_,_>=child.docs.iter().enumerate().map(|(i,d)|(d.file_id.clone(),i)).collect();
             for modification in modifications(&doc.text) {
-                let Some(target)=child.sources.get(&modification.target) else {self.issues.push(format!("PrefabInstance {}: override target not resolved",doc.file_id));continue;};
+                let Some(target)=child.sources.get(&modification.target) else {
+                    let absent=modification.target.0==source && !template.iter().any(|d|d.file_id==modification.target.1);
+                    let reason=if absent {"absent from source asset (stale override)"}else{"not resolved"};
+                    self.issues.push(format!("PrefabInstance {}: override target {}/{} {reason} ({})",doc.file_id,modification.target.0,modification.target.1,modification.path));continue;
+                };
                 let Some(index)=lookup.get(target) else {continue;};
                 let resolved_object=source_ref(&modification.object).and_then(|source|child.sources.get(&source)).map(|id|format!("{{fileID: {id}}}"));
                 let value=if let Some(reference)=resolved_object {reference} else if modification.object.starts_with('{') && (reference(&modification.object,"fileID").is_some_and(|id|id!="0") || field(&child.docs[*index].text,&modification.path).is_some_and(|value|value.starts_with("{fileID:"))) {rewrite_refs(&modification.object,&ids)} else {modification.value};
@@ -135,17 +179,13 @@ impl<'a> Resolver<'a> {
             }
             child.docs.retain(|d|!removed.contains(&d.file_id));
             let parent=reference_field(&doc.text,"m_TransformParent").and_then(|v|reference(&v,"fileID")).unwrap_or_else(||"0".into());
-            let holder=self.id();
             let roots:Vec<_>=child.docs.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform") && d.parent_transform.as_deref().is_none_or(|id|id=="0")).map(|d|d.file_id.clone()).collect();
             for item in &mut child.docs {if roots.contains(&item.file_id) {
-                let father=if item.type_name=="RectTransform" {ids.get(&parent).unwrap_or(&parent)} else {&holder};
+                let father=ids.get(&parent).unwrap_or(&parent);
                 patch(item,"m_Father",&format!("{{fileID: {father}}}"));
             }}
-            let holder_doc=Document{file_id:holder.clone(),type_name:"Transform".into(),start_line:0,start_offset:0,
-                text:format!("Transform:\n  m_LocalPosition: {{x: 0, y: 0, z: 0}}\n  m_LocalRotation: {{x: 0, y: 0, z: 0, w: 1}}\n  m_LocalScale: {{x: 1, y: 1, z: 1}}\n  m_Father: {{fileID: {}}}\n",ids.get(&parent).unwrap_or(&parent)).into(),game_object:None,parent_transform:Some(ids.get(&parent).unwrap_or(&parent).clone())};
-            child.docs.push(holder_doc);
             for field in ["m_AddedComponents","m_AddedGameObjects"] {if doc.text.lines().any(|line|line.trim().starts_with(&format!("{field}:")) && !line.trim().ends_with("[]")) {self.issues.push(format!("PrefabInstance {}: {} uses serialized local documents; insertion order may be approximate",doc.file_id,field));}}
-            self.issues.truncate(256);
+            limit_issues(&mut self.issues);
             result.docs.extend(child.docs);
             result.ambiguous.extend(child.ambiguous);
             for source in &result.ambiguous {result.sources.remove(source);}
@@ -159,7 +199,7 @@ impl<'a> Resolver<'a> {
             if !checkpoint(self.stop,Some(self.paused)) {return result;}
             if doc.type_name=="PrefabInstance" || doc.text.lines().next().is_some_and(|line|line.ends_with(" stripped")) {continue;}
             let mut copy=doc.clone();
-            if guid.is_some() {remap(&mut copy,&ids);self.generated+=copy.text.len();if self.generated>256*1024*1024 || result.docs.len()>250_000 {self.issues.push("Prefab expansion exceeds preview budget".into());break;}}
+            if guid.is_some() {remap(&mut copy,&ids);self.generated+=copy.text.len();if self.generated>self.generated_limit || result.docs.len()>EXPANSION_DOCUMENT_LIMIT {let issue=format!("Prefab expansion budget exceeded ({} MiB text, {} documents)",self.generated_limit/(1024*1024),EXPANSION_DOCUMENT_LIMIT);if !self.issues.contains(&issue){self.issues.push(issue);}break;}}
             else {let changed=copy.game_object.as_ref().is_some_and(|id|aliases.contains_key(id))||copy.parent_transform.as_ref().is_some_and(|id|aliases.contains_key(id));if changed {remap(&mut copy,&ids);}}
             if let Some(guid)=guid {result.sources.insert((guid.into(),doc.file_id.clone()),copy.file_id.clone());}
             if let Some(proxy)=pick {result.picks.insert(copy.file_id.clone(),proxy.into());}
@@ -170,6 +210,9 @@ impl<'a> Resolver<'a> {
         result
     }
 }
+fn limit_issues(issues:&mut Vec<String>) {
+    if issues.len()>256 {issues.sort_by_key(|issue|!issue.contains("budget exceeded"));issues.truncate(256);}
+}
 fn reference_field(text:&str,key:&str) -> Option<String> {
     let mut lines=text.lines();
     while let Some(line)=lines.next() {
@@ -177,6 +220,60 @@ fn reference_field(text:&str,key:&str) -> Option<String> {
         if let Some(value)=value {let mut value=value.trim().to_owned();while value.starts_with('{') && !value.contains('}') {value.push(' ');value.push_str(lines.next()?.trim());}return Some(value);}
     }
     None
+}
+/// A single imported mesh node has unique GO/Transform/Renderer roles. Source
+/// IDs are taken from serialized typed references, never computed from names.
+fn model_template(path:&std::path::Path,guid:&str,instance:&Document,docs:&[Document])->Result<Vec<Document>,String> {
+    if std::fs::metadata(path).map_err(|e|e.to_string())?.len()>64*1024*1024{return Err("FBX exceeds 64 MiB".into());}
+    let mut opts=ufbx::LoadOpts::default();opts.ignore_animation=true;opts.ignore_embedded=true;
+    opts.temp_allocator.memory_limit=128*1024*1024;opts.result_allocator.memory_limit=128*1024*1024;
+    let scene=ufbx::load_file(path.to_str().ok_or("Invalid FBX path")?,opts).map_err(|e|format!("FBX import failed: {e:?}"))?;
+    let nodes:Vec<_>=scene.nodes.iter().filter(|n|!n.is_root).collect();
+    if nodes.len()!=1 || nodes[0].mesh.is_none(){return static_skin_template(path,guid,instance,docs,&scene);}
+    let local=nodes[0].local_transform;
+    if [local.translation.x,local.translation.y,local.translation.z,local.rotation.x,local.rotation.y,local.rotation.z,local.scale.x,local.scale.y,local.scale.z,local.rotation.w].iter().any(|v|!v.is_finite()){return Err("Non-finite FBX root transform".into());}
+    let mut roles:HashMap<&str,HashSet<String>>=HashMap::new();
+    for modification in modifications(&instance.text) {
+        if modification.target.0!=guid {continue;}
+        let role=if modification.path.starts_with("m_Local") {Some("Transform")}else if modification.path.starts_with("m_Materials") || modification.path.starts_with("m_Sorting") || modification.path=="m_Enabled" {Some("MeshRenderer")}else if matches!(modification.path.as_str(),"m_Name"|"m_IsActive"|"m_Layer"|"m_TagString") {Some("GameObject")}else{None};
+        if let Some(role)=role {roles.entry(role).or_default().insert(modification.target.1);}
+    }
+    for doc in docs.iter().filter(|d|reference_field(&d.text,"m_PrefabInstance").and_then(|v|reference(&v,"fileID")).as_deref()==Some(instance.file_id.as_str())) {
+        if let Some((g,id))=reference_field(&doc.text,"m_CorrespondingSourceObject").and_then(|v|source_ref(&v)) {
+            if g==guid && matches!(doc.type_name.as_str(),"GameObject"|"Transform"|"MeshRenderer") {let role=match doc.type_name.as_str(){"GameObject"=>"GameObject","Transform"=>"Transform",_=>"MeshRenderer"};roles.entry(role).or_default().insert(id);}
+        }
+    }
+    let unique=|role:&str|->Result<String,String>{let ids=roles.get(role).ok_or_else(||format!("Missing typed source ID for {role}"))?;if ids.len()!=1{return Err(format!("Ambiguous source IDs for {role}"));}Ok(ids.iter().next().unwrap().clone())};
+    let go=unique("GameObject")?;let transform=unique("Transform")?;let renderer=unique("MeshRenderer")?;
+    if [&go,&transform,&renderer].into_iter().collect::<HashSet<_>>().len()!=3{return Err("Conflicting Model Prefab source IDs".into());}
+    if [&go,&transform,&renderer].iter().any(|id|id.as_str()=="3300000"){return Err("Model Prefab virtual MeshFilter ID conflicts with a source object".into());}
+    let filter="__model_mesh_filter";
+    // Virtual filter IDs are local to the synthesized template and remapped
+    // before being exposed as scene documents.
+    let name=path.file_stem().unwrap_or_default().to_string_lossy();
+    let text=format!("--- !u!1 &{go}\nGameObject:\n  m_Name: {name}\n  m_IsActive: 1\n  m_Component:\n  - component: {{fileID: {transform}}}\n  - component: {{fileID: {filter}}}\n  - component: {{fileID: {renderer}}}\n--- !u!4 &{transform}\nTransform:\n  m_GameObject: {{fileID: {go}}}\n  m_LocalPosition: {{x: 0, y: 0, z: 0}}\n  m_LocalRotation: {{x: 0, y: 0, z: 0, w: 1}}\n  m_LocalScale: {{x: 1, y: 1, z: 1}}\n  m_LocalEulerAnglesHint: {{x: 0, y: 0, z: 0}}\n  m_Children: []\n  m_Father: {{fileID: 0}}\n--- !u!33 &3300000\nMeshFilter:\n  m_GameObject: {{fileID: {go}}}\n  m_Mesh: {{fileID: 4300000, guid: {guid}, type: 3}}\n--- !u!23 &{renderer}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n  m_Materials:\n  - {{fileID: 0}}\n  m_SortingLayerID: 0\n  m_SortingLayer: 0\n  m_SortingOrder: 0\n");
+    let meta=std::fs::read_to_string(format!("{}.meta",path.display())).unwrap_or_default();
+    let scale=crate::model_preview::importer_scale(&meta,scene.settings.unit_meters)?;
+    let text=text.replace(filter,"3300000")
+        .replace("m_LocalPosition: {x: 0, y: 0, z: 0}",&format!("m_LocalPosition: {{x: {}, y: {}, z: {}}}",-local.translation.x*scale,local.translation.y*scale,local.translation.z*scale))
+        .replace("m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}",&format!("m_LocalRotation: {{x: {}, y: {}, z: {}, w: {}}}",local.rotation.x,-local.rotation.y,-local.rotation.z,local.rotation.w))
+        .replace("m_LocalScale: {x: 1, y: 1, z: 1}",&format!("m_LocalScale: {{x: {}, y: {}, z: {}}}",local.scale.x,local.scale.y,local.scale.z));
+    Ok(crate::parse_unity_yaml(&text))
+}
+fn static_skin_template(path:&std::path::Path,guid:&str,instance:&Document,docs:&[Document],scene:&ufbx::Scene)->Result<Vec<Document>,String> {
+    let meshes:Vec<_>=scene.nodes.iter().filter(|n|n.mesh.is_some()).collect();
+    if meshes.len()!=1 || meshes[0].mesh.as_ref().unwrap().skin_deformers.is_empty(){return Err("Static Model Prefab requires one skinned mesh".into());}
+    let source_id=|kind:&str|->Result<String,String>{
+        let ids:HashSet<_>=docs.iter().filter(|d|d.type_name==kind && reference_field(&d.text,"m_PrefabInstance").and_then(|v|reference(&v,"fileID")).as_deref()==Some(instance.file_id.as_str())).filter_map(|d|reference_field(&d.text,"m_CorrespondingSourceObject").and_then(|v|source_ref(&v))).filter(|(g,_)|g==guid).map(|(_,id)|id).collect();
+        if ids.len()!=1{return Err(format!("Ambiguous or missing static skinned {kind} source ID"));}Ok(ids.into_iter().next().unwrap())
+    };
+    let transform=source_id("Transform")?;let renderer=source_id("SkinnedMeshRenderer")?;
+    let go="-1";if transform==go || renderer==go || renderer==transform{return Err("Static skinned source ID conflict".into());}
+    let meta=std::fs::read_to_string(format!("{}.meta",path.display())).unwrap_or_default();
+    let material=meta.lines().find_map(|l|l.trim().strip_prefix("second:")).unwrap_or("{fileID: 0}");
+    let name=path.file_stem().unwrap_or_default().to_string_lossy();
+    let text=format!("--- !u!1 &{go}\nGameObject:\n  m_Name: {name}\n  m_IsActive: 1\n  m_Component:\n  - component: {{fileID: {transform}}}\n  - component: {{fileID: {renderer}}}\n--- !u!4 &{transform}\nTransform:\n  m_GameObject: {{fileID: {go}}}\n  m_LocalPosition: {{x: 0, y: 0, z: 0}}\n  m_LocalRotation: {{x: 0, y: 0, z: 0, w: 1}}\n  m_LocalScale: {{x: 1, y: 1, z: 1}}\n  m_Father: {{fileID: 0}}\n  m_Children: []\n--- !u!137 &{renderer}\nSkinnedMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n  m_Mesh: {{fileID: 4300000, guid: {guid}, type: 3}}\n  m_Materials:\n  - {material}\n  m_SortingOrder: 0\n  m_Bones: []\n  preview_FbxStaticPose: 1\n");
+    Ok(crate::parse_unity_yaml(&text))
 }
 fn source_ref(value:&str) -> Option<Source> {Some((reference(value,"guid")?.to_lowercase(),reference(value,"fileID")?))}
 fn rewrite_refs(text:&str,ids:&HashMap<String,String>) -> String {
@@ -222,6 +319,15 @@ fn removed_references(text:&str) -> Vec<Source> {
     result
 }
 fn patch(doc:&mut Document,path:&str,value:&str) -> bool {
+    if let Some(index)=path.strip_prefix("m_Materials.Array.data[").and_then(|p|p.strip_suffix(']')).and_then(|p|p.parse::<usize>().ok()) {
+        if index>=64{return false;}
+        let mut lines:Vec<String>=doc.text.lines().map(str::to_owned).collect();
+        let Some(start)=lines.iter().position(|l|l.trim()=="m_Materials:" || l.trim()=="m_Materials: []") else{return false;};
+        let end=(start+1..lines.len()).find(|i|!lines[*i].trim_start().starts_with('-')).unwrap_or(lines.len());
+        let mut entries=lines[start+1..end].to_vec();
+        while entries.len()<=index {entries.push("  - {fileID: 0}".into());}
+        entries[index]=format!("  - {value}");lines[start]="  m_Materials:".into();lines.splice(start+1..end,entries);doc.text=lines.join("\n").into();return true;
+    }
     if path.is_empty() || path.contains("Array.") {return false;}
     let parts:Vec<_>=path.split('.').collect();let mut lines:Vec<String>=doc.text.lines().map(str::to_owned).collect();
     let mut range=0..lines.len();let mut indent=2;
@@ -245,12 +351,134 @@ fn patch(doc:&mut Document,path:&str,value:&str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "Requires the user's g003 project"]
+    fn real_seagull_static_pose() {
+        let root=PathBuf::from("C:/Git/g003_client/Assets/Res");
+        let path=root.join("Role/Seagull/seagull_skin.fbx");
+        let source=std::fs::read_to_string(root.join("Prefabs/Map/Npc/seagull.prefab")).unwrap();
+        let docs=crate::parse_unity_yaml(&source);
+        let instance=docs.iter().find(|d|d.type_name=="PrefabInstance").unwrap();
+        let template=model_template(&path,"fd3513352b6517145b14a132e4f4d679",instance,&docs).unwrap();
+        let renderer=template.iter().find(|d|d.type_name=="SkinnedMeshRenderer").unwrap();
+        assert!(renderer.text.contains("preview_FbxStaticPose: 1"));
+        let mut catalog=HashMap::new();catalog.insert("fd3513352b6517145b14a132e4f4d679".into(),path);
+        catalog.insert("13cefc8f233d2544fb5b6675f01ec432".into(),root.join("Role/Seagull/seagull_m.mat"));
+        catalog.insert("1587872b19ad62e4ea60b8928838410d".into(),root.join("Role/Seagull/seagull_t.tga"));
+        let mesh=crate::static_preview::field(&renderer.text,"m_Mesh").unwrap();
+        let (image,warnings)=crate::model_preview::bake(mesh,&renderer.text,&catalog,crate::static_preview::Matrix::identity(),&HashMap::new(),None).unwrap();
+        assert!(image.image.pixels.iter().any(|p|p.a()>0));
+        assert!(!warnings.iter().any(|w|w.contains("贴图")));
+        assert!(warnings.iter().any(|w|w.contains("static imported pose")));
+    }
     use super::*;
+    #[test]
+    fn budget_warning_remains_visible_when_other_warnings_are_capped() {
+        let mut issues=(0..256).map(|i|format!("ordinary warning {i}")).collect::<Vec<_>>();
+        issues.push("Prefab expansion budget exceeded".into());limit_issues(&mut issues);
+        assert_eq!(issues.len(),256);assert!(issues[0].contains("budget exceeded"));
+    }
+    #[test]
+    #[ignore="Requires UNITY_SHADER_TEST_PROJECT and its existing on-disk index"]
+    fn real_floor_expansion_budget() {
+        use sha2::{Digest,Sha256};
+        #[derive(serde::Deserialize)] struct Cached {index:Index}
+        #[derive(serde::Deserialize)] struct Index {assets:HashMap<String,PathBuf>}
+        let root=PathBuf::from(std::env::var("UNITY_SHADER_TEST_PROJECT").unwrap());
+        let identity=root.to_string_lossy().replace('\\',"/").to_lowercase();
+        let cache=crate::last_open_dir_config_path().unwrap().parent().unwrap().join("project_indexes").join(format!("{:x}.json",Sha256::digest(identity.as_bytes())));
+        let cached:Cached=serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(cache).unwrap())).unwrap();
+        let docs=crate::parse_unity_yaml(&std::fs::read_to_string(root.join("Assets/Scenes/Map/Level_101_Scene.unity")).unwrap());
+        let stop=AtomicBool::new(false);let paused=AtomicBool::new(false);
+        for budget in [256*1024*1024,EXPANSION_BUDGET] {
+            let mut resolver=Resolver::new(Some(&cached.index.assets),&stop,&paused,&docs);resolver.generated_limit=budget;
+            let result=resolver.level(&docs,None,None,0);
+            let (_,children,_,_)=crate::build_tree(&result.docs);
+            let group=result.docs.iter().find(|doc|doc.type_name=="GameObject" && crate::name_from_text(&doc.text).as_deref()==Some("new_home_decoration")).unwrap();
+            let mut pending=children.get(&group.file_id).cloned().unwrap_or_default();
+            println!("new_home_decoration children={}",pending.len());
+            let mut visited=HashSet::new();let mut names=HashSet::new();
+            while let Some(index)=pending.pop(){if !visited.insert(index){continue;}let doc=&result.docs[index];if let Some(name)=crate::name_from_text(&doc.text){names.insert(name);}if let Some(child)=children.get(&doc.file_id){pending.extend(child.iter().copied());}}
+            let missing:Vec<_>=["new_initial_floor_3_design","new_initial_floor_4_design","new_initial_wallpaper_4_design"].into_iter().filter(|name|!names.contains(*name)).collect();
+            println!("budget={} MiB generated={} MiB docs={} missing={:?}",budget/(1024*1024),resolver.generated/(1024*1024),result.docs.len(),missing);
+            for issue in resolver.issues.iter().filter(|issue|issue.contains("budget")) {println!("{issue}");}
+            if budget==EXPANSION_BUDGET {assert!(missing.is_empty(),"{missing:?}");}
+        }
+    }
+    #[test]
+    fn picked_instances_locate_their_own_expanded_roots() {
+        let scene=format!("--- !u!1 &1\nGameObject:\n  m_Name: parent\n--- !u!4 &2\nTransform:\n  m_GameObject: {{fileID: 1}}\n  m_Father: {{fileID: 0}}\n{}{}",instance(100,"a",5),instance(200,"a",-5));
+        let level=expand(&scene,&[("a",TEMPLATE)]);
+        let data=Expanded{documents:level.docs,picks:level.picks,..Default::default()};
+        let first=data.hierarchy_object("100").unwrap();let second=data.hierarchy_object("200").unwrap();
+        assert_ne!(first,second);
+        let ancestors=data.hierarchy_ancestors(&first);
+        assert!(ancestors.contains("1") && ancestors.contains(&first));
+        assert!(!ancestors.contains(&second));
+        let renderer=data.documents.iter().find(|doc|doc.type_name=="SpriteRenderer" && doc.game_object.as_ref()==Some(&first)).unwrap();
+        assert_eq!(data.hierarchy_object(&renderer.file_id),Some(first));
+        assert!(data.hierarchy_object("unknown").is_none());
+    }
+    #[test]
+    #[ignore="Requires UNITY_SHADER_TEST_PROJECT"]
+    fn real_garden_scene_renderer_overrides() {
+        let root=PathBuf::from(std::env::var("UNITY_SHADER_TEST_PROJECT").unwrap());
+        let scene=std::fs::read_to_string(root.join("Assets/Scenes/Map/Level_101_Scene.unity")).unwrap();
+        let start=scene.find("--- !u!1001 &1640878127").unwrap();
+        let end=start+scene[start+1..].find("--- !u!").unwrap()+1;
+        let template=std::fs::read_to_string(root.join("Assets/Res/Prefabs/MapDesign/BuildingDesign/garden_bed_design.prefab")).unwrap();
+        let level=expand(&scene[start..end],&[("6b155e57ad4ca804198a5b49d547739f",&template)]);
+        for renderer in level.docs.iter().filter(|d|d.type_name=="SpriteRenderer") {
+            println!("{} {:?} order={} sprite={}",renderer.file_id,renderer.game_object,field(&renderer.text,"m_SortingOrder").unwrap(),field(&renderer.text,"m_Sprite").unwrap());
+            let expected=if renderer.text.contains("3a2fa0aeef75d4e78ab93bcdcfcc2a43") {"2000"} else {"7464"};
+            assert_eq!(field(&renderer.text,"m_SortingOrder"),Some(expected));
+        }
+        assert_eq!(level.docs.iter().filter(|d|d.type_name=="SpriteRenderer").count(),3);
+    }
+    #[test]
+    #[ignore="Requires UNITY_SHADER_TEST_PROJECT"]
+    fn real_beach_model_prefab_hierarchy() {
+        let root=PathBuf::from(std::env::var("UNITY_SHADER_TEST_PROJECT").unwrap());
+        let docs=crate::parse_unity_yaml(&std::fs::read_to_string(root.join("Assets/Res/Prefabs/Map/Level101/map_land.prefab")).unwrap());
+        let mut catalog=HashMap::new();
+        for name in ["map_101_beach","map_101_beach2","map_101_beach3","map_101_beach4"] {
+            let path=root.join(format!("Assets/Res/Mesh/Map/{name}.FBX"));
+            let meta=std::fs::read_to_string(format!("{}.meta",path.display())).unwrap();
+            let guid=meta.lines().find_map(|l|l.strip_prefix("guid: ")).unwrap();catalog.insert(guid.to_owned(),path);
+        }
+        let stop=AtomicBool::new(false);let paused=AtomicBool::new(false);
+        let mut resolver=Resolver::new(Some(&catalog),&stop,&paused,&docs);let result=resolver.level(&docs,None,None,0);
+        for guid in catalog.keys(){assert!(resolver.templates.contains_key(guid),"{}: {:?}",guid,resolver.issues);}
+        let beach=result.docs.iter().find(|d|d.file_id=="4130157995768155313").unwrap();
+        assert_eq!(beach.parent_transform.as_deref(),Some("768023218"));
+        assert!(beach.text.contains("x: -1680"));
+        assert!(result.docs.iter().any(|d|d.type_name=="MeshRenderer" && d.text.contains("bfa5a729023b88d4e9c3113e110721a5")));
+    }
+    #[test]
+    #[ignore="Requires UNITY_SHADER_TEST_PROJECT"]
+    fn real_effect_override_targets() {
+        let root=PathBuf::from(std::env::var("UNITY_SHADER_TEST_PROJECT").unwrap());
+        let source=root.join("Assets/Res/Prefabs/Effect/dns_night_home_door_effect.prefab");
+        let catalog=HashMap::from([("6a67288b572d5374ca999087ec3355b5".into(),source)]);
+        let docs=crate::parse_unity_yaml(&std::fs::read_to_string(root.join("Assets/Res/Prefabs/Map/Level101/map_land.prefab")).unwrap());
+        let instance=docs.iter().find(|d|d.file_id=="1395338311").unwrap().clone();
+        let stop=AtomicBool::new(false);let paused=AtomicBool::new(false);let mut resolver=Resolver::new(Some(&catalog),&stop,&paused,&docs);
+        let result=resolver.level(&[instance],None,None,0);
+        assert_eq!(resolver.issues.len(),3,"{:?}",resolver.issues);
+        for id in ["6720468148848614069","6720468149440723645","6720468149850780655"] {
+            assert!(resolver.issues.iter().any(|e|e.contains(id) && e.contains("absent from source asset")));
+        }
+        for id in ["6720468148054464119","6720468148055709344"] {
+            let mapped=&result.sources[&("6a67288b572d5374ca999087ec3355b5".into(),id.into())];
+            let object=result.docs.iter().find(|d|d.file_id==*mapped).unwrap();
+            assert_eq!(field(&object.text,"m_IsActive"),Some("1"));
+        }
+    }
     const TEMPLATE:&str="--- !u!1 &10\nGameObject:\n  m_Name: source\n  m_IsActive: 1\n--- !u!4 &11\nTransform:\n  m_GameObject: {fileID: 10}\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}\n  m_LocalScale: {x: 1, y: 1, z: 1}\n  m_Father: {fileID: 0}\n--- !u!212 &12\nSpriteRenderer:\n  m_GameObject: {fileID: 10}\n  m_Enabled: 1\n  m_Sprite: {fileID: 21300000, guid: texture, type: 3}\n";
     fn instance(id:i64,guid:&str,x:i64) -> String {format!("--- !u!1001 &{id}\nPrefabInstance:\n  m_Modification:\n    m_TransformParent: {{fileID: 2}}\n    m_Modifications:\n    - target: {{fileID: 11, guid: {guid},\n        type: 3}}\n      propertyPath: m_LocalPosition.x\n      value: {x}\n      objectReference: {{fileID: 0}}\n  m_SourcePrefab: {{fileID: 100100000, guid: {guid}, type: 3}}\n")}
     fn expand(scene:&str,templates:&[(&str,&str)]) -> Level {
         let docs=crate::parse_unity_yaml(scene);let stop=AtomicBool::new(false);let paused=AtomicBool::new(false);let mut resolver=Resolver::new(None,&stop,&paused,&docs);
-        for (guid,text) in templates {resolver.templates.insert(guid.to_string(),crate::parse_unity_yaml(text));}
+        for (guid,text) in templates {resolver.templates.insert(guid.to_string(),Arc::new(crate::parse_unity_yaml(text)));}
         resolver.level(&docs,None,None,0)
     }
     #[test]
@@ -281,12 +509,15 @@ mod tests {
         let original=doc.text.clone();assert!(patch(&mut doc,"m_FontData.m_FontSize","28"));assert!(patch(&mut doc,"m_Color.a","0.5"));
         assert!(doc.text.contains("m_FontSize: 28"));assert!(doc.text.contains("a: 0.5"));assert!(original.contains("m_FontSize: 14"));
         assert!(!patch(&mut doc,"m_Children.Array.size","2"));
+        let mut renderer=crate::parse_unity_yaml("--- !u!23 &2\nMeshRenderer:\n  m_Materials:\n  - {fileID: 0}\n  m_SortingOrder: 0\n").remove(0);
+        assert!(patch(&mut renderer,"m_Materials.Array.data[0]","{fileID: 2100000, guid: beach, type: 2}"));
+        assert!(renderer.text.contains("guid: beach"));
         assert_eq!(rewrite_refs("{fileID: 12, guid: asset, type: 3}",&HashMap::from([("12".into(),"99".into())])),"{fileID: 12, guid: asset, type: 3}");
     }
     #[test]
     fn recursive_sources_are_bounded_and_cancelled_expansion_stops() {
         let docs=crate::parse_unity_yaml(&instance(1,"a",0));let stop=AtomicBool::new(false);let paused=AtomicBool::new(false);let mut resolver=Resolver::new(None,&stop,&paused,&docs);
-        resolver.templates.insert("a".into(),docs.clone());resolver.level(&docs,None,None,0);assert!(resolver.issues.iter().any(|issue|issue.contains("recursive")));
+        resolver.templates.insert("a".into(),Arc::new(docs.clone()));resolver.level(&docs,None,None,0);assert!(resolver.issues.iter().any(|issue|issue.contains("recursive")));
         stop.store(true,std::sync::atomic::Ordering::Relaxed);assert!(resolver.level(&docs,None,None,0).docs.is_empty());
     }
 }
