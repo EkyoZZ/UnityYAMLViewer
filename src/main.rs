@@ -42,6 +42,7 @@ mod hierarchy_controls;
 mod command_line;
 mod file_associations;
 mod media_history;
+mod playlist;
 mod app_cache;
 mod release_notes;
 use script_properties::ScriptProperties;
@@ -202,6 +203,8 @@ struct ViewerApp {
     saved_histories: HashMap<PathBuf, editing::Shared>,
     pending_save: Option<PathBuf>,
     pending_close_tab: Option<PathBuf>,
+    pending_playlist_close: Option<PathBuf>,
+    playlist_exit_requested: bool,
     show_settings: bool,
     settings: AppSettings,
     decoder_settings: media_tools::DecoderSettings,
@@ -588,6 +591,7 @@ impl ViewerApp {
         .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp"])
         .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
         .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
+        .add_filter(crate::localization::tr("播放列表"), &["m3u8", "m3u"])
         .add_filter(crate::localization::tr("视频"), &["mp4", "m4v", "mkv", "webm", "mov", "avi", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts", "3gp", "bytes"]);
         let dialog = if let Some(directory) = &self.last_open_dir {
             dialog.set_directory(directory)
@@ -616,7 +620,7 @@ impl ViewerApp {
             self.remember_recent_file();
             return;
         }
-        if (media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
+        if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -635,11 +639,30 @@ impl ViewerApp {
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
             self.load_reload.insert(path.clone());self.load_queue.push_back(path);
+            ctx.request_repaint();
+        }
+    }
+    fn playlist_close_dialog(&mut self,ctx:&egui::Context){
+        if self.playlist_exit_requested && self.pending_playlist_close.is_none(){
+            if let Some(path)=self.assets.playlist_dirty_paths().into_iter().next(){self.pending_playlist_close=Some(path);}
+            else{self.playlist_exit_requested=false;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}
+        }
+        let Some(path)=self.pending_playlist_close.clone() else{return;};
+        let mut save=false;let mut discard=false;let mut cancel=false;
+        native_window::Window::new(localization::tr("播放列表有未保存的修改")).id(egui::Id::new("playlist_close_confirm")).modal().resizable(false).default_width(380.0).show(ctx,|ui|{
+            ui.label(path.display().to_string());ui.label(localization::tr("保存列表修改后关闭，或放弃本次列表编辑？"));
+            if let Some(error)=self.assets.playlist_error(&path){ui.colored_label(ui.visuals().warn_fg_color,error);}
+            ui.horizontal(|ui|{save=ui.button(localization::tr("保存列表")).clicked();discard=ui.button(localization::tr("放弃修改")).clicked();cancel=ui.button(localization::tr("取消")).clicked();});
+        });
+        if cancel{self.pending_playlist_close=None;self.playlist_exit_requested=false;}
+        else if (save||discard)&&self.assets.resolve_playlist_dirty(&path,save){
+            self.pending_playlist_close=None;
+            if !self.playlist_exit_requested{if let Some(index)=self.tabs.iter().position(|tab|tab.path==path){self.close_tab(index,ctx);}}
             ctx.request_repaint();
         }
     }
@@ -686,6 +709,7 @@ impl ViewerApp {
     }
 
     fn close_tab(&mut self, index: usize, ctx: &egui::Context) {
+        if self.assets.playlist_dirty(&self.tabs[index].path){self.pending_playlist_close=Some(self.tabs[index].path.clone());return;}
         if let Some(session) = self.edits.get(&self.tabs[index].path) {
             if session.lock().unwrap().has_changes() {
                 self.pending_close_tab = Some(self.tabs[index].path.clone());
@@ -1276,6 +1300,7 @@ impl ViewerApp {
 impl eframe::App for ViewerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.assets.pause_media();
+        playlist::flush_writes();
         if let Some(error) = media_history::take_error() {
             rfd::MessageDialog::new().set_title("Unity YAML Viewer")
                 .set_description(crate::lf!("播放位置记录保存失败：{0}", error))
@@ -1285,12 +1310,13 @@ impl eframe::App for ViewerApp {
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         native_window::track_main_window(ctx);
+        self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
         if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
             if let Some(path)=self.path.as_deref(){self.assets.retry_media_decoder(path);}
             ctx.request_repaint();
         }
-        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_settings_request"))).unwrap_or(false) {self.show_settings=true;}
+        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_settings_request"))).unwrap_or(false) {native_window::wake(ctx,egui::Id::new("settings_window"));self.show_settings=true;}
         if let Some(path)=ctx.data_mut(|data|data.remove_temp::<PathBuf>(egui::Id::new("spine_window_request"))) {
             self.open_file_with_directory_tracking(path,false);
         }
@@ -1349,6 +1375,9 @@ impl eframe::App for ViewerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if let Some(session) = self.edits.values().next() { session.lock().unwrap().warning = Some(crate::localization::tr("仍有文件处于编辑模式，请先保存或放弃编辑，再关闭程序。").into()); }
         }
+        if ctx.input(|input|input.viewport().close_requested()) && self.edits.is_empty() && !self.assets.playlist_dirty_paths().is_empty(){
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);self.playlist_exit_requested=true;ctx.request_repaint();
+        }
         if self.selected.is_some() { self.last_selected = self.selected; }
         let dropped_paths = ctx.input(|input| {
             input
@@ -1362,6 +1391,24 @@ impl eframe::App for ViewerApp {
             self.open_file(path);
         }
 
+        if let Some(path)=ctx.data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("playlist_open"))){self.open_file(path);}
+        if let Some((media,list))=ctx.data_mut(|d|d.remove_temp::<(PathBuf,PathBuf)>(egui::Id::new("playlist_created"))) {
+            // Replace only the current media tab; other media tabs keep their ownership.
+            self.save_active_tab();
+            self.assets.invalidate_playlist(&list);
+            if let Some(index)=self.tabs.iter().position(|t|t.path==media) {
+                self.assets.forget(&media);
+                if let Some(existing)=self.tabs.iter().position(|t|t.path==list) {
+                    self.tabs.remove(index);
+                    self.activate_tab(if existing>index{existing-1}else{existing});
+                    self.assets.request_media_playback(&list);
+                } else {
+                    self.tabs[index]=ViewerTab {path:list.clone(),raw:"".into(),documents:Vec::new(),selected:None,status:String::new(),encoding:String::new()};
+                    self.activate_tab(index);
+                }
+                self.remember_recent_file();
+            }else{self.open_file(list);}
+        }
         if self.assets.media_fullscreen(ctx,self.path.as_deref()) {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ctx,|ui| {
                 ui.visuals_mut().clone_from(&egui::Visuals::dark());
@@ -1373,7 +1420,7 @@ impl eframe::App for ViewerApp {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::settings_button(ui).clicked() { self.show_settings = true; }
+                if theme::settings_button(ui).clicked() { native_window::wake(ctx,egui::Id::new("settings_window"));self.show_settings = true; }
                 let previous_theme = self.settings.theme.clone();
                 ui.push_id("toolbar_theme", |ui| theme::toolbar_selector(ui, &mut self.settings.theme));
                 if previous_theme != self.settings.theme {
@@ -1559,7 +1606,7 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
-        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -1723,7 +1770,7 @@ impl eframe::App for ViewerApp {
         }
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("inspector_hide_property_types"), self.preview.open));
         let mut content_frame=egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill);
-        if self.path.as_ref().is_some_and(|path|media_preview::is_media(path)) {content_frame=content_frame.inner_margin(egui::Margin::same(8));}
+        if self.path.as_ref().is_some_and(|path|playlist::is_playlist(path)||media_preview::is_media(path)) {content_frame=content_frame.inner_margin(egui::Margin::same(8));}
         egui::CentralPanel::default().frame(content_frame).show(ctx, |ui| {
             if reference_tab {
                 editing::publish(ctx, None, 0..0);
@@ -2061,7 +2108,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
+                    if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();
@@ -2094,6 +2141,7 @@ impl eframe::App for ViewerApp {
                 egui::Grid::new("application_settings").num_columns(2).spacing(egui::vec2(12.0, 16.0)).show(ui, |ui| {
                     settings_label(ui, crate::localization::tr("关于"));
                     if settings_control(ui, |ui| ui.add_sized([208.0, 30.0], egui::Button::new(crate::localization::tr("关于 Unity YAML Viewer")).wrap())).inner.clicked() {
+                        native_window::wake(ctx,egui::Id::new("about_window"));
                         self.show_about = true;
                         self.show_older_history = false;
                     }
@@ -2136,7 +2184,8 @@ impl eframe::App for ViewerApp {
                     if previous_depth != self.settings.hierarchy_depth {self.settings.persist();}
                     ui.end_row();
                     settings_label(ui, localization::tr("预览"));
-                    settings_control(ui, |ui| {
+                    settings_group(ui, "preview_toggle_settings_group", |ui| {
+                        ui.set_width(208.0);
                         if theme::toggle_switch(ui, localization::tr("可预览默认展开"), &mut self.settings.auto_open_preview).changed() {
                             self.settings.persist();
                         }
@@ -2161,6 +2210,7 @@ impl eframe::App for ViewerApp {
                     settings_group(ui, "app_cache_settings_group", |ui| {
                         ui.set_width(208.0);
                         let mut in_use: Vec<_> = self.tabs.iter().map(|tab| tab.path.clone()).collect();
+                        in_use.extend(self.assets.playlist_in_use());
                         if let Ok(executable) = std::env::current_exe() { in_use.push(executable); }
                         if let Some(directory) = self.updater.staged.as_ref().and_then(|path| path.parent()) { in_use.push(directory.to_owned()); }
                         let busy = self.url_job.is_some() || self.updater.downloading
@@ -2251,7 +2301,13 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 支持 HTTP / HTTPS 文件直链下载打开，浅色音频电平线更清晰"));
                         ui.label(localization::tr("• 设置集中管理文件关联与缓存清理，保留设置和最近文件"));
                         ui.label(localization::tr("• 音视频打开后自动播放并恢复上次位置，播放记录可清理；音量不显示数字"));
-                        ui.label(localization::tr("• 新开弹窗相对主窗口居中，初始尺寸稳定后仍可手动移动"));
+                        ui.label(localization::tr("• 弹窗新开或再次唤醒时居中并前置，设置长文案在右列换行"));
+                        ui.label(localization::tr("• 支持本地 M3U / M3U8 播放列表、独立续播与可调宽侧栏；HLS 暂不支持"));
+                        ui.label(localization::tr("• 音频列表支持顺序、随机及单曲循环；各列表片头片尾可按当前播放时间设置"));
+                        ui.label(localization::tr("• 列表播放以矢量下一项按钮替代停止，窗口与全屏一致"));
+                        ui.label(localization::tr("• 列表侧栏仅占媒体画面区域，信息与时间轴保持全宽；保存按钮居中放大"));
+                        ui.label(localization::tr("• 全屏播放列表采用半透明浮层，不挤占视频画面"));
+                        ui.label(localization::tr("• 音视频音频信息显示码率，列表箭头仅在媒体区域鼠标活动时显示"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.1.8").strong());
                         ui.label(localization::tr("• 场景接入有限 Built-in Sprite Shader GPU 预览；URP 与复杂 Shader 暂不支持"));

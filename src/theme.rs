@@ -214,8 +214,10 @@ pub fn preview_toggle(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
 pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
     let color=ui.visuals().text_color();
     let font=egui::TextStyle::Button.resolve(ui.style());
-    let galley=ui.painter().layout_no_wrap(label.to_owned(),font,color);
-    let (rect,mut response)=ui.allocate_exact_size(egui::vec2(galley.size().x+8.0+40.0,26.0),egui::Sense::click());
+    let width=ui.available_width().max(48.0);
+    let galley=ui.painter().layout(label.to_owned(),font,color,(width-48.0).max(1.0));
+    let height=galley.size().y.max(26.0);
+    let (rect,mut response)=ui.allocate_exact_size(egui::vec2(width,height),egui::Sense::click());
     if response.clicked() {*value=!*value;response.mark_changed();}
     response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Checkbox,ui.is_enabled(),*value,label));
     let rail=egui::Rect::from_center_size(egui::pos2(rect.right()-20.0,rect.center().y),egui::vec2(40.0,24.0));

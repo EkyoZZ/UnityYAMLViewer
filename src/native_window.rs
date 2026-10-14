@@ -29,6 +29,13 @@ struct Placement {
     stable: u8,
     last_size: Option<egui::Vec2>,
     closed: bool,
+    focused: Option<bool>,
+}
+
+/// An explicit reopen action also restores an existing dialog's placement and focus.
+pub fn wake(ctx:&egui::Context,id:egui::Id){
+    ctx.data_mut(|data|data.insert_temp(id.with("native_dialog_wake"),true));
+    ctx.request_repaint();
 }
 
 pub struct Window<'a> {
@@ -77,7 +84,8 @@ impl<'a> Window<'a> {
         let main = ctx.data(|data| data.get_temp::<MainBounds>(egui::Id::new("native_dialog_main_bounds")));
         let mut placement = ctx.data_mut(|data| data.get_temp::<Placement>(state_id)).unwrap_or_default();
         let exists = ctx.input(|input| input.raw.viewports.contains_key(&viewport_id));
-        let fresh = placement.closed || placement.last_pass.is_none_or(|last| pass.saturating_sub(last) > 1) || !exists;
+        let requested_wake=ctx.data_mut(|data|data.remove_temp::<bool>(self.id.with("native_dialog_wake"))).unwrap_or(false);
+        let fresh = requested_wake || placement.closed || placement.last_pass.is_none_or(|last| pass.saturating_sub(last) > 1) || !exists;
         if fresh { placement = Placement { pending: true, last_pass: Some(pass), ..Default::default() }; }
         placement.last_pass = Some(pass);
         if self.modal && !ctx.embed_viewports() {
@@ -105,6 +113,15 @@ impl<'a> Window<'a> {
                 if self.open.is_some() { window.open(&mut open).show(child_ctx, contents); }
                 else { window.show(child_ctx, contents); }
             } else {
+                let focused=child_ctx.input(|input|input.viewport().focused).unwrap_or(false);
+                let regained=placement.focused==Some(false)&&focused;
+                placement.focused=Some(focused);
+                if regained {placement.pending=true;placement.attempts=0;placement.stable=0;placement.last_size=None;}
+                if fresh||regained {
+                    child_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    child_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    child_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
                 if child_ctx.input(|input| input.viewport().close_requested()) {
                     open = false;
                     if self.open.is_none() { child_ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose); }

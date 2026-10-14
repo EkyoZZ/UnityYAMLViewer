@@ -104,6 +104,7 @@ impl ImageTab {
 }
 #[derive(Default)]
 pub struct Assets {
+    playlists: crate::playlist::Lists,
     media: HashMap<PathBuf, crate::media_preview::Preview>,
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
@@ -112,13 +113,15 @@ pub struct Assets {
 }
 impl Assets {
     pub fn request_media_playback(&mut self, path: &Path) {
+        self.playlists.request(path);
         if let Some(preview) = self.media.get_mut(path) { preview.request_playback(); }
     }
     pub fn retry_media_decoder(&mut self,path:&Path) {
+        self.playlists.retry(path);
         if let Some(preview)=self.media.get_mut(path){preview.retry_missing_decoder();}
     }
     pub fn media_fullscreen(&mut self,ctx:&egui::Context,path:Option<&Path>)->bool {
-        let video=path.and_then(|path|self.media.get(path)).is_some_and(|preview|preview.has_video());
+        let video=path.is_some_and(|path|self.playlists.has_video(path)||self.media.get(path).is_some_and(|preview|preview.has_video()));
         let fullscreen=crate::media_preview::is_fullscreen(ctx);
         let owner_id=egui::Id::new("media_fullscreen_path");
         let owner=ctx.data(|data|data.get_temp::<PathBuf>(owner_id));
@@ -131,23 +134,26 @@ impl Assets {
         fullscreen
     }
     pub fn show_media_fullscreen(&mut self,ui:&mut egui::Ui,path:&Path) {
+        if crate::playlist::is_playlist(path){self.playlists.show(ui,path,true);return;}
         if let Some(preview)=self.media.get_mut(path){preview.show(ui,path);}
     }
-    pub fn pause_media(&mut self) {for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
+    pub fn invalidate_playlist(&mut self,path:&Path){self.playlists.invalidate(path);}
+    pub fn playlist_error(&self,path:&Path)->Option<&str>{self.playlists.error(path)}
+    pub fn playlist_dirty(&self,path:&Path)->bool{self.playlists.dirty(path)}
+    pub fn playlist_dirty_paths(&self)->Vec<PathBuf>{self.playlists.dirty_paths()}
+    pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
+    pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
+    pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
+    pub fn forget(&mut self, path: &Path) { self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
             if other != path { tab.original = None; tab.texture = None; tab.pending = None; }
         }
+        if crate::playlist::is_playlist(path){self.playlists.show(ui,path,false);return;}
         if crate::media_preview::is_media(path) {
             let preview=self.media.entry(path.to_owned()).or_insert_with(|| crate::media_preview::Preview::new(path));
-            ui.horizontal_wrapped(|ui| {
-                ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
-                if let Some(bytes)=preview.file_size() {ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}
-                preview.header_controls(ui,path);
-            });
-            preview.show(ui,path);
+            self.playlists.show_creator(ui,path,preview);
             return;
         }
         ui.heading(path.file_name().unwrap_or_default().to_string_lossy());

@@ -522,3 +522,83 @@ URL 格式无效	URL 格式無效	Invalid URL	URL の形式が無効です	잘�
 已复制程序路径；使用此按钮会替换剪贴板中的后缀。	已複製程式路徑；此按鈕會取代剪貼簿中的副檔名。	App path copied; this button replaces the extension in the clipboard.	アプリのパスをコピーしました。クリップボードの拡張子は置き換えられます。	앱 경로가 복사되었습니다. 이 버튼은 클립보드의 확장자를 대체합니다.	Programmpfad kopiert. Er ersetzt die Endung in der Zwischenablage.	Chemin copié. Ce bouton remplace l’extension dans le presse-papiers.
 无法打开系统设置或读取关联：{0}	無法開啟系統設定或讀取關聯：{0}	Could not open settings or read associations: {0}	設定を開くか関連付けを確認できません：{0}	설정을 열거나 연결을 읽을 수 없음: {0}	Einstellungen oder Zuordnungen konnten nicht geöffnet bzw. gelesen werden: {0}	Impossible d’ouvrir les paramètres ou de lire les associations : {0}
 音视频需要 FFmpeg；Spine 文件需要有效骨骼数据和配套资源。.bytes 中的 MP4 可按文件头识别。后缀列表不代表所有内容均可完整预览；代码文件仅作文本查看。	影音需要 FFmpeg；Spine 需要有效骨骼資料及配套資源。.bytes 中的 MP4 可依檔頭識別。副檔名不保證完整預覽；程式碼僅供文字檢視。	Media requires FFmpeg; Spine requires valid skeleton data and companion assets. MP4 in .bytes is detected by its header. Extensions do not guarantee full previews; code files are viewed as text.	音声・動画には FFmpeg、Spine には有効な骨格データと関連リソースが必要です。.bytes 内の MP4 はヘッダーで判別します。拡張子は完全なプレビューを保証しません。コードはテキスト表示のみです。	미디어에는 FFmpeg, Spine에는 유효한 골격 데이터와 관련 리소스가 필요합니다. .bytes의 MP4는 헤더로 식별합니다. 확장자가 완전한 미리보기를 보장하지는 않으며 코드는 텍스트로만 표시합니다.	Medien benötigen FFmpeg; Spine benötigt gültige Skelettdaten und zugehörige Ressourcen. MP4 in .bytes wird am Header erkannt. Endungen garantieren keine vollständige Vorschau; Code wird als Text angezeigt.	Les médias nécessitent FFmpeg ; Spine nécessite un squelette valide et ses ressources. Les MP4 dans .bytes sont identifiés par leur en-tête. Les extensions ne garantissent pas un aperçu complet ; le code est affiché comme texte.
+播放列表	播放清單	Playlist	プレイリスト	재생 목록	Wiedergabeliste	Liste de lecture
+创建播放列表	建立播放清單	Create playlist	プレイリストを作成	재생 목록 만들기	Wiedergabeliste erstellen	Créer une liste
+打开列表	開啟清單	Open playlist	リストを開く	목록 열기	Liste öffnen	Ouvrir une liste
+保存列表	儲存清單	Save playlist	リストを保存	목록 저장	Liste speichern	Enregistrer la liste
+保存并使用	儲存並使用	Save and use	保存して使用	저장 후 사용	Speichern und verwenden	Enregistrer et utiliser
+列表名称	清單名稱	Playlist name	リスト名	목록 이름	Listenname	Nom de la liste
+目录	目錄	Folder	フォルダー	폴더	Ordner	Dossier
+选择目录	選擇目錄	Choose folder	フォルダーを選択	폴더 선택	Ordner wählen	Choisir un dossier
+目录内全部	目錄內全部	All files in folder	フォルダー内の全ファイル	폴더 내 모든 파일	Alle Dateien im Ordner	Tous les fichiers du dossier
+文件名前缀匹配	檔名前綴比對	Match filename prefix	ファイル名の接頭辞で検索	파일명 접두사로 찾기	Dateinamenpräfix abgleichen	Filtrer par préfixe du nom
+前缀	前綴	Prefix	接頭辞	접두사	Präfix	Préfixe
+匹配条目	符合項目	Matching entries	一致する項目	일치하는 항목	Passende Einträge	Éléments correspondants
+音频	音訊	Audio	音声	오디오	Audio	Audio
+视频	影片	Video	動画	비디오	Video	Vidéo
+显示方式	顯示方式	Display	表示形式	표시 방식	Anzeige	Affichage
+编号	編號	Numbers	番号	번호	Nummern	Numéros
+显示名称	顯示名稱	Display name	表示名	표시 이름	Anzeigename	Nom affiché
+播放模式	播放模式	Playback mode	再生モード	재생 모드	Wiedergabemodus	Mode de lecture
+顺序播放	依序播放	Sequential	順番に再生	순서대로 재생	Der Reihe nach	Dans l’ordre
+随机播放	隨機播放	Shuffle	シャッフル	무작위 재생	Zufällig	Aléatoire
+单曲循环	單曲循環	Repeat one	1曲リピート	한 곡 반복	Einzeltitel wiederholen	Répéter un titre
+剧集模式	劇集模式	Episode mode	エピソードモード	에피소드 모드	Episodenmodus	Mode épisodes
+跳过片头	略過片頭	Skip intro	冒頭をスキップ	도입부 건너뛰기	Vorspann überspringen	Passer le début
+跳过片尾	略過片尾	Skip outro	末尾をスキップ	마무리 건너뛰기	Abspann überspringen	Passer la fin
+分:秒，例如 2:00；仅对当前列表生效	分:秒，例如 2:00；僅對目前清單生效	Minutes:seconds, e.g. 2:00; this playlist only	分:秒（例 2:00）。このリストのみに適用	분:초 (예: 2:00), 현재 목록에만 적용	Minuten:Sekunden, z. B. 2:00; nur diese Liste	Minutes:secondes, ex. 2:00 ; cette liste uniquement
+已是最后一集	已是最後一集	This is the last episode	最終エピソードです	마지막 에피소드입니다	Dies ist die letzte Episode	C’est le dernier épisode
+展开播放列表	展開播放清單	Expand playlist	リストを展開	재생 목록 펼치기	Liste einblenden	Afficher la liste
+收起播放列表	收合播放清單	Collapse playlist	リストを閉じる	재생 목록 접기	Liste ausblenden	Masquer la liste
+编辑列表	編輯清單	Edit playlist	リストを編集	목록 편집	Liste bearbeiten	Modifier la liste
+添加文件	新增檔案	Add files	ファイルを追加	파일 추가	Dateien hinzufügen	Ajouter des fichiers
+移除条目，不删除文件	移除項目，不刪除檔案	Remove entry, keep file	項目のみ削除（ファイルは保持）	항목만 제거하고 파일 유지	Eintrag entfernen, Datei behalten	Retirer l’élément, conserver le fichier
+列表修改尚未保存	清單修改尚未儲存	Playlist changes are unsaved	リストの変更は未保存です	목록 변경 사항이 저장되지 않음	Listenänderungen nicht gespeichert	Modifications de la liste non enregistrées
+列表已播放完毕，可点击条目重新播放	清單已播放完畢，可點選項目重新播放	Playlist finished; click an entry to replay	リスト再生完了。項目をクリックして再生	목록 재생 완료, 항목을 눌러 다시 재생	Liste beendet; Eintrag zum Wiederholen anklicken	Liste terminée ; cliquez sur un élément pour relire
+覆盖	覆寫	Overwrite	上書き	덮어쓰기	Überschreiben	Remplacer
+修改名称	修改名稱	Change name	名前を変更	이름 변경	Namen ändern	Changer le nom
+同名文件已存在，覆盖将替换原列表内容	同名檔案已存在，覆寫將取代原清單內容	A file with this name exists. Overwriting replaces its playlist contents.	同名ファイルがあります。上書きすると元のリスト内容が置換されます。	같은 이름의 파일이 있습니다. 덮어쓰면 기존 목록 내용이 교체됩니다.	Datei existiert. Überschreiben ersetzt den bisherigen Listeninhalt.	Ce fichier existe. Le remplacement écrasera le contenu de la liste.
+播放列表文件过大	播放清單檔案過大	Playlist file is too large	リストファイルが大きすぎます	재생 목록 파일이 너무 큼	Listendatei ist zu groß	Fichier de liste trop volumineux
+播放列表条目过多	播放清單項目過多	Too many playlist entries	リストの項目が多すぎます	재생 목록 항목이 너무 많음	Zu viele Listeneinträge	Trop d’éléments dans la liste
+播放列表为空	播放清單為空	Playlist is empty	リストが空です	재생 목록이 비어 있음	Liste ist leer	La liste est vide
+播放列表为空或条目过多	播放清單為空或項目過多	Playlist is empty or has too many entries	リストが空か項目数が多すぎます	목록이 비어 있거나 항목이 너무 많음	Liste leer oder mit zu vielen Einträgen	Liste vide ou contenant trop d’éléments
+M3U8 必须使用 UTF-8 编码	M3U8 必須使用 UTF-8 編碼	M3U8 must use UTF-8 encoding	M3U8 は UTF-8 が必要です	M3U8은 UTF-8 인코딩이어야 함	M3U8 muss UTF-8 verwenden	M3U8 doit être encodé en UTF-8
+无法读取 M3U 编码	無法讀取 M3U 編碼	Cannot decode M3U	M3U の文字コードを読み取れません	M3U 인코딩을 읽을 수 없음	M3U-Kodierung nicht lesbar	Impossible de décoder le M3U
+暂不支持 HLS 流媒体播放列表	暫不支援 HLS 串流播放清單	HLS streaming playlists are not supported	HLS ストリーミングリストは未対応です	HLS 스트리밍 목록은 지원하지 않음	HLS-Streaminglisten nicht unterstützt	Listes de diffusion HLS non prises en charge
+播放列表目前只支持本地媒体路径	播放清單目前僅支援本機媒體路徑	Playlists currently support local media paths only	現在はローカルメディアのパスのみ対応	현재 목록은 로컬 미디어 경로만 지원	Listen unterstützen derzeit nur lokale Medienpfade	Les listes acceptent uniquement les chemins de médias locaux
+播放列表路径包含无效字符	播放清單路徑包含無效字元	Invalid playlist path	リストのパスが無効です	재생 목록 경로가 잘못됨	Ungültiger Listenpfad	Chemin de liste non valide
+无法保存非 Unicode 路径	無法儲存非 Unicode 路徑	Cannot save a non-Unicode path	Unicode 以外のパスは保存できません	유니코드가 아닌 경로는 저장할 수 없음	Nicht-Unicode-Pfad nicht speicherbar	Impossible d’enregistrer un chemin non Unicode
+列表中的媒体文件不存在	清單中的媒體檔案不存在	A media file in the playlist is missing	リスト内のメディアファイルがありません	목록의 미디어 파일이 없음	Mediendatei in der Liste fehlt	Un fichier média de la liste est introuvable
+上次播放条目已移除，已选择第一项	上次播放項目已移除，已選擇第一項	The previous entry was removed; the first entry is selected	前回の項目が削除されたため先頭を選択しました	이전 재생 항목이 제거되어 첫 항목을 선택함	Letzter Eintrag entfernt; erster Eintrag ausgewählt	L’élément précédent a été retiré ; le premier est sélectionné
+列表文件已被外部修改，请重新打开后再编辑	清單檔案已被外部修改，請重新開啟後再編輯	Playlist changed externally; reopen before editing	リストが外部で変更されました。開き直して編集してください	목록 파일이 외부에서 변경됨, 다시 연 후 편집하세요	Liste extern geändert; vor dem Bearbeiten neu öffnen	Liste modifiée ailleurs ; rouvrez-la avant de la modifier
+片头片尾设置无效，请检查分:秒与媒体时长	片頭片尾設定無效，請檢查分:秒與媒體長度	Invalid intro/outro; check minutes:seconds and media duration	冒頭・末尾の設定が無効です。分:秒と再生時間を確認	도입부/마무리 설정 오류, 분:초와 미디어 길이를 확인하세요	Ungültiger Vor-/Abspann; Minuten:Sekunden und Dauer prüfen	Début/fin non valides ; vérifiez minutes:secondes et la durée
+请填写文件名前缀	請填寫檔名前綴	Enter a filename prefix	ファイル名の接頭辞を入力	파일명 접두사를 입력하세요	Dateinamenpräfix eingeben	Saisissez un préfixe de nom
+请填写列表名称	請填寫清單名稱	Enter a playlist name	リスト名を入力	목록 이름을 입력하세요	Listennamen eingeben	Saisissez un nom de liste
+列表名称包含无效字符	清單名稱包含無效字元	Playlist name contains invalid characters	リスト名に無効な文字があります	목록 이름에 잘못된 문자가 있음	Listenname enthält ungültige Zeichen	Le nom contient des caractères non valides
+目录扫描失败	目錄掃描失敗	Folder scan failed	フォルダーの検索に失敗	폴더 검색 실패	Ordnersuche fehlgeschlagen	Échec de l’analyse du dossier
+重试	重試	Retry	再試行	다시 시도	Erneut versuchen	Réessayer
+播放列表有未保存的修改	播放清單有未儲存的修改	Unsaved playlist changes	リストに未保存の変更があります	저장하지 않은 목록 변경 사항	Ungespeicherte Listenänderungen	Modifications de liste non enregistrées
+保存列表修改后关闭，或放弃本次列表编辑？	儲存清單修改後關閉，或放棄本次清單編輯？	Save the playlist before closing, or discard these changes?	保存して閉じますか、変更を破棄しますか？	목록을 저장하고 닫거나 변경 사항을 버리시겠습니까?	Liste speichern und schließen oder Änderungen verwerfen?	Enregistrer avant de fermer ou abandonner les modifications ?
+放弃修改	放棄修改	Discard changes	変更を破棄	변경 사항 버리기	Änderungen verwerfen	Abandonner les modifications
+• 支持本地 M3U / M3U8 播放列表、独立续播与可调宽侧栏；HLS 暂不支持	• 支援本機 M3U / M3U8 播放清單、獨立續播與可調寬側欄；HLS 暫不支援	• Local M3U / M3U8 playlists, independent resume and resizable sidebar; HLS unsupported	• ローカル M3U / M3U8 リスト、独立した再開、幅調整サイドバー。HLS は未対応	• 로컬 M3U / M3U8 목록, 독립 이어 재생 및 폭 조절 사이드바; HLS 미지원	• Lokale M3U-/M3U8-Listen, unabhängiges Fortsetzen und verstellbare Seitenleiste; kein HLS	• Listes M3U / M3U8 locales, reprise indépendante et volet redimensionnable ; sans HLS
+• 音频列表支持顺序、随机及单曲循环，剧集列表可独立设置片头片尾	• 音訊清單支援依序、隨機及單曲循環，劇集清單可獨立設定片頭片尾	• Sequential, shuffle and repeat-one audio; per-playlist episode intro/outro settings	• 音声の順番・シャッフル・1曲リピートとリスト別の冒頭・末尾スキップ	• 오디오 순서/무작위/한 곡 반복, 목록별 에피소드 도입부/마무리 설정	• Audio der Reihe nach, zufällig oder Titelwiederholung; Vor-/Abspann je Liste	• Audio dans l’ordre, aléatoire ou répétition ; réglages début/fin par liste
+播放列表记录保存失败	播放清單記錄儲存失敗	Failed to save playlist state	リストの記録を保存できません	재생 목록 기록 저장 실패	Listenstatus konnte nicht gespeichert werden	Échec de l’enregistrement de l’état de la liste
+该列表正在编辑，请先保存或放弃修改再覆盖	該清單正在編輯，請先儲存或放棄修改再覆寫	This playlist is being edited; save or discard changes before overwriting	このリストは編集中です。保存または破棄してから上書きしてください	목록 편집 중, 저장하거나 변경을 버린 후 덮어쓰세요	Diese Liste wird bearbeitet; vor dem Überschreiben speichern oder Änderungen verwerfen	Liste en cours de modification ; enregistrez ou abandonnez avant de remplacer
+媒体时长未知，无法跳过片尾	媒體長度未知，無法略過片尾	Media duration is unknown; cannot skip the outro	再生時間が不明なため末尾をスキップできません	미디어 길이를 알 수 없어 마무리를 건너뛸 수 없음	Mediendauer unbekannt; Abspann kann nicht übersprungen werden	Durée inconnue ; impossible de passer la fin
+下一项	下一項	Next	次の項目	다음 항목	Nächster Eintrag	Suivant
+• 列表播放以矢量下一项按钮替代停止，窗口与全屏一致	• 清單播放以向量下一項按鈕取代停止，視窗與全螢幕一致	• Playlist playback replaces Stop with a vector Next button in windowed and fullscreen modes	• リスト再生の停止ボタンをベクターの次へボタンに変更。全画面でも共通	• 목록 재생에서 정지 대신 벡터 다음 버튼 사용, 창과 전체 화면 공통	• Listenwiedergabe ersetzt Stopp durch eine vektorbasierte Weiter-Taste, auch im Vollbild	• En liste, Arrêter est remplacé par un bouton vectoriel Suivant, y compris en plein écran
+• 列表侧栏仅占媒体画面区域，信息与时间轴保持全宽；保存按钮居中放大	• 清單側欄僅佔媒體畫面區域，資訊與時間軸保持全寬；儲存按鈕置中放大	• Playlist sidebar stays within the media canvas; metadata and timeline keep full width; save button is larger and centered	• リストはメディア領域内に表示。情報とシークバーは全幅を維持し、保存ボタンを中央に拡大	• 목록 사이드바는 미디어 영역에만 표시, 정보와 시간축은 전체 폭 유지; 저장 버튼 확대 및 중앙 배치	• Listenseitenleiste nur im Medienbereich; Infos und Zeitleiste bleiben volle Breite; Speichern größer und zentriert	• Volet limité à la zone média ; informations et chronologie gardent toute la largeur ; bouton de sauvegarde agrandi et centré
+跳过片头片尾	略過片頭片尾	Skip intro and outro	冒頭・末尾をスキップ	도입부 및 마무리 건너뛰기	Vor- und Abspann überspringen	Passer le début et la fin
+片头	片頭	Intro	冒頭	도입부	Vorspann	Début
+片尾	片尾	Outro	末尾	마무리	Abspann	Fin
+使用当前播放时间设置片头	使用目前播放時間設定片頭	Set intro to the current playback time	現在の再生位置を冒頭の長さに設定	현재 재생 시간으로 도입부 설정	Vorspann auf aktuelle Wiedergabezeit setzen	Définir le début avec la position actuelle
+使用总时长减去当前播放时间设置片尾	使用總長度減去目前播放時間設定片尾	Set outro to total duration minus current playback time	総再生時間から現在位置を引いて末尾の長さを設定	전체 길이에서 현재 재생 시간을 빼서 마무리 설정	Abspann auf Gesamtdauer minus aktuelle Wiedergabezeit setzen	Définir la fin avec la durée totale moins la position actuelle
+• 音频列表支持顺序、随机及单曲循环；各列表片头片尾可按当前播放时间设置	• 音訊清單支援依序、隨機及單曲循環；各清單片頭片尾可依目前播放時間設定	• Sequential, shuffle and repeat-one audio; per-playlist intro/outro can be set from the current playback time	• 音声の順番・シャッフル・1曲リピート。リストごとの冒頭・末尾を現在位置から設定	• 오디오 순서/무작위/한 곡 반복; 목록별 도입부/마무리를 현재 재생 시간으로 설정	• Audio der Reihe nach, zufällig oder Titelwiederholung; Vor-/Abspann je Liste aus aktueller Wiedergabezeit	• Audio dans l’ordre, aléatoire ou répétition ; début/fin par liste définis depuis la position actuelle
+重置	重設	Reset	リセット	초기화	Zurücksetzen	Réinitialiser
+• 全屏播放列表采用半透明浮层，不挤占视频画面	• 全螢幕播放清單採用半透明浮層，不擠佔影片畫面	• Fullscreen playlists use a translucent overlay without reducing the video area	• 全画面リストを半透明で重ね、動画領域を縮小しません	• 전체 화면 목록은 반투명 오버레이로 표시되어 영상 영역을 줄이지 않음	• Vollbildlisten als halbtransparente Überlagerung ohne Verkleinerung des Videos	• Liste en plein écran en surimpression translucide sans réduire la vidéo
+仅对当前列表生效	僅對目前清單生效	Applies only to this playlist	このリストのみに適用	현재 목록에만 적용	Gilt nur für diese Liste	Uniquement pour cette liste
+片头片尾设置无效，请检查秒数与媒体时长	片頭片尾設定無效，請檢查秒數與媒體長度	Invalid intro/outro; check seconds and media duration	冒頭・末尾の設定が無効です。秒数と再生時間を確認	도입부/마무리 설정 오류, 초와 미디어 길이를 확인하세요	Ungültiger Vor-/Abspann; Sekunden und Mediendauer prüfen	Début/fin non valides ; vérifiez les secondes et la durée
+码率	位元率	Bitrate	ビットレート	비트레이트	Bitrate	Débit
+• 音频信息显示码率，波形与播放栏之间减少留白	• 音訊資訊顯示位元率，波形與播放列之間減少留白	• Audio information shows bitrate, with less space between waveform and transport	• 音声情報にビットレートを表示し、波形と操作バーの余白を縮小	• 오디오 정보에 비트레이트 표시, 파형과 재생 바 사이 여백 축소	• Audioinformationen mit Bitrate; weniger Abstand zwischen Wellenform und Steuerung	• Débit affiché dans les informations audio ; espace réduit entre la forme d’onde et les commandes
+• 音视频音频信息显示码率，列表箭头仅在媒体区域鼠标活动时显示	• 影音音訊資訊顯示位元率，清單箭頭僅在媒體區域滑鼠活動時顯示	• Audio bitrate for audio/video; playlist arrows appear only during mouse activity in the media area	• 音声・動画の音声ビットレートを表示。リスト矢印はメディア領域でのマウス操作時のみ表示	• 오디오 및 영상의 오디오 비트레이트 표시; 목록 화살표는 미디어 영역의 마우스 활동 시에만 표시	• Audiobitrate für Audio/Video; Listenpfeile nur bei Mausaktivität im Medienbereich	• Débit audio affiché pour audio/vidéo ; flèches de liste visibles lors de l’activité de la souris dans la zone média
+• 弹窗新开或再次唤醒时居中并前置，设置长文案在右列换行	• 彈窗新開或再次喚醒時置中並前置，設定長文案於右欄換行	• Dialogs center and come forward on opening or reactivation; long Settings labels wrap in the right column	• ダイアログを開く・再表示する際に中央と前面へ。設定の長文は右列で改行	• 대화창을 열거나 다시 활성화하면 중앙 및 앞으로 표시; 긴 설정 문구는 오른쪽 열에서 줄바꿈	• Dialoge beim Öffnen/Reaktivieren zentrieren und nach vorn bringen; lange Einstellungstexte rechts umbrechen	• Dialogues centrés et ramenés au premier plan à l’ouverture/réactivation ; textes longs des réglages sur plusieurs lignes à droite

@@ -82,7 +82,7 @@ fn clean_tree(path: &Path, boundary: &Path, in_use: &[PathBuf], errors: &mut Vec
         Ok(path) if comparable(&path).starts_with(comparable(boundary)) => path,
         _ => { errors.push(path.display().to_string()); return; }
     };
-    if protected(&resolved, in_use) { return; }
+    if protected(&resolved, in_use) || (metadata.is_file() && crate::playlist::is_playlist(path)) { return; }
     // Leave a failed update's recovery files and a recently started installer intact.
     if metadata.is_dir() && legacy_update(&path.file_name().unwrap_or_default().to_string_lossy()) {
         let installer = path.join("install.ps1");
@@ -122,6 +122,7 @@ fn measure() -> Snapshot {
 }
 
 fn cleanup(in_use: &[PathBuf]) -> Snapshot {
+    crate::playlist::flush_writes();
     let _cache_guard = mutation_guard();
     let before = measure().bytes();
     let mut errors = Vec::new();
@@ -133,7 +134,7 @@ fn cleanup(in_use: &[PathBuf]) -> Snapshot {
         let Ok(boundary) = std::fs::canonicalize(&path) else { continue; };
         if root().as_ref() == Some(&path) {
             // Only known disposable locations; configuration, recent files, tabs and unknown files stay.
-            for name in ["project_indexes", "network_cache", "updates"] {
+            for name in ["project_indexes", "network_cache", "updates", "playlist_positions"] {
                 clean_tree(&path.join(name), &boundary, in_use, &mut errors);
             }
             if let Err(error) = crate::media_history::clear() { errors.push(error); }
@@ -253,6 +254,8 @@ mod tests {
         let used = owned.join("nested/playing.mp4");
         let old = owned.join("nested/unused.mp4");
         let outside = parent.join("user.mp4");
+        let playlist = owned.join("nested/user.m3u8");
+        std::fs::write(&playlist, b"#EXTM3U\nplaying.mp4\n").unwrap();
         for path in [&used, &old, &outside] { std::fs::write(path, b"test data").unwrap(); }
         let boundary = std::fs::canonicalize(&owned).unwrap();
         let mut errors = Vec::new();
@@ -265,6 +268,9 @@ mod tests {
         assert!(used.exists());
         assert!(!old.exists());
         assert!(outside.exists());
+        clean_tree(&owned, &boundary, &[], &mut errors);
+        assert!(playlist.exists());
+        std::fs::remove_file(playlist).unwrap();
         clean_tree(&owned, &boundary, &[], &mut errors);
         assert!(!owned.exists());
         // The test only removes files it created under the resolved workspace target directory.

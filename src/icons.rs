@@ -2,7 +2,7 @@
 use eframe::egui;
 
 #[derive(Clone, Copy)]
-pub enum Icon { Gear, Eye, Hand, Play, Pause, Stop, TriangleRight, TriangleDown, Search, Close, Minus }
+pub enum Icon { Gear, Eye, Hand, Play, Pause, Stop, Next, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus }
 
 pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) {
     let source = match icon {
@@ -13,6 +13,9 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         Icon::Eye => egui::include_image!("../assets/icons/eye.svg"),
         Icon::Hand => egui::include_image!("../assets/icons/hand.svg"),
         Icon::Play => egui::include_image!("../assets/icons/play.svg"),
+        Icon::ChevronLeft => egui::include_image!("../assets/icons/chevron-left.svg"),
+        Icon::ChevronRight => egui::include_image!("../assets/icons/chevron-right.svg"),
+        Icon::Next => egui::include_image!("../assets/icons/next.svg"),
         Icon::Stop => egui::include_image!("../assets/icons/stop.svg"),
         Icon::Pause => egui::include_image!("../assets/icons/pause.svg"),
         Icon::TriangleRight => egui::include_image!("../assets/icons/triangle-right.svg"),

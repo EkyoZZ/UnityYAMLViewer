@@ -12,10 +12,19 @@
 
 ### 已支持
 
+- 独立应用弹窗新开或重新唤醒时恢复主窗口居中位置，并请求显示、取消最小化和前置聚焦；再次点击设置 / 关于入口也会唤醒已有窗口。初始定位完成后仍可手动移动。设置中的预览开关说明限制在右列内换行，长语言文案不覆盖左侧标签。
+
+- 支持本地 `.m3u8` / `.m3u` 音视频播放列表，默认保存 UTF-8 M3U8；从当前媒体右侧面板按目录全部文件或文件名前缀创建，默认不递归，按自然顺序排列，保存前可预览、排除和排序，名称可修改，同名覆盖需确认。优先保存相对列表位置的路径，跨盘保存绝对路径；M3U 兼容 UTF-8、UTF-16 BOM 及 Windows 当前 ANSI 编码。
+- 每份列表只占一个页签，最近打开只记录列表；当前媒体信息随条目切换，列表播放器和进度独立于普通媒体页签。视频支持紧密编号网格或名称单列，音乐使用名称单列，面板内纵向滚动，滚动条始终靠右内边缘；侧栏仅占媒体画面区域，上方文件信息和底部时间轴保持全宽；左侧内容增加 2 点内边距，创建“保存并使用”按钮底部居中、128×36 点。悬浮箭头展开 / 收起、边界拖动调宽，各列表面板最大宽度统一为窗口宽度的三分之一，最小目标宽度 220 点（小窗口随上限收缩）；全屏浮层默认半屏高、垂直居中，上下边缘拖动保持中心并对称改变高度，按列表记住高度。全屏展开列表使用带细主题边框的半透明浮层覆盖画面；背板 45% 不透明度，控件保持清晰，左上 / 左下 30 点圆角、右侧直角贴窗口边缘，拖宽时右缘固定，不挤占视频可用区域或改变视频缩放，底部时间轴保持全宽；鼠标停止活动 1 秒后隐藏全屏箭头与列表，移动后恢复，拖动或输入时保持可见；收起时 SVG 箭头按钮贴媒体区域右边缘、图标居中，不预留列或缩小适应窗口的宽度。窗口和全屏的展开 / 收起箭头仅在媒体画布内鼠标移动时显示，停止 1 秒或移出区域后隐藏，不改变列表状态。前缀创建时可去掉名称前缀，显示名称写入通用 EXTINF 标题，不修改原文件名。
+- 列表播放控制栏使用矢量“下一项”按钮替代停止，窗口 / 全屏一致；手动下一项在单曲循环中仍切换到下一条，随机模式使用随机队列，顺序末项暂停。
+- 音频列表在当前文件名及大小后显示当前播放模式，收起列表后仍可见；支持顺序（末项暂停）、随机（每轮不重复，持续下一轮）和单曲循环。视频“跳过片头片尾”按每份列表独立设置非负整数秒（单位固定 `s`）；时间输入框为 60×24 点，输入框 / s / 按钮采用 2 点紧凑间距，框后“片头”按钮取当前播放时间，“片尾”按钮取总时长减当前时间，向下取整到秒，未知时长时禁用片尾按钮；复选框后的“重置”将当前列表两项时间同时恢复为 `0`，不改变开关；到总时长减片尾时切到下一集，最后一集暂停并在画面中央显示“已是最后一集”和确定按钮；无效时间或片头片尾覆盖整集时暂停并提示。
+- 列表本地记录当前条目、时间和媒体身份，重新打开恢复；手动 / 自动切换从零或片头结束处播放。播放中约每十秒、暂停、切换、关闭和正常退出时保存；目录扫描和定时记录在后台处理。各列表模式、跳过时间和面板偏好独立记忆；清理缓存只删除列表进度，保留列表设置及用户列表文件。列表改名 / 移动不追踪，缺失条目提示并停下，媒体内容修改不使用旧进度。
+
 - “格式支持”和设置中的“文件关联”可进入同一个默认程序弹窗，按分组查询 Windows 当前默认程序。每项“去设置”复制后缀并打开系统默认应用页面，需粘贴搜索并由用户确认；可复制本程序 EXE 路径，不自动注册或改写关联。复合后缀按最后一段处理，共用后缀可能包含不同内容。
 - 音视频打开后在媒体信息就绪时自动播放，有记录时从上次位置继续；重复打开已有媒体页签会继续播放，普通页签切换保持暂停行为。关闭页签、切换页签或正常退出时记忆播放位置。记录按路径、大小及修改时间核对，最多 500 项、2 MiB；文件替换、位置无效或已播放完毕时从头开始，网络下载缓存不记录播放位置。
 - 设置中的“文件关联”“软件缓存”依次位于“最近打开记录”上方；缓存项以 KB / MB / GB 显示占用并提供文件管理器查看及后台清理，不显示固定说明段落。保留设置、最近文件及页签恢复信息；清除播放记录、可重建项目索引及未使用的网络 / 更新下载。打开中的文件、待安装更新、更新失败备份及未知文件保留，目录链接不跟随；占用或权限错误会提示。下载 / 索引扫描时禁用清理，缓存使用后可重新生成；不清理外部 FFmpeg 或用户资源。
 
+- 音频信息显示采样率、位深、声道和音频流码率；视频的音频信息也显示当前所选音轨码率，切换音轨同步更新（kb/s）；元数据缺失时显示未知，不使用容器总码率替代。波形与底部控制栏保持紧凑间距。
 - 音轨菜单读取标题（缺失时读取 handler_name）；常见语言名称与代码按界面语言显示，包含英语、国语、粤语、日语等 18 类语言；未覆盖的标记保留原文，泛中文不推定方言，悬浮查看原始名称和语言标记，便于区分多音轨；不识别实际语音或自动纠正文件标记。
 
 - 工具栏提供可收起的放大镜查找入口，窄窗口自动换行；收起时显示拖入文件提示及格式支持按钮，可打开后缀列表；最近打开支持单项删除及非空时全部清空；删除长名称后框体宽度随列表调整，矢量减号保持右侧对齐。浅色音频电平峰值线使用深灰色配色；悬浮文件页签名称显示完整路径；过长页签名称中间省略，保留末尾两个字符及扩展名。
@@ -113,6 +122,8 @@ target\release\unity_yaml_viewer.exe
 
 ### 待支持与当前限制
 
+- 播放列表目前只支持本地媒体及本地 file URI，不支持 HLS 或网络媒体条目；每份列表最多 10,000 项、8 MiB。相对路径依赖列表与媒体的相对位置；随机顺序不跨程序重启保存，崩溃 / 强制退出不保证最后几秒进度。
+
 - 粒子为有限 CPU 模拟与 GPU 绘制：UI Canvas / 3D、Mesh / Stretch Renderer、Custom Vertex Streams、纹理动画、碰撞、子发射器、轨迹、复杂力场 / Shape、超预算预热和发射器动画未还原；不支持的启用模块会提示。最多 128 系统、每系统 4096 粒子、每帧 65536 可见粒子；曲线积分、随机分布和重力为预览近似，不保证与 Unity 一致，尚无逐粒子拾取。
 
 - Spine 特殊混合 / 双色染色、缺少材质映射或不支持的 Shader 回退普通显示；仅略过明确的 ShadowCaster Pass，其他多颜色 Pass、条件变体、阴影 / 遮罩和昼夜脚本未还原。原始骨骼文件须能通过同目录资源索引定位配套 SkeletonDataAsset 才能取得材质上下文；UI Spine 与 3D 模式仍未接入本路径。
@@ -162,10 +173,19 @@ The project now supports **property editing**: change recognized values through 
 
 ### Supported features
 
+- Native app dialogs center on the main window when opened or reactivated and request visibility, restoration and focus. Clicking Settings/About again reactivates the existing dialog. Manual movement remains available after placement settles. Long preview-toggle text wraps inside the right Settings column without covering the left label.
+
+- Local `.m3u8` / `.m3u` audio/video playlists, saved as UTF-8 M3U8 by default. Create from all matching media in a folder or a filename prefix in the current media's side panel, without recursion and with natural sorting. Preview, exclude and reorder entries before saving; edit the name and confirm overwrites. Paths are relative to the playlist where possible, absolute across drives. M3U accepts UTF-8, UTF-16 BOM and the current Windows ANSI encoding.
+- A playlist occupies one tab and is the only item added to recent history. Its current media information changes with selection; its player and progress are independent of ordinary media tabs. Video uses a compact number grid or a single name column; audio uses a name column, with vertical scrolling and a scrollbar fixed to the inner right edge. The windowed playlist occupies only the media canvas; metadata and transport timeline retain full width. Content has 2 points of left padding, and the 128×36 Save and use button is centered at the bottom. A floating arrow toggles the resizable sidebar. All playlist panels are capped at one third of the window width, with a target minimum of 220 points (reduced for small windows). The fullscreen overlay defaults to half the screen height, stays vertically centered and resizes symmetrically from its top or bottom edge; height is remembered per playlist. In fullscreen, the playlist overlays the video with a 45%-opaque backplate and clear controls, a thin theme border, 30-point left corners and square right corners pinned to the window edge during resize, preserving the video area, scaling and full-width transport; fullscreen arrows and the playlist hide after one second of inactivity and return on activity, remaining visible during dragging or text input; when collapsed, a centered SVG arrow floats at the right edge of the media region without reserving a column or reducing fit-to-window width. In windowed and fullscreen modes, expand/collapse arrows appear only on mouse movement within the media canvas, hiding after one second or when the pointer leaves without changing playlist state. Prefix matching can strip that prefix from display titles, exported as standard EXTINF titles without renaming media files.
+- Playlist transport replaces Stop with a vector Next button in windowed and fullscreen modes. Manual Next advances even in repeat-one mode, uses the shuffle queue in shuffle mode, and pauses at the end of a sequential list.
+- Audio playlists show the current playback mode after the filename and size even when collapsed; they support sequential playback (pause at the end), shuffle (no repeats within each round, continuing into new rounds) and repeat one. Skip intro and outro stores times separately for each playlist as nonnegative integer seconds with the fixed unit `s`. Time inputs use 60×24 points with 2-point spacing between the input, s and button. The Intro button uses the current position; Outro uses total duration minus current position, rounded down to seconds. Outro is disabled when duration is unknown; Reset next to the checkbox sets both times to `0` for the current playlist without changing the checkbox; reaching duration minus outro advances to the next episode. The last episode pauses with a centered message and OK button. Invalid times or skips covering the entire episode pause with a warning.
+- Local playlist state remembers the current entry, time and media identity for resume. Manual or automatic entry changes start at zero or after the intro. Background records save roughly every ten seconds during playback and on pause, switching, close and normal exit. Folder scans run in the background. Modes, skips and sidebar preferences are independent per playlist; cache cleanup removes playlist progress while keeping settings and user playlist documents. Playlist moves/renames are not tracked; missing entries pause with an error and changed media does not reuse stale progress.
+
 - Supported formats and Settings → File associations open the same default-app dialog, with grouped Windows association queries. Go to settings copies an extension and opens Default apps; paste it into search and confirm the choice in Windows. The EXE path can also be copied. No automatic app registration or association changes are made. Compound suffixes use the final extension; shared extensions may contain different content.
 - Audio/video plays automatically once metadata is ready, resuming the last saved position. Opening an existing media tab resumes playback; ordinary tab switching keeps it paused. Positions are saved when closing or switching tabs and on normal exit. Records are checked against the path, file size and modification time, with limits of 500 entries and 2 MiB. Replaced files, invalid positions and completed playback restart at zero; downloaded network-cache files have no playback records.
 - File associations and App cache appear above Recent file history in Settings. The cache section shows usage in KB / MB / GB, opens its folders and cleans disposable files in the background, without permanent explanation paragraphs. Settings, recent files and tab restore data stay; playback records, rebuildable project indexes and unused network/update downloads are removed. Open files, pending updates, failed-update backups and unknown files stay; directory links are not followed and access errors are reported. Cleanup is disabled during downloads/index scans, and caches may regenerate during use. External FFmpeg installations and user assets are excluded.
 
+- Audio information shows sample rate, bit depth, channels and audio-stream bitrate (kb/s); missing bitrate is shown as unknown rather than replaced with container bitrate. Video audio information also shows the selected track bitrate and updates on track changes. The waveform sits close to the transport bar.
 - Audio track menus read metadata titles (falling back to handler_name), localize 18 common language categories including English, Mandarin, Cantonese and Japanese (unknown tags remain unchanged; generic Chinese tags do not imply a dialect), and show original names and language tags on hover; no speech identification or automatic metadata correction.
 
 - A collapsible magnifying-glass search control moves to a second row in narrow windows; when collapsed, a drag-and-drop hint and Supported formats button open an extension list; recent files can be removed individually or cleared when nonempty; deleting a long name also updates the menu width, keeping vector minus buttons aligned at the right. Audio peak lines use dark gray in light mode; hovering over a file tab name shows its full path. Long tab names use middle ellipsis, retaining the last two stem characters and extension.
@@ -248,6 +268,8 @@ target\release\unity_yaml_viewer.exe
 During Windows builds, `assets/app_icon.png` is converted and embedded as the application icon.
 
 ### Pending support and current limitations
+
+- Playlists support local media paths and local file URIs only, with no HLS or network entries; up to 10,000 entries and 8 MiB per document. Relative paths depend on the folder relationship. Shuffle order does not persist across restarts, and crashes/forced exits may lose the most recent seconds of progress.
 
 - Particles use limited CPU simulation and GPU drawing. UI Canvas / 3D, Mesh / Stretch renderers, custom vertex streams, texture animation, collisions, subemitters, trails, complex forces / shapes, prewarm beyond the budget and emitter animation remain unsupported, with diagnostics for enabled modules. Limits are 128 systems, 4,096 particles per system and 65,536 visible particles per frame. Curve integration, random distributions and gravity are preview approximations; per-particle picking is unavailable.
 
