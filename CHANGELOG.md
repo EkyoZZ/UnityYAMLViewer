@@ -2,7 +2,7 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
-- [1.1.8：渲染系统、运行时 Shader、模型与预览交互（源码升级，未构建，未发布）](docs/versions/1.1.8.md)
+- [1.1.8：渲染系统、Spine 与基础粒子、模型及预览交互（已正式发布）](docs/versions/1.1.8.md) · [发布说明](docs/releases/1.1.8.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.1.8)
 
 - [1.1.7：音视频、系统代理、最近记录及独立弹窗（合并修订，已构建，待重新发布）](docs/versions/1.1.7.md)
 

@@ -1,3 +1,11 @@
+# 正式发布：1.1.8（2026-10-14）
+
+- 2026-10-14 18:36（北京时间）：用户确认已合并 master 并授权正式发布。GitHub v1.1.8 已发布为最新正式版（非草稿、非预发布），源标签指向 master 的 3188e4f80f0e790e00685c21c420c1d33e1c5471；沿用已核对的最新 Release 构建，不因发布重新生成 EXE。附件 UnityYAMLViewer-v1.1.8-windows-x64.exe，Windows x64 PE、文件 / 产品版本 1.1.8，19743232 字节；本地 SHA-256 与 GitHub asset.digest 均为 A0691B6D5ABCF13E521CC4C2DC7B78614ADD9341747BB89AE6221089C89EE361。发布页 https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.1.8，最新正式版 API 与标签已复核。6 项粒子和 1 项 Prefab 源导航回归通过；此前粒子 Shader 回归及编译检查通过，部分真实资源有用户确认，未声称全部显卡 / 资源 / 七语言全面验证。发布说明见 docs/releases/1.1.8.md。
+
+本节优先于下方未发布描述。当前分支 master，源代码已由用户提交并同步远程；本轮只维护发布文档。后续构建仍需明确授权及占用检查，复杂粒子、UI Canvas / 3D 等限制继续保留。
+
+---
+
 # 最新构建：1.1.8 灯塔粒子与 Prefab 打开（2026-10-14）
 
 - 2026-10-14 用户关闭占用程序并再次明确授权后，进程 / EXE 独占检查通过。6 项粒子回归（含真实灯塔预热与继续播放 0.25 秒后的 Burst）及 1 项多实例 Prefab 源导航映射回归通过。首次灯塔断言错误地要求预热结束瞬间已有至少四个系统存活；真实两个 Burst 每周期 0.2 秒触发，已按该时间点修正验证，不改变实际发射计划。Release 构建前再次确认无占用，cargo build --release --offline --locked 成功（24.00 秒）。产物 target/release/unity_yaml_viewer.exe，版本 1.1.8，19743232 字节，SHA-256：A0691B6D5ABCF13E521CC4C2DC7B78614ADD9341747BB89AE6221089C89EE361。包含 Prefab 根节点打开源资源、有限预热与缓存重播、Billboard 独立宽高、ConeVolume 和粒子 straight RGBA 修复及此前累计修改。保留 Spine 158 条既有警告，未启动本次 EXE；实际灯塔效果、源页签打开 / 目标、排序 / 重播和七语言界面仍待运行验证，未发布。日志 target/lighthouse-particle-tests.log、target/prefab-open-tests.log、target/lighthouse-build.log。
