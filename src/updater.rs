@@ -126,14 +126,16 @@ impl Updater {
     pub fn cancel_download(&self) { self.cancel.store(true, Ordering::Relaxed); }
 }
 fn download(asset: &Asset, sender: &mpsc::Sender<Event>, ctx: &egui::Context, cancel: &AtomicBool) -> Result<PathBuf, String> {
+    let _cache_guard = crate::app_cache::mutation_guard();
     if asset.size == 0 || asset.size > MAX_SIZE { return Err("更新文件大小不符合要求。".into()); }
     let expected_digest = asset.digest.as_deref().filter(|d| d.starts_with("sha256:") && d.len() == 71)
         .ok_or("发行附件缺少 SHA-256 校验值，无法安全地自动更新。")?;
     if !asset.browser_download_url.starts_with("https://github.com/EkyoZZ/UnityYAMLViewer/releases/download/") {
         return Err("更新下载地址不属于本项目。".into());
     }
-    let directory = std::env::temp_dir().join(format!("UnityYAMLViewer-update-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
-    fs::create_dir(&directory).map_err(|e| e.to_string())?;
+    let base = crate::app_cache::root().map_or_else(std::env::temp_dir, |path| path.join("updates"));
+    let directory = base.join(format!("UnityYAMLViewer-update-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let result = (|| {
         let package = directory.join("package");
         let mut file = fs::File::create(&package).map_err(|e| e.to_string())?;

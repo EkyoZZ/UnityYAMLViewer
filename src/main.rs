@@ -30,6 +30,7 @@ mod model_preview;
 mod render_system;
 mod preview_fonts;
 mod recent_files;
+mod remote_file;
 mod native_window;
 mod timeline_edit;
 mod animation_curves;
@@ -39,6 +40,9 @@ mod tilemap;
 mod ui_preview;
 mod hierarchy_controls;
 mod command_line;
+mod file_associations;
+mod media_history;
+mod app_cache;
 mod release_notes;
 use script_properties::ScriptProperties;
 
@@ -163,6 +167,14 @@ struct ViewerApp {
     locate_target: Option<usize>,
     last_selected: Option<usize>,
     query: String,
+    show_search: bool,
+    show_supported_formats: bool,
+    file_associations: file_associations::Dialog,
+    cache_panel: app_cache::Panel,
+    show_url: bool,
+    url_input: String,
+    url_error: Option<String>,
+    url_job: Option<mpsc::Receiver<Result<PathBuf, String>>>,
     status: String,
     encoding: String,
     selected_keyframe: Option<SelectedKeyframe>,
@@ -340,6 +352,24 @@ impl ViewerApp {
     }
 
     fn update_windows(&mut self, ctx: &egui::Context) {
+        self.url_window(ctx);
+        if self.show_supported_formats {
+            native_window::Window::new(localization::tr("支持的文件格式"))
+                .id(egui::Id::new("supported_formats")).open(&mut self.show_supported_formats)
+                .default_width(560.0).fit_height().show(ctx, |ui| {
+                    for &(label, extensions) in file_associations::FORMAT_GROUPS {
+                        ui.strong(localization::tr(label));
+                        ui.add(egui::Label::new(extensions).wrap());
+                        ui.add_space(6.0);
+                    }
+                    ui.add(egui::Label::new(localization::tr("音视频需要 FFmpeg；Spine 文件需要有效骨骼数据和配套资源。.bytes 中的 MP4 可按文件头识别。后缀列表不代表所有内容均可完整预览；代码文件仅作文本查看。")).wrap());
+                    ui.separator();
+                    if ui.button(localization::tr("设置默认打开程序…")).clicked() {
+                        self.file_associations.open(ui.ctx());
+                    }
+                });
+        }
+        self.file_associations.show(ctx);
         if self.updater.show {
             let mut open = true;
             crate::native_window::Window::new(localization::tr("软件更新")).id(egui::Id::new("update_release")).fit_height()
@@ -438,7 +468,7 @@ impl ViewerApp {
         let Some(config_path) = last_open_dir_config_path().map(|path| path.with_file_name("open_tabs.txt")) else { return };
         let Some(parent) = config_path.parent() else { return };
         if fs::create_dir_all(parent).is_err() { return; }
-        let session = encode_open_tabs(&self.tabs.iter().map(|tab| tab.path.clone()).collect::<Vec<_>>(), self.path.as_deref());
+        let session = encode_open_tabs(&self.tabs.iter().filter(|tab| !remote_file::is_cached(&tab.path)).map(|tab| tab.path.clone()).collect::<Vec<_>>(), self.path.as_deref());
         let temporary = config_path.with_extension("tmp");
         if fs::write(&temporary, session.as_bytes()).is_ok() {
             let _ = fs::rename(temporary, config_path);
@@ -480,6 +510,64 @@ impl ViewerApp {
         }
     }
 
+    fn search_field(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let width = (ui.available_width() - 28.0 - ui.spacing().item_spacing.x).clamp(32.0, 420.0);
+        let response = ui.add_sized([width, 28.0], TextEdit::singleline(&mut self.query).vertical_align(egui::Align::Center)
+            .hint_text(localization::tr("名称、组件、字段值、fileID 或 GUID")));
+        let clear = icons::button(ui, icons::Icon::Close, localization::tr("清除查找")).clicked();
+        if clear { self.query.clear(); }
+        if response.changed() || clear {
+            let query = self.query.trim().to_lowercase();
+            if query.is_empty() {
+                self.selected = self.selected.or(self.last_selected);
+                self.locate_target = self.selected;
+            } else {
+                self.selected = self.documents.iter().position(|document|
+                    self.display_name(document).to_lowercase().contains(&query) || document.text.to_lowercase().contains(&query));
+            }
+        }
+    }
+
+    fn url_window(&mut self, ctx: &egui::Context) {
+        if let Some(job) = &self.url_job {
+            match job.try_recv() {
+                Ok(result) => {
+                    self.url_job = None;
+                    match result {
+                        Ok(path) => { self.show_url = false; self.open_file_with_directory_tracking(path, false); }
+                        Err(error) => { self.url_error = Some(error); self.show_url = true; }
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => { self.url_job = None; self.url_error = Some(localization::tr("网络加载任务已中断").into()); }
+                Err(mpsc::TryRecvError::Empty) => { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
+            }
+        }
+        if !self.show_url { return; }
+        let mut open = true;
+        let mut submit = false;
+        native_window::Window::new(localization::tr("打开 URL")).id(egui::Id::new("open_url"))
+            .open(&mut open).default_width(620.0).fit_height().show(ctx, |ui| {
+                ui.label(localization::tr("输入 HTTP / HTTPS 文件直链，下载完成后打开（最大 1 GiB）。"));
+                let pending = self.url_job.is_some();
+                ui.horizontal(|ui| {
+                    let input_width = (ui.available_width() - 104.0 - ui.spacing().item_spacing.x).max(40.0);
+                    let response = ui.add_enabled_ui(!pending, |ui| ui.add_sized([input_width, 32.0],
+                        TextEdit::singleline(&mut self.url_input).vertical_align(egui::Align::Center).hint_text("https://"))).inner;
+                    submit = ui.add_enabled_ui(!pending, |ui| ui.add_sized([104.0, 32.0],
+                        egui::Button::new(localization::tr("确定")))).inner.clicked()
+                        || (!pending && response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+                });
+                if let Some(error) = &self.url_error { ui.colored_label(ui.visuals().error_fg_color, error); }
+                if pending { ui.horizontal(|ui| { ui.spinner(); ui.label(localization::tr("正在网络加载…")); }); }
+            });
+        if !open { self.show_url = false; }
+        if submit {
+            self.url_error = None;
+            self.url_job = Some(remote_file::start(self.url_input.trim().to_owned(), ctx.clone()));
+        }
+    }
+
     fn show_open_dialog(&mut self) {
         let dialog = rfd::FileDialog::new().add_filter("All files", &["*"]).add_filter(
             "Unity YAML",
@@ -516,13 +604,15 @@ impl ViewerApp {
     }
 
     fn open_file_with_directory_tracking(&mut self, path: PathBuf, remember_directory: bool) {
-        if remember_directory && !self.restoring_session {
+        if remote_file::is_cached(&path) { /* Cached network files do not change the local open directory. */ }
+        else if remember_directory && !self.restoring_session {
             self.last_open_dir = path.parent().map(PathBuf::from);
             self.persist_last_open_dir();
         }
         if let Some(index) = self.tabs.iter().position(|tab| tab.path == path) {
             self.save_active_tab();
             self.activate_tab(index);
+            self.assets.request_media_playback(&path);
             self.remember_recent_file();
             return;
         }
@@ -539,7 +629,7 @@ impl ViewerApp {
     }
     fn remember_recent_file(&mut self) {
         if !self.restoring_session {
-            if let Some(path) = &self.path { self.recent_files.record(path.clone()); self.recent_files.persist(); }
+            if let Some(path) = &self.path { if !remote_file::is_cached(path) { self.recent_files.record(path.clone()); self.recent_files.persist(); } }
         }
     }
 
@@ -1185,9 +1275,17 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.assets.pause_media();
+        if let Some(error) = media_history::take_error() {
+            rfd::MessageDialog::new().set_title("Unity YAML Viewer")
+                .set_description(crate::lf!("播放位置记录保存失败：{0}", error))
+                .set_level(rfd::MessageLevel::Warning).show();
+        }
         render_system::shutdown();
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        native_window::track_main_window(ctx);
+        if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
         if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
             if let Some(path)=self.path.as_deref(){self.assets.retry_media_decoder(path);}
             ctx.request_repaint();
@@ -1271,6 +1369,7 @@ impl eframe::App for ViewerApp {
             });
             return;
         }
+        let mut search_inline = false;
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1294,53 +1393,95 @@ impl eframe::App for ViewerApp {
                             open_dialog = true;
                             ui.close_menu();
                         }
+                        if ui.button(localization::tr("打开 URL")).clicked() {
+                            self.show_url = true;
+                            self.url_error = None;
+                            ui.close_menu();
+                        }
                         ui.menu_button(crate::localization::tr("最近打开"), |ui| {
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                             if self.recent_files.paths().is_empty() { ui.label(crate::localization::tr("暂无最近文件")); }
-                            for path in self.recent_files.paths() {
+                            let mut remove = None;
+                            let row_height = ui.text_style_height(&egui::TextStyle::Button) + 4.0;
+                            let widest = self.recent_files.paths().iter().map(|path| {
                                 let name = path.file_name().unwrap_or_default().to_string_lossy();
-                                if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
-                                    recent_path = Some(path.clone());
-                                    ui.close_menu();
-                                }
+                                ui.painter().layout_no_wrap(name.into_owned(), egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color()).size().x
+                            }).fold(0.0_f32, f32::max);
+                            let row_width = (widest + row_height + 20.0).clamp(180.0, 420.0).min((ctx.screen_rect().width() - 32.0).max(80.0));
+                            // Reset the popup's content width as well as its rows. Otherwise the
+                            // separator preserves the previous Area width after deleting a long name.
+                            ui.set_width(row_width);
+                            for path in self.recent_files.paths() {
+                                ui.push_id(path, |ui| {
+                                    let (row, _) = ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::hover());
+                                    let close_rect = egui::Rect::from_min_max(egui::pos2(row.right() - row_height, row.top()), row.max);
+                                    let name_rect = egui::Rect::from_min_max(row.min, egui::pos2(close_rect.left() - 4.0, row.bottom()));
+                                    ui.spacing_mut().interact_size.y = row_height;
+                                    ui.spacing_mut().button_padding.y = 2.0;
+                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                    let name_response = ui.put(name_rect, egui::Button::new(""));
+                                    let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
+                                    let galley = ui.painter().layout(name.into_owned(), egui::TextStyle::Button.resolve(ui.style()),
+                                        ui.visuals().text_color(), text_rect.width());
+                                    let mut job = galley.job.as_ref().clone();
+                                    job.wrap.max_rows = 1;
+                                    job.wrap.break_anywhere = true;
+                                    let galley = ui.painter().layout_job(job);
+                                    ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
+                                        egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
+                                    if name_response.on_hover_text(path.display().to_string()).clicked() {
+                                        recent_path = Some(path.clone());
+                                        ui.close_menu();
+                                    }
+                                    let close = ui.put(close_rect, egui::Button::new(""));
+                                    icons::paint(ui, icons::Icon::Minus, close.rect.shrink(3.0), ui.visuals().text_color());
+                                    if close.on_hover_text(localization::tr("删除记录")).clicked() { remove = Some(path.clone()); }
+                                });
+                            }
+                            if let Some(path) = remove { self.recent_files.remove(&path); }
+                            if !self.recent_files.paths().is_empty() {
+                                ui.separator();
+                                if ui.button(localization::tr("清空记录")).clicked() { self.recent_files.clear(); }
                             }
                         });
                     });
                     if open_dialog { self.show_open_dialog(); }
                     if let Some(path) = recent_path { self.open_file(path); }
-                    ui.add(egui::Label::new(
-                        self.path
-                            .as_ref()
-                            .map_or(crate::localization::tr("尚未打开文件").into(), |p| p.display().to_string()),
-                    ).truncate());
-                });
-                });
-            });
-            ui.horizontal(|ui| {
-                ui.label(crate::localization::tr("查找："));
-                let search_response = ui.add(
-                    TextEdit::singleline(&mut self.query)
-                        .hint_text(crate::localization::tr("名称、组件、字段值、fileID 或 GUID")),
-                );
-                if search_response.changed() {
-                    let query = self.query.trim().to_lowercase();
-                    if query.is_empty() {
-                        self.selected = self.selected.or(self.last_selected);
-                        self.locate_target = self.selected;
-                    } else {
-                        self.selected = self.documents.iter().position(|document| {
-                            self.display_name(document).to_lowercase().contains(&query)
-                                || document.text.to_lowercase().contains(&query)
+                    let previous_spacing = ui.spacing().item_spacing.x;
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    if icons::button(ui, icons::Icon::Search, localization::tr("查找")).clicked() {
+                        self.show_search = !self.show_search;
+                    }
+                    if self.show_search && ui.available_width() >= 160.0 {
+                        search_inline = true;
+                        self.search_field(ui);
+                    }
+                    if !self.show_search {
+                        let text = localization::tr("可以将任何本软件支持的格式文件拖入窗口打开");
+                        let font = egui::FontId::proportional(13.0);
+                        let text_width = ui.painter().layout_no_wrap(text.into(),font.clone(),ui.visuals().weak_text_color()).size().x;
+                        let button_text = localization::tr("格式支持");
+                        let button_width = ui.painter().layout_no_wrap(button_text.into(),egui::TextStyle::Button.resolve(ui.style()),ui.visuals().text_color()).size().x + 12.0;
+                        let width = (text_width + button_width + 10.0).min(ui.available_width().max(0.0));
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::hover());
+                        let button_rect = egui::Rect::from_min_max(egui::pos2((rect.right()-button_width).max(rect.left()),rect.center().y-10.0),egui::pos2(rect.right(),rect.center().y+10.0));
+                        let text_rect = egui::Rect::from_min_max(rect.min,egui::pos2((button_rect.left()-4.0).max(rect.left()),rect.bottom()));
+                        let galley = ui.painter().layout_no_wrap(text.into(),font,ui.visuals().weak_text_color());
+                        ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
+                            egui::pos2(text_rect.left()+4.0,text_rect.center().y-galley.size().y*0.5),galley,ui.visuals().weak_text_color());
+                        ui.scope(|ui| {
+                            ui.spacing_mut().interact_size.y = 20.0;
+                            ui.spacing_mut().button_padding.y = 1.0;
+                            if ui.put(button_rect,egui::Button::new(button_text)).clicked() { self.show_supported_formats = true; }
                         });
                     }
-                }
-                if ui.button("×").on_hover_text(crate::localization::tr("清除查找")).clicked() {
-                    self.query.clear();
-                    self.selected = self.selected.or(self.last_selected);
-                    self.locate_target = self.selected;
-                }
+                    ui.spacing_mut().item_spacing.x = previous_spacing;
+                });
+                });
             });
-            ui.small(crate::localization::tr("也可以将 .prefab、.unity、.asset 等 Unity YAML 文件拖入窗口打开"));
+            if self.show_search && !search_inline {
+                ui.horizontal(|ui| self.search_field(ui));
+            }
             if !self.tabs.is_empty() {
                 ui.separator();
                 let mut activate = None;
@@ -1353,7 +1494,7 @@ impl eframe::App for ViewerApp {
                     let title=tab.path.file_name().and_then(|name|name.to_str()).unwrap_or(crate::localization::tr("未命名"));
                     let dirty=self.edits.get(&tab.path).is_some_and(|session|session.lock().unwrap().has_changes());
                     let title=if dirty{format!("{title} *")}else{title.to_owned()};
-                    let width=(ui.painter().layout_no_wrap(title,egui::FontId::proportional(14.0),ui.visuals().text_color()).size().x+38.0).min(tab_width);
+                    let width=(ui.painter().layout_no_wrap(title,egui::FontId::proportional(14.0),ui.visuals().text_color()).size().x+38.0).min(350.0).min(tab_width);
                     if x>0.0 && x+width>tab_width {x=0.0;y+=24.0+spacing.y;}
                     slots.push(egui::Rect::from_min_size(egui::pos2(x,y),egui::vec2(width,24.0)));x+=width+spacing.x;
                 }
@@ -2008,6 +2149,25 @@ impl eframe::App for ViewerApp {
                         self.decoder_settings.show(ui);
                     });
                     ui.end_row();
+                    settings_label(ui, localization::tr("文件关联"));
+                    settings_group(ui, "file_associations_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        if ui.add_sized([208.0, 30.0], egui::Button::new(localization::tr("设置默认打开程序…")).wrap()).clicked() {
+                            self.file_associations.open(ui.ctx());
+                        }
+                    });
+                    ui.end_row();
+                    settings_label(ui, localization::tr("软件缓存"));
+                    settings_group(ui, "app_cache_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        let mut in_use: Vec<_> = self.tabs.iter().map(|tab| tab.path.clone()).collect();
+                        if let Ok(executable) = std::env::current_exe() { in_use.push(executable); }
+                        if let Some(directory) = self.updater.staged.as_ref().and_then(|path| path.parent()) { in_use.push(directory.to_owned()); }
+                        let busy = self.url_job.is_some() || self.updater.downloading
+                            || ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("asset_catalog_loading"))).unwrap_or(false);
+                        self.cache_panel.show(ui, in_use, busy);
+                    });
+                    ui.end_row();
                     settings_label(ui, localization::tr("最近打开记录"));
                     let mut recent_limit = self.recent_files.limit();
                     settings_group(ui, "recent_files_settings_group", |ui| {
@@ -2086,6 +2246,13 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.1.9").strong());
+                        ui.label(localization::tr("• 查找栏可收起并自适应换行，最近记录可删除或清空，按钮靠右对齐"));
+                        ui.label(localization::tr("• 支持 HTTP / HTTPS 文件直链下载打开，浅色音频电平线更清晰"));
+                        ui.label(localization::tr("• 设置集中管理文件关联与缓存清理，保留设置和最近文件"));
+                        ui.label(localization::tr("• 音视频打开后自动播放并恢复上次位置，播放记录可清理；音量不显示数字"));
+                        ui.label(localization::tr("• 新开弹窗相对主窗口居中，初始尺寸稳定后仍可手动移动"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.1.8").strong());
                         ui.label(localization::tr("• 场景接入有限 Built-in Sprite Shader GPU 预览；URP 与复杂 Shader 暂不支持"));
                         ui.label(localization::tr("• GPU 网格按材质槽绘制，支持同一子网格多材质叠加"));
@@ -2104,6 +2271,10 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 对象名称的 Unicode 转义显示为实际文字"));
                         ui.label(localization::tr("• Prefab 展开限制详情支持一键复制"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.1.7").strong());
                         ui.label(localization::tr("• 最近记录支持 10～50 条与清空；联网更新跟随 Windows 系统代理"));
                         ui.label(localization::tr("• 弹窗使用独立系统窗口，优化多语言设置布局与关于窗口高度"));
@@ -2112,10 +2283,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页"));
                         ui.add_space(8.0);
 
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.1.6").strong());
                         ui.label(localization::tr("• 音视频预览与播放、视频逐帧与硬解选项，改善资源索引及界面响应"));
                         ui.add_space(8.0);
@@ -3744,6 +3911,28 @@ mod tab_reorder_tests {
         assert_eq!(tab_drop_slot(&rects,egui::pos2(300.0,40.0)),3);
     }
 }
+/// Keep the start, last two stem characters and extension when a tab is too wide.
+fn shortened_tab_title(ui: &egui::Ui, title: &str, width: f32, font: &egui::FontId) -> String {
+    let measure = |value: &str| ui.painter().layout_no_wrap(value.to_owned(), font.clone(), ui.visuals().text_color()).size().x;
+    if measure(title) <= width { return title.to_owned(); }
+    let (name, dirty) = title.strip_suffix(" *").map_or((title, ""), |name| (name, " *"));
+    let (stem, extension) = name.rsplit_once('.').filter(|(stem, _)| !stem.is_empty())
+        .map_or((name, String::new()), |(stem, extension)| (stem, format!(".{extension}")));
+    let chars: Vec<char> = stem.chars().collect();
+    let suffix_start = chars.len().saturating_sub(2);
+    let suffix: String = chars[suffix_start..].iter().collect();
+    let tail = format!("…{suffix}{extension}{dirty}");
+    let mut low = 0;
+    let mut high = suffix_start;
+    while low < high {
+        let count = (low + high).div_ceil(2);
+        let prefix: String = chars[..count].iter().collect();
+        if measure(&format!("{prefix}{tail}")) <= width { low = count; } else { high = count - 1; }
+    }
+    let prefix: String = chars[..low].iter().collect();
+    format!("{prefix}{tail}")
+}
+
 fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::Path,slot:egui::Rect) -> (bool, bool,egui::Response,egui::Rect) {
     let tab_id=ui.id().with(path);
     let font = egui::FontId::proportional(14.0);
@@ -3770,6 +3959,7 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
             .hover_pos()
             .is_some_and(|pointer| close_rect.contains(pointer))
     });
+    let response = if !close_hovered && !dragged { response.on_hover_text(path.display().to_string()) } else { response };
     let show_close = is_active || tab_hovered;
     let (fill, stroke) = if is_active {
         (
@@ -3790,6 +3980,7 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
             .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
     }
     let text_rect=egui::Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.top()),egui::pos2(close_rect.left(),rect.bottom()));
+    let title = shortened_tab_title(ui, title, text_rect.width(), &font);
     painter.with_clip_rect(painter.clip_rect().intersect(text_rect)).text(
         egui::pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,

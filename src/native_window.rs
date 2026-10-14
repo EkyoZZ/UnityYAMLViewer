@@ -1,6 +1,36 @@
 //! Shared native dialog host. Embedded backends retain the original egui window.
 use eframe::egui;
 
+#[derive(Clone, Copy)]
+struct MainBounds { physical_rect: egui::Rect }
+
+/// Save the root window's OS bounds before any nested dialog changes the current viewport.
+pub fn track_main_window(ctx: &egui::Context) {
+    if ctx.viewport_id() != egui::ViewportId::ROOT { return; }
+    if let Some(rect) = ctx.input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect)) {
+        let scale = ctx.pixels_per_point();
+        let physical_rect = egui::Rect::from_min_max((rect.min.to_vec2() * scale).to_pos2(), (rect.max.to_vec2() * scale).to_pos2());
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("native_dialog_main_bounds"), MainBounds { physical_rect }));
+    }
+}
+
+fn centered_position(parent: egui::Rect, outer_size: egui::Vec2, scale: f32) -> Option<egui::Pos2> {
+    if !parent.is_finite() || !outer_size.is_finite() || !scale.is_finite() || scale <= 0.0
+        || parent.width() <= 0.0 || parent.height() <= 0.0 { return None; }
+    // Physical monitor coordinates also handle negative monitor origins and different DPI scales.
+    Some((parent.center().to_vec2() / scale - outer_size * 0.5).to_pos2())
+}
+
+#[derive(Clone, Default)]
+struct Placement {
+    last_pass: Option<u64>,
+    pending: bool,
+    attempts: u8,
+    stable: u8,
+    last_size: Option<egui::Vec2>,
+    closed: bool,
+}
+
 pub struct Window<'a> {
     title: String,
     id: egui::Id,
@@ -29,7 +59,7 @@ impl<'a> Window<'a> {
     pub fn resizable(mut self, value: bool) -> Self { self.resizable = value; self }
     pub fn fit_height(mut self) -> Self { self.fit_height = true; self }
     pub fn modal(mut self) -> Self { self.modal = true; self }
-    // Native title bars and window positioning are managed by the OS.
+    // Native title bars are managed by the OS; fresh dialogs are centered on the main window.
     pub fn collapsible(self, _: bool) -> Self { self }
     pub fn title_bar(self, _: bool) -> Self { self }
     pub fn movable(self, _: bool) -> Self { self }
@@ -40,6 +70,16 @@ impl<'a> Window<'a> {
 
     pub fn show(mut self, ctx: &egui::Context, contents: impl FnOnce(&mut egui::Ui)) {
         if self.open.as_deref() == Some(&false) { return; }
+        track_main_window(ctx);
+        let viewport_id = egui::ViewportId(self.id);
+        let state_id = self.id.with("native_dialog_placement");
+        let pass = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+        let main = ctx.data(|data| data.get_temp::<MainBounds>(egui::Id::new("native_dialog_main_bounds")));
+        let mut placement = ctx.data_mut(|data| data.get_temp::<Placement>(state_id)).unwrap_or_default();
+        let exists = ctx.input(|input| input.raw.viewports.contains_key(&viewport_id));
+        let fresh = placement.closed || placement.last_pass.is_none_or(|last| pass.saturating_sub(last) > 1) || !exists;
+        if fresh { placement = Placement { pending: true, last_pass: Some(pass), ..Default::default() }; }
+        placement.last_pass = Some(pass);
         if self.modal && !ctx.embed_viewports() {
             // Keep the parent's original input protection while the native confirmation is open.
             egui::Modal::new(self.id.with("parent_blocker")).frame(egui::Frame::NONE).show(ctx, |_| {});
@@ -51,11 +91,17 @@ impl<'a> Window<'a> {
             .with_close_button(self.open.is_some()).with_icon(crate::application_icon());
         if let Some(width) = self.minimum_width { builder = builder.with_min_inner_size([width, 120.0]); }
         if let Some(width) = self.maximum_width { builder = builder.with_max_inner_size([width, f32::INFINITY]); }
-        ctx.show_viewport_immediate(egui::ViewportId(self.id), builder, |child_ctx, class| {
+        if fresh {
+            if let Some(position) = main.and_then(|main| centered_position(main.physical_rect, egui::vec2(self.width, self.height), ctx.pixels_per_point())) {
+                builder = builder.with_position(position);
+            }
+        }
+        ctx.show_viewport_immediate(viewport_id, builder, |child_ctx, class| {
             let Some(contents) = contents.take() else { return; };
             if class == egui::ViewportClass::Embedded {
-                let window = egui::Window::new(&self.title).id(self.id)
+                let mut window = egui::Window::new(&self.title).id(self.id)
                     .default_width(self.width - 16.0).resizable(self.resizable);
+                if fresh { window = window.current_pos(child_ctx.screen_rect().center() - egui::vec2(self.width, self.height) * 0.5); }
                 if self.open.is_some() { window.open(&mut open).show(child_ctx, contents); }
                 else { window.show(child_ctx, contents); }
             } else {
@@ -63,6 +109,8 @@ impl<'a> Window<'a> {
                     open = false;
                     if self.open.is_none() { child_ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose); }
                 }
+                let mut target_inner = child_ctx.input(|input| input.screen_rect().size());
+                let mut resizing = false;
                 egui::CentralPanel::default().show(child_ctx, |ui| {
                     let scroll = egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, contents);
                     if !self.resizable || self.fit_height {
@@ -71,12 +119,58 @@ impl<'a> Window<'a> {
                         let height = (scroll.content_size.y + 16.0).clamp(80.0, maximum_height);
                         let current_height = child_ctx.input(|input| input.screen_rect().height());
                         if (current_height - height).abs() > 1.0 {
-                            child_ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(if self.resizable { child_ctx.input(|input| input.screen_rect().width()) } else { self.width }, height)));
+                            target_inner = egui::vec2(if self.resizable { child_ctx.input(|input| input.screen_rect().width()) } else { self.width }, height);
+                            resizing = true;
+                            child_ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target_inner));
                         }
                     }
                 });
+                if placement.pending {
+                    placement.attempts = placement.attempts.saturating_add(1);
+                    let decoration = child_ctx.input(|input| input.viewport().outer_rect.zip(input.viewport().inner_rect)
+                        .map(|(outer, inner)| (outer.size() - inner.size()).max(egui::Vec2::ZERO)));
+                    if let Some((main, decoration)) = main.zip(decoration) {
+                        let outer_size = target_inner + decoration;
+                        if let Some(position) = centered_position(main.physical_rect, outer_size, child_ctx.pixels_per_point()) {
+                            child_ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+                        }
+                        placement.stable = if !resizing && placement.last_size.is_some_and(|last| (last - outer_size).length() < 1.0) {
+                            placement.stable.saturating_add(1)
+                        } else { 0 };
+                        placement.last_size = Some(outer_size);
+                    }
+                    // Stop positioning once the actual outer frame and fitted height have settled.
+                    // Later dragging, resizing or changes to content do not lock the window in place.
+                    if placement.stable >= 2 || placement.attempts >= 12 { placement.pending = false; }
+                    else { child_ctx.request_repaint(); }
+                }
             }
         });
+        placement.closed = !open;
+        ctx.data_mut(|data| data.insert_temp(state_id, placement));
         if let Some(value) = self.open.as_mut() { **value = open; }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn aligns_outer_centers_with_negative_monitor_coordinates_and_dpi() {
+        let parent = egui::Rect::from_min_size(egui::pos2(-1600.0, 100.0), egui::vec2(1200.0, 900.0));
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let outer = egui::vec2(400.0, 600.0);
+            let position = centered_position(parent, outer, scale).unwrap();
+            assert!(((position.to_vec2() + outer * 0.5) * scale - parent.center().to_vec2()).length() < 0.01);
+        }
+        assert!(centered_position(parent, egui::vec2(400.0, 600.0), 0.0).is_none());
+    }
+    #[test]
+    fn fitted_height_keeps_the_same_center() {
+        let parent = egui::Rect::from_min_size(egui::pos2(100.0, 200.0), egui::vec2(800.0, 600.0));
+        let initial = centered_position(parent, egui::vec2(380.0, 560.0), 1.0).unwrap();
+        let fitted = centered_position(parent, egui::vec2(380.0, 700.0), 1.0).unwrap();
+        assert_eq!(initial.x, fitted.x);
+        assert_eq!(initial.y - fitted.y, 70.0);
     }
 }

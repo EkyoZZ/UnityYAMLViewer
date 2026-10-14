@@ -437,3 +437,88 @@ UI Canvas 粒子播放尚未接入	UI Canvas 粒子播放尚未接入	UI Canvas 
 • 场景与 Prefab 支持基础粒子播放、暂停和重播，复杂模块仍有限制	• 場景與 Prefab 支援基礎粒子播放、暫停和重播，複雜模組仍有限制	• Scenes and Prefabs support basic particle play, pause and replay; complex modules remain limited	• シーンとPrefabで基本パーティクルの再生・一時停止・再再生に対応、複雑なモジュールは制限あり	• 장면과 Prefab의 기본 파티클 재생, 일시 정지 및 다시 재생 지원, 복잡한 모듈은 제한	• Szenen und Prefabs unterstützen grundlegende Partikelwiedergabe, Pause und Neustart; komplexe Module bleiben begrenzt	• Scènes et Prefabs : lecture, pause et reprise des particules de base ; modules complexes limités
 打开源 Prefab，场景实例覆盖不会写入源资源	開啟來源 Prefab，場景實例覆寫不會寫入來源資源	Open the source Prefab; scene overrides are not written to the source	元のPrefabを開く。シーンの上書きは元のリソースに書き込まれません	원본 Prefab 열기; 장면 덮어쓰기는 원본에 기록되지 않음	Quell-Prefab öffnen; Szenenüberschreibungen werden nicht in die Quelle geschrieben	Ouvrir le Prefab source ; les modifications de scène ne sont pas écrites dans la source
 • Prefab 根节点可打开源资源，基础粒子支持有限预热	• Prefab 根節點可開啟來源資源，基礎粒子支援有限預熱	• Prefab roots open source assets; basic particles support bounded prewarm	• Prefabルートから元のリソースを開き、基本パーティクルの制限付きプリウォームに対応	• Prefab 루트에서 원본 열기 및 기본 파티클의 제한된 사전 시뮬레이션 지원	• Prefab-Wurzeln öffnen Quellressourcen; begrenztes Partikel-Vorwärmen	• Racines Prefab : ouverture des sources et préchauffage limité des particules
+删除记录	刪除紀錄	Remove entry	履歴を削除	기록 삭제	Eintrag entfernen	Supprimer cette entrée
+查找	尋找	Find	検索	찾기	Suchen	Rechercher
+打开 URL	開啟 URL	Open URL	URL を開く	URL 열기	URL öffnen	Ouvrir une URL
+输入 HTTP / HTTPS 文件直链，下载完成后打开（最大 1 GiB）。	輸入 HTTP / HTTPS 檔案直連，下載完成後開啟（最大 1 GiB）。	Enter a direct HTTP / HTTPS file URL. Opens after download (up to 1 GiB).	HTTP / HTTPS のファイル直リンクを入力。ダウンロード後に開きます（最大 1 GiB）。	HTTP / HTTPS 파일 직접 링크를 입력하세요. 다운로드 후 열립니다 (최대 1 GiB).	Direkte HTTP-/HTTPS-Datei-URL eingeben. Öffnet nach dem Download (max. 1 GiB).	Saisissez une URL directe HTTP / HTTPS. Ouverture après téléchargement (1 GiB maximum).
+正在网络加载…	正在網路載入…	Loading from network…	ネットワークから読み込み中…	네트워크에서 불러오는 중…	Wird aus dem Netzwerk geladen…	Chargement depuis le réseau…
+网络加载任务已中断	網路載入工作已中斷	Network loading was interrupted	ネットワーク読み込みが中断されました	네트워크 로드가 중단되었습니다	Netzwerkladen wurde unterbrochen	Le chargement réseau a été interrompu
+URL 格式无效	URL 格式無效	Invalid URL	URL の形式が無効です	잘못된 URL 형식	Ungültige URL	URL non valide
+仅支持 HTTP / HTTPS 文件直链	僅支援 HTTP / HTTPS 檔案直連	Only direct HTTP / HTTPS file URLs are supported	HTTP / HTTPS のファイル直リンクのみ対応	HTTP / HTTPS 파일 직접 링크만 지원됩니다	Nur direkte HTTP-/HTTPS-Datei-URLs werden unterstützt	Seules les URL directes de fichiers HTTP / HTTPS sont prises en charge
+网络加载失败	網路載入失敗	Network loading failed	ネットワーク読み込みに失敗	네트워크 로드 실패	Netzwerkladen fehlgeschlagen	Échec du chargement réseau
+文件超过 1 GiB，无法通过 URL 打开	檔案超過 1 GiB，無法透過 URL 開啟	File exceeds 1 GiB and cannot be opened via URL	ファイルが 1 GiB を超えるため URL から開けません	파일이 1 GiB를 초과하여 URL로 열 수 없습니다	Datei größer als 1 GiB; Öffnen per URL nicht möglich	Le fichier dépasse 1 GiB et ne peut pas être ouvert via une URL
+此 URL 返回网页，请提供文件直链；暂不支持网页解析或登录认证	此 URL 傳回網頁，請提供檔案直連；暫不支援網頁解析或登入驗證	This URL returns a web page. Use a direct file URL; page parsing and login are unsupported	この URL はウェブページです。ファイル直リンクを指定してください。ページ解析やログインは未対応です	이 URL은 웹페이지를 반환합니다. 파일 직접 링크를 사용하세요. 페이지 분석 및 로그인은 지원되지 않습니다	Diese URL liefert eine Webseite. Direkte Datei-URL verwenden; Webseitenanalyse und Anmeldung werden nicht unterstützt	Cette URL renvoie une page web. Utilisez un lien direct ; analyse des pages et connexion non prises en charge
+无法识别受支持的文件类型，请使用带文件扩展名的直链	無法識別支援的檔案類型，請使用帶副檔名的直連	Unsupported or unknown file type. Use a direct URL with a file extension	対応するファイル形式を判別できません。拡張子付きの直リンクを使用してください	지원 파일 형식을 식별할 수 없습니다. 확장자가 있는 직접 링크를 사용하세요	Dateityp unbekannt oder nicht unterstützt. Direkte URL mit Dateiendung verwenden	Type de fichier inconnu ou non pris en charge. Utilisez un lien direct avec une extension
+无法保存网络文件	無法儲存網路檔案	Cannot save the downloaded file	ダウンロードしたファイルを保存できません	다운로드 파일을 저장할 수 없습니다	Heruntergeladene Datei kann nicht gespeichert werden	Impossible de sauvegarder le fichier téléchargé
+服务器返回空文件	伺服器傳回空檔案	Server returned an empty file	サーバーが空のファイルを返しました	서버가 빈 파일을 반환했습니다	Server lieferte eine leere Datei	Le serveur a renvoyé un fichier vide
+• 查找栏可收起并自适应换行，最近记录可删除或清空，按钮靠右对齐	• 尋找列可收合並自適應換行，最近紀錄可刪除或清空，按鈕靠右對齊	• Collapsible, responsive search; remove recent entries or clear all, with buttons aligned right	• 検索欄の折りたたみと自動改行、履歴の削除と全消去、ボタンの右揃えに対応	• 검색창 접기 및 자동 줄바꿈, 최근 기록 삭제 및 전체 지우기, 버튼 오른쪽 정렬	• Einklappbare Suche mit Zeilenumbruch; Verlauf löschen oder leeren, Schaltflächen rechtsbündig	• Recherche repliable et adaptative ; suppression ou effacement de l’historique, boutons alignés à droite
+• 支持 HTTP / HTTPS 文件直链下载打开，浅色音频电平线更清晰	• 支援 HTTP / HTTPS 檔案直連下載開啟，淺色音訊電平線更清晰	• Open direct HTTP / HTTPS file downloads; clearer audio peak lines in light mode	• HTTP / HTTPS のファイルをダウンロードして開けます。ライトテーマの音声ピーク線を改善	• HTTP / HTTPS 파일 직접 링크 다운로드 열기, 라이트 모드 오디오 피크 선 개선	• Direkte HTTP-/HTTPS-Dateien herunterladen und öffnen; klarere Audio-Spitzenlinien im hellen Design	• Téléchargement et ouverture de fichiers HTTP / HTTPS ; lignes de crête audio plus visibles en thème clair
+英语	英語	English	英語	영어	Englisch	Anglais
+国语	國語	Mandarin Chinese	中国語（標準語）	중국어(표준어)	Mandarin	Chinois mandarin
+粤语	粵語	Cantonese	広東語	광둥어	Kantonesisch	Cantonais
+中文	中文	Chinese	中国語	중국어	Chinesisch	Chinois
+日语	日語	Japanese	日本語	일본어	Japanisch	Japonais
+韩语	韓語	Korean	韓国語	한국어	Koreanisch	Coréen
+德语	德語	German	ドイツ語	독일어	Deutsch	Allemand
+法语	法語	French	フランス語	프랑스어	Französisch	Français
+西班牙语	西班牙語	Spanish	スペイン語	스페인어	Spanisch	Espagnol
+意大利语	義大利語	Italian	イタリア語	이탈리아어	Italienisch	Italien
+葡萄牙语	葡萄牙語	Portuguese	ポルトガル語	포르투갈어	Portugiesisch	Portugais
+俄语	俄語	Russian	ロシア語	러시아어	Russisch	Russe
+阿拉伯语	阿拉伯語	Arabic	アラビア語	아랍어	Arabisch	Arabe
+印地语	印地語	Hindi	ヒンディー語	힌디어	Hindi	Hindi
+泰语	泰語	Thai	タイ語	태국어	Thailändisch	Thaï
+越南语	越南語	Vietnamese	ベトナム語	베트남어	Vietnamesisch	Vietnamien
+印度尼西亚语	印度尼西亞語	Indonesian	インドネシア語	인도네시아어	Indonesisch	Indonésien
+马来语	馬來語	Malay	マレー語	말레이어	Malaiisch	Malais
+未标注语言	未標註語言	Unspecified language	言語未指定	언어 미지정	Sprache nicht angegeben	Langue non précisée
+多种语言	多種語言	Multiple languages	複数言語	여러 언어	Mehrere Sprachen	Plusieurs langues
+无语言内容	無語言內容	No linguistic content	言語的内容なし	언어 콘텐츠 없음	Kein sprachlicher Inhalt	Sans contenu linguistique
+可以将任何本软件支持的格式文件拖入窗口打开	可以將任何本軟體支援格式的檔案拖入視窗開啟	Drag any supported file into this window to open it	対応する形式のファイルをウィンドウにドラッグして開けます	지원되는 형식의 파일을 창으로 끌어 열 수 있습니다	Unterstützte Dateien zum Öffnen in dieses Fenster ziehen	Glissez un fichier pris en charge dans cette fenêtre pour l’ouvrir
+格式支持	格式支援	Supported formats	対応形式	지원 형식	Dateiformate	Formats pris en charge
+支持的文件格式	支援的檔案格式	Supported file formats	対応するファイル形式	지원 파일 형식	Unterstützte Dateiformate	Formats de fichiers pris en charge
+文本 / 代码	文字 / 程式碼	Text / code	テキスト / コード	텍스트 / 코드	Text / Code	Texte / code
+设置默认打开程序…	設定預設開啟程式…	Configure default apps…	既定のアプリを設定…	기본 앱 설정…	Standardprogramme einrichten…	Configurer les applications par défaut…
+文件关联	檔案關聯	File associations	ファイルの関連付け	파일 연결	Dateizuordnungen	Associations de fichiers
+• 新开弹窗相对主窗口居中，初始尺寸稳定后仍可手动移动	• 新開視窗相對主視窗置中，初始尺寸穩定後仍可手動移動	• New dialogs are centered on the main window and remain movable once their initial size settles	• 新しいダイアログは主ウィンドウ中央に配置され、初期サイズ確定後は移動可能	• 새 대화 상자는 주 창 가운데에 표시되고 초기 크기가 정해지면 이동 가능	• Neue Dialoge werden am Hauptfenster zentriert und bleiben nach der anfänglichen Größenanpassung verschiebbar	• Les nouvelles fenêtres sont centrées sur la fenêtre principale et restent déplaçables une fois leur taille initiale stabilisée
+• 设置集中管理文件关联与缓存清理，保留设置和最近文件	• 設定集中管理檔案關聯與快取清理，保留設定和最近檔案	• Settings centralize file associations and cache cleanup, preserving settings and recent files	• 設定で関連付けとキャッシュ削除をまとめて管理し、設定と最近のファイルを保持	• 설정에서 파일 연결과 캐시 정리를 함께 관리, 설정과 최근 파일 유지	• Dateizuordnungen und Cache-Bereinigung zentral in den Einstellungen; Einstellungen und letzte Dateien bleiben erhalten	• Associations et nettoyage du cache regroupés dans les paramètres ; paramètres et fichiers récents conservés
+• 音视频打开后自动播放并恢复上次位置，播放记录可清理；音量不显示数字	• 影音開啟後自動播放並恢復上次位置，播放記錄可清理；音量不顯示數字	• Audio/video plays automatically on open and resumes its last position; playback records can be cleared; volume numbers are hidden	• 音声・動画を開くと前回の位置から自動再生。再生記録は削除可能。音量の数値表示を省略	• 오디오·비디오를 열면 마지막 위치에서 자동 재생, 재생 기록 정리 가능; 음량 숫자 표시 제거	• Audio/Video startet beim Öffnen an der letzten Position; Wiedergabeeinträge können gelöscht werden; Lautstärke ohne Zahlen	• Lecture automatique à l’ouverture depuis la dernière position ; historique de lecture effaçable ; volume sans chiffres
+软件缓存	軟體快取	App cache	アプリのキャッシュ	앱 캐시	App-Cache	Cache de l’application
+正在使用的文件、待安装更新及更新失败备份会保留。	正在使用的檔案、待安裝更新與更新失敗備份會保留。	Files in use, pending updates and failed-update backups are preserved.	使用中のファイル、インストール待ちの更新、更新失敗時のバックアップは保持します。	사용 중인 파일, 설치 대기 업데이트 및 업데이트 실패 백업은 유지합니다.	Verwendete Dateien, ausstehende Updates und Sicherungen fehlgeschlagener Updates bleiben erhalten.	Les fichiers utilisés, mises à jour en attente et sauvegardes d’échecs sont conservés.
+占用空间：{0}	佔用空間：{0}	Space used: {0}	使用容量：{0}	사용 공간: {0}	Belegter Speicher: {0}	Espace utilisé : {0}
+正在统计缓存…	正在統計快取…	Measuring cache…	キャッシュ容量を集計中…	캐시 용량 계산 중…	Cache-Größe wird ermittelt…	Calcul de la taille du cache…
+查看	檢視	View	表示	보기	Anzeigen	Afficher
+清理	清理	Clean up	削除	정리	Bereinigen	Nettoyer
+保留设置、最近文件及页签恢复信息；清除播放位置、项目索引和未使用的下载缓存。	保留設定、最近檔案及分頁恢復資訊；清除播放位置、專案索引與未使用的下載快取。	Keep settings, recent files and tab restore data; clear playback positions, project indexes and unused downloads.	設定、最近のファイル、タブ復元情報を保持し、再生位置、プロジェクト索引、未使用のダウンロードを削除します。	설정, 최근 파일 및 탭 복원 정보는 유지하고 재생 위치, 프로젝트 인덱스 및 사용하지 않는 다운로드를 정리합니다.	Einstellungen, letzte Dateien und Tab-Wiederherstellung behalten; Wiedergabepositionen, Projektindizes und ungenutzte Downloads löschen.	Conserve les paramètres, fichiers récents et données des onglets ; efface les positions de lecture, index de projets et téléchargements inutilisés.
+正在清理缓存…	正在清理快取…	Cleaning cache…	キャッシュを削除中…	캐시 정리 중…	Cache wird bereinigt…	Nettoyage du cache…
+下载或索引扫描期间暂不能清理缓存。	下載或索引掃描期間暫時無法清理快取。	Cache cleanup is unavailable during downloads or index scans.	ダウンロードや索引のスキャン中は削除できません。	다운로드 또는 인덱스 스캔 중에는 캐시를 정리할 수 없습니다.	Während Downloads oder Indexscans ist die Bereinigung nicht verfügbar.	Le nettoyage est indisponible pendant les téléchargements ou l’indexation.
+已释放：{0}	已釋放：{0}	Freed: {0}	解放済み：{0}	확보된 공간: {0}	Freigegeben: {0}	Libéré : {0}
+旧缓存：{0}	舊快取：{0}	Legacy cache: {0}	旧キャッシュ：{0}	이전 캐시: {0}	Alter Cache: {0}	Ancien cache : {0}
+查看旧缓存	檢視舊快取	View legacy cache	旧キャッシュを表示	이전 캐시 보기	Alten Cache anzeigen	Afficher l’ancien cache
+部分缓存无法统计或清理，可能被占用或为目录链接。	部分快取無法統計或清理，可能正在使用或為目錄連結。	Some cache entries could not be measured or removed; they may be locked or directory links.	一部を集計または削除できません。使用中のファイルやディレクトリリンクの可能性があります。	일부 캐시를 계산하거나 삭제할 수 없습니다. 사용 중이거나 디렉터리 링크일 수 있습니다.	Einige Einträge konnten nicht ermittelt oder gelöscht werden; möglicherweise gesperrt oder Verzeichnislinks.	Certains éléments ne peuvent être mesurés ou supprimés ; ils sont peut-être utilisés ou liés à un autre dossier.
+缓存操作中断，请重试。	快取操作中斷，請重試。	Cache operation interrupted; please retry.	キャッシュ操作が中断されました。再試行してください。	캐시 작업이 중단되었습니다. 다시 시도하세요.	Cache-Vorgang unterbrochen. Bitte erneut versuchen.	Opération interrompue. Réessayez.
+缓存操作失败：{0}	快取操作失敗：{0}	Cache operation failed: {0}	キャッシュ操作に失敗：{0}	캐시 작업 실패: {0}	Cache-Vorgang fehlgeschlagen: {0}	Échec de l’opération sur le cache : {0}
+播放位置记录保存失败：{0}	播放位置記錄儲存失敗：{0}	Could not save playback position: {0}	再生位置を保存できません：{0}	재생 위치 저장 실패: {0}	Wiedergabeposition konnte nicht gespeichert werden: {0}	Impossible d’enregistrer la position de lecture : {0}
+默认打开程序	預設開啟程式	Default apps	既定のアプリ	기본 앱	Standardprogramme	Applications par défaut
+格式分组	格式分組	Format group	形式グループ	형식 그룹	Formatgruppe	Groupe de formats
+刷新状态	重新整理狀態	Refresh status	状態を更新	상태 새로 고침	Status aktualisieren	Actualiser l’état
+正在查询默认程序…	正在查詢預設程式…	Checking default apps…	既定のアプリを確認中…	기본 앱 확인 중…	Standardprogramme werden abgefragt…	Vérification des applications par défaut…
+默认程序查询中断，请重试刷新。	預設程式查詢中斷，請重新整理。	Default app query interrupted; refresh to retry.	既定のアプリの確認が中断されました。更新して再試行してください。	기본 앱 조회가 중단되었습니다. 새로 고침으로 다시 시도하세요.	Abfrage unterbrochen. Bitte erneut aktualisieren.	La vérification a été interrompue. Actualisez pour réessayer.
+点击去设置会复制后缀并打开 Windows 默认应用页面，请粘贴后缀搜索并选择本程序。此处不会直接修改文件关联。	按下前往設定會複製副檔名並開啟 Windows 預設應用程式頁面，請貼上搜尋並選擇本程式。此處不會直接修改檔案關聯。	Go to settings copies the extension and opens Windows Default apps. Paste it into search and select this app. File associations are not changed here.	設定へを押すと拡張子をコピーして Windows の既定のアプリを開きます。貼り付けて検索し、このアプリを選択してください。ここでは関連付けを変更しません。	설정으로 이동하면 확장자를 복사하고 Windows 기본 앱 페이지를 엽니다. 검색에 붙여 넣고 이 앱을 선택하세요. 여기서는 파일 연결을 변경하지 않습니다.	Zu den Einstellungen kopiert die Endung und öffnet Windows-Standard-Apps. Fügen Sie sie in die Suche ein und wählen Sie diese App. Zuordnungen werden hier nicht geändert.	Accéder aux paramètres copie l’extension et ouvre les applications par défaut de Windows. Collez-la dans la recherche et choisissez cette application. Aucune association n’est modifiée ici.
+文件关联设置仅支持 Windows。	檔案關聯設定僅支援 Windows。	File association settings are available only on Windows.	関連付けの設定は Windows のみ対応しています。	파일 연결 설정은 Windows에서만 지원됩니다.	Dateizuordnungen können nur unter Windows eingerichtet werden.	Les paramètres d’association sont disponibles uniquement sous Windows.
+关联按最后一个后缀生效：.skel.bytes 使用 .bytes，.json.txt 使用 .txt；.json 和 .ts 等后缀可能包含不同类型的内容。	關聯依最後一個副檔名生效：.skel.bytes 使用 .bytes，.json.txt 使用 .txt；.json 和 .ts 等可能包含不同類型的內容。	Associations use the final extension: .skel.bytes uses .bytes and .json.txt uses .txt. Extensions such as .json and .ts can contain different types of content.	関連付けには末尾の拡張子を使います。.skel.bytes は .bytes、.json.txt は .txt です。.json や .ts には異なる種類の内容が含まれる場合があります。	연결은 마지막 확장자에 적용됩니다. .skel.bytes는 .bytes, .json.txt는 .txt를 사용합니다. .json과 .ts에는 서로 다른 종류의 내용이 들어갈 수 있습니다.	Zuordnungen gelten für die letzte Endung: .skel.bytes verwendet .bytes, .json.txt verwendet .txt. .json und .ts können unterschiedliche Inhalte enthalten.	Les associations utilisent la dernière extension : .skel.bytes utilise .bytes et .json.txt utilise .txt. .json et .ts peuvent contenir différents types de contenu.
+后缀	副檔名	Extension	拡張子	확장자	Endung	Extension
+当前默认程序	目前預設程式	Current default app	現在の既定アプリ	현재 기본 앱	Aktuelles Standardprogramm	Application par défaut actuelle
+已是本程序	已是本程式	This app is the default	このアプリが既定です	이 앱이 기본값임	Diese App ist bereits Standard	Cette application est déjà utilisée
+未设置	未設定	Not set	未設定	설정되지 않음	Nicht festgelegt	Non définie
+查询失败	查詢失敗	Query failed	確認に失敗	조회 실패	Abfrage fehlgeschlagen	Échec de la vérification
+不支持	不支援	Unsupported	未対応	지원되지 않음	Nicht unterstützt	Non pris en charge
+去设置…	前往設定…	Go to settings…	設定へ…	설정으로 이동…	Zu den Einstellungen…	Accéder aux paramètres…
+如果系统列表中没有本程序，请浏览选择下方 EXE；未列出的后缀可通过实际文件的打开方式选择本程序。	若系統清單沒有本程式，請瀏覽選擇下方 EXE；未列出的副檔名可透過實際檔案的開啟方式選擇本程式。	If this app is not listed, browse to the EXE below. For unlisted extensions, choose this app through Open with on an actual file.	一覧にない場合は下の EXE を参照して選択してください。拡張子が表示されない場合は実際のファイルの「プログラムから開く」で選択できます。	목록에 이 앱이 없으면 아래 EXE를 찾아 선택하세요. 확장자가 없으면 실제 파일의 연결 프로그램에서 이 앱을 선택하세요.	Falls diese App fehlt, wählen Sie die folgende EXE aus. Fehlende Endungen können über Öffnen mit an einer echten Datei eingerichtet werden.	Si cette application n’apparaît pas, sélectionnez l’EXE ci-dessous. Pour les extensions absentes, utilisez Ouvrir avec sur un fichier réel.
+复制程序路径	複製程式路徑	Copy app path	アプリのパスをコピー	앱 경로 복사	Programmpfad kopieren	Copier le chemin de l’application
+打开 Windows 默认应用设置	開啟 Windows 預設應用程式設定	Open Windows Default apps	Windows の既定のアプリを開く	Windows 기본 앱 설정 열기	Windows-Standard-Apps öffnen	Ouvrir les applications par défaut de Windows
+关闭	關閉	Close	閉じる	닫기	Schließen	Fermer
+已复制后缀 {0}，请在系统默认应用页面搜索；返回此窗口会刷新状态。	已複製副檔名 {0}，請在系統預設應用程式頁面搜尋；返回此視窗會重新整理狀態。	Copied {0}; search for it in Default apps. Returning to this window refreshes the status.	{0} をコピーしました。既定のアプリで検索してください。このウィンドウに戻ると状態を更新します。	{0} 복사됨. 기본 앱에서 검색하세요. 이 창으로 돌아오면 상태가 새로 고쳐집니다.	{0} kopiert. Suchen Sie in den Standard-Apps danach. Bei Rückkehr wird der Status aktualisiert.	{0} copiée. Recherchez-la dans les applications par défaut. Le retour à cette fenêtre actualise l’état.
+已复制程序路径；使用此按钮会替换剪贴板中的后缀。	已複製程式路徑；此按鈕會取代剪貼簿中的副檔名。	App path copied; this button replaces the extension in the clipboard.	アプリのパスをコピーしました。クリップボードの拡張子は置き換えられます。	앱 경로가 복사되었습니다. 이 버튼은 클립보드의 확장자를 대체합니다.	Programmpfad kopiert. Er ersetzt die Endung in der Zwischenablage.	Chemin copié. Ce bouton remplace l’extension dans le presse-papiers.
+无法打开系统设置或读取关联：{0}	無法開啟系統設定或讀取關聯：{0}	Could not open settings or read associations: {0}	設定を開くか関連付けを確認できません：{0}	설정을 열거나 연결을 읽을 수 없음: {0}	Einstellungen oder Zuordnungen konnten nicht geöffnet bzw. gelesen werden: {0}	Impossible d’ouvrir les paramètres ou de lire les associations : {0}
+音视频需要 FFmpeg；Spine 文件需要有效骨骼数据和配套资源。.bytes 中的 MP4 可按文件头识别。后缀列表不代表所有内容均可完整预览；代码文件仅作文本查看。	影音需要 FFmpeg；Spine 需要有效骨骼資料及配套資源。.bytes 中的 MP4 可依檔頭識別。副檔名不保證完整預覽；程式碼僅供文字檢視。	Media requires FFmpeg; Spine requires valid skeleton data and companion assets. MP4 in .bytes is detected by its header. Extensions do not guarantee full previews; code files are viewed as text.	音声・動画には FFmpeg、Spine には有効な骨格データと関連リソースが必要です。.bytes 内の MP4 はヘッダーで判別します。拡張子は完全なプレビューを保証しません。コードはテキスト表示のみです。	미디어에는 FFmpeg, Spine에는 유효한 골격 데이터와 관련 리소스가 필요합니다. .bytes의 MP4는 헤더로 식별합니다. 확장자가 완전한 미리보기를 보장하지는 않으며 코드는 텍스트로만 표시합니다.	Medien benötigen FFmpeg; Spine benötigt gültige Skelettdaten und zugehörige Ressourcen. MP4 in .bytes wird am Header erkannt. Endungen garantieren keine vollständige Vorschau; Code wird als Text angezeigt.	Les médias nécessitent FFmpeg ; Spine nécessite un squelette valide et ses ressources. Les MP4 dans .bytes sont identifiés par leur en-tête. Les extensions ne garantissent pas un aperçu complet ; le code est affiché comme texte.

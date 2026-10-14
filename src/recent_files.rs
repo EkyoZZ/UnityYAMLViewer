@@ -24,6 +24,7 @@ impl RecentFiles {
         self.paths.truncate(self.limit);
         self.persist();
     }
+    pub fn remove(&mut self, path: &Path) { self.paths.retain(|entry| !same_path(entry, path)); self.persist(); }
     pub fn clear(&mut self) { self.paths.clear(); self.persist(); }
     pub fn record(&mut self, path: PathBuf) {
         self.paths.retain(|entry| !same_path(entry, &path));

@@ -111,6 +111,9 @@ pub struct Assets {
 
 }
 impl Assets {
+    pub fn request_media_playback(&mut self, path: &Path) {
+        if let Some(preview) = self.media.get_mut(path) { preview.request_playback(); }
+    }
     pub fn retry_media_decoder(&mut self,path:&Path) {
         if let Some(preview)=self.media.get_mut(path){preview.retry_missing_decoder();}
     }
@@ -138,7 +141,7 @@ impl Assets {
             if other != path { tab.original = None; tab.texture = None; tab.pending = None; }
         }
         if crate::media_preview::is_media(path) {
-            let preview=self.media.entry(path.to_owned()).or_default();
+            let preview=self.media.entry(path.to_owned()).or_insert_with(|| crate::media_preview::Preview::new(path));
             ui.horizontal_wrapped(|ui| {
                 ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
                 if let Some(bytes)=preview.file_size() {ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}

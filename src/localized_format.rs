@@ -298,4 +298,67 @@ macro_rules! localized_format {
         6 => format!("RGB: {0}, {1}, {2}\nAlpha: {3}\nCliquer pour ouvrir la palette (aperçu uniquement)" $(, $arg)*),
         _ => format!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）" $(, $arg)*),
     }};
+    ("占用空间：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("佔用空間：{0}" $(, $arg)*),
+        2 => format!("Space used: {0}" $(, $arg)*),
+        3 => format!("使用容量：{0}" $(, $arg)*),
+        4 => format!("사용 공간: {0}" $(, $arg)*),
+        5 => format!("Belegter Speicher: {0}" $(, $arg)*),
+        6 => format!("Espace utilisé : {0}" $(, $arg)*),
+        _ => format!("占用空间：{0}" $(, $arg)*),
+    }};
+    ("已释放：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("已釋放：{0}" $(, $arg)*),
+        2 => format!("Freed: {0}" $(, $arg)*),
+        3 => format!("解放済み：{0}" $(, $arg)*),
+        4 => format!("확보된 공간: {0}" $(, $arg)*),
+        5 => format!("Freigegeben: {0}" $(, $arg)*),
+        6 => format!("Libéré : {0}" $(, $arg)*),
+        _ => format!("已释放：{0}" $(, $arg)*),
+    }};
+    ("旧缓存：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("舊快取：{0}" $(, $arg)*),
+        2 => format!("Legacy cache: {0}" $(, $arg)*),
+        3 => format!("旧キャッシュ：{0}" $(, $arg)*),
+        4 => format!("이전 캐시: {0}" $(, $arg)*),
+        5 => format!("Alter Cache: {0}" $(, $arg)*),
+        6 => format!("Ancien cache : {0}" $(, $arg)*),
+        _ => format!("旧缓存：{0}" $(, $arg)*),
+    }};
+    ("缓存操作失败：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("快取操作失敗：{0}" $(, $arg)*),
+        2 => format!("Cache operation failed: {0}" $(, $arg)*),
+        3 => format!("キャッシュ操作に失敗：{0}" $(, $arg)*),
+        4 => format!("캐시 작업 실패: {0}" $(, $arg)*),
+        5 => format!("Cache-Vorgang fehlgeschlagen: {0}" $(, $arg)*),
+        6 => format!("Échec de l’opération sur le cache : {0}" $(, $arg)*),
+        _ => format!("缓存操作失败：{0}" $(, $arg)*),
+    }};
+    ("播放位置记录保存失败：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("播放位置記錄儲存失敗：{0}" $(, $arg)*),
+        2 => format!("Could not save playback position: {0}" $(, $arg)*),
+        3 => format!("再生位置を保存できません：{0}" $(, $arg)*),
+        4 => format!("재생 위치 저장 실패: {0}" $(, $arg)*),
+        5 => format!("Wiedergabeposition konnte nicht gespeichert werden: {0}" $(, $arg)*),
+        6 => format!("Impossible d’enregistrer la position de lecture : {0}" $(, $arg)*),
+        _ => format!("播放位置记录保存失败：{0}" $(, $arg)*),
+    }};
+    ("已复制后缀 {0}，请在系统默认应用页面搜索；返回此窗口会刷新状态。" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("已複製副檔名 {0}，請在系統預設應用程式頁面搜尋；返回此視窗會重新整理狀態。" $(, $arg)*),
+        2 => format!("Copied {0}; search for it in Default apps. Returning to this window refreshes the status." $(, $arg)*),
+        3 => format!("{0} をコピーしました。既定のアプリで検索してください。このウィンドウに戻ると状態を更新します。" $(, $arg)*),
+        4 => format!("{0} 복사됨. 기본 앱에서 검색하세요. 이 창으로 돌아오면 상태가 새로 고쳐집니다." $(, $arg)*),
+        5 => format!("{0} kopiert. Suchen Sie in den Standard-Apps danach. Bei Rückkehr wird der Status aktualisiert." $(, $arg)*),
+        6 => format!("{0} copiée. Recherchez-la dans les applications par défaut. Le retour à cette fenêtre actualise l’état." $(, $arg)*),
+        _ => format!("已复制后缀 {0}，请在系统默认应用页面搜索；返回此窗口会刷新状态。" $(, $arg)*),
+    }};
+    ("无法打开系统设置或读取关联：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("無法開啟系統設定或讀取關聯：{0}" $(, $arg)*),
+        2 => format!("Could not open settings or read associations: {0}" $(, $arg)*),
+        3 => format!("設定を開くか関連付けを確認できません：{0}" $(, $arg)*),
+        4 => format!("설정을 열거나 연결을 읽을 수 없음: {0}" $(, $arg)*),
+        5 => format!("Einstellungen oder Zuordnungen konnten nicht geöffnet bzw. gelesen werden: {0}" $(, $arg)*),
+        6 => format!("Impossible d’ouvrir les paramètres ou de lire les associations : {0}" $(, $arg)*),
+        _ => format!("无法打开系统设置或读取关联：{0}" $(, $arg)*),
+    }};
 }

@@ -253,6 +253,7 @@ fn read_index_cache(path:&Path,root:&Path)->Option<ProjectIndex> {
     Some(cache.index)
 }
 fn write_index_cache(path:&Path,root:&Path,index:&ProjectIndex)->Result<(),String> {
+    let _cache_guard = crate::app_cache::mutation_guard();
     // An incomplete scan must not replace a usable cache.
     if index.issues>0 && path.exists() {return Ok(());}
     fs::create_dir_all(path.parent().ok_or("Missing cache directory")?).map_err(|e|e.to_string())?;

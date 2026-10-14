@@ -12,6 +12,15 @@
 
 ### 已支持
 
+- “格式支持”和设置中的“文件关联”可进入同一个默认程序弹窗，按分组查询 Windows 当前默认程序。每项“去设置”复制后缀并打开系统默认应用页面，需粘贴搜索并由用户确认；可复制本程序 EXE 路径，不自动注册或改写关联。复合后缀按最后一段处理，共用后缀可能包含不同内容。
+- 音视频打开后在媒体信息就绪时自动播放，有记录时从上次位置继续；重复打开已有媒体页签会继续播放，普通页签切换保持暂停行为。关闭页签、切换页签或正常退出时记忆播放位置。记录按路径、大小及修改时间核对，最多 500 项、2 MiB；文件替换、位置无效或已播放完毕时从头开始，网络下载缓存不记录播放位置。
+- 设置中的“文件关联”“软件缓存”依次位于“最近打开记录”上方；缓存项以 KB / MB / GB 显示占用并提供文件管理器查看及后台清理，不显示固定说明段落。保留设置、最近文件及页签恢复信息；清除播放记录、可重建项目索引及未使用的网络 / 更新下载。打开中的文件、待安装更新、更新失败备份及未知文件保留，目录链接不跟随；占用或权限错误会提示。下载 / 索引扫描时禁用清理，缓存使用后可重新生成；不清理外部 FFmpeg 或用户资源。
+
+- 音轨菜单读取标题（缺失时读取 handler_name）；常见语言名称与代码按界面语言显示，包含英语、国语、粤语、日语等 18 类语言；未覆盖的标记保留原文，泛中文不推定方言，悬浮查看原始名称和语言标记，便于区分多音轨；不识别实际语音或自动纠正文件标记。
+
+- 工具栏提供可收起的放大镜查找入口，窄窗口自动换行；收起时显示拖入文件提示及格式支持按钮，可打开后缀列表；最近打开支持单项删除及非空时全部清空；删除长名称后框体宽度随列表调整，矢量减号保持右侧对齐。浅色音频电平峰值线使用深灰色配色；悬浮文件页签名称显示完整路径；过长页签名称中间省略，保留末尾两个字符及扩展名。
+- 文件菜单支持打开 HTTP / HTTPS 文件直链：后台下载完成后使用已有查看器打开，最大 1 GiB、总超时 5 分钟；网页解析、登录认证和边下载边播放暂不支持。新下载文件缓存在软件数据目录，不加入最近打开或恢复页签；可在设置中清理未使用的下载缓存。
+
 - 展开的 Prefab 实例根节点可从 Inspector 标题旁打开源资源页签，场景覆盖不会复制到源资源。基础粒子支持预算内循环预热、缓存重播、Billboard 独立宽高及静态 ConeVolume。
 
 - 二维场景与 Prefab 共用基础粒子实时预览，提供播放、暂停和固定种子重播；View Billboard 使用 Renderer 材质在 GPU 绘制，支持持续发射 / Burst、初始属性、大小 / 颜色 / Z 旋转生命周期变化及部分基础形状。
@@ -28,7 +37,7 @@
 - Spine 3.8 独立骨骼预览：动画、皮肤、多轨播放、速度、时间轴、缩放和平移。
 - FBX / OBJ 模型预览：贴图、颜色、实体 / 线框、网格统计、静态蒙皮与视角操作；单蒙皮 FBX 按名称匹配外部材质并保留多个槽，已识别的 PFCore/PF3D2_Default / PF3D2_Transparent 兼容主色、Alpha 与颜色调整公式。
 - 图片通道查看、缩放和平移；常见脚本 / 文本查看、基础语法高亮及工程字体预览。
-- 音频 / 视频播放：播放、暂停、停止、进度跳转、音量及空格键控制；视频支持音轨选择、暂停方向键逐帧及自动 / 软解 / 硬解选项。
+- 音频 / 视频播放：播放、暂停、停止、进度跳转、音量及空格键控制；音量弹窗仅显示竖直滑条，不显示百分比数字；视频支持音轨选择、暂停方向键逐帧及自动 / 软解 / 硬解选项。
 - 视频适应窗口、原尺寸、自由缩放与全屏播放：F11 切换、Esc 退出，全屏悬浮控件在鼠标静止 1 秒后隐藏。自由缩放支持鼠标锚点缩放、拖动及轻点播放 / 暂停。
 - 音频波形、dBFS 电平条及白色峰值拖尾，峰值线以每秒 5 dB 回落；电平为源音频近似峰值。
 - 设置安装 / 检测外部 FFmpeg，安装就绪后关闭设置自动刷新当前失败媒体页。
@@ -67,7 +76,7 @@ MonoBehaviour 属性视图会在后台扫描 `Assets`、`Packages` 和 `Library/
 - 确认输入（Enter 或失去焦点）时验证整数范围、有限浮点数、向量分量和已识别枚举；无效值警告并回退。未知类型、原始 YAML、fileID 引用保持只读。
 - 切换标签页保留各文件的暂存修改；处于编辑模式时，关闭标签或退出应用前须先保存或放弃。未保存修改和撤销记录不会跨启动恢复。
 - 未确认输入或警告会阻止保存；保存前检查外部改动，通过同目录临时文件替换原文件，写入失败保留原文件。
-- 设置、关于、更新、加载进度、编辑确认及颜色 / 渐变面板使用独立系统窗口，可移出主窗口，内容超出窗口时可滚动；设置支持主题、语言、预览、Hierarchy 展开层级、视频解码及撤销容量等选项；最后两项固定为“单个文件缓存撤销步骤”和“检查更新”。
+- 设置、关于、更新、加载进度、编辑确认及颜色 / 渐变面板使用独立系统窗口，新开或重新打开时外框中心与主窗口外框中心对齐，初始尺寸稳定后可手动移出主窗口，内容超出窗口时可滚动；系统文件选择器及 Windows 设置页面由系统管理位置。设置支持主题、语言、预览、Hierarchy 展开层级、视频解码及撤销容量等选项；最后两项固定为“单个文件缓存撤销步骤”和“检查更新”。
 
 ### 使用方法
 
@@ -153,6 +162,15 @@ The project now supports **property editing**: change recognized values through 
 
 ### Supported features
 
+- Supported formats and Settings → File associations open the same default-app dialog, with grouped Windows association queries. Go to settings copies an extension and opens Default apps; paste it into search and confirm the choice in Windows. The EXE path can also be copied. No automatic app registration or association changes are made. Compound suffixes use the final extension; shared extensions may contain different content.
+- Audio/video plays automatically once metadata is ready, resuming the last saved position. Opening an existing media tab resumes playback; ordinary tab switching keeps it paused. Positions are saved when closing or switching tabs and on normal exit. Records are checked against the path, file size and modification time, with limits of 500 entries and 2 MiB. Replaced files, invalid positions and completed playback restart at zero; downloaded network-cache files have no playback records.
+- File associations and App cache appear above Recent file history in Settings. The cache section shows usage in KB / MB / GB, opens its folders and cleans disposable files in the background, without permanent explanation paragraphs. Settings, recent files and tab restore data stay; playback records, rebuildable project indexes and unused network/update downloads are removed. Open files, pending updates, failed-update backups and unknown files stay; directory links are not followed and access errors are reported. Cleanup is disabled during downloads/index scans, and caches may regenerate during use. External FFmpeg installations and user assets are excluded.
+
+- Audio track menus read metadata titles (falling back to handler_name), localize 18 common language categories including English, Mandarin, Cantonese and Japanese (unknown tags remain unchanged; generic Chinese tags do not imply a dialect), and show original names and language tags on hover; no speech identification or automatic metadata correction.
+
+- A collapsible magnifying-glass search control moves to a second row in narrow windows; when collapsed, a drag-and-drop hint and Supported formats button open an extension list; recent files can be removed individually or cleared when nonempty; deleting a long name also updates the menu width, keeping vector minus buttons aligned at the right. Audio peak lines use dark gray in light mode; hovering over a file tab name shows its full path. Long tab names use middle ellipsis, retaining the last two stem characters and extension.
+- The File menu opens direct HTTP / HTTPS file URLs after a background download (up to 1 GiB, 5-minute total timeout). Web-page parsing, login and playback during download are unsupported. New downloads use the app data directory and are excluded from recent files and restored tabs; unused downloads can be cleaned in Settings.
+
 - Expanded Prefab roots can open source assets in separate tabs from the Inspector title; scene overrides are not copied. Basic particles support bounded looping prewarm, cached replay, independent billboard width / height and static ConeVolume emission.
 
 - 2D scenes and Prefabs share basic real-time particle previews with play, pause and repeatable seeded replay. View billboards use Renderer materials on the GPU, with continuous emission / bursts, initial properties, size / color / Z rotation over lifetime and selected basic shapes.
@@ -168,7 +186,7 @@ The project now supports **property editing**: change recognized values through 
 - Standalone Spine 3.8 previews with animation, skins, multiple tracks, playback speed, timeline, zoom and pan.
 - FBX / OBJ previews with textures, colors, solid / wireframe display, mesh statistics, static skinning and camera controls; single-skinned FBX previews match external materials by name and retain multiple slots, with main color, alpha and color adjustment formulas for recognized PFCore/PF3D2_Default / PF3D2_Transparent shaders.
 - Image channels, zoom and pan; script / text viewing, basic syntax highlighting and project font previews.
-- Audio / video playback with pause, stop, seeking, volume and Space controls; video audio-track selection, paused arrow-key frame stepping and automatic / software / hardware decoding options.
+- Audio / video playback with pause, stop, seeking, volume and Space controls; the volume popup shows only a vertical slider without percentage numbers; video audio-track selection, paused arrow-key frame stepping and automatic / software / hardware decoding options.
 - Fit, native-size and free-scale video modes, plus fullscreen via F11 and exit via F11 / Esc. Floating fullscreen controls hide after 1 second without mouse movement. Free scale supports pointer-centered zoom, dragging and click playback controls.
 - Audio waveforms, approximate source dBFS levels and white peak trails falling at 5 dB per second.
 - External FFmpeg installation / detection in Settings; failed media automatically retries after closing Settings once the decoder is ready.
@@ -204,7 +222,7 @@ The MonoBehaviour inspector indexes `.cs.meta` files in `Assets`, `Packages`, an
 - Ctrl+Z keeps separate histories per file. Default: 200 steps; configurable range: 50–1000. The oldest entries expire beyond the limit. Saving exits Edit Mode and retains undo history. Ctrl+Z re-enters Edit Mode and restores a previous value; save again to write it to disk. Closing the file or choosing Discard Edits clears its history. Discard restores the latest saved contents.
 - Committed input validates numeric widths, finite floats, vector components and recognized enums. Invalid input warns and reverts. Unknown types, raw YAML and fileID references remain locked.
 - Switching tabs preserves staged edits for each file. Save or discard before closing an editing tab or exiting the application. Unsaved edits and undo histories are not restored after restarting. and replaces the asset using a temporary file in the same directory. Failed writes preserve the original.
-- Settings, About, update dialogs, loading progress, edit confirmations and color / gradient panels use separate native windows with scrolling when needed. Settings includes theme, language, preview, hierarchy expansion, video decoder and undo options. Undo history capacity and Check for Updates remain the final two items.
+- Settings, About, update dialogs, loading progress, edit confirmations and color / gradient panels use separate native windows with scrolling when needed. New or reopened windows align their outer-frame center with the main window and remain movable once their initial size settles. System file pickers and Windows Settings retain system-managed positioning. Settings includes theme, language, preview, hierarchy expansion, video decoder and undo options. Undo history capacity and Check for Updates remain the final two items.
 
 ### Usage
 
