@@ -280,7 +280,6 @@ UI 内置 Sprite 暂用颜色矩形近似显示。	UI 內建 Sprite 暫用顏色
 打开图片	開啟圖片	Open image	画像を開く	이미지 열기	Bild öffnen	Ouvrir l’image
 确认	確認	Confirm	確認	확인	Bestätigen	Confirmer
 打开发布页面，手动更新	開啟發佈頁面，手動更新	Open release page to update manually	リリースページから手動更新	릴리스 페이지에서 수동 업데이트	Release-Seite für manuelles Update öffnen	Ouvrir la page de publication pour mettre à jour manuellement
-
 文件	檔案	File	ファイル	파일	Datei	Fichier
 打开文件	開啟檔案	Open File	ファイルを開く	파일 열기	Datei öffnen	Ouvrir un fichier
 最近打开	最近開啟	Open Recent	最近開いたファイル	최근 파일	Zuletzt geöffnet	Fichiers récents
@@ -347,45 +346,35 @@ Hierarchy 默认展开层级	Hierarchy 預設展開層級	Default hierarchy expa
 解码	解碼	Decoding	デコード	디코딩	Dekodierung	Décodage
 音频播放	音訊播放	Audio playback	音声再生	오디오 재생	Audiowiedergabe	Lecture audio
 点击播放预览视频	點擊播放預覽影片	Play to preview the video	再生して動画をプレビュー	재생하여 비디오 미리 보기	Video zur Vorschau abspielen	Lancez la lecture pour prévisualiser la vidéo
-
 上一帧	上一幀	Previous frame	前のフレーム	이전 프레임	Vorheriges Bild	Image précédente
 下一帧	下一幀	Next frame	次のフレーム	다음 프레임	Nächstes Bild	Image suivante
 正在索引视频帧…	正在索引影片幀…	Indexing video frames…	動画フレームを索引中…	동영상 프레임 색인 중…	Videobilder werden indiziert…	Indexation des images vidéo…
-
 单声道	單聲道	Mono	モノラル	모노	Mono	Mono
 双声道	雙聲道	Stereo	ステレオ	스테레오	Stereo	Stéréo
 点击或拖动跳转	點擊或拖動跳轉	Click or drag to seek	クリックまたはドラッグして移動	클릭하거나 드래그하여 탐색	Zum Springen klicken oder ziehen	Cliquez ou faites glisser pour avancer
-
 音轨	音軌	Audio tracks	音声トラック	오디오 트랙	Audiospuren	Pistes audio
 内嵌字幕	內嵌字幕	Embedded subtitles	内蔵字幕	내장 자막	Eingebettete Untertitel	Sous-titres intégrés
 音轨 / 语言	音軌 / 語言	Audio track / language	音声トラック / 言語	오디오 트랙 / 언어	Audiospur / Sprache	Piste audio / langue
 关闭音频	關閉音訊	Disable audio	音声を無効にする	오디오 끄기	Audio deaktivieren	Désactiver l’audio
 没有音轨	沒有音軌	No audio tracks	音声トラックなし	오디오 트랙 없음	Keine Audiospuren	Aucune piste audio
-
 视频信息	影片資訊	Video information	動画情報	비디오 정보	Videoinformationen	Informations vidéo
 视频编码	影片編碼	Video codec	動画コーデック	비디오 코덱	Videocodec	Codec vidéo
 音频信息	音訊資訊	Audio information	音声情報	오디오 정보	Audioinformationen	Informations audio
 当前音轨	目前音軌	Current audio track	現在の音声トラック	현재 오디오 트랙	Aktuelle Audiospur	Piste audio actuelle
-
 像素宽高比	像素寬高比	Pixel aspect ratio	ピクセル縦横比	픽셀 종횡비	Pixel-Seitenverhältnis	Rapport des pixels
 容器格式	容器格式	Container format	コンテナ形式	컨테이너 형식	Containerformat	Format du conteneur
 像素格式	像素格式	Pixel format	ピクセル形式	픽셀 형식	Pixelformat	Format des pixels
 传递特性	傳遞特性	Transfer characteristics	伝達特性	전달 특성	Übertragungsfunktion	Fonction de transfert
 详细信息	詳細資訊	Details	詳細情報	세부 정보	Details	Détails
 文件大小	檔案大小	File size	ファイルサイズ	파일 크기	Dateigröße	Taille du fichier
-
 dBFS 为源音频近似峰值，不受播放音量影响	dBFS 為來源音訊近似峰值，不受播放音量影響	dBFS is an approximate source peak, independent of playback volume	dBFS は元音声の概算ピーク値で、再生音量には依存しません	dBFS는 재생 볼륨과 무관한 원본 오디오의 근사 피크입니다	dBFS ist ein ungefährer Quellpegel, unabhängig von der Wiedergabelautstärke	Le dBFS indique une crête approximative de la source, indépendante du volume de lecture
-
 显示模式	顯示模式	Display mode	表示モード	표시 모드	Anzeigemodus	Mode d’affichage
 无镜像	無鏡像	No mirroring	反転なし	미러링 없음	Keine Spiegelung	Sans miroir
 上下左右镜像	上下左右鏡像	Horizontal and vertical mirroring	上下左右反転	상하좌우 미러링	Horizontal und vertikal gespiegelt	Miroir horizontal et vertical
-
 模型	模型	Models	モデル	모델	Modelle	Modèles
-
 自由缩放	自由縮放	FreeScale	自由ズーム	자유 확대/축소	Freier Zoom	Zoom libre
 全屏播放 (F11)	全螢幕播放 (F11)	Fullscreen playback (F11)	全画面再生 (F11)	전체 화면 재생 (F11)	Vollbildwiedergabe (F11)	Lecture plein écran (F11)
 退出全屏 (F11 / Esc)	退出全螢幕 (F11 / Esc)	Exit fullscreen (F11 / Esc)	全画面を終了 (F11 / Esc)	전체 화면 종료 (F11 / Esc)	Vollbild verlassen (F11 / Esc)	Quitter le plein écran (F11 / Esc)
-
 • 音视频支持空格播放、视频全屏与音频峰值拖尾	• 音視訊支援空白鍵播放、視訊全螢幕與音訊峰值拖尾	• Space playback, fullscreen video and audio peak trails	• スペース再生、動画全画面表示と音声ピークトレイル	• 스페이스 재생, 동영상 전체 화면 및 오디오 피크 표시	• Wiedergabe per Leertaste, Vollbildvideo und Audio-Spitzenanzeige	• Lecture par Espace, vidéo plein écran et crêtes audio
 • 改善 FFmpeg 安装识别，关闭设置自动刷新失败媒体页	• 改善 FFmpeg 安裝識別，關閉設定自動重新整理失敗媒體頁	• Improved FFmpeg detection and media retry after closing settings	• FFmpeg 検出と設定を閉じた後のメディア再試行を改善	• FFmpeg 감지 및 설정 종료 후 미디어 재시도 개선	• Verbesserte FFmpeg-Erkennung und Medienwiederholung nach Schließen der Einstellungen	• Détection FFmpeg et nouvelle tentative média après fermeture des paramètres
 最近打开记录	最近開啟記錄	Recent file history	最近開いたファイルの履歴	최근 파일 기록	Zuletzt geöffnete Dateien	Fichiers récents
@@ -431,13 +420,20 @@ GPU Shader 预览	GPU Shader 預覽	GPU Shader preview	GPU Shaderプレビュー
 • 支持片元 Shader 的 clip 透明裁剪	• 支援片元 Shader 的 clip 透明裁剪	• Support fragment shader clip alpha cutouts	• フラグメントShaderのclip透明切り抜きに対応	• 프래그먼트 Shader clip 투명 컷아웃 지원	• clip-Transparenzausschnitte in Fragment-Shadern unterstützt	• Découpe de transparence clip dans les Shaders de fragment
 • Prefab 展开预算提高，减少大场景节点缺失	• 提高 Prefab 展開預算，減少大型場景節點遺失	• Increase Prefab expansion budgets to reduce missing scene nodes	• Prefab展開上限を増やし、大規模シーンのノード欠落を軽減	• Prefab 확장 한도를 높여 대규모 장면 노드 누락 감소	• Höhere Prefab-Grenzen reduzieren fehlende Szenenknoten	• Limites Prefab augmentées pour réduire les nœuds manquants
 • GPU 预览首次渲染后离焦冻结，返回画面恢复	• GPU 預覽首次繪製後離焦凍結，返回畫面恢復	• GPU previews finish the first render, freeze off focus and resume on return	• GPU初回描画後は非フォーカス時に停止し、戻ると再開	• GPU 첫 렌더링 완료 후 포커스 이탈 시 정지, 복귀 시 재개	• GPU-Vorschau nach erstem Rendern ohne Fokus einfrieren und bei Rückkehr fortsetzen	• Aperçu GPU figé après le premier rendu hors focus, puis repris au retour
-
 • 提高 Prefab 展开预算；GPU 首次渲染后离焦冻结，返回恢复	• 提高 Prefab 展開預算；GPU 首次繪製後離焦凍結，返回恢復	• Higher Prefab budgets; GPU previews freeze off focus after their first render and resume on return	• Prefab展開上限を拡大。GPU初回描画後は非フォーカス時に停止し、戻ると再開	• Prefab 확장 한도 확대; GPU 첫 렌더링 후 포커스 이탈 시 정지, 복귀 시 재개	• Höhere Prefab-Grenzen; GPU-Vorschau nach erstem Rendern ohne Fokus einfrieren und bei Rückkehr fortsetzen	• Limites Prefab augmentées ; aperçu GPU figé hors focus après le premier rendu, puis repris au retour
-
 • TEXCOORD1/2 输入暂填零，粒子顶点流数据待接入	• TEXCOORD1/2 輸入暫填零，粒子頂點流資料待接入	• TEXCOORD1/2 inputs use zeros; particle vertex stream data remains unsupported	• TEXCOORD1/2入力は暫定ゼロ値。粒子頂点ストリームは未対応	• TEXCOORD1/2 입력은 임시 0값, 파티클 버텍스 스트림은 미지원	• TEXCOORD1/2 vorläufig null; Partikel-Vertexdaten noch nicht unterstützt	• Entrées TEXCOORD1/2 provisoirement nulles ; flux de sommets des particules non pris en charge
-
 • 对象名称的 Unicode 转义显示为实际文字	• 物件名稱的 Unicode 跳脫顯示為實際文字	• Decode Unicode escapes in object names for display	• オブジェクト名のUnicodeエスケープを文字として表示	• 객체 이름의 Unicode 이스케이프를 실제 문자로 표시	• Unicode-Escapes in Objektnamen als Text anzeigen	• Affichage des échappements Unicode des noms sous forme de texte
-
 • Prefab 展开限制详情支持一键复制	• Prefab 展開限制詳情支援一鍵複製	• Copy Prefab expansion diagnostics with one click	• Prefab展開の診断をワンクリックでコピー	• Prefab 확장 진단 원클릭 복사	• Prefab-Diagnosen mit einem Klick kopieren	• Copie des diagnostics Prefab en un clic
-
 • 支持单蒙皮 FBX 静态导入姿态，骨骼覆盖与动画暂未还原	• 支援單蒙皮 FBX 靜態匯入姿態，骨骼覆寫與動畫暫未還原	• Static imported poses for single skinned FBX meshes; bone overrides and animations remain unsupported	• 単一スキンFBXの静的インポート姿勢に対応。骨の上書きとアニメーションは未対応	• 단일 스킨 FBX 정적 임포트 포즈 지원; 본 오버라이드와 애니메이션 미지원	• Statische Importpose für einzelne skinnierte FBX-Meshes; Knochenänderungen und Animationen noch nicht unterstützt	• Pose statique importée pour un maillage FBX skinné ; modifications des os et animations non prises en charge
+• 修正静态 FBX 轴向及可唯一确认的根骨骼缩放	• 修正靜態 FBX 軸向及可唯一確認的根骨骼縮放	• Correct static FBX axes and unambiguous skeleton-root scaling	• 静的FBX軸方向と一意に確認できるルート骨格スケールを修正	• 정적 FBX 축과 명확한 루트 본 스케일 수정	• Statische FBX-Achsen und eindeutige Wurzelskalierung korrigiert	• Correction des axes FBX statiques et des facteurs racines non ambigus
+• 静态模型兼容 PF3D2 材质颜色与透明度，保留多材质槽	• 靜態模型相容 PF3D2 材質色彩與透明度，保留多材質槽	• Static models support PF3D2 colors and alpha with multiple material slots	• 静的モデルでPF3D2の色と透明度、複数マテリアルスロットに対応	• 정적 모델의 PF3D2 색상과 투명도 및 다중 머티리얼 슬롯 지원	• Statische Modelle unterstützen PF3D2-Farben, Transparenz und mehrere Materialplätze	• Modèles statiques : couleurs et transparence PF3D2 avec plusieurs matériaux
+• Tilemap 材质接入 GPU，空网格不再误报缺失	• Tilemap 材質接入 GPU，空網格不再誤報缺失	• GPU Tilemap materials; empty meshes no longer report missing resources	• TilemapマテリアルをGPUに接続、空メッシュの欠落誤報を修正	• Tilemap GPU 머티리얼 및 빈 메시 누락 오진 수정	• GPU-Tilemap-Materialien; keine Fehlmeldungen für leere Meshes	• Matériaux Tilemap sur GPU ; correction des alertes sur les maillages vides
+• 场景与独立 Spine 接入受限 GPU Shader，特殊效果保留回退	• 場景與獨立 Spine 接入受限 GPU Shader，特殊效果保留回退	• Scene and standalone Spine use limited GPU shaders with fallback for special effects	• シーンと単独Spineで限定GPU Shaderに対応、特殊効果はフォールバック	• 장면 및 독립 Spine의 제한된 GPU Shader 지원, 특수 효과는 대체 표시	• Szene und separate Spine-Vorschau mit begrenzten GPU-Shadern und Rückfall für Spezialeffekte	• Spine en scène et autonome : shaders GPU limités avec repli pour les effets spéciaux
+粒子播放	粒子播放	Particle playback	パーティクル再生	파티클 재생	Partikelwiedergabe	Lecture des particules
+播放	播放	Play	再生	재생	Abspielen	Lire
+重播	重播	Replay	再再生	다시 재생	Erneut abspielen	Relancer
+粒子播放目前仅支持二维场景与 Prefab 预览	粒子播放目前僅支援二維場景與 Prefab 預覽	Particle playback currently supports only 2D scene and Prefab previews	パーティクル再生は現在2DシーンとPrefabプレビューのみ対応	파티클 재생은 현재 2D 장면 및 Prefab 미리 보기만 지원	Partikelwiedergabe derzeit nur in 2D-Szenen und Prefab-Vorschauen	La lecture des particules est limitée aux aperçus 2D de scènes et de Prefabs
+UI Canvas 粒子播放尚未接入	UI Canvas 粒子播放尚未接入	UI Canvas particle playback is not implemented	UI Canvasのパーティクル再生は未対応	UI Canvas 파티클 재생은 미지원	UI-Canvas-Partikelwiedergabe ist noch nicht implementiert	La lecture des particules UI Canvas n’est pas encore prise en charge
+• 场景与 Prefab 支持基础粒子播放、暂停和重播，复杂模块仍有限制	• 場景與 Prefab 支援基礎粒子播放、暫停和重播，複雜模組仍有限制	• Scenes and Prefabs support basic particle play, pause and replay; complex modules remain limited	• シーンとPrefabで基本パーティクルの再生・一時停止・再再生に対応、複雑なモジュールは制限あり	• 장면과 Prefab의 기본 파티클 재생, 일시 정지 및 다시 재생 지원, 복잡한 모듈은 제한	• Szenen und Prefabs unterstützen grundlegende Partikelwiedergabe, Pause und Neustart; komplexe Module bleiben begrenzt	• Scènes et Prefabs : lecture, pause et reprise des particules de base ; modules complexes limités
+打开源 Prefab，场景实例覆盖不会写入源资源	開啟來源 Prefab，場景實例覆寫不會寫入來源資源	Open the source Prefab; scene overrides are not written to the source	元のPrefabを開く。シーンの上書きは元のリソースに書き込まれません	원본 Prefab 열기; 장면 덮어쓰기는 원본에 기록되지 않음	Quell-Prefab öffnen; Szenenüberschreibungen werden nicht in die Quelle geschrieben	Ouvrir le Prefab source ; les modifications de scène ne sont pas écrites dans la source
+• Prefab 根节点可打开源资源，基础粒子支持有限预热	• Prefab 根節點可開啟來源資源，基礎粒子支援有限預熱	• Prefab roots open source assets; basic particles support bounded prewarm	• Prefabルートから元のリソースを開き、基本パーティクルの制限付きプリウォームに対応	• Prefab 루트에서 원본 열기 및 기본 파티클의 제한된 사전 시뮬레이션 지원	• Prefab-Wurzeln öffnen Quellressourcen; begrenztes Partikel-Vorwärmen	• Racines Prefab : ouverture des sources et préchauffage limité des particules

@@ -25,6 +25,7 @@ mod asset_viewer;
 mod media_tools;
 mod media_preview;
 mod spine_preview;
+mod particle_preview;
 mod model_preview;
 mod render_system;
 mod preview_fonts;
@@ -835,7 +836,16 @@ impl ViewerApp {
             if let Some(index) = self.selected { data.insert_temp(target_key, index); }
             previous
         });
-        ui.heading(self.display_name(&self.documents[object]));
+        let prefab_guid=self.path.as_ref().and_then(|path|self.preview.hierarchy_documents(&path.display().to_string())).and_then(|data|data.prefab_roots.get(&object_id).cloned())
+            .or_else(||ctx.data(|d|d.get_temp::<std::collections::HashMap<String,String>>(egui::Id::new("inspector_prefab_roots"))).and_then(|roots|roots.get(&object_id).cloned()));
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(self.display_name(&self.documents[object]));
+            if let Some(guid)=prefab_guid {
+                let catalog=ctx.data(|d|d.get_temp::<Arc<std::collections::HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
+                let path=catalog.as_ref().and_then(|c|c.get(&guid)).filter(|p|p.is_file()).cloned();
+                if ui.add_enabled(path.is_some(),egui::Button::new(crate::localization::tr("打开"))).on_hover_text(crate::localization::tr("打开源 Prefab，场景实例覆盖不会写入源资源")).clicked(){if let Some(path)=path{ctx.data_mut(|d|d.insert_temp(egui::Id::new("open_reference"),script_properties::ReferenceOpen::Asset(path,String::new())));}}
+            }
+        });
         ui.horizontal(|ui| {
             ui.small(format!("GameObject · fileID: {object_id}"));
             if ui.button(crate::localization::tr("复制 FileID")).clicked() { ctx.copy_text(object_id.clone()); }
@@ -873,7 +883,7 @@ impl ViewerApp {
                         title_rect=title.rect;
                         ui.add_space(4.0);
                         model_preview::component_button(ui,&doc.text);
-                        spine_preview::component_button(ui,&doc.text);
+                        spine_preview::component_button(ui,&doc.text,&self.documents);
                     });
                     if title_clicked {header.set_open(!header.is_open());}
                     let (_,header_response,_) = header.body(|ui| {
@@ -1672,6 +1682,7 @@ impl eframe::App for ViewerApp {
             let expanded=self.preview.hierarchy_documents(&self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default());
             let nested=self.nested_selected.as_ref().filter(|(path,_)|Some(path)==self.path.as_ref()).and_then(|(_,id)|expanded.as_ref()?.documents.iter().position(|doc|doc.file_id==*id));
             if let (Some(index),Some(data))=(nested,expanded) {
+                ctx.data_mut(|d|d.insert_temp(egui::Id::new("inspector_prefab_roots"),data.prefab_roots.clone()));
                 ui.small(format!("Prefab · {}",crate::localization::tr("只读 Inspector")));
                 let documents=std::mem::replace(&mut self.documents,data.documents.clone());
                 let path=self.path.take();
@@ -1682,6 +1693,7 @@ impl eframe::App for ViewerApp {
                 self.show_game_object_inspector(ui,index);
                 self.selected=selected;
                 self.path=path;self.documents=documents;
+                ctx.data_mut(|d|d.remove::<std::collections::HashMap<String,String>>(egui::Id::new("inspector_prefab_roots")));
                 editing::publish(ctx,None,0..0);
             } else if let Some(object) = selected_object {
                 self.show_game_object_inspector(ui, object);
@@ -1713,7 +1725,7 @@ impl eframe::App for ViewerApp {
                     })
 				};
                 let metadata_top_left = ui.cursor().min;
-				ui.horizontal_wrapped(|ui| {ui.label(crate::lf!("{0}  ·  fileID: {1}  ·  YAML 第 {2} 行", self.display_name(doc), doc.file_id, doc.start_line)); model_preview::component_button(ui,&doc.text); spine_preview::component_button(ui,&doc.text); });
+				ui.horizontal_wrapped(|ui| {ui.label(crate::lf!("{0}  ·  fileID: {1}  ·  YAML 第 {2} 行", self.display_name(doc), doc.file_id, doc.start_line)); model_preview::component_button(ui,&doc.text); spine_preview::component_button(ui,&doc.text,&self.documents); });
 				let guid_entries = guid_entries_from_text(&doc.text);
 				ui.horizontal(|ui| {
 					ui.menu_button(crate::localization::tr("复制 GUID"), |ui| {
@@ -2078,6 +2090,12 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 场景接入有限 Built-in Sprite Shader GPU 预览；URP 与复杂 Shader 暂不支持"));
                         ui.label(localization::tr("• GPU 网格按材质槽绘制，支持同一子网格多材质叠加"));
                         ui.label(localization::tr("• 支持单蒙皮 FBX 静态导入姿态，骨骼覆盖与动画暂未还原"));
+                        ui.label(localization::tr("• 修正静态 FBX 轴向及可唯一确认的根骨骼缩放"));
+                        ui.label(localization::tr("• 静态模型兼容 PF3D2 材质颜色与透明度，保留多材质槽"));
+                        ui.label(localization::tr("• Tilemap 材质接入 GPU，空网格不再误报缺失"));
+                        ui.label(localization::tr("• 场景与独立 Spine 接入受限 GPU Shader，特殊效果保留回退"));
+                        ui.label(localization::tr("• 场景与 Prefab 支持基础粒子播放、暂停和重播，复杂模块仍有限制"));
+                        ui.label(localization::tr("• Prefab 根节点可打开源资源，基础粒子支持有限预热"));
                         ui.label(localization::tr("• 项目索引磁盘缓存优先加载，每次启动后台刷新一次"));
                         ui.label(localization::tr("• 场景点选嵌套 Prefab 自动定位 Hierarchy 节点"));
                         ui.label(localization::tr("• 提高 Prefab 展开预算；GPU 首次渲染后离焦冻结，返回恢复"));

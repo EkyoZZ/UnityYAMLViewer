@@ -8,6 +8,11 @@ struct Gradient {
     color_indices: Vec<usize>,
     alpha_indices: Vec<usize>,
 }
+pub(crate) struct GradientSampler(Gradient);
+impl GradientSampler {
+    pub(crate) fn parse(text:&str)->Option<Self>{parse(text).map(Self)}
+    pub(crate) fn at(&self,time:f64)->[f64;4]{self.0.sample(time)}
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SelectedKey { Color(usize), Alpha(usize) }

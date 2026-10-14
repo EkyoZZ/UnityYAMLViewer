@@ -1,3 +1,162 @@
+# 最新构建：1.1.8 灯塔粒子与 Prefab 打开（2026-10-14）
+
+- 2026-10-14 用户关闭占用程序并再次明确授权后，进程 / EXE 独占检查通过。6 项粒子回归（含真实灯塔预热与继续播放 0.25 秒后的 Burst）及 1 项多实例 Prefab 源导航映射回归通过。首次灯塔断言错误地要求预热结束瞬间已有至少四个系统存活；真实两个 Burst 每周期 0.2 秒触发，已按该时间点修正验证，不改变实际发射计划。Release 构建前再次确认无占用，cargo build --release --offline --locked 成功（24.00 秒）。产物 target/release/unity_yaml_viewer.exe，版本 1.1.8，19743232 字节，SHA-256：A0691B6D5ABCF13E521CC4C2DC7B78614ADD9341747BB89AE6221089C89EE361。包含 Prefab 根节点打开源资源、有限预热与缓存重播、Billboard 独立宽高、ConeVolume 和粒子 straight RGBA 修复及此前累计修改。保留 Spine 158 条既有警告，未启动本次 EXE；实际灯塔效果、源页签打开 / 目标、排序 / 重播和七语言界面仍待运行验证，未发布。日志 target/lighthouse-particle-tests.log、target/prefab-open-tests.log、target/lighthouse-build.log。
+
+本节优先于下方未构建和新断言未执行描述。下一步验证 Level_102 灯塔，鼠标移回画面继续播放；源 Prefab 打开不携带场景覆盖。后续构建仍需明确授权与占用检查。
+
+---
+
+# 最新源码：Prefab 打开与灯塔粒子（2026-10-14）
+
+- 2026-10-14 Prefab 源资源入口与灯塔粒子阻塞修复：展开数据记录每个实例根节点的实际源 GUID，保留嵌套实例与 stripped 别名映射；Inspector 标题旁新增打开入口，独立打开源 Prefab / 模型资源，不写入或复制场景实例覆盖，源文件不可用时禁用。灯塔六个粒子系统均开启 prewarm，此前拒绝该配置导致没有粒子绘制。现支持循环系统预热一个周期（最多 60 秒、估算 2,000,000 particle-steps），后台初始化后缓存粒子 / 时间 / RNG / 发射累计状态，重播直接恢复缓存。Billboard 的 size3D 读取 X/Y 独立宽高，Z 厚度不使用；新增静态 ConeVolume 体积分布。粒子顶点保留 straight RGBA，由原 Shader 处理 Alpha / 混合，修正 One 混合中重复预乘。Velocity 等未支持模块仍提供提示，鼠标离开画面 / 离焦冻结规则保留。新增实例源导航映射、预热恢复和真实灯塔系统回归代码；cargo check --offline --locked --tests 通过，新增测试断言未执行，源资源导航、灯塔实际画面 / 排序 / 重播及七语言界面待验证。未生成本轮 EXE，现有基础粒子构建不含修复，未发布。
+
+本节优先于下方记录。编译须明确授权并检查占用；下一步验证 Level_102 灯塔及独立打开源 Prefab。场景覆盖不复制到源资源。
+
+---
+
+# 最新构建：1.1.8 基础粒子实时预览（2026-10-14）
+
+- 2026-10-14 用户明确授权后检查程序进程及目标 EXE 独占访问均通过，粒子模拟 / Shader / 属性回归共 7 项通过（包含真实 newitem Prefab 与材质 Shader）。受限环境首次真实 Include 路径检查拒绝访问，经正常权限重试全部通过；日志 target/particle-tests.log、target/particle-shader-tests.log。构建前重新检查主程序无占用，cargo build --release --offline --locked 成功（21.21 秒）。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本均为 1.1.8，19671040 字节，SHA-256：2BD63219E4918F8A644663755FFE6B2226FEEAC75429634D2910706962F7615E。包含场景 / Prefab 基础粒子播放、暂停 / 重播、Renderer GPU 材质及此前 Spine / Tilemap / 模型 / 空 Mesh 累计修改。保留 Spine 158 条既有警告。未启动本次 EXE；实际显卡编译、粒子画面、场景 / Prefab、暂停 / 重播 / 冻结、变换 / 排序与七语言界面待运行验证，复杂模块与 UI Canvas / 3D 限制仍保留，未发布。
+
+本节优先于下方未构建 / 测试断言未执行描述。下一步在 board_item_newitem_effect.prefab 等资源及场景内检查粒子画面与控制，按实际诊断扩展尚未支持模块。后续构建仍须明确授权并检查占用；LineRenderer / TrailRenderer / Terrain 仍暂缓。
+
+---
+
+# 最新源码：场景与 Prefab 基础粒子播放（2026-10-14）
+
+- 2026-10-14 场景 / Prefab 基础粒子实时预览：两者复用现有二维场景 GPU 路径，不新增独立粒子窗口。CPU 按固定 1/60 秒步进模拟，ParticleSystemRenderer 首材质执行既有限定 Built-in Shader，绑定真实主纹理、UV0、颜色、时间和每帧 Billboard 三角网格；材质 / 纹理缓存复用。提供播放 / 暂停 / 重播，共用预览时间用于 Shader _Time；重播恢复固定随机种子，遵循此前离焦 / 鼠标离开画面冻结规则。支持 duration / looping / 常量 startDelay、simulationSpeed 0..2、playOnAwake、持续 rateOverTime 和 Burst（数量 / 重复 / 概率）、初始寿命 / 速度 / 大小 / Z 旋转 / 颜色、MinMaxCurve 常量 / 曲线 / 双曲线 / 双常量及颜色 / 渐变；生命周期大小、颜色与 Z 旋转，曲线复用已有加权采样，旋转积分为 16 段数值近似。支持不启用 Shape，以及静态完整 Sphere / Cone 基底 / Box / Circle / Rectangle 的位置、旋转、缩放和半径厚度；只接入 View Billboard，静态父节点变换下采用既有层级矩阵，尚未播放发射器 Transform 动画，Local-only / Custom 缩放或空间、3D 初始大小 / 旋转等拒绝。默认重力取 -9.81，未加载项目 Physics 全局设置；速率曲线按步长中点积分，预览随机分布不保证与 Unity 相同。prewarm / ring buffer、部分 / 动态 Shape arc、Mesh / Stretch 等 Renderer、Custom Vertex Streams / TEXCOORD1/2 实值、UV 动画、Velocity / Force / Noise / Collision / SubEmitter / Trail 等模块未还原；启用未支持模块提供逐模块提示，仍允许其余基础行为，不能称为完整粒子还原。UI Canvas 与 3D 预览明确提示尚未接入；粒子逐粒子画面拾取未实现。未支持 / 缺失的材质 Shader 报告诊断，不能显示粒子真实效果。每场景最多 128 个系统、每系统最多 4096 粒子、每帧最多 65536 个可见粒子，生命周期预览最多 120 秒，duration 支持 0.001..3600 秒；超限或不支持行为明确提示，估计发射范围用于初始适应窗口，实际最大范围可能不同。新增 Burst 嵌套曲线不误拆、寿命 / 持续发射 / playOnAwake、确定性重播、原始几何 / Alpha 预乘和真实 newitem Prefab 初始 Burst 回归代码。cargo check --offline --locked --tests 通过（target/particle-check.log）；测试断言未执行，实际 GPU 粒子画面、材质、场景与单独 Prefab、暂停 / 重播 / 冻结、层级变换 / 排序和七语言界面待运行验证。源码仍为 1.1.8，未生成本轮 EXE、未发布。
+
+- 本轮粒子 Shader 兼容补充：真实 newitem 材质为 PFW/UI Particles/Alpha Blended。二维世界粒子路径只移除未启用 UNITY_UI_CLIP_RECT 分支及其声明，保留原颜色 / 2 倍 Tint / AlphaScale / BSC 公式；启用裁剪关键字或嵌套裁剪条件明确拒绝，不声称支持 Canvas 遮罩。UnityUI.cginc 作为已知引擎引用保留至粒子专用预处理，非粒子路径仍拒绝未支持指令。当前无场景深度的世界预览把 unity_GUIZTestMode 设为 Always，ColorMask 按实际参数仅接受 RGB / RGBA。材质缓存区分粒子、Spine 和普通网格的编译模式。新增未启用裁剪 / 实际参数 / 启用关键字拒绝及真实粒子 Shader 回归代码；仅通过编译检查，未执行断言和实际显卡编译。
+
+本节优先于下方构建记录。用户确认上一 Spine 构建已可用，随后要求粒子接入，并指定场景 / Prefab 共用实时预览和暂停 / 重播。现有 EXE 为下方 Spine GPU 构建，不含本轮粒子源码。下一步经明确授权并检查占用后构建，核对 board_item_newitem_effect.prefab 等真实资源及场景中嵌套粒子；复杂模块按实际反馈扩展，不把未支持事项写成完成。LineRenderer / TrailRenderer / Terrain 仍暂缓。
+
+---
+
+# 最新构建：1.1.8 场景与独立 Spine GPU Shader（2026-10-14）
+
+- 2026-10-14 用户明确授权后，检查无 unity_yaml_viewer 进程且目标 EXE 独占访问通过，cargo build --release --offline --locked 成功（31.01 秒）。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本均为 1.1.8，19536896 字节，SHA-256：2FD4D52D93018779F268E88A6C4115E6DF4D27A01785228CFD3C49748F2D8A90。包含场景与独立 Spine 原始几何 / 图集 / 材质的受限 GPU Shader 接入、场景材质覆盖与初始皮肤传递、独立动画几何更新、有效空 Mesh 跳过，以及此前 Tilemap 材质、PF3D2 半透明模型与 FBX 轴向 / 缩放累计修复。编译检查、七语言与差异检查通过；保留 Spine 158 条既有警告，新增测试断言未执行。未启动本次 EXE，实际显卡 Shader 编译、Level_101 船屋夜景调色 / 透明边缘、多页材质、独立动画 / 皮肤切换、场景入口覆盖传递、控件层级、空 Mesh 提示和七语言界面仍待运行验证，未发布。
+
+本节优先于下方未构建描述。下一步核对场景船屋调色与从场景进入独立 Spine 的材质、初始皮肤、动画、透明边缘及控件。特殊混合 / 双色染色、缺失映射或不支持 Shader 保留回退；LineRenderer / TrailRenderer / Terrain 仍暂缓。后续构建仍需明确授权并重新检查占用。
+
+---
+
+# 最新源码：场景与独立 Spine GPU Shader（2026-10-14）
+
+- 2026-10-14 Spine GPU Shader 接入：场景 Spine 3.8 setup pose 保留运行时裁剪后的原始附件顶点 / UV / 索引、颜色及槽顺序，按 AtlasAsset 材质的 _MainTex 引用唯一匹配图集页与材质槽，并使用同 GameObject MeshRenderer 的材质覆盖。按原有场景变换 / 初始翻转 / 排序提交 GPU 绘制；保留 CPU 烘焙用于回退、边界与拾取，不把烘焙图再乘材质颜色冒充原始 Shader。独立 Spine 预览复用材质加载，动画每帧更新原始几何；从场景入口携带 Renderer 材质与初始皮肤，SkeletonDataAsset 直接打开使用 AtlasAsset 默认材质，原始骨骼文件仅在同目录索引能唯一找到配套 SkeletonDataAsset 时取得材质上下文，否则仍普通预览。材质 / 图集缓存复用，原始图集像素与 UV 保持原方向及源 Alpha 编码；One 混合的顶点 RGB 按 Alpha 预乘。船屋 Spine/Skeleton 的单颜色 Pass 按原公式编译，仅省略明确标记 LightMode=ShadowCaster 的 Pass；其他多颜色 Pass 仍拒绝，实际用到的 shader_feature 条件变体仍不支持，仅删除没有被代码引用的声明。特殊混合 / 双色染色、图集材质映射缺失、槽或 Shader 不支持时保留整对象普通回退及提示。场景仍静态姿态，独立动画继续使用已有 Spine Runtime；UI Spine / 3D 模式、阴影 / Stencil / 全局昼夜脚本未接入。GPU 几何上限每骨骼一百万顶点，图集 GPU 计入 2 GiB 源纹理预算；原 CPU 缓存和几何仍有额外占用。新增原始网格 / 图集像素 / 材质颜色绑定及颜色 Pass / 变体拒绝回归代码和真实船屋 Shader 检查代码；cargo check --offline --locked --tests 通过（target/spine-gpu-check.log），本轮测试断言未执行，实际 GL Shader 编译、船屋调色、透明边缘、多页材质、动画 / 皮肤切换、覆盖传递、控件层级、七语言界面仍待运行验证。未生成本轮 EXE，现有 Tilemap 修复构建不含 Spine GPU 和有效空 Mesh 修改，未发布。
+
+本节优先于下方构建记录。有效空 Mesh 修改一并待构建。生成 EXE 须明确授权并检查占用；下一步核对 Level_101 船屋调色和从场景进入独立 Spine 的材质 / 皮肤及动画显示。LineRenderer / TrailRenderer / Terrain 仍按用户要求暂缓。
+
+---
+
+# 最新源码：有效空 Mesh（2026-10-14）
+
+- 2026-10-14 有效空 Mesh 不再误报缺失 / 超预算：核对 Level_101.unity 的 MeshFilter 461402410 / 1148902295 / 1996789715，引用 Mesh 1939818100 / 1214895597 / 787006432，均为零顶点、零顶点数据、空顶点 / 索引缓冲、零索引数。空网格正常不绘制；非零缓冲或索引与零顶点矛盾仍报错，超一百万顶点单独报告预算错误。静态场景跳过确认的本地空 Mesh，模型烘焙也处理空几何，避免计算无效边界。独立 Mesh 保留 Inspector，不把 Hierarchy 的未关联分组等同资源缺失。新增空网格 / 矛盾数据 / 超预算回归代码；本轮仅编译检查，未执行测试断言，实际界面待验证，未生成本轮 EXE、未发布。
+
+本节优先于下方构建记录，现有 EXE 尚不含本修复。后续构建须明确授权并检查占用。
+
+---
+
+# 最新构建：1.1.8 Tilemap 材质（2026-10-14）
+
+- 2026-10-14 用户明确授权后，重新检查无 unity_yaml_viewer 进程且目标 EXE 独占访问通过，cargo build --release --offline --locked 成功（18.95 秒）。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本均为 1.1.8，19430400 字节，SHA-256：AC2E1B7CAD6BE11658CC642E1DB73D27329A3BBC94E164A7FD0418D53D3E036C。包含 TilemapRenderer 首材质 GPU Shader 接入，以及此前 PF3D2 透明模型、多材质槽、FBX 轴向 / 缩放等累计修复。cargo check --offline --locked --tests、七语言校验与 git diff --check 通过；新增测试断言未执行，保留 Spine 158 条既有警告。未启动本次 EXE，Level_101.unity 的 LandTilemap / sprite_night 调色、单元贴图 / 排序 / 点选及七语言界面仍待运行验证；未发布。
+
+- 用户确认目前未使用 LineRenderer、TrailRenderer、Terrain，明确暂缓接入；相关代码未修改，不属于本次已完成能力。
+
+本节优先于下方未构建描述。下一步验证 Level_101.unity 的 LandTilemap / sprite_night 效果。后续构建仍需明确授权并重新检查占用。
+
+---
+
+# 最新源码：Tilemap Renderer 材质（2026-10-14）
+
+- 2026-10-14 Tilemap Renderer 材质接入：Level_101.unity 的 LandTilemap 使用 sprite_night（PFW/Sprite/SpriteDefault），此前 GPU 材质筛选遗漏 Tilemap，导致仅用普通贴图。现通过同 GameObject 的 TilemapRenderer 获取首材质，复用已有 Shader 编译、参数和纹理绑定路径；每个 Tile 单元继续提供自身 Sprite / 图集纹理、UV、Tile / Tilemap 颜色、变换、排序及 Tilemap 拾取 ID。按组件去重材质准备，材质缓存区分 Renderer 提供主纹理与 Mesh 材质主纹理绑定模式。Shader 不支持 / 编译失败仍提示并回退普通贴图；仅支持既有限定 Built-in Shader 范围，非 Unity 完整 Tilemap Chunk / Individual 渲染、遮罩或运行时脚本。真实材质参数 _Color=(0.50980395,0.6431373,0.7607843,1)，Shader 位于 Library/PackageCache，包含相对 CommonMath.cginc。新增双纹理单元共享材质、UV / 颜色 / 拾取 ID 回归代码，cargo check --offline --locked --tests 通过（target/tilemap-material-check.log）；测试断言未执行，真实显卡 sprite_night 调色、画面 / 排序 / 点选和七语言界面待运行验证。未生成本轮 EXE；现有透明模型修复构建不含 Tilemap 材质接入，未发布。
+
+本节优先于下方构建记录。后续构建须明确授权并重新检查占用；下一步验证 Level_101.unity 的 LandTilemap / sprite_night 材质调色。
+
+---
+
+# 最新构建：1.1.8 静态模型透明度（2026-10-14）
+
+- 2026-10-14 用户明确授权编译后，检查无 unity_yaml_viewer 进程且目标 EXE 独占访问通过，cargo build --release --offline --locked 成功（18.88 秒）。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本均为 1.1.8，19411456 字节，SHA-256：72097E277A26F55035D6992BD504A32852D3EB0D7779189FB8D7CE2C4857FD1B。包含本轮 PF3D2 主色 / Alpha / 颜色公式与静态 FBX 按名称匹配多材质槽修复，以及此前轴向 / 缩放等累计修改。编译检查、七语言翻译与 git diff --check 通过，保留 Spine 158 条既有警告；新增测试断言未执行。未启动新 EXE，海豚半透明、蜻蜓透明翅膀、材质槽效果及七语言界面仍待运行验证；完整多 Pass / 剔除 / 场景深度和透明表面叠加仍未还原，未发布。
+
+本节优先于下方未构建描述。下一步在 Level_102.unity 核对海豚半透明与蜻蜓透明翅膀。后续构建仍需明确授权并检查占用。
+
+---
+
+# 最新源码：静态模型材质透明度（2026-10-14）
+
+- 2026-10-14 静态模型半透明修复：用户确认上一构建的海鸥 / 海豚 / 蜻蜓尺寸与方向正确，但海豚和蜻蜓翅膀显示实色。定位到静态模型只读取 _Color，遗漏 PFCore/PF3D2_Default / PFCore/PF3D2_Transparent 的 _MainColor 与 _AlphaScale，且静态 FBX 代理只保留首个材质。现按 FBX 材质名称匹配 importer externalObjects 并保留全部槽；匹配不到保留空槽，不按顺序猜测。已识别的这两个 Shader 使用其纹理、主色、Tint、AlphaScale、亮度 / 饱和度 / 对比度、环境色和 Overlay 公式；未知 Shader 仍走原有近似材质路径。海豚材质主色 Alpha 约 0.102，翅膀 0.4，均与贴图 Alpha 相乘。仍是静态 CPU 最近表面烘焙，不代表完整 Shader 执行、多 Pass / Cull / ZWrite / ZTest、多个透明表面或跨对象场景深度的还原。新增材质名称 / 槽顺序与 Alpha 合成回归代码；cargo check --offline --locked --tests 通过（target/model-alpha-check.log），本轮未执行测试断言，实际半透明效果及七语言界面待运行验证。本轮尚未生成 EXE，现有 1.1.8 EXE 不含此修复，未发布。
+
+本节优先于下方构建记录；后续生成 EXE 仍需明确授权并检查占用。下一步验证 Level_102.unity 的海豚半透与蜻蜓透明翅膀。
+
+---
+
+# 最新构建：1.1.8 渲染系统（2026-10-14）
+
+- 2026-10-14 用户明确授权后，重新检查无 unity_yaml_viewer 进程且目标 EXE 独占访问通过，cargo build --release --offline --locked 成功（20.78 秒）。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本均为 1.1.8，19375616 字节，SHA-256：AD4621340B2A758FAE4238BD596BA351D746B5969FA5314FBD74E3930B244FE3。包含 FBX 轴向转换、静态蒙皮与蜻蜓根骨骼均匀缩放修复及此前累计修改。cargo check --offline --locked --tests 与 git diff --check 通过；保留 Spine 158 条既有警告。未启动新 EXE，实际场景朝向、尺寸、贴图、透明翅膀、深度 / 排序及七语言界面仍待运行验证，未发布。
+
+本节优先于下方构建前交接。下一步请在 Level_102.unity 核对海鸥、海豚、蜻蜓朝向与蜻蜓尺寸，以及透明翅膀表现。后续重新构建仍需用户明确授权并重新检查占用。
+
+---
+
+# 新会话交接：1.1.8 静态 FBX 轴向与缩放（2026-10-14）
+
+本节优先于下方历史交接。请先读工程 AGENTS.md；保留用户已有提交和未提交改动。
+
+## 当前版本、分支与产物
+
+- 工作目录：C:\Git\UnityYAMLViewer；分支 render_system；当前 HEAD：6bdcfc1（* 渲染系统）。不是所有渲染工作都未提交：用户已经提交此前工作。
+- Cargo.toml / Cargo.lock 当前源码为 1.1.8，版本整理已在 HEAD 中。渲染系统记录迁至 docs/versions/1.1.8.md，1.1.7 保留此前媒体 / 界面记录；原已合并的旧 1.1.8 开发记录单独放入 docs/versions/archive/1.1.8-merged-into-1.1.7.md。
+- 当前未提交文件：HANDOFF.md、README.md、docs/versions/1.1.8.md、src/main.rs、src/model_preview.rs、src/static_preview/prefab.rs、src/translations.tsv。开始工作时重新核对 git status。
+- 现有 target/release/unity_yaml_viewer.exe 仍为 1.1.7，19378176 字节，SHA-256：972E85DAE0E9EA865C93855D8EB86E7EEAE3CA6CA0810688316F0492611D8F69。
+- 现有 EXE 包含首次静态海鸥模型支持、Unicode 中文名称显示、Prefab 诊断复制、此前运行时 Shader 与预览修改；不含本轮 FBX 轴向 / 蜻蜓缩放修复，也不是 1.1.8 构建。尚未发布。
+
+## 用户最新问题与已修改源码
+
+用户在 C:\Git\g003_client\Assets\Scenes\Level_102.unity 中确认海鸥、海豚、蜻蜓已经出现，但角度不对，只有蜻蜓尺寸严重放大。截图已在本会话中给出。
+
+1. src/model_preview.rs：新增 fbx_axes_point，依据 FBX right/up/front 把源坐标转换为 Y-up，再由 unity_point 转换手性并应用场景世界矩阵。真实三个 FBX 均为 right=PositiveX、up=PositiveZ、front=NegativeY，unit_meters=0.01；旧路径仅翻 X，没有处理 Z-up。
+2. 静态导入路径新增 load_evaluated，开启 ufbx evaluate_skinning；读取 skinned_position，按 skinned_is_local 判断是否应用 geometry_to_world。普通模型与已有显式骨骼姿态路径维持原逻辑。
+3. 蜻蜓：Assets/Res/Prefabs/Map/Npc/dragonfly_red.prefab 将 FBX 实例根缩放设为 20000，同时把源骨骼对象 3805688988141419503 三轴缩放覆盖为 1；实际 FBX RootBone 默认缩放约 100。此前静态代理未恢复骨骼覆盖，产生约 100 倍放大。
+4. src/static_preview/prefab.rs 的 static_skin_template：只有一个完整非根均匀缩放覆盖、一个明显非单位且均匀缩放骨骼，并且全部蒙皮骨骼均为该骨骼后代时，才生成 preview_FbxBoneScaleRatio。本例为 0.01；烘焙围绕该骨骼世界枢轴应用比例。此方案依靠唯一性与结构确认，不是完整 Unity importer fileID 映射，不应扩展到存在歧义的多骨骼覆盖。
+5. 本轮更新 README 中英能力限制、1.1.8 记录、关于摘要及七语言翻译。关于默认 1.1.8 / 1.1.7，其余历史折叠，重新打开恢复折叠。
+
+## 验证状态
+
+- cargo check --offline --locked 通过：target/axes-check.log。
+- real_seagull_static_pose：真实海鸥模板、材质 / 贴图及非空静态烘焙测试通过，target/static-axes-test.log。
+- inspect_static_fbx_axes：真实海鸥、蜻蜓、海豚轴声明和默认蒙皮数据检查通过，target/fbx-axes.log。默认骨骼姿态下 raw / evaluated 顶点范围基本相同，单独开启 skinning 不是蜻蜓尺寸修复原因；修复来自根骨骼覆盖比例。
+- real_dragonfly_root_scale_override：验证实际生成比例 0.01，通过，target/dragonfly-scale-test.log。
+- git diff --check 通过。既有 Spine 158 条警告，增量缓存 hardlink 警告非错误。
+- 未运行实际新画面；模型朝向、尺寸、贴图、透明翅膀、深度 / 排序仍待用户检查。未生成本轮 EXE。
+
+## 下一步
+
+- 若用户要求编译：必须先检查 unity_yaml_viewer 进程及目标 EXE 独占打开，确认无占用后 cargo build --release --offline --locked；若占用，不能自动关闭或更换输出绕过，需用户关闭后再次明确确认。本次交接请求不含编译授权。
+- 构建后更新 docs/versions/1.1.8.md 与 HANDOFF.md 的产物版本、大小、哈希，明确未运行验证 / 未发布。
+- 让用户核对三类模型的朝向与蜻蜓尺寸；如仍有问题，继续追踪实际 FBX 与覆盖，不使用物种固定角度 / 倍率。
+- 蜻蜓翅膀曾显示灰白，透明材质 / alpha 表现尚未核验，不能声称已修好。
+
+## 既有能力与剩余限制
+
+- 实时 GPU 渲染有限 Built-in 单 Pass CG/HLSL→GLSL，不是 Unity 完整编译器；URP / ShaderGraph、完整光照 / 深度、粒子模拟未接入。
+- TEXCOORD1/2 标量、2～4 分量输入暂填零，用户明确接受，未来粒子 Custom Vertex Streams 接入真实数据。
+- clip 片元裁剪已修复；Stencil 用户要求忽略遮罩但继续 Shader，并保留提示。复杂 multi_compile PIXELSNAP_ON / 条件实例化 Shader 仍有材质不可用，未完整解决。
+- 单网格多材质 GPU 按槽绘制，多余材质叠加最后子网格；CPU / 3D 额外槽规则未全面还原。
+- 嵌套 FBX 静态代理当前限单蒙皮网格且唯一 stripped 根 Transform / SkinnedMeshRenderer 源 ID。尚未完整展开骨骼层级 / 还原骨骼旋转与位置覆盖 / 动画；本次只新增满足严格条件的根骨骼均匀缩放。
+- 原生三角文本 Mesh 支持本地 fileID；线拓扑仍不支持，模型 GUID 缺失与其他骨骼绑定问题仍可能存在。
+- Prefab 模板 / 生成文本各 512 MiB、每层 50 万文档；真实 g001 new_home_decoration 从 11 恢复 14 个子节点，生成约 308 MiB / 90938 文档。诊断上限 256 条，预算诊断优先保留。
+- 纹理总预算 CPU / GPU 各 2 GiB，并非进程总内存上限；纹理按路径共享，部分模型 / 烘焙缓存仍可能独立占用。
+- GPU 首次渲染必须完成；后续鼠标离开画面 / 应用失去焦点复用最后帧，返回恢复。缓存颜色、DPI / 缩放 / 恢复实际运行验证仍有限。
+- 项目索引优先磁盘缓存，后台每启动每项目扫描一次，手动可重扫；Assets / Packages / Library/PackageCache 索引。同项目不同目录用规范化路径 SHA-256 区分缓存。
+- tests/fixtures 被测试 include_str! 引用，提交源码须带上；分发 EXE 不需带测试目录。
+
+---
+# 静态模型轴向 / 缩放修复（1.1.8 源码）
+
+- 2026-10-14 静态模型轴向 / 缩放修复：按 FBX right/up/front 转换至 Y-up 后转换 Unity 手性，并计算静态蒙皮数据。真实海鸥 / 蜻蜓 / 海豚均为 Z-up、单位 0.01。蜻蜓 RootBone 缩放约 100，Prefab 覆盖为 1；仅在唯一完整均匀缩放覆盖、唯一缩放骨骼且全部蒙皮骨骼均为其后代时应用相对倍率（本例 0.01）与枢轴修正，不使用物种固定倍率。其他骨骼覆盖 / 动画仍未支持。真实轴向 / 蒙皮检查、海鸥烘焙与蜻蜓比例回归通过，cargo check 通过；实际场景朝向 / 尺寸 / 透明翼效果和七语言界面待验证，未生成 1.1.8 EXE。
+
+---
+
 # 1.1.8 渲染系统版本整理（2026-10-14）
 
 源码版本已升级至 1.1.8；渲染记录迁入 docs/versions/1.1.8.md，1.1.7 保留非渲染历史，旧 1.1.8 合并历史单独归档。关于默认显示 1.1.8 / 1.1.7，其他默认折叠。未生成 1.1.8 EXE、未发布；现有 EXE 仍为此前 1.1.7 构建，哈希见下方历史。

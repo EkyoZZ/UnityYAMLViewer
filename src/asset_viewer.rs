@@ -160,8 +160,10 @@ impl Assets {
             self.spine.retain(|other,_|other==path);
             let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
             if crate::spine_preview::is_data_asset(text) && catalog.is_none() {ui.spinner();ui.label("正在索引 Spine 资源…");return;}
+            let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("spine_refresh")));
+            if refresh.as_deref()==Some(path){self.spine.remove(path);}
             let reload=match self.spine.entry(path.to_owned()).or_insert_with(|| {
-                if crate::spine_preview::is_data_asset(text) {crate::spine_preview::Preview::load_asset(ui.ctx(),text,catalog.as_ref().unwrap())}
+                if crate::spine_preview::is_data_asset(text) {crate::spine_preview::Preview::load_asset(ui.ctx(),path,text,catalog.as_ref().unwrap())}
                 else {crate::spine_preview::Preview::load(ui.ctx(),path)}
             }) {
                 Ok(preview)=>preview.show(ui),

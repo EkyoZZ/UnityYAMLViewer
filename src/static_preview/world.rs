@@ -23,6 +23,7 @@ impl Default for View {
 #[derive(Default)]
 struct Status { loaded: usize, total: usize, stage: usize, errors: Vec<String>, cached:usize, load_ms:u128, build_ms:u128, slowest:Vec<(PathBuf,u128)> }
 struct Shared {
+    particles:Mutex<Vec<crate::particle_preview::Emitter>>,
     gpu_scene: Mutex<Option<Arc<crate::render_system::scene::Scene>>>,
     cancelled: AtomicBool,
     paused: Arc<AtomicBool>,
@@ -58,6 +59,10 @@ impl Drop for Job {
 }
 #[derive(Default)]
 pub(super) struct World {
+    particle_playing:bool,
+    particle_last:Option<Instant>,
+    particle_elapsed:f32,
+    particle_scene:Option<(usize,Arc<crate::render_system::scene::Scene>)>,
     gpu_error: Arc<Mutex<Option<String>>>,
     job: Option<Job>,
     texture: Option<egui::TextureHandle>,
@@ -74,6 +79,7 @@ pub(super) struct World {
 }
 impl World {
     pub(super) fn release(&mut self) {
+        self.particle_scene=None;self.particle_last=None;self.particle_elapsed=0.0;
         self.job=None;
         if let Some(textures)=self.textures.take() {std::thread::spawn(move || drop(textures));}
         self.texture=None;self.frame_key=None;self.errors.clear();
@@ -93,16 +99,25 @@ impl World {
         catalog.as_ref().map(|c|Arc::as_ptr(c) as usize).hash(&mut hash);
         let key=hash.finish();
         if self.job.as_ref().is_none_or(|job|job.key!=key) {
+            self.particle_playing=true;self.particle_elapsed=0.0;self.particle_last=Some(Instant::now());self.particle_scene=None;
             // Cancel the old worker while retaining the displayed frame and camera.
             self.job=None;self.status_stage=0;self.status_text=tr("正在准备预览…").into();
             *self.gpu_error.lock().unwrap()=None;
-            let shared=Arc::new(Shared {gpu_scene:Mutex::new(None),cancelled:AtomicBool::new(false),paused,revision:AtomicU64::new(1),view:Mutex::new(self.view.clone()),status:Mutex::new(Status::default()),frame:Mutex::new(None)});
+            let shared=Arc::new(Shared {particles:Mutex::default(),gpu_scene:Mutex::new(None),cancelled:AtomicBool::new(false),paused,revision:AtomicU64::new(1),view:Mutex::new(self.view.clone()),status:Mutex::new(Status::default()),frame:Mutex::new(None)});
             let worker=shared.clone();let docs=documents.to_vec();let flags=flags.clone();let ctx=ui.ctx().clone();
             let textures=self.textures.get_or_insert_with(||Arc::new(Mutex::new(TextureCache::default()))).clone();
             std::thread::spawn(move || run(&docs,&flags,catalog.as_ref(),axis,&worker,&ctx,textures));
             self.job=Some(Job {key,shared});
         }
         let shared=self.job.as_ref().unwrap().shared.clone();
+        let has_particles=!shared.particles.lock().unwrap().is_empty();
+        let mut particle_controls_changed=false;
+        if has_particles {ui.horizontal(|ui|{
+            ui.label(tr("粒子播放"));
+            if ui.button(tr(if self.particle_playing {"暂停"}else{"播放"})).clicked(){self.particle_playing=!self.particle_playing;particle_controls_changed=true;}
+            if ui.button(tr("重播")).clicked(){for emitter in shared.particles.lock().unwrap().iter_mut(){emitter.restart();}self.particle_elapsed=0.0;self.particle_playing=true;particle_controls_changed=true;}
+            ui.label(format!("{:.2} s",self.particle_elapsed));
+        });}
         if let Ok(status)=shared.status.try_lock() {
             self.status_stage=status.stage;
             self.status_text=match status.stage {
@@ -172,6 +187,9 @@ impl World {
         }
         let painter=ui.painter_at(rect);
         let preview_active=response.hovered() && ui.input(|input|input.focused) && !shared.paused.load(Ordering::Relaxed);
+        let particle_now=Instant::now();let particle_dt=self.particle_last.replace(particle_now).map_or(0.0,|last|particle_now.duration_since(last).as_secs_f64().min(0.25));
+        let particle_running=has_particles && self.particle_playing && preview_active && self.status_stage==3;
+        if particle_running {self.particle_elapsed+=particle_dt as f32;for emitter in shared.particles.lock().unwrap().iter_mut(){emitter.advance(particle_dt);}}
         let mut live_frame=preview_active;
         super::paint_background(&painter,rect,background,rgb);
         let mut picked=None;
@@ -197,16 +215,27 @@ impl World {
             // Guides sit above the background and beneath scene content, like UI previews.
             let gpu_scene=shared.gpu_scene.lock().unwrap().clone();
             if let Some(scene)=gpu_scene.filter(|_|self.frame_key==Some(key) && crate::render_system::available() && self.gpu_error.lock().unwrap().is_none()) {
+                let scene=if has_particles {
+                    let source_key=Arc::as_ptr(&scene) as usize;
+                    if self.particle_scene.as_ref().is_none_or(|(key,_)|*key!=source_key) || particle_running || particle_controls_changed {
+                    let particles=shared.particles.lock().unwrap();
+                    let emitters:HashMap<_,_>=particles.iter().map(|p|(p.id.as_str(),p)).collect();
+                    let mut draws=Vec::new();let mut particle_vertices=0usize;
+                    for draw in scene.draws.iter(){if let Some(emitter)=emitters.get(draw.component.as_ref()){let draw=emitter.draw(draw);particle_vertices+=draw.vertices.len();if particle_vertices<=262144{draws.push(draw);}}else{draws.push(draw.clone());}}
+                    self.particle_scene=Some((source_key,Arc::new(crate::render_system::scene::Scene{draws:Arc::from(draws),revision:scene.revision})));
+                    }
+                    self.particle_scene.as_ref().unwrap().1.clone()
+                }else{scene};
                 let w=size[0] as f64;let h=size[1] as f64;
                 let projection=[[(2.0*frame.scale/w) as f32,0.0,0.0,(2.0*frame.pan[0]-2.0*frame.center[0]*frame.scale/w) as f32],
                     [0.0,(2.0*frame.scale/h) as f32,0.0,(-2.0*frame.pan[1]-2.0*frame.center[1]*frame.scale/h) as f32],
                     [0.0,0.0,0.0,0.0],[0.0,0.0,0.0,1.0]];
                 let projection=crate::render_system::fixed_viewport_projection(projection,image_rect,rect);
                 let first_frame=!crate::render_system::snapshot_ready(&scene);
-                live_frame=preview_active || first_frame || composed_frame_changed;
+                live_frame=preview_active || first_frame || composed_frame_changed || particle_running;
                 let mut style=std::collections::hash_map::DefaultHasher::new();background.hash(&mut style);rgb.hash(&mut style);show_guides.hash(&mut style);
                 let camera_input=self.view.pan!=previous_view.pan || self.view.zoom!=previous_view.zoom || self.view.focus!=previous_view.focus;
-                painter.add(crate::render_system::callback(rect,scene,projection,self.gpu_error.clone(),preview_active || camera_input || composed_frame_changed,style.finish()));
+                painter.add(crate::render_system::callback_timed(rect,scene,projection,self.gpu_error.clone(),preview_active || camera_input || composed_frame_changed || particle_controls_changed,style.finish(),has_particles.then_some(self.particle_elapsed)));
                 if live_frame {ui.ctx().request_repaint_after(Duration::from_millis(16));}
             } else {
                 painter.image(texture.id(),image_rect,egui::Rect::from_min_max(Pos2::ZERO,Pos2::new(1.0,1.0)),Color32::WHITE);
@@ -350,7 +379,9 @@ fn include(area:&mut [f64;4],points:[[f64;2];4]) {
 }
 fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:Option<&Arc<HashMap<String,PathBuf>>>,axis:usize,shared:&Shared,ctx:&egui::Context,cache:Arc<Mutex<TextureCache>>) {
     if !shared.checkpoint() {return;}
-    let prepared=super::prepare(docs,flags,catalog,&shared.cancelled,axis,Some(&shared.paused));
+    let mut prepared=super::prepare(docs,flags,catalog,&shared.cancelled,axis,Some(&shared.paused));
+    if prepared.particles.len()*crate::particle_preview::MAX_PARTICLES>65536 {prepared.issues.push("Particle preview limits total visible particles to 65,536 per frame".into());}
+    *shared.particles.lock().unwrap()=std::mem::take(&mut prepared.particles);
     if !shared.checkpoint() {return;}
     let mut paths=Vec::new();let mut indices=HashMap::new();
     for (index,sprite) in prepared.sprites.iter().enumerate() {
@@ -455,13 +486,22 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
     let guid=regex::Regex::new(r"guid:\s*([0-9a-fA-F]{32})").unwrap();
     let values=regex::Regex::new(r"(?m)^\s*-\s*(_\w+):\s*([-+0-9.eE]+)\s*$").unwrap();
     let defaults=regex::Regex::new(r#"(?m)^\s*(?:\[\w+\]\s*)?(_\w+)\s*\([^\n]*\)\s*=\s*([-+0-9.eE]+)"#).unwrap();
-    let mut materials:HashMap<PathBuf,Result<Arc<rs::Material>,String>>=HashMap::new();
+    let mut materials:HashMap<(PathBuf,bool,bool,bool),Result<Arc<rs::Material>,String>>=HashMap::new();
     let mut material_sources:HashMap<PathBuf,Arc<rs::Texture>>=HashMap::new();
     let mut material_source_bytes=0usize;
     let mut custom=HashMap::new();
+    let tile_renderers:HashMap<_,_>=docs.values().filter(|d|d.type_name=="TilemapRenderer").filter_map(|d|Some((d.game_object.as_deref()?,*d))).collect();
+    let mesh_renderers:HashMap<_,_>=docs.values().filter(|d|d.type_name=="MeshRenderer").filter_map(|d|Some((d.game_object.as_deref()?,*d))).collect();
+    let mut visited_components=HashSet::new();
     for sprite in sprites {
         if !shared.checkpoint() {return Err("Preview cancelled".into());}
-        let Some(doc)=docs.get(sprite.component.as_str()).filter(|d|matches!(d.type_name.as_str(),"SpriteRenderer"|"MeshRenderer")) else {continue;};
+        if !visited_components.insert(sprite.component.as_str()) {continue;}
+        let Some(component)=docs.get(sprite.component.as_str()) else {continue;};
+        let spine=component.type_name=="MonoBehaviour" && field(&component.text,"skeletonDataAsset").is_some();
+        if spine && sprite.baked.as_ref().is_none_or(|b|b.gpu.is_none()) {shared.status.lock().unwrap().errors.push(format!("Spine {}: GPU geometry unavailable (atlas material mapping, special blend or two-color tint); baked fallback",component.file_id));continue;}
+        let doc=if component.type_name=="Tilemap" {let Some(renderer)=component.game_object.as_deref().and_then(|go|tile_renderers.get(go)) else {continue;};*renderer}else if spine {let Some(renderer)=component.game_object.as_deref().and_then(|go|mesh_renderers.get(go)) else {continue;};*renderer}else{*component};
+        if !matches!(doc.type_name.as_str(),"SpriteRenderer"|"MeshRenderer"|"TilemapRenderer"|"ParticleSystemRenderer") {continue;}
+        let sprite_texture=spine || matches!(doc.type_name.as_str(),"SpriteRenderer"|"TilemapRenderer");
         let Some(tail)=doc.text.split_once("  m_Materials:").map(|(_,v)|v) else {continue;};
         let mut slots=Vec::new();
         let limit=if doc.type_name=="MeshRenderer" {64}else{1};
@@ -469,15 +509,15 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
         if doc.type_name=="MeshRenderer" && lines.len()>64 {shared.status.lock().unwrap().errors.push(format!("Mesh {}: material slot limit 64 exceeded",doc.file_id));}
         for line in lines.into_iter().take(limit) {
         let Some(path)=guid.captures(line).and_then(|c|catalog.get(&c[1].to_lowercase())) else {
-            if doc.type_name=="MeshRenderer" {shared.status.lock().unwrap().errors.push(format!("Mesh {}: material slot {} reference unavailable",doc.file_id,slots.len()));}
+            if matches!(doc.type_name.as_str(),"MeshRenderer"|"ParticleSystemRenderer") {shared.status.lock().unwrap().errors.push(format!("Renderer {}: material slot {} reference unavailable",doc.file_id,slots.len()));}
             slots.push(None);continue;
         };
-        let material=materials.entry(path.clone()).or_insert_with(||{
+        let material=materials.entry((path.clone(),sprite_texture,spine,doc.type_name=="ParticleSystemRenderer")).or_insert_with(||{
             let text=read(path)?;
             let reference=field(&text,"m_Shader").ok_or("Missing material shader")?;
             let shader_path=guid.captures(reference).and_then(|c|catalog.get(&c[1].to_lowercase())).ok_or("Shader GUID not found")?;
             let shader=read(shader_path)?;
-            let (program,state)=crate::render_system::shader::translate_material_file(shader_path,&text)?;
+            let (program,state)=if spine {crate::render_system::shader::translate_spine_material_file(shader_path,&text)?}else if doc.type_name=="ParticleSystemRenderer" {crate::render_system::shader::translate_particle_material_file(shader_path,&text)?}else{crate::render_system::shader::translate_material_file(shader_path,&text)?};
             let mut uniforms=BTreeMap::new();
             uniforms.insert("_MainTex_ST".into(),U::Vector([1.0,1.0,0.0,0.0]));
             uniforms.insert("_LightIntensity".into(),U::Float(0.0));
@@ -501,7 +541,7 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
                 let scale=nested_field(block,"m_Scale").and_then(|v|crate::inline_vector(v,&["x","y"])).unwrap_or(vec![1.0;2]);
                 let offset=nested_field(block,"m_Offset").and_then(|v|crate::inline_vector(v,&["x","y"])).unwrap_or(vec![0.0;2]);
                 uniforms.insert(format!("{name}_ST"),U::Vector([scale[0] as f32,scale[1] as f32,offset[0] as f32,offset[1] as f32]));
-                if name=="_MainTex" && doc.type_name=="SpriteRenderer" {continue;}
+                if name=="_MainTex" && sprite_texture {continue;}
                 let Some(reference)=nested_field(block,"m_Texture") else{continue;};
                 let Some(texture_path)=guid.captures(reference).and_then(|c|catalog.get(&c[1].to_lowercase())) else{continue;};
                 if let Some(texture)=material_sources.get(texture_path) {bound_textures.insert(name.clone(),texture.clone());continue;}
@@ -529,7 +569,7 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
                 uniforms.insert("_MainTex_ST".into(),U::Vector([scale[0] as f32,scale[1] as f32,offset[0] as f32,offset[1] as f32]));
             }
             for c in regex::Regex::new(r"uniform\s+sampler2D\s+(_\w+)\s*;").unwrap().captures_iter(&program.fragment) {
-                if &c[1]=="_MainTex" && doc.type_name=="SpriteRenderer" {continue;}
+                if &c[1]=="_MainTex" && sprite_texture {continue;}
                 if bound_textures.contains_key(&c[1]) {continue;}
                 let texture_defaults=regex::Regex::new(r#"(_\w+)\s*\("[^"\n]*",\s*2D\s*\)\s*=\s*"(\w+)""#).unwrap();
                 let default=texture_defaults.captures_iter(&shader).find(|v|v[1]==c[1]).map(|v|v[2].to_owned()).ok_or_else(||format!("Missing material texture: {}",&c[1]))?;
@@ -572,8 +612,38 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
         gpu_textures.insert(instance.texture,Arc::new(rs::Texture{size:cpu.size.map(|v|v as u32),rgba:Arc::from(rgba),revision:1,repeat:[false;2]}));
     }
     let mut draws=Vec::new();
+    let sprite_lookup:HashMap<_,_>=sprites.iter().map(|s|(s.component.as_str(),s)).collect();
+    let mut spine_textures:HashMap<PathBuf,Arc<rs::Texture>>=HashMap::new();
     for instance in instances {
         let id=components[instance.component as usize].as_str();
+        if let Some(sprite)=sprite_lookup.get(id).filter(|s|s.id=="spine") {
+            if let (Some(parts),Some(slots))=(sprite.baked.as_ref().and_then(|b|b.gpu.as_ref()),custom.get(id)) {
+                let prepared=(||->Result<Vec<rs::Draw>,String>{
+                    if parts.iter().any(|p|slots.get(p.slot).and_then(Option::as_ref).is_none()) {return Err("Atlas material slot unavailable".into());}
+                    let mut matrix=sprite.spatial.0.map(|row|row.map(|v|v as f32));
+                    for row in &mut matrix {for axis in 0..2 {if sprite.flip[axis]{row[axis]*=-1.0;}}}
+                    let mut result=Vec::new();
+                    for part in parts.iter() {
+                        if !shared.checkpoint(){return Err("Preview cancelled".into());}
+                        let texture=if let Some(texture)=spine_textures.get(&part.path){texture.clone()}else{
+                            let mut reader=image::ImageReader::open(&part.path).map_err(|e|e.to_string())?.with_guessed_format().map_err(|e|e.to_string())?;
+                            let mut limits=image::Limits::default();limits.max_image_width=Some(8192);limits.max_image_height=Some(8192);limits.max_alloc=Some(256*1024*1024);reader.limits(limits);
+                            let image=reader.decode().map_err(|e|e.to_string())?.into_rgba8();
+                            bytes=bytes.checked_add(image.len()).ok_or("Spine texture budget overflow")?;if bytes>TEXTURE_BUDGET {return Err("GPU source textures exceed 2 GiB".into());}
+                            // Spine atlas UVs and pixel rows share the top-down convention.
+                            // Preserve source pixels, including premultiplied-alpha atlases.
+                            let texture=Arc::new(rs::Texture{size:[image.width(),image.height()],rgba:Arc::from(image.into_raw()),revision:1,repeat:[false;2]});
+                            spine_textures.insert(part.path.clone(),texture.clone());texture
+                        };
+                        let material=slots[part.slot].as_ref().unwrap();
+                        let vertices=if material.state.source==B::One && part.vertices.iter().any(|v|v.color[3]!=1.0) {Arc::from(part.vertices.iter().copied().map(|mut v|{for i in 0..3{v.color[i]*=v.color[3];}v}).collect::<Vec<_>>())}else{part.vertices.clone()};
+                        result.push(rs::Draw{component:Arc::from(id),vertices,indices:part.indices.clone(),object_to_world:matrix,material:material.clone(),main_texture:texture});
+                    }Ok(result)
+                })();
+                match prepared {Ok(parts)=>{draws.extend(parts);continue;},Err(error)=>{shared.status.lock().unwrap().errors.push(format!("Spine {id}: {error}; baked fallback"));}}
+            }
+            custom.remove(id);
+        }
         let tint=docs.get(id).filter(|d|d.type_name=="SpriteRenderer").map(|d|{let c=vector(&d.text,"m_Color",&["r","g","b","a"],&[1.0;4]);std::array::from_fn(|i|c[i] as f32)}).unwrap_or_else(||straight_gamma(instance.tint).map(|v|v as f32/255.0));
         let mut vertices=instance.points.iter().zip(instance.uv).map(|(p,uv)|rs::Vertex{position:[p[0] as f32,p[1] as f32,0.0],uv:[uv[0] as f32,uv[1] as f32],color:tint,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
         let mut submeshes=vec![vec![0,1,2,0,2,3]];let mut object_to_world=identity;
@@ -623,6 +693,20 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
         }
     }
     Ok(Some(Arc::new(rs::Scene{draws:Arc::from(draws),revision:1})))
+}
+pub(crate) fn spine_preview_resources(parts:Vec<crate::spine_preview::GpuPart>,materials:&str,catalog:&HashMap<String,PathBuf>)->Result<Arc<crate::render_system::scene::Scene>,String> {
+    let docs=crate::parse_unity_yaml(&format!("--- !u!114 &1\nMonoBehaviour:\n  m_GameObject: {{fileID: 3}}\n  skeletonDataAsset: {{fileID: 1}}\n--- !u!23 &2\nMeshRenderer:\n  m_GameObject: {{fileID: 3}}\n  m_Materials:\n{materials}\n"));
+    let baked=Arc::new(crate::spine_preview::Baked{image:egui::ColorImage::new([1,1],Color32::TRANSPARENT),region:Region{rect:[0.0,0.0,1.0,1.0],pivot:[0.5;2],ppu:1.0,border:[0.0;4]},approximate:false,gpu:Some(Arc::new(parts))});
+    let path=PathBuf::from("__spine_gpu_preview");
+    let sprite=Sprite{baked:Some(baked),ui:None,component:"1".into(),selectable:true,name:String::new(),path:path.clone(),id:"spine".into(),spatial:Matrix::identity(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)};
+    let instance=Instance{points:[[0.0,0.0];4],uv:[[0.0,0.0];4],tint:Color32::WHITE,texture:0,component:0,selectable:true};
+    let texture=Arc::new(CpuTexture{size:[1,1],pixels:vec![Color32::TRANSPARENT],meta:String::new(),regions:Mutex::default()});
+    let shared=Shared{particles:Mutex::default(),gpu_scene:Mutex::default(),cancelled:AtomicBool::new(false),paused:Arc::new(AtomicBool::new(false)),revision:AtomicU64::new(1),view:Mutex::default(),status:Mutex::default(),frame:Mutex::default()};
+    let scene=gpu_scene(&[sprite],&[instance],&[Some(texture)],&[path],&["1".into()],&docs,Some(&Arc::new(catalog.clone())),&shared)?;
+    let errors=shared.status.lock().unwrap().errors.clone();
+    let scene=scene.ok_or_else(||errors.join("\n"))?;
+    if scene.draws.iter().any(|d|d.main_texture.size==[1,1] && d.main_texture.rgba.iter().all(|v|*v==0)){return Err(errors.join("\n"));}
+    Ok(scene)
 }
 fn neutral_day_night_colors(uniforms:&mut BTreeMap<String,crate::render_system::scene::Uniform>) {
     for name in ["_GlobalDayNightColor","_GlobalDayNightFogColor","_GlobalDayNightWaterColor"] {
@@ -679,6 +763,54 @@ fn compose(instances:&[Instance],textures:&[Option<Arc<CpuTexture>>],view:&View,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spine_gpu_resources_keep_original_geometry_and_material_tint() {
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("spine-resources-test-{}",std::process::id()));
+        let assets=root.join("Assets");std::fs::create_dir_all(&assets).unwrap();
+        let shader=assets.join("test.shader");std::fs::write(&shader,include_str!("../../tests/fixtures/pf_sprite_overlay.shader")).unwrap();
+        let mat=assets.join("night.mat");std::fs::write(&mat,"Material:\n  m_Shader: {fileID: 4800000, guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\n  m_Colors:\n  - _Color: {r: 0.5, g: 0.6, b: 0.7, a: 1}\n").unwrap();
+        let page=assets.join("page.png");image::RgbaImage::from_pixel(2,2,image::Rgba([64,128,192,128])).save(&page).unwrap();
+        let vertex=crate::render_system::scene::Vertex{position:[3.0,4.0,0.0],uv:[0.25,0.75],color:[1.0;4],normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]};
+        let part=crate::spine_preview::GpuPart{path:page.clone(),slot:0,vertices:Arc::from(vec![vertex;3]),indices:Arc::from(vec![0,1,2])};
+        let catalog=HashMap::from([("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),shader.clone()),("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),mat.clone())]);
+        let scene=spine_preview_resources(vec![part],"  - {fileID: 2100000, guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}",&catalog).unwrap();
+        assert_eq!(scene.draws.len(),1);
+        assert_eq!(scene.draws[0].vertices[0].position,[3.0,4.0,0.0]);
+        assert_eq!(scene.draws[0].vertices[0].uv,[0.25,0.75]);
+        assert_eq!(&scene.draws[0].main_texture.rgba[..4],&[64,128,192,128]);
+        assert_eq!(scene.draws[0].material.uniforms["_Color"],crate::render_system::scene::Uniform::Vector([0.5,0.6,0.7,1.0]));
+        assert!(!scene.draws[0].material.textures.contains_key("_MainTex"));
+        for path in [&shader,&mat,&page]{std::fs::remove_file(path).unwrap();}std::fs::remove_dir(assets).unwrap();std::fs::remove_dir(root).unwrap();
+    }
+    #[test]
+    fn tilemap_material_preserves_each_cell_texture_tint_and_uv() {
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("tilemap-material-test-{}",std::process::id()));
+        let assets=root.join("Assets");std::fs::create_dir_all(&assets).unwrap();
+        let shader=assets.join("test.shader");std::fs::write(&shader,include_str!("../../tests/fixtures/pf_sprite_overlay.shader")).unwrap();
+        let mat=assets.join("night.mat");
+        std::fs::write(&mat,"Material:\n  m_Shader: {fileID: 4800000, guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\n  m_Colors:\n  - _Color: {r: 0.5, g: 0.6, b: 0.7, a: 1}\n").unwrap();
+        let paths=[assets.join("red.png"),assets.join("green.png")];
+        let colors=[Color32::RED,Color32::GREEN];
+        for (path,pixel) in paths.iter().zip([[255,0,0,255],[0,255,0,255]]) {image::RgbaImage::from_pixel(1,1,image::Rgba(pixel)).save(path).unwrap();}
+        let docs=crate::parse_unity_yaml("--- !u!1839735485 &10\nTilemap:\n  m_GameObject: {fileID: 1}\n--- !u!483693784 &11\nTilemapRenderer:\n  m_GameObject: {fileID: 1}\n  m_Materials:\n  - {fileID: 2100000, guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}\n");
+        let sprites:Vec<_>=paths.iter().map(|path|Sprite{spatial:Matrix::identity(),baked:None,ui:None,component:"10".into(),selectable:true,name:String::new(),path:path.clone(),id:String::new(),matrix:Matrix::identity().into(),tint:Color32::WHITE,flip:[false;2],order:(0,0,0)}).collect();
+        let instances:Vec<_>=(0..2).map(|texture|Instance{points:[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]],uv:[[0.25,0.75];4],tint:crate::asset_viewer::preview_color([128,255,255,128]),texture,component:0,selectable:true}).collect();
+        let textures:Vec<_>=colors.iter().map(|color|Some(Arc::new(CpuTexture{size:[1,1],pixels:vec![*color],meta:String::new(),regions:Mutex::default()}))).collect();
+        let catalog=Arc::new(HashMap::from([("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),shader.clone()),("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),mat.clone())]));
+        let state=shared();
+        let scene=gpu_scene(&sprites,&instances,&textures,&paths,&["10".into()],&docs,Some(&catalog),&state).unwrap().unwrap();
+        assert_eq!(scene.draws.len(),2,"{:?}",state.status.lock().unwrap().errors);
+        assert_eq!(scene.draws[0].material.uniforms["_Color"],crate::render_system::scene::Uniform::Vector([0.5,0.6,0.7,1.0]));
+        assert!(Arc::ptr_eq(&scene.draws[0].material,&scene.draws[1].material));
+        assert_eq!(&*scene.draws[0].main_texture.rgba,&[255,0,0,255]);
+        assert_eq!(&*scene.draws[1].main_texture.rgba,&[0,255,0,255]);
+        assert_eq!(scene.draws[0].vertices[0].uv,[0.25,0.75]);
+        assert_eq!(scene.draws[0].vertices[0].color[3],128.0/255.0);
+        assert_eq!(&*scene.draws[0].component,"10");
+        assert!(!scene.draws[0].material.textures.contains_key("_MainTex"));
+        for path in paths.iter().chain([&shader,&mat]) {std::fs::remove_file(path).unwrap();}
+        std::fs::remove_dir(assets).unwrap();std::fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn one_submesh_draws_both_material_slots_in_order() {
         let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("material-slots-test-{}",std::process::id()));
@@ -753,7 +885,7 @@ mod tests {
         assert!(scene.is_some(),"All custom shaders were rejected");
     }
     fn shared() -> Shared {
-        Shared {gpu_scene:Mutex::new(None),cancelled:AtomicBool::new(false),paused:Arc::new(AtomicBool::new(false)),revision:AtomicU64::new(1),view:Mutex::new(View::default()),status:Mutex::new(Status::default()),frame:Mutex::new(None)}
+        Shared {particles:Mutex::default(),gpu_scene:Mutex::new(None),cancelled:AtomicBool::new(false),paused:Arc::new(AtomicBool::new(false)),revision:AtomicU64::new(1),view:Mutex::new(View::default()),status:Mutex::new(Status::default()),frame:Mutex::new(None)}
     }
     #[test]
     fn small_tile_decodes_with_exact_pixel_reservation() {

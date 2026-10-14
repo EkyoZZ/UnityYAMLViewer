@@ -4,6 +4,11 @@ use eframe::egui::{self, Color32, Stroke};
 use crate::{AnimationBinding, SelectedKeyframe, editing, localization::tr};
 #[derive(Clone)]
 struct Block { start: usize, end: usize, time_line: usize, parent: usize, time: f64, fields: Vec<(String,String)> }
+pub(crate) struct ScalarSampler(Vec<Block>);
+impl ScalarSampler {
+    pub(crate) fn parse(text:&str)->Option<Self>{let mut keys=blocks(text);keys.sort_by(|a,b|a.time.total_cmp(&b.time));(!keys.is_empty()).then_some(Self(keys))}
+    pub(crate) fn at(&self,time:f64)->f64{let first=&self.0[0];let last=self.0.last().unwrap();if time<=first.time{return number(first,"value",None).unwrap_or(0.0);}if time>=last.time{return number(last,"value",None).unwrap_or(0.0);}let a=self.0.iter().rev().find(|k|k.time<=time).unwrap();let b=self.0.iter().find(|k|k.time>=time).unwrap();evaluate(a,b,time,None).map_or(0.0,|v|v.0)}
+}
 fn blocks(text: &str) -> Vec<Block> {
     let lines: Vec<_> = text.split_inclusive('\n').collect();
     let mut result = Vec::new(); let mut parent = 0;

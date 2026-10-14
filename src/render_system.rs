@@ -32,10 +32,13 @@ pub(crate) fn fixed_viewport_projection(mut projection:[[f32;4];4],image:eframe:
     projection
 }
 pub(crate) fn callback(rect: eframe::egui::Rect, scene: std::sync::Arc<scene::Scene>, projection: [[f32;4];4], error: std::sync::Arc<std::sync::Mutex<Option<String>>>,active:bool,style:u64) -> eframe::egui::PaintCallback {
+    callback_timed(rect,scene,projection,error,active,style,None)
+}
+pub(crate) fn callback_timed(rect: eframe::egui::Rect, scene: std::sync::Arc<scene::Scene>, projection: [[f32;4];4], error: std::sync::Arc<std::sync::Mutex<Option<String>>>,active:bool,style:u64,time:Option<f32>) -> eframe::egui::PaintCallback {
     eframe::egui::PaintCallback { rect, callback: std::sync::Arc::new(eframe::egui_glow::CallbackFn::new(move |info,_painter| {
         let globals = std::collections::BTreeMap::new();
         let viewport=info.viewport_in_pixels();
-        let frame=scene::Frame { scene:&scene, viewport:[viewport.width_px as u32,viewport.height_px as u32],view_projection:projection,clear_color:[0.0;4],elapsed_seconds:STARTED.get().map_or(0.0,|t|t.elapsed().as_secs_f32()),globals:&globals };
+        let frame=scene::Frame { scene:&scene, viewport:[viewport.width_px as u32,viewport.height_px as u32],view_projection:projection,clear_color:[0.0;4],elapsed_seconds:time.unwrap_or_else(||STARTED.get().map_or(0.0,|t|t.elapsed().as_secs_f32())),globals:&globals };
         if let Some(gpu)=GPU.lock().unwrap().as_mut() {
             let result=unsafe { gpu.draw_cached(&frame,scene.clone(),[viewport.left_px,viewport.from_bottom_px,viewport.width_px,viewport.height_px],active,style) };
             *error.lock().unwrap()=result.err();

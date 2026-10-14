@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, mpsc}, time::SystemTime};
 use eframe::egui::{self, Color32, Pos2, Vec2};
 use crate::{Document, localization::tr};
-mod world;
+pub(crate) mod world;
 mod sdf;
 pub(crate) mod prefab;
 const AUTO_PREFAB_LIMIT:usize=20;
@@ -53,7 +53,7 @@ pub struct Preview {
 }
 
 #[derive(Default)]
-struct Prepared { sprites: Vec<Sprite>, missing: usize, issues: Vec<String> }
+struct Prepared { sprites: Vec<Sprite>, missing: usize, issues: Vec<String>,particles:Vec<crate::particle_preview::Emitter> }
 struct Preparation {
     key: u64, receiver: Option<mpsc::Receiver<Prepared>>, cancelled: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -198,6 +198,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
             for name in duplicate_bones {bones.remove(&name);}
         }
         let local=if reference(mesh,"guid").is_none() {reference(mesh,"fileID").and_then(|id|documents.iter().find(|d|d.file_id==id && d.type_name=="Mesh")).map(|d|d.text.as_ref())}else{None};
+        if local.is_some_and(crate::render_system::mesh::is_empty) {continue;}
         match crate::model_preview::bake(mesh,&renderer.text,catalog,matrix,&bones,local) {
             Ok((baked,warnings))=>{
                 baked_bytes+=baked.image.pixels.len()*4;
@@ -211,8 +212,25 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
             Err(e)=>{missing+=1;issues.push(format!("{}: {e}",doc.file_id));}
         }
     }
+    let mut particles=Vec::new();
+    for doc in documents.iter().filter(|d|d.type_name=="ParticleSystem") {
+        if !checkpoint(cancelled,paused){return Prepared::default();}
+        let Some(object)=doc.game_object.as_deref() else {continue;};
+        if flags.get(object).is_some_and(|f|!f.visible){continue;}
+        let Some(renderer)=documents.iter().find(|d|d.type_name=="ParticleSystemRenderer" && d.game_object==doc.game_object && number(&d.text,"m_Enabled",1.0)!=0.0) else {continue;};
+        let Some(matrix)=by_object.get(object).and_then(|id|world(id,&transforms,&objects,&mut HashSet::new())) else {continue;};
+        if particles.len()>=128{issues.push("Particle preview exceeds 128 systems; remaining systems skipped".into());break;}
+        match crate::particle_preview::Emitter::parse(renderer.file_id.clone(),&doc.text,&renderer.text,matrix) {
+            Ok(emitter)=>{
+                issues.extend(emitter.warnings.iter().cloned());
+                let radius=emitter.bounds_radius(); let baked=crate::spine_preview::Baked{image:egui::ColorImage::new([1,1],Color32::TRANSPARENT),region:Region{rect:[0.0,0.0,1.0,1.0],pivot:[0.5;2],ppu:1.0/(radius*2.0),border:[0.0;4]},approximate:false,gpu:None};
+                sprites.push(Sprite{baked:Some(Arc::new(baked)),ui:None,component:renderer.file_id.clone(),selectable:flags.get(object).is_none_or(|f|f.selectable),name:doc.file_id.clone(),path:PathBuf::from(format!("__particle_preview_{}",doc.file_id)),id:"particle".into(),spatial:matrix,matrix:matrix.into(),tint:Color32::WHITE,flip:[false;2],order:renderer_order(renderer,matrix,axis)});
+                particles.push(emitter);
+            },Err(error)=>{missing+=1;issues.push(format!("Particle {}: {error}",doc.file_id));}
+        }
+    }
     sprites.sort_by_key(|s|s.order);
-    Prepared {sprites,missing,issues}
+    Prepared {sprites,missing,issues,particles}
 }
 
 struct Texture {
@@ -514,7 +532,7 @@ impl Preview {
     }
     pub fn available(documents: &[Document], path: Option<&std::path::Path>) -> bool {
         path.is_some_and(|p|p.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab") || e.eq_ignore_ascii_case("unity"))) && documents.iter().any(|d|
-            d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer") || (d.type_name=="MonoBehaviour" && field(&d.text,"skeletonDataAsset").is_some()) || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
+            d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || d.type_name=="ParticleSystem" || matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer") || (d.type_name=="MonoBehaviour" && field(&d.text,"skeletonDataAsset").is_some()) || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
     }
     pub fn release(&mut self) {
         self.scene3d=None;
@@ -629,6 +647,7 @@ impl Preview {
             crate::theme::preview_warning_details(ui,"prefab_expansion_warnings",tr("Prefab 展开存在限制"),&data.issues);
         }
         if self.three_dimensional {
+            if documents.iter().any(|d|d.type_name=="ParticleSystem"){ui.colored_label(ui.visuals().warn_fg_color,tr("粒子播放目前仅支持二维场景与 Prefab 预览"));}
             use std::hash::{Hash,Hasher};
             let mut hash=std::collections::hash_map::DefaultHasher::new();
             for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
@@ -653,6 +672,7 @@ impl Preview {
             if !self.open {self.release();ui.ctx().request_repaint();}
             return picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())));
         }
+        if has_ui && documents.iter().any(|d|d.type_name=="ParticleSystem"){ui.colored_label(ui.visuals().warn_fg_color,tr("UI Canvas 粒子播放尚未接入"));}
         let objects: HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
         let transforms: HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
         let by_object: HashMap<_,_>=transforms.values().filter_map(|d|Some((d.game_object.as_deref()?,d.file_id.as_str()))).collect();

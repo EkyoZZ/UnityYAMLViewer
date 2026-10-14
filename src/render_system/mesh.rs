@@ -55,11 +55,19 @@ fn hex(text:&str)->Result<Vec<u8>,String> {
         Ok((a*16+b) as u8)
     }).collect()
 }
+pub(crate) fn is_empty(text:&str)->bool {
+    number(text,"m_VertexCount")==Ok(0) && number(text,"m_DataSize")==Ok(0)
+        && field(text,"_typelessdata").is_some_and(|v|v.trim().is_empty())
+        && field(text,"m_IndexBuffer").is_some_and(|v|v.trim().is_empty())
+        && field(text,"path").is_none_or(|v|v.trim().trim_matches('"').is_empty())
+        && text.lines().filter_map(|l|l.trim().strip_prefix("indexCount:")).all(|v|v.trim()=="0")
+}
 pub(crate) fn decode(text:&str)->Result<Mesh,String> {
     if number(text,"m_MeshCompression")?!=0 {return Err("Compressed Unity Mesh is not supported".into());}
     if field(text,"path").is_some_and(|p|!p.trim().trim_matches('"').is_empty()) {return Err("External Mesh stream data is not supported".into());}
     let count=number(text,"m_VertexCount")?;
-    if count==0 || count>1_000_000 {return Err("Mesh vertex count exceeds budget or is zero".into());}
+    if count>1_000_000 {return Err("Mesh vertex count exceeds budget (1,000,000)".into());}
+    if count==0 {return if is_empty(text) {Ok(Mesh{vertices:Vec::new(),submeshes:Vec::new()})}else{Err("Zero-vertex Mesh has inconsistent or missing buffer data".into())};}
     let bytes=hex(field(text,"_typelessdata").ok_or("Missing vertex buffer")?)?;
     if bytes.len()!=number(text,"m_DataSize")? {return Err("Mesh vertex buffer length mismatch".into());}
     let channel_section=text.split_once("m_Channels:").ok_or("Missing vertex channels")?.1.split_once("m_DataSize:").ok_or("Missing vertex data size")?.0;
@@ -119,6 +127,14 @@ pub(crate) fn decode_reference(text:&str,file_id:&str)->Result<Mesh,String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_mesh_is_valid_but_nonempty_buffers_are_not() {
+        let empty="Mesh:\n  m_MeshCompression: 0\n  m_VertexCount: 0\n  m_DataSize: 0\n  _typelessdata: \n  m_IndexBuffer: \n  indexCount: 0\n";
+        assert!(decode(empty).unwrap().vertices.is_empty());
+        assert!(decode(&empty.replace("indexCount: 0","indexCount: 3")).is_err());
+        assert!(decode(&empty.replace("_typelessdata: ","_typelessdata: ff")).is_err());
+        assert!(decode(&empty.replace("m_VertexCount: 0","m_VertexCount: 1000001")).err().unwrap().contains("exceeds budget"));
+    }
     use super::*;
     #[test]
     #[ignore="Requires UNITY_SHADER_TEST_PROJECT"]

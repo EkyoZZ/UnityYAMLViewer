@@ -19,7 +19,9 @@ pub(crate) struct Baked {
     pub image: egui::ColorImage,
     pub region: crate::static_preview::Region,
     pub approximate: bool,
+    pub gpu: Option<Arc<Vec<GpuPart>>>,
 }
+pub(crate) struct GpuPart {pub path:PathBuf,pub slot:usize,pub vertices:Arc<[crate::render_system::scene::Vertex]>,pub indices:Arc<[u32]>}
 
 /// Bake setup pose off-thread, retaining transparent margins and skeleton-space origin.
 pub(crate) fn bake(component: &str, catalog: &HashMap<String,PathBuf>, cancelled: &std::sync::atomic::AtomicBool, paused:Option<&std::sync::atomic::AtomicBool>) -> Result<(PathBuf,Baked),String> {
@@ -43,6 +45,9 @@ pub(crate) fn bake(component: &str, catalog: &HashMap<String,PathBuf>, cancelled
     if !version.starts_with("3.8.") {return Err(format!("仅支持 Spine 3.8，资源为 {version}"));}
     let atlas=Arc::new(Atlas::new_from_file(&atlas_file).map_err(|e|e.to_string())?);
     let mut images=HashMap::new();let mut total=0usize;
+    let atlas_materials:Vec<_>=atlas_asset.split_once("  materials:").map(|(_,s)|s.lines().skip(1).take_while(|l|l.trim_start().starts_with('-')).filter_map(|l|resolve(l.trim().trim_start_matches('-').trim()).ok()).collect()).unwrap_or_default();
+    let mut page_slots=HashMap::new();
+    for (slot,material) in atlas_materials.iter().enumerate() {let text=read_text(material)?;if let Some(tail)=text.split_once("- _MainTex:").map(|(_,s)|s){if let Some(reference)=tail.lines().find_map(|l|l.trim().strip_prefix("m_Texture:")){if let Ok(path)=resolve(reference.trim()){if page_slots.insert(path.clone(),slot).is_some(){page_slots.insert(path,usize::MAX);}}}}}
     for page in atlas.pages() {
         if !crate::static_preview::checkpoint(cancelled,paused) {return Err("预览已取消".into());}
         let path=unsafe {page.renderer_object().get::<PathBuf>().cloned()}.ok_or("缺少贴图路径")?;
@@ -69,13 +74,20 @@ pub(crate) fn bake(component: &str, catalog: &HashMap<String,PathBuf>, cancelled
     let ppu=(1024.0/width.max(height)).min(100.0/scale);
     let size=[(width*ppu).ceil().max(1.0) as usize,(height*ppu).ceil().max(1.0) as usize];
     let mut image=egui::ColorImage{size,pixels:vec![Color32::TRANSPARENT;size[0]*size[1]]};
-    let mut approximate=false;
+    let mut approximate=false;let mut gpu=Vec::new();let mut gpu_valid=true;let mut gpu_vertices=0usize;
     for mesh in meshes {
         approximate |= mesh.blend_mode!=spine38::BlendMode::Normal || mesh.dark_color.r!=0.0 || mesh.dark_color.g!=0.0 || mesh.dark_color.b!=0.0;
         let Some(pointer)=mesh.attachment_renderer_object else {continue};
         let path=unsafe {&*pointer.cast::<PathBuf>()};
         let Some(texture)=images.get(path) else {continue};
         let c=mesh.color;
+        gpu_vertices+=mesh.vertices.len();
+        if gpu_vertices>1_000_000 {return Err("Spine GPU geometry exceeds 1,000,000 vertices".into());}
+        if let Some(&slot)=page_slots.get(path).filter(|slot|**slot!=usize::MAX) {
+            if mesh.vertices.len()!=mesh.uvs.len() || mesh.indices.iter().any(|i|*i as usize>=mesh.vertices.len()) {return Err("Invalid Spine GPU geometry".into());}
+            let vertices=mesh.vertices.iter().zip(&mesh.uvs).map(|(p,uv)|crate::render_system::scene::Vertex{position:[p[0],p[1],0.0],uv:*uv,color:[c.r,c.g,c.b,c.a],normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
+            gpu.push(GpuPart{path:path.clone(),slot,vertices:Arc::from(vertices),indices:Arc::from(mesh.indices.iter().map(|i|*i as u32).collect::<Vec<_>>())});
+        }else{gpu_valid=false;}
         let byte=|v:f32|(v.clamp(0.0,1.0)*255.0).round() as u8;
         let tint=crate::asset_viewer::preview_color([byte(c.r),byte(c.g),byte(c.b),byte(c.a)]);
         for triangle in mesh.indices.chunks_exact(3) {
@@ -107,11 +119,11 @@ pub(crate) fn bake(component: &str, catalog: &HashMap<String,PathBuf>, cancelled
         }
     }
     let region=crate::static_preview::Region{rect:[0.0,0.0,size[0] as f64,size[1] as f64],pivot:[-bounds[0] as f64*ppu as f64/size[0] as f64,-bounds[1] as f64*ppu as f64/size[1] as f64],ppu:ppu as f64,border:[0.0;4]};
-    Ok((PathBuf::from(format!("{}.{}.spine-preview",data_path.display(),skin)),Baked{image,region,approximate}))
+    Ok((PathBuf::from(format!("{}.{}.spine-preview",data_path.display(),skin)),Baked{image,region,approximate,gpu:if gpu_valid && !approximate && !gpu.is_empty(){Some(Arc::new(gpu))}else{None}}))
 }
 
 /// Follow Unity's serialized SkeletonDataAsset reference using the existing project index.
-pub fn component_button(ui: &mut egui::Ui, text: &str) {
+pub fn component_button(ui: &mut egui::Ui, text: &str,documents:&[crate::Document]) {
     let data_reference = crate::static_preview::field(text,"skeletonDataAsset");
     let direct_reference = crate::static_preview::field(text,"skeletonJSON");
     if data_reference.is_none() && direct_reference.is_none() {return;}
@@ -128,7 +140,12 @@ pub fn component_button(ui: &mut egui::Ui, text: &str) {
             resolve(data_reference.unwrap())
         })();
         match result {
-            Ok(path)=>ui.ctx().data_mut(|data|data.insert_temp(egui::Id::new("spine_window_request"),path)),
+            Ok(path)=>{
+                let object=crate::static_preview::field(text,"m_GameObject").and_then(|v|crate::static_preview::reference(v,"fileID"));
+                let materials=documents.iter().find(|d|d.type_name=="MeshRenderer" && d.game_object==object).and_then(|d|d.text.split_once("  m_Materials:").map(|(_,s)|s.lines().skip(1).take_while(|l|l.trim_start().starts_with('-')).collect::<Vec<_>>().join("\n")));
+                let skin=crate::static_preview::field(text,"initialSkinName").unwrap_or("").trim_matches('"').trim_matches('\'').to_owned();
+                ui.ctx().data_mut(|data|{data.insert_temp(egui::Id::new(("spine_skin",&path)),skin);data.insert_temp(egui::Id::new(("spine_materials",&path)),materials);data.insert_temp(egui::Id::new("spine_refresh"),path.clone());data.insert_temp(egui::Id::new("spine_window_request"),path);});
+            },
             Err(error)=>ui.ctx().data_mut(|data|data.insert_temp(egui::Id::new(("spine_reference_error",text)),error)),
         }
         ui.ctx().request_repaint();
@@ -190,6 +207,9 @@ fn atlas_path(path: &Path) -> Result<PathBuf,String> {
 }
 
 pub struct Preview {
+    gpu_resources:HashMap<PathBuf,(Arc<crate::render_system::scene::Material>,Arc<crate::render_system::scene::Texture>)>,
+    gpu_error:Arc<std::sync::Mutex<Option<String>>>,
+    gpu_status:Option<String>,
     controller: SkeletonController,
     textures: HashMap<PathBuf, egui::TextureHandle>,
     animations: Vec<(String,f32)>,
@@ -214,7 +234,7 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn load_asset(ctx:&egui::Context,text:&str,catalog:&HashMap<String,PathBuf>) -> Result<Self,String> {
+    pub fn load_asset(ctx:&egui::Context,path:&Path,text:&str,catalog:&HashMap<String,PathBuf>) -> Result<Self,String> {
         use crate::static_preview::{field,reference};
         let resolve=|value:&str|reference(value,"guid").and_then(|guid|catalog.get(&guid.to_ascii_lowercase()).cloned()).ok_or("Spine 资源 GUID 未找到".to_owned());
         let skeleton=resolve(field(text,"skeletonJSON").ok_or("缺少 skeletonJSON")?)?;
@@ -223,9 +243,42 @@ impl Preview {
         if std::fs::metadata(&atlas_asset).map_err(|e|e.to_string())?.len()>128*1024 {return Err("AtlasAsset 超过读取限制".into());}
         let atlas_source=std::fs::read_to_string(atlas_asset).map_err(|e|e.to_string())?;
         let atlas=resolve(field(&atlas_source,"atlasFile").ok_or("缺少 atlasFile")?)?;
-        Self::load_with_atlas(ctx,&skeleton,Some(atlas))
+        let mut preview=Self::load_with_atlas(ctx,&skeleton,Some(atlas))?;
+        if let Some(skin)=ctx.data(|d|d.get_temp::<String>(egui::Id::new(("spine_skin",path)))).filter(|s|!s.is_empty()) {if let Some(index)=preview.skins.iter().position(|s|s==&skin){preview.skin=index;preview.controller.skeleton.set_skin_by_name(&skin).map_err(|e|e.to_string())?;preview.pose();preview.fit_bounds();}}
+        let material_refs:Vec<_>=atlas_source.split_once("  materials:").map(|(_,s)|s.lines().skip(1).take_while(|l|l.trim_start().starts_with('-')).collect()).unwrap_or_default();
+        let mut page_slots=HashMap::new();
+        for (slot,reference) in material_refs.iter().enumerate() {if let Ok(material)=resolve(reference.trim().trim_start_matches('-').trim()) {let content=std::fs::read_to_string(material).unwrap_or_default();if let Some(tail)=content.split_once("- _MainTex:").map(|(_,s)|s){if let Some(reference)=tail.lines().find_map(|l|l.trim().strip_prefix("m_Texture:")){if let Ok(texture)=resolve(reference.trim()){if page_slots.insert(texture.clone(),slot).is_some(){page_slots.insert(texture,usize::MAX);}}}}}}
+        let materials=ctx.data(|d|d.get_temp::<Option<String>>(egui::Id::new(("spine_materials",path)))).flatten().unwrap_or_else(||material_refs.join("\n"));
+        let result=(||->Result<_,String>{
+            let renderables=preview.controller.renderables();let mut parts=Vec::new();
+            for mesh in renderables {
+                if mesh.blend_mode!=spine38::BlendMode::Normal || mesh.dark_color.r!=0.0 || mesh.dark_color.g!=0.0 || mesh.dark_color.b!=0.0 {return Err("Spine special blend / two-color tint uses ordinary preview".into());}
+                let pointer=mesh.attachment_renderer_object.ok_or("Missing Spine atlas page")?;let path=unsafe {&*pointer.cast::<PathBuf>()};
+                let slot=*page_slots.get(path).filter(|slot|**slot!=usize::MAX).ok_or("Spine atlas material mapping unavailable or ambiguous")?;let c=mesh.color;
+                let vertices=mesh.vertices.iter().zip(&mesh.uvs).map(|(p,uv)|crate::render_system::scene::Vertex{position:[p[0],p[1],0.0],uv:*uv,color:[c.r,c.g,c.b,c.a],normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
+                parts.push(GpuPart{path:path.clone(),slot,vertices:Arc::from(vertices),indices:Arc::from(mesh.indices.iter().map(|i|*i as u32).collect::<Vec<_>>())});
+            }
+            let paths=parts.iter().map(|p|p.path.clone()).collect::<Vec<_>>();
+            let scene=crate::static_preview::world::spine_preview_resources(parts,&materials,catalog)?;
+            if scene.draws.len()!=paths.len(){return Err("Spine GPU draw count mismatch".into());}
+            Ok((scene,paths))
+        })();
+        match result {Ok((scene,paths))=>{for (draw,path) in scene.draws.iter().zip(paths){preview.gpu_resources.insert(path,(draw.material.clone(),draw.main_texture.clone()));}preview.gpu_status=None;},Err(error)=>preview.gpu_status=Some(error)}
+        Ok(preview)
     }
     pub fn load(ctx: &egui::Context, path: &Path) -> Result<Self,String> {
+        if let Some(catalog)=ctx.data(|d|d.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog"))) {
+            let mut matching=Vec::new();
+            for candidate in catalog.values().filter(|p|p.parent()==path.parent() && p.extension().is_some_and(|v|v=="asset")) {
+                if std::fs::metadata(candidate).is_ok_and(|m|m.len()<=128*1024) {
+                    if let Ok(text)=std::fs::read_to_string(candidate) {
+                        let skeleton=crate::static_preview::field(&text,"skeletonJSON").and_then(|v|crate::static_preview::reference(v,"guid")).and_then(|g|catalog.get(&g.to_ascii_lowercase()));
+                        if skeleton.is_some_and(|p|p==path){matching.push(text);}
+                    }
+                }
+            }
+            if matching.len()==1 {return Self::load_asset(ctx,path,&matching[0],&catalog);}
+        }
         Self::load_with_atlas(ctx,path,None)
     }
     fn load_with_atlas(ctx: &egui::Context,path:&Path,atlas_file:Option<PathBuf>) -> Result<Self,String> {
@@ -261,7 +314,7 @@ impl Preview {
             controller.skeleton.set_to_setup_pose();
             controller.update(0.0);
         }
-        let mut preview = Self { controller,textures,animations,skins,animation:0,base_track:0,tracks:Vec::new(),skin:0,dynamic:false,playing:false,looping:true,speed:1.0,time:0.0,last:Instant::now(),bounds:egui::Rect::NOTHING,zoom:1.0,pan:egui::Vec2::ZERO,background:String::new(),background_rgb:[190;3],show_guides:false,error:None };
+        let mut preview = Self {gpu_resources:HashMap::new(),gpu_error:Arc::new(std::sync::Mutex::new(None)),gpu_status:Some("Spine material context unavailable; ordinary preview".into()),controller,textures,animations,skins,animation:0,base_track:0,tracks:Vec::new(),skin:0,dynamic:false,playing:false,looping:true,speed:1.0,time:0.0,last:Instant::now(),bounds:egui::Rect::NOTHING,zoom:1.0,pan:egui::Vec2::ZERO,background:String::new(),background_rgb:[190;3],show_guides:false,error:None };
         preview.fit_bounds();
         Ok(preview)
     }
@@ -419,6 +472,7 @@ impl Preview {
             shapes.push(egui::Shape::line_segment([egui::pos2(canvas.left(),origin.y),egui::pos2(canvas.right(),origin.y)],stroke));
             shapes.push(egui::Shape::line_segment([egui::pos2(origin.x,canvas.top()),egui::pos2(origin.x,canvas.bottom())],stroke));
         }
+        let gpu_background=shapes.clone();
         for renderable in renderables {
             let Some(pointer)=renderable.attachment_renderer_object else {continue};
             // Runtime returns the page renderer object allocated above; atlas outlives meshes.
@@ -435,6 +489,30 @@ impl Preview {
             shapes.push(egui::Shape::mesh(mesh));
         }
         painter.set(scene_shape,egui::Shape::Vec(shapes));
+        let gpu_error=self.gpu_error.lock().unwrap().clone();
+        if let Some(error)=gpu_error.as_ref().or(self.gpu_status.as_ref()){painter.text(canvas.left_top()+egui::vec2(8.0,46.0),egui::Align2::LEFT_TOP,error,egui::FontId::proportional(13.0),Color32::YELLOW);}
+        if !self.gpu_resources.is_empty() && crate::render_system::available() && gpu_error.is_none() {
+            let renderables=self.controller.renderables();let mut draws=Vec::new();let mut supported=true;let mut count=0usize;
+            for mesh in renderables {
+                count+=mesh.vertices.len();
+                if count>1_000_000 || mesh.blend_mode!=spine38::BlendMode::Normal || mesh.dark_color.r!=0.0 || mesh.dark_color.g!=0.0 || mesh.dark_color.b!=0.0 {supported=false;break;}
+                let Some(pointer)=mesh.attachment_renderer_object else {supported=false;break;};let path=unsafe {&*pointer.cast::<PathBuf>()};
+                let Some((material,texture))=self.gpu_resources.get(path) else {supported=false;break;};
+                if mesh.vertices.len()!=mesh.uvs.len() || mesh.indices.iter().any(|i|*i as usize>=mesh.vertices.len()) {supported=false;break;}
+                let c=mesh.color;let color=if material.state.source==crate::render_system::scene::BlendFactor::One {[c.r*c.a,c.g*c.a,c.b*c.a,c.a]}else{[c.r,c.g,c.b,c.a]};
+                let vertices=mesh.vertices.iter().zip(&mesh.uvs).map(|(p,uv)|crate::render_system::scene::Vertex{position:[p[0],p[1],0.0],uv:*uv,color,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
+                draws.push(crate::render_system::scene::Draw{component:Arc::from("spine-preview"),vertices:Arc::from(vertices),indices:Arc::from(mesh.indices.iter().map(|i|*i as u32).collect::<Vec<_>>()),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:material.clone(),main_texture:texture.clone()});
+            }
+            if supported && !draws.is_empty() {
+                let projection=[[2.0*scale/canvas.width(),0.0,0.0,2.0*(self.pan.x-self.bounds.center().x*scale)/canvas.width()],
+                    [0.0,2.0*scale/canvas.height(),0.0,2.0*(-self.pan.y+self.bounds.center().y*scale)/canvas.height()],
+                    [0.0,0.0,0.0,0.0],[0.0,0.0,0.0,1.0]];
+                // Replace ordinary geometry, preserving the same background and guides.
+                let mut shapes=gpu_background;
+                shapes.push(egui::Shape::Callback(crate::render_system::callback(canvas,Arc::new(crate::render_system::scene::Scene{draws:Arc::from(draws),revision:1}),projection,self.gpu_error.clone(),true,0)));
+                painter.set(scene_shape,egui::Shape::Vec(shapes));
+            }else{painter.text(canvas.left_top()+egui::vec2(8.0,46.0),egui::Align2::LEFT_TOP,"Spine pose uses ordinary fallback (blend, tint, atlas page or geometry)",egui::FontId::proportional(13.0),Color32::YELLOW);}
+        }
         reload
     }
 }

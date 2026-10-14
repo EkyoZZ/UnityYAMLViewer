@@ -14,6 +14,15 @@ pub(crate) fn translate_file(path:&std::path::Path)->Result<(Program,RenderState
     translate_material_file(path, "")
 }
 pub(crate) fn translate_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
+    translate_material_file_mode(path,material,false,false)
+}
+pub(crate) fn translate_spine_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
+    translate_material_file_mode(path,material,true,false)
+}
+pub(crate) fn translate_particle_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
+    translate_material_file_mode(path,material,false,true)
+}
+fn translate_material_file_mode(path:&std::path::Path,material:&str,spine:bool,particle:bool)->Result<(Program,RenderState),String> {
     fn expand(path:&std::path::Path,root:&std::path::Path,depth:usize,budget:&mut usize)->Result<String,String> {
         if depth>8 {return Err("Shader include nesting exceeds 8".into());}
         let length=std::fs::metadata(path).map_err(|e|format!("{}: {e}",path.display()))?.len() as usize;
@@ -28,7 +37,7 @@ pub(crate) fn translate_material_file(path:&std::path::Path,material:&str)->Resu
         let mut output=String::new();
         for line in text.lines() {
             if let Some(c)=include.captures(line) {
-                if &c[1]=="UnityCG.cginc" {output.push_str(line);} else {
+                if matches!(&c[1],"UnityCG.cginc"|"UnityUI.cginc") {output.push_str(line);} else {
                     let relative=std::path::Path::new(&c[1]);
                     if relative.is_absolute() {return Err("Unsafe include path".into());}
                     let resolved=if c[1].starts_with("Packages/"){package_include(root,relative,path)?}else if c[1].starts_with("Assets/"){root.join(relative)}else{path.parent().unwrap().join(relative)};
@@ -49,7 +58,53 @@ pub(crate) fn translate_material_file(path:&std::path::Path,material:&str)->Resu
     }
     let container=path.ancestors().find(|p|p.file_name().is_some_and(|n|n=="Assets" || n=="Packages" || n=="PackageCache")).ok_or("Shader is not inside a Unity project resource directory")?;
     let root=if container.file_name().is_some_and(|n|n=="PackageCache") {container.parent().and_then(|p|p.parent())}else{container.parent()}.ok_or("Missing Unity project root")?;
-    translate(&material_render_states(&expand(path,root,0,&mut 0)?,material)?)
+    let source=expand(path,root,0,&mut 0)?;
+    let source=if spine {spine_color_pass(&source)?}else{source};
+    let source=if particle {particle_color_source(&source,material)?}else{source};
+    translate(&material_render_states(&source,material)?)
+}
+fn particle_color_source(source:&str,material:&str)->Result<String,String> {
+    let clean=re(r"(?s)/\*.*?\*/|//[^\r\n]*").replace_all(source,"");let mut source=clean.to_string();
+    let enabled=material.split_once("m_ValidKeywords:").map(|(_,s)|s.lines().skip(1).take_while(|l|l.trim_start().starts_with('-')).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+    let legacy=material.lines().find_map(|l|l.trim().strip_prefix("m_ShaderKeywords:")).unwrap_or("");
+    let inline=re(r"(?m)^\s*m_ValidKeywords:\s*\[([^\]]*)\]").captures(material).map(|c|c[1].to_owned()).unwrap_or_default();
+    if enabled.split_whitespace().chain(legacy.split_whitespace()).any(|v|v.trim_matches('"')=="UNITY_UI_CLIP_RECT") || inline.split(',').any(|v|v.trim().trim_matches('"')=="UNITY_UI_CLIP_RECT"){return Err("Active particle UI clip rect is not implemented".into());}
+    let clipping=re(r"(?ms)^\s*#ifdef\s+UNITY_UI_CLIP_RECT\s*\r?\n(.*?)^\s*#endif[^\r\n]*");
+    if clipping.captures_iter(&source).any(|c|c[1].contains('#')){return Err("Nested particle UI clip variants are not implemented".into());}
+    source=clipping.replace_all(&source,"").to_string();
+    source=re(r"(?m)^\s*#pragma\s+multi_compile\s+__\s+UNITY_UI_CLIP_RECT[^\r\n]*").replace_all(&source,"").to_string();
+    if source.contains("UnityGet2DClipping"){return Err("Particle clipping helper requires unsupported UI clipping".into());}
+    source=re(r#"(?m)^\s*#include\s+"UnityUI.cginc"[^\r\n]*"#).replace_all(&source,"").to_string();
+    source=re(r"\bZTest\s*\[\s*unity_GUIZTestMode\s*\]").replace_all(&source,"ZTest Always").to_string();
+    let mask_token=re(r"\bColorMask\s*\[\s*_ColorMask\s*\]");
+    if mask_token.is_match(&source) {
+        let saved=re(r"(?m)^\s*-\s*_ColorMask:\s*([-+0-9.eE]+)\s*$").captures(material).and_then(|c|c[1].parse::<f64>().ok());
+        let default=re(r"(?m)^\s*_ColorMask\s*\([^\r\n]*\)\s*=\s*([-+0-9.eE]+)").captures(&source).and_then(|c|c[1].parse::<f64>().ok());
+        let mask=match saved.or(default){Some(15.0)=>"RGBA",Some(7.0)=>"RGB",_=>return Err("Particle ColorMask must be RGB or RGBA in preview".into())};
+        source=mask_token.replace_all(&source,format!("ColorMask {mask}")).to_string();
+    }
+    Ok(source)
+}
+fn spine_color_pass(source:&str)->Result<String,String> {
+    let clean=re(r"(?s)/\*.*?\*/|//[^\r\n]*").replace_all(source,"");
+    let mut source=clean.to_string();let mut ranges=Vec::new();
+    for pass in re(r"\bPass\s*\{").find_iter(&source) {
+        let mut depth=1;let mut quoted=false;let mut escaped=false;let mut end=None;
+        for (offset,c) in source[pass.end()..].char_indices() {
+            if quoted {if escaped {escaped=false;}else if c=='\\' {escaped=true;}else if c=='"' {quoted=false;}continue;}
+            if c=='"' {quoted=true;}else if c=='{' {depth+=1;}else if c=='}' {depth-=1;if depth==0 {end=Some(pass.end()+offset+1);break;}}
+        }
+        let end=end.ok_or("Unterminated Shader pass")?;
+        let block=&source[pass.end()..end];let states=block.split("CGPROGRAM").next().unwrap();
+        if re(r#""LightMode"\s*=\s*"ShadowCaster""#).is_match(states) {ranges.push(pass.start()..end);}
+    }
+    for range in ranges.into_iter().rev() {source.replace_range(range,"");}
+    if source.matches("CGPROGRAM").count()!=1 {return Err("Spine preview requires one color pass; only ShadowCaster passes may be omitted".into());}
+    let directives=re(r"(?m)^\s*#pragma\s+shader_feature\s+([^\r\n]+)");
+    let body=source.split_once("CGPROGRAM").unwrap().1.split_once("ENDCG").ok_or("Missing ENDCG")?.0;
+    let without=directives.replace_all(body,"");
+    for c in directives.captures_iter(body) {for keyword in c[1].split_whitespace().filter(|v|*v!="_") {if re(&format!(r"\b{}\b",regex::escape(keyword))).is_match(&without){return Err(format!("Spine shader keyword variant not implemented: {keyword}"));}}}
+    Ok(directives.replace_all(&source,"").to_string())
 }
 fn package_include(root:&std::path::Path,relative:&std::path::Path,source:&std::path::Path)->Result<std::path::PathBuf,String> {
     let embedded=root.join(relative);if embedded.is_file() {return Ok(embedded);}
@@ -334,6 +389,46 @@ fn explicit_vector_initializers(code:&str)->String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inactive_particle_ui_clipping_keeps_fragment_formula_and_color_mask(){
+        let source="Shader \"particle\" { Properties {\n_ColorMask (\"Color Mask\", Float) = 15\n} SubShader { ZTest [unity_GUIZTestMode] ColorMask [_ColorMask] Pass { CGPROGRAM\n#include \"UnityUI.cginc\"\n#pragma multi_compile __ UNITY_UI_CLIP_RECT\nfloat4 frag(){float4 col=2.0*color*texture;\n#ifdef UNITY_UI_CLIP_RECT\ncol.a *= UnityGet2DClipping(pos,rect);\n#endif\nreturn col;} ENDCG } } }";
+        let prepared=particle_color_source(source,"m_ValidKeywords: []").unwrap();
+        assert!(prepared.contains("2.0*color*texture"));assert!(prepared.contains("ZTest Always"));assert!(prepared.contains("ColorMask RGBA"));assert!(!prepared.contains("UnityGet2DClipping"));
+        assert!(particle_color_source(source,"m_ValidKeywords:\n- UNITY_UI_CLIP_RECT").is_err());
+        assert!(particle_color_source(source,"m_ValidKeywords: [UNITY_UI_CLIP_RECT]").is_err());
+        assert!(particle_color_source(source,"  - _ColorMask: 0").is_err());
+    }
+    #[test]
+    #[ignore="Requires the user's g003 project"]
+    fn real_newitem_particle_shader_translates_without_ui_clip(){
+        let shader=std::path::Path::new("C:/Git/g003_client/Library/PackageCache/com.photonfox.pfw.visualfx@9fd2696321/Runtime/Shaders/ParticlesUI/ui_particle_alpha_blend.shader");
+        let material=std::fs::read_to_string("C:/Git/g003_client/Assets/Res/Materials/Effect/ui_light_circle005_ab.mat").unwrap();
+        let (program,state)=translate_particle_material_file(shader,&material).unwrap();
+        assert_eq!(state.source,BlendFactor::SourceAlpha);assert!(program.fragment.contains("_TintColor"));assert!(!program.fragment.contains("UnityGet2DClipping"));
+    }
+    #[test]
+    fn spine_color_pass_omits_only_shadowcaster_and_rejects_used_variants() {
+        let source=include_str!("../../tests/fixtures/pf_sprite_overlay.shader");
+        let extra="Pass { Tags { \"LightMode\"=\"ShadowCaster\" } ZWrite On CGPROGRAM\n#pragma vertex unused\nENDCG\n}";
+        let combined=format!("{source}\n{extra}");
+        let selected=spine_color_pass(&combined).unwrap();
+        assert_eq!(selected.matches("CGPROGRAM").count(),1);
+        assert!(translate(&selected).is_ok());
+        assert!(spine_color_pass(&format!("{source}\nPass {{ CGPROGRAM ENDCG }}")).is_err());
+        let unused=source.replace("CGPROGRAM","CGPROGRAM\n#pragma shader_feature _ UNUSED");
+        assert!(spine_color_pass(&unused).is_ok());
+        assert!(spine_color_pass(&unused.replace("ENDCG","#ifdef UNUSED\n#endif\nENDCG")).is_err());
+    }
+    #[test]
+    #[ignore="Requires the user's g003 project"]
+    fn real_spine_boathouse_shader_color_pass() {
+        let path=std::path::Path::new("C:/Git/g003_client/Library/PackageCache/com.photonfox.pfw@b1f076600f/Runtime/SDK/Spine/Runtime/spine-unity/Shaders/Spine-Skeleton.shader");
+        let material=std::fs::read_to_string("C:/Git/g003_client/Assets/Res/Spine/Map/Building/BuildingBoathouse01/building_boathouse_01_Material.mat").unwrap();
+        let (program,state)=translate_spine_material_file(path,&material).unwrap();
+        assert_eq!(state.source,BlendFactor::One);
+        assert!(program.fragment.contains("_Color") && program.fragment.contains("_AlphaScale"));
+        assert!(!program.vertex.contains("SHADOW_CASTER"));
+    }
     use super::*;
     #[test]
     fn fragment_clip_preserves_discard_and_rejects_vertex_calls() {
