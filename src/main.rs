@@ -1312,6 +1312,7 @@ impl eframe::App for ViewerApp {
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         native_window::track_main_window(ctx);
+        native_window::track_file_drop(ctx, _frame);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
         if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
@@ -2334,7 +2335,16 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• Property 节点内直接编辑，RGBA / XYZW 逐行显示并按上下文展示分量连接"));
                         ui.label(localization::tr("• Vert、Frag 与辅助函数独立分组，顶点输入和 v2f 阶段接口分别展示"));
                         ui.label(localization::tr("• 交互参考 Amplify Shader Editor，模块内输入与重置，输出模块可切换 2D / 3D 并拉伸"));
-                        ui.label(localization::tr("• 图片可拖入纹理 Property 临时替换；缓存尺寸不支持时继续直接渲染"));
+                        ui.label(localization::tr("• 修正 Windows 拖图落点识别；纹理节点支持临时替换，缓存尺寸异常仍可渲染"));
+                        ui.label(localization::tr("• 修复颜色节点显示时清零透明 RGB，RGB 拾色与 A 分量独立"));
+                        ui.label(localization::tr("• 节点数值回车或失焦生效，鼠标拖动松开后刷新预览"));
+                        ui.label(localization::tr("• Frag 与输出之间增加 Render State，可临时调整 Cull 与 Blend"));
+                        ui.label(localization::tr("• Frag 语句步骤节点可预览中间值与 A，支持切回最终输出"));
+                        ui.label(localization::tr("• Vert 步骤可预览顶点中间值，经插值显示并保留原顶点变换"));
+                        ui.label(localization::tr("• 阶段与函数拆分 In / 步骤 / Out，颜色快照限可确定调用上下文"));
+                        ui.label(localization::tr("• 分组块可拖动与拉伸，Out 文本自动换行并限制在节点内"));
+                        ui.label(localization::tr("• 节点按依赖横向排列，输入分点连线，画布可缩至 10%"));
+                        ui.label(localization::tr("• 分组随动包含参与计算的常量节点，排除无关节点"));
                         ui.label(localization::tr("• 预览与 Inspector 随窗口按比例调整，节点连线使用自适应曲率"));
                         ui.label(localization::tr("• 图标包含多档高 DPI 尺寸，直接打包对应 PNG，保持原始颜色"));
                         ui.label(localization::tr("• 预览输入可临时调整与重置，不写回文件；渲染限受支持的 Built-in Shader"));

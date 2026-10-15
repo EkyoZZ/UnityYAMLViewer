@@ -16,11 +16,13 @@ pub(super) struct Group {
     pub signature: String,
     pub body: String,
     pub statements: Vec<String>,
+    pub(super) probes: Vec<Result<super::probe::Probe, String>>,
+    pub(super) flow: super::flow::Plan,
     pub inputs: Vec<(usize, String, String)>,
     pub calls: Vec<usize>,
     pub result_type: String,
     pub argument_types: Vec<String>,
-    parameters: Vec<String>,
+    pub(super) parameters: Vec<String>,
     call_names: Vec<String>,
 }
 
@@ -148,6 +150,8 @@ fn functions(code: &str, pass: Option<usize>, vert: &str, frag: &str, graph: &mu
             signature: t[i - 2..open].join(" "),
             body: body_tokens.join(" "),
             statements,
+            probes: Vec::new(),
+            flow: Default::default(),
             inputs: Vec::new(),
             calls: Vec::new(),
             result_type: t[i - 2].clone(),
@@ -185,8 +189,11 @@ fn schema_fields(
     }
 }
 
-fn group_height(group: &Group) -> f32 {
-    110. + group.inputs.len() as f32 * 24. + group.statements.len().max(1) as f32 * 52.
+fn group_height(group:&Group)->f32 {super::flow::size(group,0,&Default::default()).y}
+fn vertex_width(graph:&Graph)->f32 {graph.groups.iter().filter(|g|g.stage==Stage::Vert).map(|g|super::flow::size(g,0,&Default::default()).x).fold(0.,f32::max)}
+pub(super) fn destination_x(graph:&Graph)->f32 {
+    let frag_width=graph.groups.iter().filter(|g|g.stage==Stage::Frag).map(|g|super::flow::size(g,0,&Default::default()).x).fold(0.,f32::max);
+    440.+vertex_width(graph)+460.+frag_width+100.
 }
 
 /// Draw source groups, not an executable replacement graph. All edges are
@@ -201,9 +208,14 @@ pub(super) fn draw(
     zoom: f32,
     positions: &mut std::collections::HashMap<usize, eframe::egui::Vec2>,
     output: eframe::egui::Rect,
-) {
+    selected: Option<&super::probe::Probe>,
+    areas: &mut super::flow::Areas,
+    mini: &mut super::mini::Previews,
+    mini_source: Option<&super::mini::Source>,
+) -> Option<super::probe::Probe> {
     use super::{input_color, output_y};
     use eframe::egui::{self, Color32, Rect, Sense, Stroke};
+    let mut request = None;
     let painter = ui.painter().with_clip_rect(canvas);
     let color = |stage| match stage {
         Stage::Vert => Color32::from_rgb(95, 175, 225),
@@ -240,20 +252,23 @@ pub(super) fn draw(
     let mut helper = 0;
     let mut helper_row = bottom;
     let mut helper_height = 0.;
-    let groups = graph
+    let mut helper_x=440.;
+    let mut groups = graph
         .groups
         .iter()
         .enumerate()
         .map(|(index, group)| {
             let default = match group.stage {
                 Stage::Vert => egui::vec2(440., rows[group.pass.unwrap_or(0)]),
-                Stage::Frag => egui::vec2(1360., rows[group.pass.unwrap_or(0)]),
+                Stage::Frag => egui::vec2(440.+vertex_width(graph)+460., rows[group.pass.unwrap_or(0)]),
                 Stage::Function => {
                     if helper > 0 && helper % 2 == 0 {
                         helper_row += helper_height + 60.;
                         helper_height = 0.;
+                        helper_x=440.;
                     }
-                    let point = egui::vec2(940. + (helper % 2) as f32 * 520., helper_row);
+                    let point = egui::vec2(helper_x, helper_row);
+                    helper_x+=super::flow::size(group,index,positions).x+100.;
                     helper_height = helper_height.max(group_height(group));
                     helper += 1;
                     point
@@ -261,17 +276,20 @@ pub(super) fn draw(
             };
             rect(
                 *positions.entry(1000 + index).or_insert(default),
-                egui::vec2(420., group_height(group)),
+                super::flow::size(group,index,positions),
             )
         })
         .collect::<Vec<_>>();
+    for (index,group) in graph.groups.iter().enumerate(){
+        areas.prepare(ui,group,index,&mut groups[index],canvas,zoom,positions);
+    }
     let interfaces = graph
         .interfaces
         .iter()
         .enumerate()
         .map(|(index, interface)| {
             let position = if let Some(from) = interface.from {
-                egui::vec2(940., rows[graph.groups[from].pass.unwrap_or(0)])
+                egui::vec2(440.+vertex_width(graph)+60., rows[graph.groups[from].pass.unwrap_or(0)])
             } else {
                 let parent = groups[interface.to];
                 egui::vec2(
@@ -293,19 +311,13 @@ pub(super) fn draw(
     } else {
         Color32::from_rgb(235, 238, 244)
     };
-    let card_fill = if ui.visuals().dark_mode {
-        Color32::from_rgb(43, 45, 50)
-    } else {
-        Color32::from_rgb(250, 250, 252)
-    };
-    for (index, group) in graph.groups.iter().enumerate() {
-        painter.rect_filled(groups[index], 7., fill);
-        painter.rect_stroke(
-            groups[index],
-            7.,
-            Stroke::new(1.0_f32, color(group.stage).gamma_multiply(0.55)),
-            egui::StrokeKind::Inside,
-        );
+    // Paint all scope backgrounds before connections and nodes.
+    for (index,group) in graph.groups.iter().enumerate(){
+        let bounds=areas.rect(index,groups[index],zoom);
+        let tint=color(group.stage);
+        painter.rect_filled(bounds,8.,Color32::from_rgba_unmultiplied(tint.r(),tint.g(),tint.b(),if ui.visuals().dark_mode{10}else{8}));
+        painter.rect_stroke(bounds,8.,Stroke::new(1.2_f32,tint.gamma_multiply(0.65)),egui::StrokeKind::Inside);
+        painter.line_segment([bounds.right_bottom()-egui::vec2(15.,3.),bounds.right_bottom()-egui::vec2(3.,15.)],Stroke::new(1.5_f32,tint));
     }
     for (index, _) in graph.interfaces.iter().enumerate() {
         painter.rect_filled(interfaces[index], 7., fill);
@@ -333,12 +345,7 @@ pub(super) fn draw(
             );
         }
     };
-    let property_port = |group: usize, row: usize| {
-        egui::pos2(
-            groups[group].left(),
-            groups[group].top() + (78. + row as f32 * 24.) * zoom,
-        )
-    };
+    let property_port = |group: usize, row: usize| super::flow::input_port(&graph.groups[group],groups[group],zoom,Some(row));
     for (index, group) in graph.groups.iter().enumerate() {
         for (row, (input, channel, _)) in group.inputs.iter().enumerate() {
             line(
@@ -352,14 +359,15 @@ pub(super) fn draw(
             );
         }
         for &called in &group.calls {
-            line(
-                egui::pos2(groups[index].right(), groups[index].top() + 30. * zoom),
-                egui::pos2(groups[called].left(), groups[called].top() + 30. * zoom),
-                color(Stage::Function),
-                super::tr("函数调用"),
-            );
+            for (step,statement) in group.statements.iter().enumerate() {
+                if !re(&format!(r"\b{}\s*\(",regex::escape(&graph.groups[called].name))).is_match(statement){continue;}
+                let (left,right)=super::flow::step_ports(group,index,groups[index],zoom,positions,step);
+                line(right,super::flow::input_port(&graph.groups[called],groups[called],zoom,None),color(Stage::Function),super::tr("函数调用"));
+                line(super::flow::output_port(&graph.groups[called],groups[called],zoom),left,color(Stage::Function),super::tr("返回值"));
+            }
         }
     }
+
     for (index, interface) in graph.interfaces.iter().enumerate() {
         for (field, _) in interface.fields.iter().enumerate() {
             let left = egui::pos2(
@@ -369,7 +377,7 @@ pub(super) fn draw(
             let right = egui::pos2(interfaces[index].right(), left.y);
             if let Some(from) = interface.from {
                 line(
-                    groups[from].right_center(),
+                    super::flow::output_port(&graph.groups[from],groups[from],zoom),
                     left,
                     Color32::from_rgb(100, 190, 175),
                     "",
@@ -378,8 +386,8 @@ pub(super) fn draw(
             line(
                 right,
                 egui::pos2(
-                    groups[interface.to].left(),
-                    groups[interface.to].top() + 52. * zoom,
+                    super::flow::input_port(&graph.groups[interface.to],groups[interface.to],zoom,None).x,
+                    super::flow::input_port(&graph.groups[interface.to],groups[interface.to],zoom,None).y,
                 ),
                 Color32::from_rgb(100, 190, 175),
                 "",
@@ -409,7 +417,7 @@ pub(super) fn draw(
         .collect::<Vec<_>>();
     if fragments.len() == 1 {
         line(
-            egui::pos2(groups[fragments[0]].right(), groups[fragments[0]].top() + 64. * zoom),
+            super::flow::output_port(&graph.groups[fragments[0]],groups[fragments[0]],zoom),
             egui::pos2(output.left(), output.top() + 55. * zoom),
             color(Stage::Frag),
             "Output",
@@ -417,23 +425,13 @@ pub(super) fn draw(
     }
     for (index, group) in graph.groups.iter().enumerate() {
         let r = groups[index];
-        if !r.intersects(canvas) {
-            continue;
-        }
         let title = match group.stage {
             Stage::Vert => "Vert",
             Stage::Frag => "Frag",
             Stage::Function => "Function",
         };
-        if group.stage == Stage::Frag && fragments.len() == 1 {
-            let port = egui::pos2(r.right(), r.top() + 64. * zoom);
-            painter.circle_filled(port, 4. * zoom, color(Stage::Frag));
-            painter.with_clip_rect(r.intersect(canvas)).text(
-                port - egui::vec2(10. * zoom, 0.), egui::Align2::RIGHT_CENTER,
-                "Output", egui::FontId::proportional(11. * zoom), color(Stage::Frag),
-            );
-        }
-        let header = Rect::from_min_size(r.min, egui::vec2(r.width(), 34. * zoom));
+        let scope=areas.rect(index,r,zoom);
+        let header = Rect::from_min_size(scope.min, egui::vec2(scope.width(), 34. * zoom));
         painter.rect_filled(
             header,
             6.,
@@ -452,64 +450,9 @@ pub(super) fn draw(
             egui::FontId::proportional(15. * zoom),
             ui.visuals().text_color(),
         );
-        let drag = ui
-            .interact(
-                header.intersect(canvas),
-                ui.id().with(("function_group", index)),
-                Sense::click_and_drag(),
-            )
-            .on_hover_text(&group.signature);
-        if drag.dragged() {
-            *positions.get_mut(&(1000 + index)).unwrap() += drag.drag_delta() / zoom;
-        }
-        painter.with_clip_rect(r.intersect(canvas)).text(
-            r.min + egui::vec2(12., 42.) * zoom,
-            egui::Align2::LEFT_TOP,
-            &group.signature,
-            egui::FontId::monospace(11. * zoom),
-            ui.visuals().weak_text_color(),
-        );
-        for (row, (input, _, target)) in group.inputs.iter().enumerate() {
-            let port = property_port(index, row);
-            painter.circle_filled(port, 4. * zoom, input_color(&inputs[*input].value));
-            painter.text(
-                port + egui::vec2(10. * zoom, 0.),
-                egui::Align2::LEFT_CENTER,
-                format!("{} · {target}", inputs[*input].name),
-                egui::FontId::proportional(11. * zoom),
-                ui.visuals().text_color(),
-            );
-        }
-        let top = 102. + group.inputs.len() as f32 * 24.;
-        for (statement, source) in group.statements.iter().enumerate() {
-            let card = Rect::from_min_size(
-                r.min + egui::vec2(12., top + statement as f32 * 52.) * zoom,
-                egui::vec2(396., 44.) * zoom,
-            );
-            if !card.intersects(canvas) {
-                continue;
-            }
-            painter.rect_filled(card, 3., card_fill);
-            let text = source.chars().take(512).collect::<String>();
-            let galley = painter.layout(
-                text,
-                egui::FontId::monospace(11. * zoom),
-                ui.visuals().text_color(),
-                card.width() - 12. * zoom,
-            );
-            painter.with_clip_rect(card.intersect(canvas)).galley(
-                card.min + egui::vec2(6., 5.) * zoom,
-                galley,
-                ui.visuals().text_color(),
-            );
-            ui.interact(
-                card.intersect(canvas),
-                ui.id().with(("source_statement", index, statement)),
-                Sense::hover(),
-            )
-            .on_hover_text(source.chars().take(4096).collect::<String>());
-        }
+        if let Some(selected)=super::flow::draw(ui,group,index,r,canvas,zoom,positions,areas,inputs,selected,mini,mini_source){request=Some(selected);}
     }
+
     for (index, interface) in graph.interfaces.iter().enumerate() {
         let r = interfaces[index];
         if !r.intersects(canvas) {
@@ -553,6 +496,7 @@ pub(super) fn draw(
             );
         }
     }
+    request
 }
 
 pub(super) fn parse(source: &str, inputs: &[Input]) -> Graph {
@@ -786,6 +730,18 @@ pub(super) fn parse(source: &str, inputs: &[Input]) -> Graph {
                 graph.groups[i].inputs.push((index, output, target));
             }
         }
+    }
+    for group in &mut graph.groups {
+        group.probes = (0..group.statements.len()).map(|step|super::probe::candidate(group, step)).collect();
+        group.flow=super::flow::plan(group,&source,inputs);
+    }
+    for index in 0..graph.groups.len() {
+        if graph.groups[index].stage==Stage::Function {
+            graph.groups[index].probes=(0..graph.groups[index].statements.len()).map(|step|super::helper::candidate(&graph,index,step)).collect();
+        }
+    }
+    for group in &mut graph.groups {
+        let (layout,output)=super::flow::arrange(group);group.flow.layout=layout;group.flow.output=output;
     }
     graph
 }

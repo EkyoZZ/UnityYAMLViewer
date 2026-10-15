@@ -191,3 +191,65 @@ mod tests {
         assert_eq!(initial.y - fitted.y, 70.0);
     }
 }
+
+/// OS file dragging can suppress winit cursor events or send PointerGone.
+/// Query client coordinates from the real root HWND instead of a stale egui pointer.
+pub(crate) fn track_file_drop(ctx: &egui::Context, frame: &eframe::Frame) {
+    let dragging = ctx.input(|input| !input.raw.hovered_files.is_empty() || !input.raw.dropped_files.is_empty());
+    let id = egui::Id::new("native_file_drop_position");
+    let position = if dragging { file_drop_cursor(ctx, frame) } else { None };
+    ctx.data_mut(|data| {
+        if let Some(position) = position { data.insert_temp(id, position); }
+        else { data.remove::<egui::Pos2>(id); }
+    });
+    if dragging { ctx.request_repaint_after(std::time::Duration::from_millis(16)); }
+}
+
+pub(crate) fn file_drop_position(ctx: &egui::Context) -> Option<egui::Pos2> {
+    ctx.data(|data| data.get_temp(egui::Id::new("native_file_drop_position")))
+}
+
+#[cfg(windows)]
+fn file_drop_cursor(ctx: &egui::Context, frame: &eframe::Frame) -> Option<egui::Pos2> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::ffi::c_void;
+    #[repr(C)] struct Point { x: i32, y: i32 }
+    #[repr(C)] struct ClientRect { left: i32, top: i32, right: i32, bottom: i32 }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetCursorPos(point: *mut Point) -> i32;
+        fn ScreenToClient(window: *mut c_void, point: *mut Point) -> i32;
+        fn GetClientRect(window: *mut c_void, rect: *mut ClientRect) -> i32;
+    }
+    let RawWindowHandle::Win32(window) = frame.window_handle().ok()?.as_raw() else { return None; };
+    let hwnd = window.hwnd.get() as *mut c_void;
+    let mut point = Point { x: 0, y: 0 };
+    let mut rect = ClientRect { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe {
+        if GetCursorPos(&mut point) == 0 || ScreenToClient(hwnd, &mut point) == 0 || GetClientRect(hwnd, &mut rect) == 0 { return None; }
+    }
+    client_drop_point([point.x, point.y], [rect.right, rect.bottom], ctx.pixels_per_point())
+}
+
+#[cfg(any(windows, test))]
+fn client_drop_point(point: [i32; 2], size: [i32; 2], scale: f32) -> Option<egui::Pos2> {
+    if !scale.is_finite() || scale <= 0. || point[0] < 0 || point[1] < 0 || point[0] >= size[0] || point[1] >= size[1] { return None; }
+    Some(egui::pos2(point[0] as f32 / scale, point[1] as f32 / scale))
+}
+
+#[cfg(not(windows))]
+fn file_drop_cursor(ctx: &egui::Context, _frame: &eframe::Frame) -> Option<egui::Pos2> {
+    ctx.input(|input| input.pointer.latest_pos())
+}
+
+#[cfg(test)]
+mod file_drop_tests {
+    #[test]
+    fn client_pixels_convert_at_display_and_ui_scale_without_accepting_outside() {
+        assert_eq!(super::client_drop_point([450, 300], [1200, 900], 1.5), Some(eframe::egui::pos2(300., 200.)));
+        for point in [[-1, 30], [30, -1], [1200, 30], [30, 900]] {
+            assert!(super::client_drop_point(point, [1200, 900], 1.5).is_none());
+        }
+        assert!(super::client_drop_point([20, 20], [100, 100], 0.).is_none());
+    }
+}

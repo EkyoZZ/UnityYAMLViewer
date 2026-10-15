@@ -1,3 +1,50 @@
+# 最新本地构建：Vert / Frag 单步预览（2026-10-15）
+
+## Vert / Frag 单步预览本地构建（2026-10-15）
+
+- 用户明确授权编译，构建前进程及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（23.95 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21143552 字节；SHA-256：06B678024FEAE8F8472B610FF18C7CA310B9B02B07C01DF360DE891CFBD50920。
+- 包含 Vert / Frag 步骤节点、中间数值 / A 预览、最终输出切换；Vert 保留原几何并以插值显示。此前输入提交规则、透明 RGB 修正、Render State 和 Windows 拖图修正均包含在内。
+- 日志 target/stage-step-preview-release-build.log，保留 Spine Runtime 158 条既有警告。未启动 EXE，单步 GPU 画面 / 交互及兼容性仍待运行验证；新增测试断言未执行。仅替换本地产物，GitHub 正式附件 / 标签未变，未提交或发布本次修正。
+
+# 最新未发布源码：Vert 步骤值预览（2026-10-15）
+
+Vert / Frag 均可选步骤预览。Vert 截取该步数值后继续原顶点计算，经空闲 Varying 插值显示，保留原几何；整结构体 / 多返回 / 通道不足拒绝。尚未生成 EXE，实际图像待验证；此前 Frag 首版待支持 Vert 的说明为当时状态。
+
+# 最新未发布源码：Frag 步骤值预览（2026-10-15）
+
+Frag 源语句以可选择的步骤节点展示，按原 Shader 执行前缀预览中间标量 / 向量，可看 A 或返回最终输出；诊断绕过 Blend，不改用户文件。本轮仅直线 Frag 语句级探针，完整算术拆解 / Vert / helper 内部 / 同时缩略图未实现。未重新生成 EXE，实际图像待验证。
+
+# 最新本地构建：输入提交、颜色与 Render State（2026-10-15）
+
+## 输入提交、颜色与 Render State 本地构建（2026-10-15）
+
+- 用户明确授权编译，构建前进程及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（23.21 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21108224 字节；SHA-256：F0811596752373DEA76633AE20CC3086DA6513EB7683B5934E2D92F822A79410。
+- 包含此前 Windows 拖放修正、颜色控件保留透明 RGB、稳定输入标识、键盘回车 / 失焦提交、鼠标左键 release 后刷新，以及 Frag → Render State → Output；Cull Off / Back 与 Blend 可临时调节，Lighting / 深度仍只读并标出限制。
+- 日志 target/material-focus-state-release-build.log，保留 Spine Runtime 158 条既有警告。未启动 EXE，实际拖放、发黑修正、连续输入 / 拖动与状态模块仍待运行验证；新增测试断言未执行。仅替换本地产物，GitHub 正式附件 / 标签未变，未提交或发布修正。
+
+# 最新未发布源码：输入提交与 Render State（2026-10-15）
+
+节点输入保留稳定焦点，键盘回车 / 失焦生效，拖动左键 release 后刷新；新增 Frag → Render State → Output，支持临时 Cull / Blend，光照和深度只读标明限制。尚未生成新 EXE；颜色修正、输入与状态模块均不在下方最新本地构建中。
+
+# 最新未发布源码：透明 RGB 被颜色控件清零的修正（2026-10-15）
+
+材质节点的 RGB 拾色器改用临时副本，确认编辑才提交 RGB，A 独立，防止 OverlayColor=(0.5,0.5,0.5,0) 在显示时变黑。未改 Shader / 用户资源 / Blend，尚未重新生成 EXE；下方最新本地 EXE 仅含拖放修正，尚无此次颜色修正。
+
+# 最新本地构建：Windows 纹理拖放修正（2026-10-15）
+
+## Windows 纹理拖放修正本地构建（2026-10-15）
+
+- 用户明确授权“可以编译”，构建前进程和目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（24.97 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21000704 字节；SHA-256：E1E3D1DDBB514D2E39763972D97BE3F01FFE0ABFD03CB5329F9390968788FBB4。
+- 包含 Windows 主窗口客户区鼠标坐标检测及拖放期间持续刷新，解决此前依赖普通鼠标事件而可能不出现节点蓝框、误开图片页签的问题。编译成功，实际 Windows / Unity 拖放仍待用户运行验证，测试断言未执行。
+- 日志 target/texture-native-drop-release-build.log，保留 Spine Runtime 158 条既有警告。本地产物已替换，GitHub v1.2.0 附件 / 标签保持不变，未提交、未推送或发布本次修正。此前“尚未生成 EXE”指当时状态。
+
+# 最新未发布源码：Windows 纹理拖放落点修正（2026-10-15）
+
+修复预览纹理拖图依赖普通鼠标坐标的问题，改用主 HWND 客户区实际坐标并持续刷新悬停。已发布 1.2.0 不含本次修正；尚未重新生成 EXE，实际拖放待验证。同工作区 README 精简与使用指南迁移仍未提交，须保留。
+
 # 最新正式发布：1.2.0（2026-10-15）
 
 ## 正式发布（2026-10-15）
@@ -1372,3 +1419,51 @@ Prefab 含非空 Sprite 引用时在 Inspector 标题前出现预览按钮；展
 
 建议新窗口首条消息：
 「请先阅读 C:\Git\UnityYAMLViewer\HANDOFF.md 和 AGENTS.md。1.1.1 最终 release 已构建，接下来讨论并实现静态图形预览。版本号保持 1.1.1，不升级到 1.2.0；后续构建须明确授权并检查程序占用。」
+
+## 独立阶段节点后续源码（2026-10-15）
+
+已实现 In / 步骤 / Out 依赖布局、仅颜色节点快照、纯计算紧凑节点及显式范围成员。普通与测试编译检查通过，测试断言 / GPU / 交互未运行。本轮未生成 EXE，最新本地 EXE 仍为此前 Vert / Frag 单步版本，SHA-256 06B678024FEAE8F8472B610FF18C7CA310B9B02B07C01DF360DE891CFBD50920；未更新 GitHub。细节见 docs/versions/1.2.0.md。
+
+## 独立阶段节点本地构建（2026-10-15）
+
+- 用户明确授权编译；构建前进程及目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21360640 字节；SHA-256：034B87C46CDEAAF43A7F7B77A80E39CA26B3EB13990DFA7200A8F3886AE5E180。
+- 包含独立 Vert / Frag In → 步骤 → Out、颜色节点快照、纯计算无预览区与可选范围框。日志 target/stage-flow-release-build.log。
+- 未启动程序；实际 GPU 画面、节点拖动及范围成员交互待运行验证，测试断言未执行。仅更新本地产物，未更新 GitHub 正式发布。
+
+## 普通函数拆分后续源码（2026-10-15）
+
+Helper 已使用独立 In / 步骤 / Out，调用 / 返回连线接具体步骤。数值参数的唯一直接阶段调用可生成颜色快照，复杂上下文仅展示并提示限制。普通与测试编译检查通过，断言及 GPU / 界面未运行，未生成本轮 EXE；本地 EXE 仍为上一轮独立阶段节点版本（SHA-256 034B87C46CDEAAF43A7F7B77A80E39CA26B3EB13990DFA7200A8F3886AE5E180），GitHub 未改。
+
+阶段 / 函数区域底色修正：In / 步骤 / Out 按实际位置绘制淡底色和边界，调用线仍接具体步骤，不改变范围框成员。cargo check 通过，尚未生成新 EXE，实际视觉待验证。
+
+## 函数拆分与区域底色本地构建（2026-10-15）
+
+- 用户明确授权编译；构建前进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（24.14 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21403136 字节；SHA-256：69BB02007DA2EFF06FCCC55B09E7944BBCB81E48811BA6F1D5AD2302C13A0EB6。
+- 包含普通函数 In / 步骤 / Out、可确定调用上下文的颜色快照、具体步骤的调用 / 返回连线，以及阶段 / 函数区域淡底色和边界。日志 target/helper-scope-release-build.log，保留 Spine Runtime 158 条既有警告。
+- 未启动程序；函数 GPU 快照、连线、深浅主题区域视觉与交互待运行验证，新增测试断言未执行。仅更新本地产物，GitHub 正式发布未改。
+
+## 统一分组块源码（2026-10-15）
+
+原阶段 / 函数底色区域成为唯一可移动 / 拉伸分组块，移除重复范围框与开关；In / Out 和明确成员随块移动，非成员保持画布位置，节点可拖出边界。普通与测试编译检查通过，断言 / 实际交互未运行。未生成本轮 EXE，最新本地 EXE 仍为上一轮函数拆分与底色版本，SHA-256 69BB02007DA2EFF06FCCC55B09E7944BBCB81E48811BA6F1D5AD2302C13A0EB6。
+
+Out 文本已改为按内容宽度换行、节点内裁剪，悬停查看全文。cargo check 通过，实际视觉待验证；与统一分组块修改均未生成新 EXE。
+
+## 统一分组块与 Out 换行本地构建（2026-10-15）
+
+- 用户明确授权编译；构建前进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（27.33 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21387264 字节；SHA-256：1515AFB08490F90725180C71FC0A0087827AE725EE5CA03C7AEC7B73090BCF09。
+- 包含统一可拖动 / 拉伸分组块、移除重复范围框、成员随动 / 非成员保持位置，以及 Out 文本自动换行、内容区裁剪和全文悬停。日志 target/unified-block-output-wrap-release-build.log，保留 Spine Runtime 158 条既有警告。
+- 未启动程序；实际分组拖动 / 拉伸、成员交互及长文本视觉待运行验证，新增测试断言未执行。仅更新本地产物，GitHub 正式发布未改。
+
+## ASE 布局与分组常量修正源码（2026-10-15）
+
+默认节点按依赖横向分层，分开输入落点、淡化底色，输出 / 阶段间距随内容宽度计算；缩放最低 10%。分组成员连通判断补入参与输入计算链的上游常量，avgColor 不再漏掉，无关常量仍排除。普通与测试编译检查通过，断言 / 实际运行未验证；未生成新 EXE，本地产物仍为统一分组块 / Out 换行版，SHA-256 1515AFB08490F90725180C71FC0A0087827AE725EE5CA03C7AEC7B73090BCF09。
+
+## ASE 参考布局本地构建（2026-10-15）
+
+- 用户明确授权编译；构建前进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（31.15 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21457920 字节；SHA-256：B1C437D63F46018EBEB862C7F64ADBEF798AC653C97034E466A230900632A14C。
+- 包含依赖横向分层布局、输入分点连线、淡化分组底色、10% 最小缩放，以及参与计算的局部常量随分组移动修正。日志 target/ase-layout-release-build.log，保留 Spine Runtime 158 条既有警告。
+- 未启动程序；实际布局、缩放、常量随动和 GPU 画面待运行验证，新增测试断言未执行。仅更新本地产物，GitHub 正式发布未改。

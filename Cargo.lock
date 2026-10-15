@@ -4831,6 +4831,7 @@ dependencies = [
  "encoding_rs",
  "ico",
  "image",
+ "raw-window-handle",
  "regex",
  "reqwest",
  "rfd",

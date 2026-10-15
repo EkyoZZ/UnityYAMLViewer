@@ -16,6 +16,9 @@ pub(crate) fn translate_file(path:&std::path::Path)->Result<(Program,RenderState
 pub(crate) fn translate_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
     translate_material_file_mode(path,material,false,false)
 }
+pub(crate) fn translate_preview_source(source:&str,material:&str)->Result<(Program,RenderState),String> {
+    translate(&material_render_states(source,material)?)
+}
 pub(crate) fn translate_preview_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
     translate(&material_render_states(&expanded_source_file(path)?,material)?)
 }

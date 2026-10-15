@@ -124,3 +124,52 @@ mod tests {
         assert!(!pickable(alpha(16), alpha(127)));
     }
 }
+
+/// Small offscreen diagnostic snapshots, independent of the visible callback viewport.
+pub(crate) fn elapsed_seconds() -> f32 { STARTED.get().map_or(0.,|time|time.elapsed().as_secs_f32()) }
+pub(crate) type SnapshotResult = std::sync::Arc<std::sync::Mutex<Option<Result<eframe::egui::ColorImage,String>>>>;
+pub(crate) fn snapshot_callback(rect:eframe::egui::Rect, scene:std::sync::Arc<scene::Scene>, time:f32, result:SnapshotResult, ctx:eframe::egui::Context)->eframe::egui::PaintCallback {
+    eframe::egui::PaintCallback {rect, callback:std::sync::Arc::new(eframe::egui_glow::CallbackFn::new(move |_,painter| {
+        use eframe::glow::{self,HasContext};
+        let gl=painter.gl();
+        let output=unsafe {
+            let draw=gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+            let read=gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING);
+            let old_active=gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+            gl.active_texture(glow::TEXTURE0);
+            let old_texture=gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+            let mut viewport=[0;4];gl.get_parameter_i32_slice(glow::VIEWPORT,&mut viewport);
+            let scissor=gl.is_enabled(glow::SCISSOR_TEST);
+            let mut clear=[0.;4];gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE,&mut clear);
+            let capture=(|| {
+                let texture=gl.create_texture()?;
+                gl.bind_texture(glow::TEXTURE_2D,Some(texture));
+                gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MIN_FILTER,glow::LINEAR as i32);
+                gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MAG_FILTER,glow::LINEAR as i32);
+                gl.tex_image_2d(glow::TEXTURE_2D,0,glow::RGBA8 as i32,192,192,0,glow::RGBA,glow::UNSIGNED_BYTE,glow::PixelUnpackData::Slice(None));
+                let framebuffer=match gl.create_framebuffer(){Ok(value)=>value,Err(error)=>{gl.delete_texture(texture);return Err(error);}};
+                let capture=(|| {
+                    gl.bind_framebuffer(glow::FRAMEBUFFER,Some(framebuffer));
+                    gl.framebuffer_texture_2d(glow::FRAMEBUFFER,glow::COLOR_ATTACHMENT0,glow::TEXTURE_2D,Some(texture),0);
+                    if gl.check_framebuffer_status(glow::FRAMEBUFFER)!=glow::FRAMEBUFFER_COMPLETE {return Err("Node snapshot framebuffer incomplete".into());}
+                    gl.disable(glow::SCISSOR_TEST);gl.viewport(0,0,192,192);
+                    gl.color_mask(true,true,true,true);gl.clear_color(0.,0.,0.,0.);gl.clear(glow::COLOR_BUFFER_BIT);
+                    let globals=std::collections::BTreeMap::new();
+                    let frame=scene::Frame {scene:&scene,viewport:[192,192],view_projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],clear_color:[0.;4],elapsed_seconds:time,globals:&globals};
+                    GPU.lock().unwrap().as_mut().ok_or("GPU unavailable")?.draw(&frame)?;
+                    let mut rgba=vec![0u8;192*192*4];
+                    gl.read_pixels(0,0,192,192,glow::RGBA,glow::UNSIGNED_BYTE,glow::PixelPackData::Slice(Some(&mut rgba)));
+                    let flipped=rgba.chunks_exact(192*4).rev().flatten().copied().collect::<Vec<_>>();
+                    Ok(eframe::egui::ColorImage::from_rgba_unmultiplied([192,192],&flipped))
+                })();
+                gl.delete_framebuffer(framebuffer);gl.delete_texture(texture);capture
+            })();
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER,draw);gl.bind_framebuffer(glow::READ_FRAMEBUFFER,read);
+            gl.active_texture(glow::TEXTURE0);gl.bind_texture(glow::TEXTURE_2D,old_texture);gl.active_texture(old_active);gl.viewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+            if scissor {gl.enable(glow::SCISSOR_TEST);} else {gl.disable(glow::SCISSOR_TEST);}
+            gl.clear_color(clear[0],clear[1],clear[2],clear[3]);
+            capture
+        };
+        *result.lock().unwrap()=Some(output);ctx.request_repaint();
+    }))}
+}

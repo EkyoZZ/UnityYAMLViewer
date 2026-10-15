@@ -17,6 +17,11 @@ pub(crate) fn available(path: Option<&Path>) -> bool {
 
 mod geometry;
 mod stages;
+mod states;
+mod probe;
+mod mini;
+mod helper;
+mod flow;
 
 /// Horizontal port tangents with bounded, distance-dependent handles.
 fn wire_points(from: egui::Pos2, to: egui::Pos2, zoom: f32) -> [egui::Pos2; 4] {
@@ -70,6 +75,7 @@ struct Input {
     bindings: Vec<(String, String)>,
 }
 struct Loaded {
+    render_notes: Vec<(String, String)>,
     shader: PathBuf,
     material: String,
     inputs: Vec<Input>,
@@ -465,7 +471,7 @@ fn load(path: &Path, text: &str, catalog: &Catalog) -> Result<Loaded, String> {
     };
     let stages = stages::parse(&expanded, &inputs);
     Ok(Loaded {
-        stages,
+        render_notes: states::notes(&source),        stages,
         source_warning,
         shader,
         material: if is_material {
@@ -538,6 +544,7 @@ fn prepare(
     material: &str,
     inputs: &[Input],
     revision: u64,
+    probe: Option<&probe::Probe>,
 ) -> Result<Arc<rs::Scene>, String> {
     let mut overrides = material.to_owned();
     let mut uniforms = BTreeMap::new();
@@ -583,7 +590,17 @@ fn prepare(
             }
         }
     }
-    let (program, state) = render_system::shader::translate_preview_file(shader, &overrides)?;
+    let (program, mut state) = if let Some(probe) = probe {
+        let source = render_system::shader::expanded_source_file(shader)?;
+        let source = probe::instrument(&source, probe)?;
+        render_system::shader::translate_preview_source(&source, &overrides)?
+    } else { render_system::shader::translate_preview_file(shader, &overrides)? };
+    if probe.is_some() {
+        // Diagnostic values must not be attenuated by the material's blend factors.
+        state.source = rs::BlendFactor::One;
+        state.destination = rs::BlendFactor::Zero;
+        state.color_mask = [true; 4];
+    }
     // The shared backend binds float uniforms. Reject integer globals until it
     // can upload them as integer uniforms, rather than silently drawing zero.
     if re(r"(?m)^\s*(?:uniform\s+)?(?:int|uint|bool)\s+_\w+\s*;").is_match(&program.fragment) {
@@ -675,12 +692,24 @@ fn input_height(value: &Value) -> f32 {
         Value::Texture { .. } => 270.,
     }
 }
+fn commit_preview_change(pending: &mut bool, changed: bool, down: bool, released: bool) -> bool {
+    if changed && down { *pending = true; }
+    if (changed && !down) || (*pending && released) { *pending = false; return true; }
+    false
+}
+
+fn property_input_ui(ui: &egui::Ui, name: &str, body: Rect) -> egui::Ui {
+    egui::Ui::new(ui.ctx().clone(), ui.id().with(("property_input", name)),
+        egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(body).style(ui.style().clone()))
+}
+
 fn edit_input(
     ui: &mut egui::Ui,
     input: &mut Input,
     thumbnail: Option<&egui::TextureHandle>,
     zoom: f32,
 ) -> bool {
+    let before = input.value.clone();
     let mut changed = false;
     ui.add(egui::Label::new(&input.label).truncate())
         .on_hover_text(&input.label);
@@ -705,17 +734,20 @@ fn edit_input(
                     changed |= if input.integer {
                         let r = ui.add_sized(
                             [150. * zoom, 26. * zoom],
-                            egui::DragValue::new(v).speed(1.).max_decimals(0),
+                            egui::DragValue::new(v).speed(1.).max_decimals(0).update_while_editing(false),
                         );
                         *v = v.round();
                         r.changed()
                     } else if let Some([min, max]) = range.filter(|r| r[0] < r[1]) {
-                        ui.spacing_mut().slider_width = 130. * zoom;
-                        ui.add(egui::Slider::new(v, min..=max)).changed()
+                        ui.spacing_mut().slider_width = 100. * zoom;
+                        let sliding = ui.add(egui::Slider::new(&mut *v, min..=max).show_value(false)).changed();
+                        let typing = ui.add_sized([70. * zoom, 26. * zoom],
+                            egui::DragValue::new(v).range(min..=max).speed(0.01).update_while_editing(false)).changed();
+                        sliding | typing
                     } else {
                         ui.add_sized(
                             [150. * zoom, 26. * zoom],
-                            egui::DragValue::new(v).speed(0.01),
+                            egui::DragValue::new(v).speed(0.01).update_while_editing(false),
                         )
                         .changed()
                     };
@@ -741,7 +773,13 @@ fn edit_input(
                 ui.horizontal(|ui| {
                     ui.label(if *color { "RGB" } else { "XYZ" });
                     if *color {
-                        changed |= ui.color_edit_button_rgba_unmultiplied(v).changed();
+                        // Alpha is a separate shader input: zero alpha must not erase RGB.
+                        // The RGBA widget premultiplies and writes back even when untouched.
+                        let mut rgb = [v[0], v[1], v[2]];
+                        if ui.color_edit_button_rgb(&mut rgb).changed() {
+                            v[..3].copy_from_slice(&rgb);
+                            changed = true;
+                        }
                     }
                 });
             });
@@ -756,7 +794,7 @@ fn edit_input(
                         changed |= ui
                             .add_sized(
                                 [150. * zoom, 26. * zoom],
-                                egui::DragValue::new(value).speed(0.01),
+                                egui::DragValue::new(value).speed(0.01).update_while_editing(false),
                             )
                             .changed();
                     });
@@ -781,6 +819,8 @@ fn edit_input(
             ui.horizontal(|ui| {
                 if let Some(image) = thumbnail {
                     ui.add(egui::Image::new(image).fit_to_exact_size(egui::vec2(64., 64.) * zoom));
+                } else {
+                    ui.allocate_exact_size(egui::vec2(64., 64.) * zoom, Sense::hover());
                 }
                 ui.vertical(|ui| {
                     if ui.button(tr("替换预览纹理")).clicked() {
@@ -808,7 +848,7 @@ fn edit_input(
                         changed |= ui
                             .add_sized(
                                 [58. * zoom, 22. * zoom],
-                                egui::DragValue::new(&mut st[offset + i]).speed(0.01),
+                                egui::DragValue::new(&mut st[offset + i]).speed(0.01).update_while_editing(false),
                             )
                             .changed();
                     }
@@ -816,7 +856,9 @@ fn edit_input(
             }
         }
     }
-    changed
+    // TextEdit marks changes while typing even when DragValue has not committed.
+    // Render invalidation must follow the actual input, not that UI signal.
+    changed && input.value != before
 }
 
 fn resized_output_size(size: Vec2, screen_delta: Vec2, zoom: f32) -> Vec2 {
@@ -832,6 +874,11 @@ fn output_image_rect(output: Rect, zoom: f32, three_d: bool) -> Rect {
 }
 
 pub(crate) struct Preview {
+    areas: flow::Areas,
+    mini: mini::Previews,
+    probe: Option<probe::Probe>,
+    pending_drag: bool,
+    render_states: states::Editor,
     loaded: Option<Loaded>,
     loading: Option<mpsc::Receiver<Result<Loaded, String>>>,
     job: Option<mpsc::Receiver<(u64, Result<Arc<rs::Scene>, String>)>>,
@@ -860,6 +907,8 @@ impl Preview {
         // Preserve temporary values, but release inactive decoded images and
         // pending render results rather than retaining 128 MiB for every tab.
         self.thumbnails.clear();
+        self.render_states.release();
+        self.mini.clear();
         self.mesh_scene = None;
         let scene = self.scene.take();
         let job = self.job.take();
@@ -877,6 +926,11 @@ impl Preview {
             ctx.request_repaint();
         });
         Self {
+            areas: Default::default(),
+            mini: Default::default(),
+            probe: None,
+            pending_drag: false,
+            render_states: Default::default(),
             loaded: None,
             loading: Some(rx),
             job: None,
@@ -949,39 +1003,59 @@ impl Preview {
                 }
             }
         }
-        if self.dirty && self.job.is_none() {
+        if self.dirty && self.job.is_none() && !self.pending_drag && !ctx.input(|input| input.pointer.primary_down()) {
             if let Some(data) = &self.loaded {
                 self.dirty = false;
                 let shader = data.shader.clone();
                 let material = data.material.clone();
                 let inputs = data.inputs.clone();
                 let revision = self.revision;
+                let probe = self.probe.clone();
                 let ctx = ctx.clone();
                 let (tx, rx) = mpsc::channel();
                 self.job = Some(rx);
                 std::thread::spawn(move || {
-                    let _ = tx.send((revision, prepare(&shader, &material, &inputs, revision)));
+                    let _ = tx.send((revision, prepare(&shader, &material, &inputs, revision, probe.as_ref())));
                     ctx.request_repaint();
                 });
             }
         }
     }
     fn changed(&mut self) {
+        self.mini.clear();
+        self.invalidate_output();
+    }
+    fn invalidate_output(&mut self) {
         self.revision += 1;
         self.dirty = true;
         self.scene = None;
+        self.render_states.release();
         self.mesh_scene = None;
         self.thumbnails.clear();
         *self.gpu_error.lock().unwrap() = None;
     }
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) -> bool {
         self.poll(ui.ctx());
+        self.mini.poll(ui.ctx());
         let mut reload = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong(tr("节点视图"));
+            if ui.button(tr("刷新节点快照")).clicked(){self.mini.clear();}
+            if self.probe.is_some() && ui.button(tr("最终输出")).clicked() {
+                self.probe = None;
+                self.invalidate_output();
+            }
+            if let Some(probe) = &mut self.probe {
+                ui.label(format!("{} · {} {} · {}", probe.function, tr("步骤"), probe.step + 1, probe.target));
+                let before = probe.alpha;
+                ui.selectable_value(&mut probe.alpha, false, tr("数值"));
+                ui.selectable_value(&mut probe.alpha, true, "A");
+                if before != probe.alpha { self.invalidate_output(); }
+            }
             if ui.button(tr("重置输入")).clicked() {
                 if let Some(data) = &mut self.loaded {
                     data.inputs = self.initial.clone();
+                    self.render_states.reset();
                     self.changed();
                 }
             }
@@ -991,6 +1065,7 @@ impl Preview {
             if ui.button(tr("重置视图")).clicked() {
                 self.pan = Vec2::ZERO;
                 self.positions.clear();
+                self.areas.clear();
                 self.fit = true;
             }
             if ui.button(tr("定位输出")).clicked() {
@@ -1003,13 +1078,12 @@ impl Preview {
                     "按 Vert / Frag / 函数分组展示源码；调用线不代表完整数据流",
                 ));
                 ui.label(tr("阶段接口按声明展示，TEXCOORD 通道不等同于模型 UV 通道"));
+                ui.label(tr("单步：标量显示灰度，二维显示 RG，三维或四维显示 RGB；A 单独查看"));
                 ui.label(tr("平面预览不包含场景光照、蒙版及自定义顶点流"));
             });
+            ui.add_visible(self.loading.is_some() || self.job.is_some(), egui::Spinner::new());
             ui.weak(format!("{:.0}%", self.zoom * 100.));
         });
-        if self.loading.is_some() || self.job.is_some() {
-            ui.spinner();
-        }
         if !render_system::available() {
             ui.colored_label(ui.visuals().warn_fg_color, tr("GPU 渲染不可用"));
         }
@@ -1053,6 +1127,7 @@ impl Preview {
             ),
             Sense::click_and_drag(),
         );
+        let stage_destination=self.loaded.as_ref().filter(|data|!data.stages.groups.is_empty()).map_or(820.,|data|stages::destination_x(&data.stages));
         if self.fit {
             self.zoom = (canvas.width()
                 / if self
@@ -1060,11 +1135,11 @@ impl Preview {
                     .as_ref()
                     .is_some_and(|d| !d.stages.groups.is_empty())
                 {
-                    2280.
+                    stage_destination+880.
                 } else {
-                    1190.
+                    1590.
                 })
-            .clamp(0.35, 1.);
+            .clamp(0.10, 1.);
             self.pan = Vec2::ZERO;
             self.fit = false;
         }
@@ -1077,7 +1152,7 @@ impl Preview {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0. {
                 let old = self.zoom;
-                self.zoom = (old * (scroll * 0.002).exp()).clamp(0.35, 1.75);
+                self.zoom = (old * (scroll * 0.002).exp()).clamp(0.10, 1.75);
                 if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
                     self.pan =
                         (self.pan - (pos - canvas.min)) * (self.zoom / old) + (pos - canvas.min);
@@ -1113,9 +1188,9 @@ impl Preview {
                     .as_ref()
                     .is_some_and(|d| !d.stages.groups.is_empty())
                 {
-                    1910.
+                    stage_destination+400.
                 } else {
-                    820.
+                    1220.
                 },
                 45.,
             );
@@ -1147,7 +1222,10 @@ impl Preview {
         let output_position = *self
             .positions
             .entry(usize::MAX)
-            .or_insert(egui::vec2(if grouped { 1910. } else { 820. }, 45.));
+            .or_insert(egui::vec2(stage_destination+400., 45.));
+        let state_position = *self.positions.entry(usize::MAX - 2)
+            .or_insert(egui::vec2(stage_destination, 45.));
+        let state_rect = Rect::from_min_size(origin + state_position * self.zoom, egui::vec2(340., 340.) * self.zoom);
         let connections = data
             .inputs
             .iter()
@@ -1195,8 +1273,10 @@ impl Preview {
                 Stroke::new(1.3_f32, color),
             ));
         };
+        let mini_source=self.scene.as_ref().map(|scene|mini::Source{shader:data.shader.clone(),material:data.material.clone(),inputs:data.inputs.clone(),scene:scene.clone(),revision:self.revision});
+        let mut step_request = None;
         if grouped {
-            stages::draw(
+            step_request = stages::draw(
                 ui,
                 &data.stages,
                 &data.inputs,
@@ -1205,7 +1285,11 @@ impl Preview {
                 canvas,
                 self.zoom,
                 &mut self.positions,
-                output,
+                state_rect,
+                self.probe.as_ref(),
+                &mut self.areas,
+                &mut self.mini,
+                mini_source.as_ref(),
             );
         } else {
             for (port_index, (index, output, _)) in connections.iter().enumerate() {
@@ -1221,7 +1305,7 @@ impl Preview {
             }
             line(
                 shader.right_center(),
-                egui::pos2(output.left(), output.top() + 55. * self.zoom),
+                egui::pos2(state_rect.left(), state_rect.top() + 55. * self.zoom),
                 Color32::from_rgb(125, 190, 220),
             );
         }
@@ -1235,18 +1319,19 @@ impl Preview {
         } else {
             Color32::from_rgb(220, 220, 226)
         };
-        let (drop_position, dropped_image, hovering_image) = ui.input(|state| {
+        let drop_position = crate::native_window::file_drop_position(ui.ctx());
+        let (dropped_image, hovering_image) = ui.input(|state| {
             let dropped = if state.raw.dropped_files.len() == 1 {
                 state.raw.dropped_files[0].path.clone().filter(|path| crate::asset_viewer::is_image(path))
             } else { None };
             let hovering = state.raw.hovered_files.len() == 1 && state.raw.hovered_files[0]
                 .path.as_ref().is_some_and(|path| crate::asset_viewer::is_image(path));
-            (state.pointer.latest_pos(), dropped, hovering)
+            (dropped, hovering)
         });
         // Use this frame's transformed and clipped nodes, never stale screen rectangles.
         let drop_target = drop_position.and_then(|position| {
             if ui.ctx().layer_id_at(position).is_some_and(|layer| layer != ui.layer_id()) { return None; }
-            if output.intersect(canvas).contains(position) || (!grouped && shader.intersect(canvas).contains(position)) { return None; }
+            if state_rect.intersect(canvas).contains(position) || output.intersect(canvas).contains(position) || (!grouped && shader.intersect(canvas).contains(position)) { return None; }
             data.inputs.iter().zip(&inputs).enumerate().rev().find_map(|(index, (input, rect))| {
                 if rect.intersect(canvas).intersect(ui.clip_rect()).contains(position)
                     && matches!(&input.value, Value::Texture { kind, .. } if kind == "2D") {
@@ -1343,11 +1428,9 @@ impl Preview {
                 r.max - egui::vec2(10., 8.) * self.zoom,
             );
             if body.intersects(canvas) {
-                let mut child = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt(("property_controls", index))
-                        .max_rect(body),
-                );
+                // A new_child's auto IDs also depend on its parent's widget count.
+                // Background status changes must not replace an active DragValue editor.
+                let mut child = property_input_ui(ui, &input.name, body);
                 child.set_clip_rect(body.intersect(canvas));
                 let style = child.style_mut();
                 for font in style.text_styles.values_mut() {
@@ -1391,11 +1474,14 @@ impl Preview {
                 );
             }
         }
+        line(egui::pos2(state_rect.right(), state_rect.top() + 55. * self.zoom),
+            egui::pos2(output.left(), output.top() + 55. * self.zoom), Color32::from_rgb(125, 190, 220));
         let boxes = if grouped {
-            vec![(usize::MAX, output, tr("预览输出"))]
+            vec![(usize::MAX - 2, state_rect, "Render State"), (usize::MAX, output, tr("预览输出"))]
         } else {
             vec![
                 (usize::MAX - 1, shader, "Shader"),
+                (usize::MAX - 2, state_rect, "Render State"),
                 (usize::MAX, output, tr("预览输出")),
             ]
         };
@@ -1424,6 +1510,22 @@ impl Preview {
             if drag.dragged() {
                 *self.positions.get_mut(&id).unwrap() += drag.drag_delta() / self.zoom;
             }
+        }
+        if state_rect.intersects(canvas) {
+            let body = Rect::from_min_max(state_rect.min + egui::vec2(12., 36.) * self.zoom, state_rect.max - egui::vec2(12., 8.) * self.zoom);
+            let mut controls = property_input_ui(ui, "render_state_controls", body);
+            controls.set_clip_rect(state_rect.intersect(canvas));
+            let style = controls.style_mut();
+            for font in style.text_styles.values_mut() { font.size *= self.zoom; }
+            style.spacing.item_spacing *= self.zoom;
+            style.spacing.interact_size *= self.zoom;
+            controls.add_enabled_ui(self.probe.is_none(), |ui| {
+                self.render_states.show(ui, self.scene.as_ref(), &data.render_notes);
+            });
+            if self.probe.is_some() { controls.weak(tr("单步数值绕过 Blend，最终输出恢复原状态")); }
+        }
+        for point in [egui::pos2(state_rect.left(), state_rect.top() + 55. * self.zoom), egui::pos2(state_rect.right(), state_rect.top() + 55. * self.zoom)] {
+            painter.circle_filled(point, 4. * self.zoom, Color32::from_rgb(125, 190, 220));
         }
         if !grouped {
             painter.with_clip_rect(shader.intersect(canvas)).text(
@@ -1459,8 +1561,14 @@ impl Preview {
             4. * self.zoom,
             Color32::from_rgb(125, 190, 220),
         );
+        if let Some(probe) = step_request {
+            self.probe = Some(probe);
+            self.pending_drag = false;
+            self.invalidate_output();
+        }
         // Update after all node widgets have finished borrowing their inputs.
-        if changed {
+        let (down, released) = ui.input(|input| (input.pointer.primary_down(), input.pointer.button_released(egui::PointerButton::Primary)));
+        if commit_preview_change(&mut self.pending_drag, changed, down, released) {
             self.changed();
         }
         if !output.intersects(canvas) {
@@ -1486,6 +1594,9 @@ impl Preview {
         output_ui.horizontal(|ui| {
             ui.selectable_value(&mut self.three_d, false, "2D");
             ui.selectable_value(&mut self.three_d, true, "3D");
+            if let Some(probe) = &self.probe {
+                ui.label(tr(if probe.vertex {"Vert 顶点值（插值显示）"} else {"单步数值（不透明）"}));
+            }
             egui::ComboBox::from_id_salt("output_background")
                 .width(100. * self.zoom)
                 .selected_text(tr(if self.checkerboard {
@@ -1589,7 +1700,10 @@ impl Preview {
             }
         }
         let gpu_failed = self.gpu_error.lock().unwrap().is_some();
-        let display = self.scene.as_ref().filter(|_| !gpu_failed).map(|base| {
+        let prepared = self.scene.as_ref().filter(|_| !gpu_failed).map(|base| {
+            if self.probe.is_some() { base.clone() } else { self.render_states.scene(base) }
+        });
+        let display = prepared.as_ref().map(|base| {
             if !self.three_d {
                 self.mesh_scene = None;
                 return base.clone();
@@ -1669,6 +1783,53 @@ mod tests {
     }
     use super::*;
     #[test]
+    fn dragging_commits_once_on_release_and_keyboard_commit_is_immediate() {
+        let mut pending = false;
+        assert!(!commit_preview_change(&mut pending, false, true, false));
+        assert!(!commit_preview_change(&mut pending, true, true, false));
+        assert!(!commit_preview_change(&mut pending, true, true, false));
+        assert!(!commit_preview_change(&mut pending, false, true, false));
+        assert!(commit_preview_change(&mut pending, false, false, true));
+        assert!(!commit_preview_change(&mut pending, false, false, false));
+        assert!(commit_preview_change(&mut pending, true, false, false));
+    }
+    #[test]
+    fn property_editor_ids_survive_background_status_widgets() {
+        let ctx = egui::Context::default();
+        let mut ids = Vec::new();
+        for busy in [false, true, false] {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    if busy { ui.spinner(); ui.label("Preparing preview"); }
+                    let mut editor = property_input_ui(ui, "_OverlayColor", ui.available_rect_before_wrap());
+                    editor.horizontal(|ui| { ui.label("R"); ids.push(ui.next_auto_id()); });
+                });
+            });
+        }
+        assert_eq!(ids[0], ids[1]);
+        assert_eq!(ids[1], ids[2]);
+    }
+    #[test]
+    fn displaying_color_nodes_preserves_transparent_rgb_and_hdr_values() {
+        for value in [[0.5, 0.5, 0.5, 0.], [0.2, 0.4, 0.8, 0.5], [2., 1.5, 0.25, 0.]] {
+            let ctx = egui::Context::default();
+            let mut input = Input {
+                name: "_OverlayColor".into(), label: "Overlay Color".into(),
+                value: Value::Vector(value, true), integer: false,
+                shader_type: "Color".into(), bindings: vec![],
+            };
+            for _ in 0..2 {
+                let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500., 500.))), ..Default::default() };
+                let _ = ctx.run(raw, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        assert!(!edit_input(ui, &mut input, None, 1.));
+                    });
+                });
+                assert_eq!(input.value, Value::Vector(value, true));
+            }
+        }
+    }
+    #[test]
     fn output_resize_tracks_graph_zoom_and_clamps_size() {
         assert_eq!(
             resized_output_size(egui::vec2(480., 520.), egui::vec2(20., 30.), 0.5),
@@ -1685,7 +1846,7 @@ mod tests {
     }
     #[test]
     fn image_stays_inside_output_node_for_both_modes() {
-        for zoom in [0.35, 1., 1.75] {
+        for zoom in [0.10, 0.35, 1., 1.75] {
             for three_d in [false, true] {
                 let output =
                     Rect::from_min_size(egui::pos2(100., 60.), egui::vec2(480., 520.) * zoom);
@@ -1739,6 +1900,11 @@ mod tests {
         let ctx = egui::Context::default();
         let (tx, rx) = mpsc::channel();
         let mut preview = Preview {
+            areas: Default::default(),
+            mini: Default::default(),
+            probe: None,
+            pending_drag: false,
+            render_states: Default::default(),
             loaded: None,
             loading: None,
             job: Some(rx),

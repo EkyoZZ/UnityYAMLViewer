@@ -151,7 +151,8 @@ impl Assets {
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
         let catalog=ui.ctx().data_mut(|d|d.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
         if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("mat"))&&catalog.is_none(){ui.spinner();ui.label(crate::localization::tr("正在索引资源"));return;}
-        let reload=self.material_graphs.entry(path.to_owned()).or_insert_with(||crate::material_graph::Preview::new(ui.ctx(),path,text,catalog.unwrap_or_default())).show(ui);
+        let preview=self.material_graphs.entry(path.to_owned()).or_insert_with(||crate::material_graph::Preview::new(ui.ctx(),path,text,catalog.unwrap_or_default()));
+        let reload=ui.push_id(("material_graph_file",path),|ui|preview.show(ui)).inner;
         if reload{self.material_graphs.remove(path);}
     }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {

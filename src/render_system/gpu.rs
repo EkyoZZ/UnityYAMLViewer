@@ -162,16 +162,17 @@ impl Gpu {
             gl.color_mask(true,true,true,true);gl.depth_mask(true);
             gl.front_face(glow::CCW);
             gl.bind_vertex_array(None);
-            // Remove resources no longer referenced by the displayed scene.
+            // Multiple callbacks may render live output and node snapshots in one frame.
+            // Retain resources still owned by another prepared scene, not just this draw.
             let programs:std::collections::HashSet<_>=frame.scene.draws.iter().map(|d|Arc::as_ptr(&d.material.program) as usize).collect();
-            self.failed.retain(|key,_|programs.contains(key));
+            self.failed.retain(|key,value|programs.contains(key)||Arc::strong_count(&value.source)>1);
             let mut programs=programs;programs.insert(Arc::as_ptr(&self.fallback) as usize);
             programs.insert(Arc::as_ptr(&self.copy) as usize);
             let textures:std::collections::HashSet<_>=frame.scene.draws.iter().flat_map(|d|std::iter::once(Arc::as_ptr(&d.main_texture) as usize).chain(d.material.textures.values().map(|t|Arc::as_ptr(t) as usize))).collect();
             let meshes:std::collections::HashSet<_>=frame.scene.draws.iter().map(|d|(d.vertices.as_ptr() as usize,d.indices.as_ptr() as usize)).collect();
-            self.programs.retain(|key,value|{if programs.contains(key){true}else{gl.delete_program(value.handle);false}});
-            self.textures.retain(|key,value|{if textures.contains(key){true}else{gl.delete_texture(value.handle);false}});
-            self.meshes.retain(|key,value|{if meshes.contains(key){true}else{gl.delete_vertex_array(value.vao);gl.delete_buffer(value.vbo);gl.delete_buffer(value.ebo);false}});
+            self.programs.retain(|key,value|{if programs.contains(key)||Arc::strong_count(&value.source)>1{true}else{gl.delete_program(value.handle);false}});
+            self.textures.retain(|key,value|{if textures.contains(key)||Arc::strong_count(&value.source)>1{true}else{gl.delete_texture(value.handle);false}});
+            self.meshes.retain(|key,value|{if meshes.contains(key)||(Arc::strong_count(&value.vertices)>1&&Arc::strong_count(&value.indices)>1){true}else{gl.delete_vertex_array(value.vao);gl.delete_buffer(value.vbo);gl.delete_buffer(value.ebo);false}});
             result
         }
     }
