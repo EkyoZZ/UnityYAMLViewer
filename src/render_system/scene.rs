@@ -73,6 +73,8 @@ pub(crate) struct Material {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Draw {
+    /// Input previews must report shader failures instead of drawing a fallback.
+    pub strict_shader: bool,
     pub component: Arc<str>,
     pub vertices: Arc<[Vertex]>,
     pub indices: Arc<[u32]>,

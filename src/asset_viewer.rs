@@ -105,6 +105,7 @@ impl ImageTab {
 #[derive(Default)]
 pub struct Assets {
     playlists: crate::playlist::Lists,
+    material_graphs: HashMap<PathBuf, crate::material_graph::Preview>,
     media: HashMap<PathBuf, crate::media_preview::Preview>,
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
@@ -144,7 +145,15 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
+    pub fn forget(&mut self, path: &Path) { self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
+    pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
+    pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
+        for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
+        let catalog=ui.ctx().data_mut(|d|d.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
+        if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("mat"))&&catalog.is_none(){ui.spinner();ui.label(crate::localization::tr("正在索引资源"));return;}
+        let reload=self.material_graphs.entry(path.to_owned()).or_insert_with(||crate::material_graph::Preview::new(ui.ctx(),path,text,catalog.unwrap_or_default())).show(ui);
+        if reload{self.material_graphs.remove(path);}
+    }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {

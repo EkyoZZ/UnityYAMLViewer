@@ -296,7 +296,8 @@ impl Session {
         }
     }
     fn panel(&mut self,ui:&mut egui::Ui,path:&Path){
-        ui.horizontal(|ui|{ui.label(path.file_name().unwrap_or_default().to_string_lossy());ui.menu_button("⋯",|ui|{
+        ui.add_space(8.0);
+        ui.horizontal(|ui|{ui.label(path.file_name().unwrap_or_default().to_string_lossy());ui.menu_image_button(egui::Image::new(egui::include_image!("../assets/icons/wrench.svg")).fit_to_exact_size(egui::vec2(16.0,16.0)).tint(ui.visuals().text_color()),|ui|{
             if ui.button(tr("编辑列表")).clicked(){self.edit=!self.edit;ui.close_menu();}
             if ui.button(tr("添加文件")).clicked(){if let Some(files)=rfd::FileDialog::new().pick_files(){for file in files {if crate::media_preview::is_media(&file)&&self.entries.len()<MAX_ENTRIES{self.entries.push(Entry{title:title(&file),path:media_path(&file)});self.dirty=true;}}}ui.close_menu();}
             if ui.button(tr("保存列表")).clicked(){self.save_document(path);ui.close_menu();}

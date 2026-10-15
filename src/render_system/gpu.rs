@@ -27,6 +27,13 @@ impl Gpu {
     pub unsafe fn draw_cached(&mut self,frame:&Frame<'_>,scene:Arc<super::scene::Scene>,viewport:[i32;4],active:bool,style:u64)->Result<(),String> {
         let fresh=self.snapshot.as_ref().is_some_and(|cache|Arc::ptr_eq(&cache.scene,&scene) && cache.style==style);
         unsafe {
+            // A clipped viewport can round to zero physical pixels. It is not a shader error.
+            if viewport[2] <= 0 || viewport[3] <= 0 { return Ok(()); }
+            let max_size = self.gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE);
+            if !snapshot_size_supported(viewport, max_size) {
+                self.drop_snapshot();
+                return self.draw(frame); // Cache is optional; keep rendering the original shader.
+            }
             if active || !fresh {
                 self.draw(frame)?;
                 self.capture(scene,frame.view_projection,viewport,style)?;
@@ -101,6 +108,7 @@ impl Gpu {
                         Ok(program)=>(program,false),
                         Err(error)=>{
                             self.failed.entry(key).or_insert_with(||FailedProgram{source:draw.material.program.clone(),error:error.clone()});
+                            if draw.strict_shader {return Err(error);}
                             if warned.insert(key){self.warnings.push(format!("Shader GPU · component {}: {error}; ordinary texture fallback",draw.component));}
                             (self.program(&self.fallback.clone())?,true)
                         }
@@ -305,8 +313,19 @@ fn frozen_scale(source:[i32;2],viewport:[i32;2])->[f32;2] {
     let fit=(viewport[0] as f32/source[0] as f32).min(viewport[1] as f32/source[1] as f32);
     [source[0] as f32*fit/viewport[0] as f32,source[1] as f32*fit/viewport[1] as f32]
 }
+fn snapshot_size_supported(viewport: [i32; 4], max_size: i32) -> bool {
+    viewport[2] > 0 && viewport[3] > 0 && viewport[2] <= max_size && viewport[3] <= max_size
+}
+
 #[cfg(test)]
 mod snapshot_tests {
+    #[test]
+    fn snapshot_limits_do_not_depend_on_viewport_origin() {
+        assert!(super::snapshot_size_supported([-100, 900, 4096, 2048], 4096));
+        for size in [[0, 100], [100, 0], [-1, 100], [4097, 100], [100, 4097]] {
+            assert!(!super::snapshot_size_supported([0, 0, size[0], size[1]], 4096));
+        }
+    }
     #[test]
     fn frozen_image_preserves_aspect_on_window_resize() {
         for destination in [[1200,400],[400,1200],[800,600]] {

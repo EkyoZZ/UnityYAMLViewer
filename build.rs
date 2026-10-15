@@ -13,7 +13,11 @@ fn main() {
         (40, "assets/app_icon_40.png"),
         (48, "assets/app_icon_48.png"),
         (64, "assets/app_icon_64.png"),
+        (72, "assets/app_icon_72.png"),
+        (80, "assets/app_icon_80.png"),
+        (96, "assets/app_icon_96.png"),
         (128, "assets/app_icon_128.png"),
+        (192, "assets/app_icon_192.png"),
         (256, "assets/app_icon_256.png"),
     ] {
         println!("cargo:rerun-if-changed={source}");

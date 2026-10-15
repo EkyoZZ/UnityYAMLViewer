@@ -87,7 +87,7 @@ impl Emitter {
         let mut vertices=Vec::with_capacity(self.particles.len()*4);let mut indices=Vec::with_capacity(self.particles.len()*6);
         for p in &self.particles{let age=(self.time-p.birth).max(0.0);let t=(age/p.life).clamp(0.0,1.0);let local=std::array::from_fn::<_,3,_>(|i|p.position[i]+p.velocity[i]*age);let center: [f64;3]=std::array::from_fn(|i|(0..3).map(|j|self.matrix.0[i][j]*local[j]).sum::<f64>()+self.matrix.0[i][3]+if i==1{0.5*self.gravity*age*age}else{0.0});let size=p.size.map(|v|v*self.size_life.as_ref().map_or(1.0,|c|c.at(t,p.random)).max(0.0));let color_life=self.color_life.as_ref().map_or([1.0;4],|c|c.at(t,p.random));let color=std::array::from_fn::<_,4,_>(|i|(p.color[i]*color_life[i]).clamp(0.0,1.0) as f32);
             let rotation=p.rotation+self.rotation_life.as_ref().map_or(0.0,|c|{let step=t/16.0;(0..16).map(|i|c.at((i as f64+0.5)*step,p.random)*step*p.life).sum::<f64>()});let (sin,cos)=(-rotation).sin_cos();let scale=if self.scale_size{[0,1].map(|a|(0..3).map(|i|self.matrix.0[i][a].powi(2)).sum::<f64>().sqrt())}else{[1.0;2]};let start=vertices.len() as u32;for (corner,uv) in [[-0.5,-0.5],[0.5,-0.5],[0.5,0.5],[-0.5,0.5]].into_iter().zip([[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]]){let x=(corner[0]-self.pivot[0])*size[0]*scale[0];let y=(corner[1]-self.pivot[1])*size[1]*scale[1];vertices.push(Vertex{position:[(center[0]+x*cos-y*sin) as f32,(center[1]+x*sin+y*cos) as f32,center[2] as f32],uv,color,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]});}indices.extend([start,start+1,start+2,start,start+2,start+3]);}
-        Draw{component:template.component.clone(),vertices:Arc::from(vertices),indices:Arc::from(indices),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:template.material.clone(),main_texture:template.main_texture.clone()}
+        Draw{strict_shader:template.strict_shader,component:template.component.clone(),vertices:Arc::from(vertices),indices:Arc::from(indices),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:template.material.clone(),main_texture:template.main_texture.clone()}
     }
 }
 fn rotate(mut p:[f64;3],r:[f64;3])->[f64;3]{for axis in [2,0,1]{let (a,b)=match axis{0=>(1,2),1=>(2,0),_=>(0,1)};let (s,c)=r[axis].sin_cos();let x=p[a]*c-p[b]*s;p[b]=p[a]*s+p[b]*c;p[a]=x;}p}
@@ -139,7 +139,7 @@ mod tests {
         let program=Arc::new(Program{pipeline:UnityPipeline::BuiltIn,vertex:Arc::from(""),fragment:Arc::from(""),revision:1});
         let material=Arc::new(Material{program,state:RenderState{source:BlendFactor::One,destination:BlendFactor::OneMinusSourceAlpha,color_mask:[true;4],depth_write:false,cull_back:false},uniforms:Default::default(),textures:Default::default()});
         let texture=Arc::new(Texture{size:[1,1],rgba:Arc::from([255;4]),repeat:[false;2],revision:1});
-        let template=Draw{component:Arc::from("renderer"),vertices:Arc::from([]),indices:Arc::from([]),object_to_world:[[0.0;4];4],material,main_texture:texture};
+        let template=Draw{strict_shader:false,component:Arc::from("renderer"),vertices:Arc::from([]),indices:Arc::from([]),object_to_world:[[0.0;4];4],material,main_texture:texture};
         let mut emitter=Emitter::parse("renderer".into(),SYSTEM,"",Matrix::identity()).unwrap();emitter.advance(1.0/60.0);
         emitter.particles[0].color=[1.0,0.5,0.25,0.5];let draw=emitter.draw(&template);
         assert_eq!(draw.vertices.len(),8);assert_eq!(draw.indices.len(),12);

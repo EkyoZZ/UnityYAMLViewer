@@ -14,6 +14,8 @@ use regex::Regex;
 mod script_properties;
 mod color_property;
 mod controller_graph;
+mod material_graph;
+mod preview_layout;
 mod gradient_property;
 mod yaml_strings;
 mod editing;
@@ -257,7 +259,7 @@ impl ViewerApp {
                     match result {
                         Ok((text,documents,gbk))=> {
                             let selected=self.load_selection.remove(&job.path).and_then(|id|documents.iter().position(|doc|doc.file_id==id));
-                            if self.load_reload.remove(&job.path) {self.saved_histories.remove(&job.path);}
+                            if self.load_reload.remove(&job.path) {self.saved_histories.remove(&job.path);self.assets.forget(&job.path);}
                             let tab=ViewerTab {path:job.path,raw:text,status:crate::lf!("已读取 {0} 个 Unity 序列化对象（只读模式）",documents.len()),documents,selected,encoding:if gbk {crate::localization::tr("GBK（检测到无效 UTF-8 字节）").into()} else {"UTF-8".into()}};
                             self.save_active_tab();
                             let index=if let Some(index)=self.tabs.iter().position(|existing|existing.path==tab.path) {
@@ -700,7 +702,7 @@ impl ViewerApp {
         self.raw = tab.raw;
         self.documents = tab.documents;
         self.preview.open = self.settings.auto_open_preview
-            && static_preview::Preview::available(&self.documents, self.path.as_deref());
+            && (static_preview::Preview::available(&self.documents, self.path.as_deref()) || material_graph::available(self.path.as_deref()));
         self.selected = tab.selected;
         self.last_selected = tab.selected;
         self.status = tab.status;
@@ -1379,16 +1381,20 @@ impl eframe::App for ViewerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);self.playlist_exit_requested=true;ctx.request_repaint();
         }
         if self.selected.is_some() { self.last_selected = self.selected; }
-        let dropped_paths = ctx.input(|input| {
-            input
-                .raw
-                .dropped_files
-                .iter()
-                .filter_map(|file| file.path.clone())
-                .collect::<Vec<_>>()
-        });
-        for path in dropped_paths {
-            self.open_file(path);
+        // Let visible texture nodes claim a drop before the normal file opener.
+        let defer_texture_drop = self.preview.open && material_graph::available(self.path.as_deref());
+        if !defer_texture_drop {
+            let dropped_paths = ctx.input(|input| {
+                input
+                    .raw
+                    .dropped_files
+                    .iter()
+                    .filter_map(|file| file.path.clone())
+                    .collect::<Vec<_>>()
+            });
+            for path in dropped_paths {
+                self.open_file(path);
+            }
         }
 
         if let Some(path)=ctx.data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("playlist_open"))){self.open_file(path);}
@@ -1719,10 +1725,35 @@ impl eframe::App for ViewerApp {
             });
 
         }
-        let preview_available = static_preview::Preview::available(&self.documents, self.path.as_deref());
+        let material_preview=material_graph::available(self.path.as_deref());
+        let preview_available = material_preview || static_preview::Preview::available(&self.documents, self.path.as_deref());
         if !preview_available { self.preview.open = false; }
         if !self.preview.open {self.preview.release();self.preview_documents.clear();self.preview_text=Arc::from("");}
-        if self.preview.open {
+        if !self.preview.open || !material_preview {self.assets.pause_material_graphs();}
+        if self.preview.open && material_preview {
+            self.preview.release();self.preview_documents.clear();self.preview_text=Arc::from("");
+            preview_layout::panel(ctx, "material_shader_preview").show(ctx,|ui|{
+                let bounds=ui.available_rect_before_wrap();
+                let mut child=ui.new_child(egui::UiBuilder::new().id_salt("bounded_material_preview").max_rect(bounds));
+                child.set_clip_rect(ui.clip_rect().intersect(bounds));
+                if let Some(path)=&self.path{self.assets.show_material_graph(&mut child,path,&self.raw);}
+                ui.allocate_rect(bounds,egui::Sense::hover());
+            });
+        }
+        if defer_texture_drop {
+            let dropped_paths = ctx.input(|input| {
+                input
+                    .raw
+                    .dropped_files
+                    .iter()
+                    .filter_map(|file| file.path.clone())
+                    .collect::<Vec<_>>()
+            });
+            for path in dropped_paths {
+                self.open_file(path);
+            }
+        }
+        if self.preview.open && !material_preview {
             let preview_edit = self.path.as_ref().and_then(|path| self.edits.get(path));
             let rendered: Arc<str> = preview_edit
                 .map(|session| Arc::from(session.lock().unwrap().rendered())).unwrap_or_else(|| self.raw.clone());
@@ -1730,7 +1761,7 @@ impl eframe::App for ViewerApp {
                 self.preview_documents = if preview_edit.is_none() {self.documents.clone()} else {parse_unity_yaml(&rendered)};
                 self.preview_text = rendered;
             }
-            egui::SidePanel::left("static_prefab_preview").resizable(true).default_width(600.0).min_width(180.0).max_width((ctx.available_rect().width() - 360.0).max(180.0)).show(ctx, |ui| {
+            preview_layout::panel(ctx, "static_prefab_preview").show(ctx, |ui| {
                 // Keep overflowing toolbar content from expanding the panel's reported width.
                 let preview_rect=ui.available_rect_before_wrap();
                 let mut preview_ui=ui.new_child(egui::UiBuilder::new().id_salt("bounded_preview").max_rect(preview_rect));
@@ -1774,6 +1805,7 @@ impl eframe::App for ViewerApp {
         egui::CentralPanel::default().frame(content_frame).show(ctx, |ui| {
             if reference_tab {
                 editing::publish(ctx, None, 0..0);
+                if material_preview && theme::preview_toggle(ui,self.preview.open).clicked(){self.preview.open=!self.preview.open;ctx.request_repaint();}
                 if !spine_preview::is_data_asset(&self.raw) && self.path.as_ref().is_some_and(|path| asset_viewer::is_text(path) && !spine_preview::is_spine(path)) && ui.button(crate::localization::tr("重载")).clicked() {
                     if let Some(path)=&self.path {self.assets.forget(path);}
                     self.reload_current_file(ctx);
@@ -1980,8 +2012,8 @@ impl eframe::App for ViewerApp {
                         ui.selectable_value(&mut self.show_sprite_atlas_yaml, false, crate::localization::tr("显示属性"));
                         ui.selectable_value(&mut self.show_sprite_atlas_yaml, true, crate::localization::tr("显示 YAML"));
 					} else if is_material {
-						ui.selectable_value(&mut self.show_material_yaml, false, crate::localization::tr("显示属性"));
-						ui.selectable_value(&mut self.show_material_yaml, true, crate::localization::tr("显示 YAML"));
+                        ui.selectable_value(&mut self.show_material_yaml,false,localization::tr("显示属性"));
+                        ui.selectable_value(&mut self.show_material_yaml,true,localization::tr("显示 YAML"));
 					} else if custom_table.is_some() {
 						if ui.selectable_label(self.show_custom_table, crate::localization::tr("显示表格")).clicked() {
 							self.show_custom_table = true;
@@ -2296,6 +2328,18 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.0").strong());
+                        ui.label(localization::tr("• 材质与 Shader 共用节点预览，分别载入材质输入与 Shader 默认值"));
+                        ui.label(localization::tr("• 材质与 Shader 通过统一预览开关打开独立节点面板"));
+                        ui.label(localization::tr("• Property 节点内直接编辑，RGBA / XYZW 逐行显示并按上下文展示分量连接"));
+                        ui.label(localization::tr("• Vert、Frag 与辅助函数独立分组，顶点输入和 v2f 阶段接口分别展示"));
+                        ui.label(localization::tr("• 交互参考 Amplify Shader Editor，模块内输入与重置，输出模块可切换 2D / 3D 并拉伸"));
+                        ui.label(localization::tr("• 图片可拖入纹理 Property 临时替换；缓存尺寸不支持时继续直接渲染"));
+                        ui.label(localization::tr("• 预览与 Inspector 随窗口按比例调整，节点连线使用自适应曲率"));
+                        ui.label(localization::tr("• 图标包含多档高 DPI 尺寸，直接打包对应 PNG，保持原始颜色"));
+                        ui.label(localization::tr("• 预览输入可临时调整与重置，不写回文件；渲染限受支持的 Built-in Shader"));
+                        ui.label(localization::tr("• 播放列表标题顶部增加留白，管理菜单使用矢量扳手图标"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.1.9").strong());
                         ui.label(localization::tr("• 查找栏可收起并自适应换行，最近记录可删除或清空，按钮靠右对齐"));
                         ui.label(localization::tr("• 支持 HTTP / HTTPS 文件直链下载打开，浅色音频电平线更清晰"));
@@ -2309,6 +2353,10 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 全屏播放列表采用半透明浮层，不挤占视频画面"));
                         ui.label(localization::tr("• 音视频音频信息显示码率，列表箭头仅在媒体区域鼠标活动时显示"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.1.8").strong());
                         ui.label(localization::tr("• 场景接入有限 Built-in Sprite Shader GPU 预览；URP 与复杂 Shader 暂不支持"));
                         ui.label(localization::tr("• GPU 网格按材质槽绘制，支持同一子网格多材质叠加"));
@@ -2327,10 +2375,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 对象名称的 Unicode 转义显示为实际文字"));
                         ui.label(localization::tr("• Prefab 展开限制详情支持一键复制"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.1.7").strong());
                         ui.label(localization::tr("• 最近记录支持 10～50 条与清空；联网更新跟随 Windows 系统代理"));
                         ui.label(localization::tr("• 弹窗使用独立系统窗口，优化多语言设置布局与关于窗口高度"));

@@ -16,13 +16,17 @@ pub(crate) fn translate_file(path:&std::path::Path)->Result<(Program,RenderState
 pub(crate) fn translate_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
     translate_material_file_mode(path,material,false,false)
 }
+pub(crate) fn translate_preview_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
+    translate(&material_render_states(&expanded_source_file(path)?,material)?)
+}
 pub(crate) fn translate_spine_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
     translate_material_file_mode(path,material,true,false)
 }
 pub(crate) fn translate_particle_material_file(path:&std::path::Path,material:&str)->Result<(Program,RenderState),String> {
     translate_material_file_mode(path,material,false,true)
 }
-fn translate_material_file_mode(path:&std::path::Path,material:&str,spine:bool,particle:bool)->Result<(Program,RenderState),String> {
+/// Bounded source expansion shared by rendering and the read-only function graph.
+pub(crate) fn expanded_source_file(path:&std::path::Path)->Result<String,String> {
     fn expand(path:&std::path::Path,root:&std::path::Path,depth:usize,budget:&mut usize)->Result<String,String> {
         if depth>8 {return Err("Shader include nesting exceeds 8".into());}
         let length=std::fs::metadata(path).map_err(|e|format!("{}: {e}",path.display()))?.len() as usize;
@@ -56,9 +60,19 @@ fn translate_material_file_mode(path:&std::path::Path,material:&str,spine:bool,p
         }
         Ok(output)
     }
+    if !path.ancestors().any(|p|p.file_name().is_some_and(|n|n=="Assets" || n=="Packages" || n=="PackageCache")) {
+        if std::fs::metadata(path).map_err(|e|e.to_string())?.len()>2*1024*1024{return Err("Shader exceeds 2 MiB".into());}
+        let source=std::fs::read_to_string(path).map_err(|e|e.to_string())?;
+        if re(r#"(?m)^\s*#include\s+"([^"]+)""#).captures_iter(&source).any(|c|!matches!(&c[1],"UnityCG.cginc"|"UnityUI.cginc")){return Err("External includes require a Unity project resource directory".into());}
+        return Ok(source);
+    }
     let container=path.ancestors().find(|p|p.file_name().is_some_and(|n|n=="Assets" || n=="Packages" || n=="PackageCache")).ok_or("Shader is not inside a Unity project resource directory")?;
     let root=if container.file_name().is_some_and(|n|n=="PackageCache") {container.parent().and_then(|p|p.parent())}else{container.parent()}.ok_or("Missing Unity project root")?;
     let source=expand(path,root,0,&mut 0)?;
+    Ok(source)
+}
+fn translate_material_file_mode(path:&std::path::Path,material:&str,spine:bool,particle:bool)->Result<(Program,RenderState),String> {
+    let source=expanded_source_file(path)?;
     let source=if spine {spine_color_pass(&source)?}else{source};
     let source=if particle {particle_color_source(&source,material)?}else{source};
     translate(&material_render_states(&source,material)?)

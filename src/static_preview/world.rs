@@ -637,7 +637,7 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
                         };
                         let material=slots[part.slot].as_ref().unwrap();
                         let vertices=if material.state.source==B::One && part.vertices.iter().any(|v|v.color[3]!=1.0) {Arc::from(part.vertices.iter().copied().map(|mut v|{for i in 0..3{v.color[i]*=v.color[3];}v}).collect::<Vec<_>>())}else{part.vertices.clone()};
-                        result.push(rs::Draw{component:Arc::from(id),vertices,indices:part.indices.clone(),object_to_world:matrix,material:material.clone(),main_texture:texture});
+                        result.push(rs::Draw{strict_shader:false,component:Arc::from(id),vertices,indices:part.indices.clone(),object_to_world:matrix,material:material.clone(),main_texture:texture});
                     }Ok(result)
                 })();
                 match prepared {Ok(parts)=>{draws.extend(parts);continue;},Err(error)=>{shared.status.lock().unwrap().errors.push(format!("Spine {id}: {error}; baked fallback"));}}
@@ -686,10 +686,10 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
             for (slot,material) in slots.iter().enumerate() {
                 let Some(material)=material else {continue;};
                 let main=material.textures.get("_MainTex").cloned().unwrap_or_else(||gpu_textures[&instance.texture].clone());
-                draws.push(rs::Draw{component:Arc::from(id),vertices:vertices.clone(),indices:submeshes[slot.min(submeshes.len()-1)].clone(),object_to_world,material:material.clone(),main_texture:main});
+                draws.push(rs::Draw{strict_shader:false,component:Arc::from(id),vertices:vertices.clone(),indices:submeshes[slot.min(submeshes.len()-1)].clone(),object_to_world,material:material.clone(),main_texture:main});
             }
         }else{
-            draws.push(rs::Draw{component:Arc::from(id),vertices,indices:submeshes[0].clone(),object_to_world,material:ordinary.clone(),main_texture:gpu_textures[&instance.texture].clone()});
+            draws.push(rs::Draw{strict_shader:false,component:Arc::from(id),vertices,indices:submeshes[0].clone(),object_to_world,material:ordinary.clone(),main_texture:gpu_textures[&instance.texture].clone()});
         }
     }
     Ok(Some(Arc::new(rs::Scene{draws:Arc::from(draws),revision:1})))

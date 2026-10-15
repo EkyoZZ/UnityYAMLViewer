@@ -501,7 +501,7 @@ impl Preview {
                 if mesh.vertices.len()!=mesh.uvs.len() || mesh.indices.iter().any(|i|*i as usize>=mesh.vertices.len()) {supported=false;break;}
                 let c=mesh.color;let color=if material.state.source==crate::render_system::scene::BlendFactor::One {[c.r*c.a,c.g*c.a,c.b*c.a,c.a]}else{[c.r,c.g,c.b,c.a]};
                 let vertices=mesh.vertices.iter().zip(&mesh.uvs).map(|(p,uv)|crate::render_system::scene::Vertex{position:[p[0],p[1],0.0],uv:*uv,color,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
-                draws.push(crate::render_system::scene::Draw{component:Arc::from("spine-preview"),vertices:Arc::from(vertices),indices:Arc::from(mesh.indices.iter().map(|i|*i as u32).collect::<Vec<_>>()),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:material.clone(),main_texture:texture.clone()});
+                draws.push(crate::render_system::scene::Draw{strict_shader:false,component:Arc::from("spine-preview"),vertices:Arc::from(vertices),indices:Arc::from(mesh.indices.iter().map(|i|*i as u32).collect::<Vec<_>>()),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:material.clone(),main_texture:texture.clone()});
             }
             if supported && !draws.is_empty() {
                 let projection=[[2.0*scale/canvas.width(),0.0,0.0,2.0*(self.pan.x-self.bounds.center().x*scale)/canvas.width()],
