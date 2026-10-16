@@ -2329,27 +2329,21 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.1").strong());
+                        ui.label(localization::tr("• 替换 AppIcon"));
+                        ui.label(localization::tr("• 优化 Material 和 Shader 预览操作体验"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.0").strong());
                         ui.label(localization::tr("• 材质与 Shader 共用节点预览，分别载入材质输入与 Shader 默认值"));
                         ui.label(localization::tr("• 材质与 Shader 通过统一预览开关打开独立节点面板"));
                         ui.label(localization::tr("• Property 节点内直接编辑，RGBA / XYZW 逐行显示并按上下文展示分量连接"));
-                        ui.label(localization::tr("• Vert、Frag 与辅助函数独立分组，顶点输入和 v2f 阶段接口分别展示"));
                         ui.label(localization::tr("• 交互参考 Amplify Shader Editor，模块内输入与重置，输出模块可切换 2D / 3D 并拉伸"));
-                        ui.label(localization::tr("• 修正 Windows 拖图落点识别；纹理节点支持临时替换，缓存尺寸异常仍可渲染"));
-                        ui.label(localization::tr("• 修复颜色节点显示时清零透明 RGB，RGB 拾色与 A 分量独立"));
-                        ui.label(localization::tr("• 节点数值回车或失焦生效，鼠标拖动松开后刷新预览"));
-                        ui.label(localization::tr("• Frag 与输出之间增加 Render State，可临时调整 Cull 与 Blend"));
-                        ui.label(localization::tr("• Frag 语句步骤节点可预览中间值与 A，支持切回最终输出"));
-                        ui.label(localization::tr("• Vert 步骤可预览顶点中间值，经插值显示并保留原顶点变换"));
-                        ui.label(localization::tr("• 阶段与函数拆分 In / 步骤 / Out，颜色快照限可确定调用上下文"));
-                        ui.label(localization::tr("• 分组块可拖动与拉伸，Out 文本自动换行并限制在节点内"));
-                        ui.label(localization::tr("• 节点按依赖横向排列，输入分点连线，画布可缩至 10%"));
-                        ui.label(localization::tr("• 分组随动包含参与计算的常量节点，排除无关节点"));
-                        ui.label(localization::tr("• 预览与 Inspector 随窗口按比例调整，节点连线使用自适应曲率"));
-                        ui.label(localization::tr("• 图标包含多档高 DPI 尺寸，直接打包对应 PNG，保持原始颜色"));
                         ui.label(localization::tr("• 预览输入可临时调整与重置，不写回文件；渲染限受支持的 Built-in Shader"));
-                        ui.label(localization::tr("• 播放列表标题顶部增加留白，管理菜单使用矢量扳手图标"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.1.9").strong());
                         ui.label(localization::tr("• 查找栏可收起并自适应换行，最近记录可删除或清空，按钮靠右对齐"));
                         ui.label(localization::tr("• 支持 HTTP / HTTPS 文件直链下载打开，浅色音频电平线更清晰"));
@@ -2363,10 +2357,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 全屏播放列表采用半透明浮层，不挤占视频画面"));
                         ui.label(localization::tr("• 音视频音频信息显示码率，列表箭头仅在媒体区域鼠标活动时显示"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.1.8").strong());
                         ui.label(localization::tr("• 场景接入有限 Built-in Sprite Shader GPU 预览；URP 与复杂 Shader 暂不支持"));
                         ui.label(localization::tr("• GPU 网格按材质槽绘制，支持同一子网格多材质叠加"));

@@ -22,6 +22,9 @@ mod probe;
 mod mini;
 mod helper;
 mod flow;
+mod operations;
+mod tools;
+mod interfaces;
 
 /// Horizontal port tangents with bounded, distance-dependent handles.
 fn wire_points(from: egui::Pos2, to: egui::Pos2, zoom: f32) -> [egui::Pos2; 4] {
@@ -699,8 +702,9 @@ fn commit_preview_change(pending: &mut bool, changed: bool, down: bool, released
 }
 
 fn property_input_ui(ui: &egui::Ui, name: &str, body: Rect) -> egui::Ui {
-    egui::Ui::new(ui.ctx().clone(), ui.id().with(("property_input", name)),
-        egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(body).style(ui.style().clone()))
+    let mut child=egui::Ui::new(ui.ctx().clone(), ui.id().with(("property_input", name)),
+        egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(body).style(ui.style().clone()));
+    child
 }
 
 fn edit_input(
@@ -888,7 +892,6 @@ pub(crate) struct Preview {
     dirty: bool,
     error: Option<String>,
     gpu_error: Arc<Mutex<Option<String>>>,
-    selected: Option<usize>,
     positions: HashMap<usize, Vec2>,
     thumbnails: HashMap<String, egui::TextureHandle>,
     pan: Vec2,
@@ -940,7 +943,6 @@ impl Preview {
             dirty: false,
             error: None,
             gpu_error: Default::default(),
-            selected: None,
             positions: HashMap::new(),
             thumbnails: HashMap::new(),
             pan: Vec2::ZERO,
@@ -1046,7 +1048,7 @@ impl Preview {
                 self.invalidate_output();
             }
             if let Some(probe) = &mut self.probe {
-                ui.label(format!("{} · {} {} · {}", probe.function, tr("步骤"), probe.step + 1, probe.target));
+                ui.label(format!("{} · {} {}", probe.function, tr("步骤"), probe.step + 1)).on_hover_text(&probe.target);
                 let before = probe.alpha;
                 ui.selectable_value(&mut probe.alpha, false, tr("数值"));
                 ui.selectable_value(&mut probe.alpha, true, "A");
@@ -1119,6 +1121,7 @@ impl Preview {
                 ui.small(tr("阶段入口未解析，保留参数绑定视图"));
             }
         }
+        ui.small(tr("左键选择 / 框选，拖动节点移动；右键平移画布；滚轮缩放；Shift 增减选择"));
         let mut changed = false;
         let (canvas, response) = ui.allocate_exact_size(
             egui::vec2(
@@ -1127,6 +1130,7 @@ impl Preview {
             ),
             Sense::click_and_drag(),
         );
+        self.areas.tools.begin(ui,canvas);
         let stage_destination=self.loaded.as_ref().filter(|data|!data.stages.groups.is_empty()).map_or(820.,|data|stages::destination_x(&data.stages));
         if self.fit {
             self.zoom = (canvas.width()
@@ -1145,14 +1149,14 @@ impl Preview {
         }
         let painter = ui.painter().with_clip_rect(canvas);
         painter.rect_filled(canvas, 0., ui.visuals().extreme_bg_color);
-        if response.dragged() {
-            self.pan += response.drag_delta();
-        }
-        if response.hovered() {
+        let pan_delta=self.areas.tools.pan_delta(ui,canvas,&response);
+        if pan_delta!=Vec2::ZERO {self.pan+=pan_delta;ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);ui.ctx().request_repaint();}
+        if !ui.memory(|m|m.any_popup_open()) && ui.input(|i|i.pointer.hover_pos().is_some_and(|p|canvas.contains(p))) {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0. {
                 let old = self.zoom;
                 self.zoom = (old * (scroll * 0.002).exp()).clamp(0.10, 1.75);
+                ui.input_mut(|i|{i.smooth_scroll_delta.y=0.;i.raw_scroll_delta.y=0.;});
                 if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
                     self.pan =
                         (self.pan - (pos - canvas.min)) * (self.zoom / old) + (pos - canvas.min);
@@ -1257,7 +1261,7 @@ impl Preview {
                     Sense::drag(),
                 )
                 .on_hover_cursor(egui::CursorIcon::ResizeNwSe);
-            if resize.dragged() {
+            if resize.dragged_by(egui::PointerButton::Primary) {
                 self.output_size =
                     resized_output_size(self.output_size, resize.drag_delta(), self.zoom);
                 output = Rect::from_min_size(output.min, self.output_size * self.zoom);
@@ -1360,23 +1364,7 @@ impl Preview {
                 2.,
                 color,
             );
-            painter.rect_stroke(
-                *r,
-                4.,
-                Stroke::new(
-                    if self.selected == Some(index) {
-                        1.8_f32
-                    } else {
-                        1.0_f32
-                    },
-                    if self.selected == Some(index) {
-                        Color32::from_rgb(225, 155, 65)
-                    } else {
-                        Color32::from_gray(72)
-                    },
-                ),
-                egui::StrokeKind::Inside,
-            );
+            painter.rect_stroke(*r,4.,Stroke::new(1.,Color32::from_gray(72)),egui::StrokeKind::Inside);
             painter.text(
                 title.left_center() + egui::vec2(12. * self.zoom, 0.),
                 egui::Align2::LEFT_CENTER,
@@ -1384,19 +1372,8 @@ impl Preview {
                 egui::FontId::proportional(14. * self.zoom),
                 ui.visuals().text_color(),
             );
-            let header_response = ui.interact(
-                Rect::from_min_max(title.min, title.max - egui::vec2(54. * self.zoom, 0.))
-                    .intersect(canvas),
-                response.id.with(("header", index)),
-                Sense::click_and_drag(),
-            );
-            if header_response.clicked() || header_response.dragged() {
-                self.selected = Some(index);
-            }
-            if header_response.dragged() {
-                *self.positions.get_mut(&index).unwrap() +=
-                    header_response.drag_delta() / self.zoom;
-            }
+            self.areas.tools.node(ui,tools::Target::Position(index),*r,
+                Rect::from_min_max(title.min,title.max-egui::vec2(54.*self.zoom,0.)),canvas,self.zoom);
             let reset = Rect::from_min_max(
                 egui::pos2(
                     title.right() - 50. * self.zoom,
@@ -1502,14 +1479,8 @@ impl Preview {
                 egui::FontId::proportional(14. * self.zoom),
                 ui.visuals().text_color(),
             );
-            let drag = ui.interact(
-                header.intersect(canvas),
-                response.id.with(id),
-                Sense::drag(),
-            );
-            if drag.dragged() {
-                *self.positions.get_mut(&id).unwrap() += drag.drag_delta() / self.zoom;
-            }
+            self.areas.tools.node(ui,tools::Target::Position(id),rect,header,canvas,self.zoom);
+
         }
         if state_rect.intersects(canvas) {
             let body = Rect::from_min_max(state_rect.min + egui::vec2(12., 36.) * self.zoom, state_rect.max - egui::vec2(12., 8.) * self.zoom);
@@ -1572,6 +1543,8 @@ impl Preview {
             self.changed();
         }
         if !output.intersects(canvas) {
+            // Output culling must not skip the graph's input/position commit.
+            self.areas.finish_tools(ui,canvas,&response,self.zoom,&mut self.positions);
             return reload;
         }
         let controls = Rect::from_min_size(
@@ -1693,7 +1666,7 @@ impl Preview {
                 } else {
                     tr("平面")
                 });
-            if self.three_d && rotate.dragged() {
+            if self.three_d && rotate.dragged_by(egui::PointerButton::Primary) {
                 self.angles[0] = (self.angles[0] + rotate.drag_delta().x * 0.012)
                     .rem_euclid(std::f32::consts::TAU);
                 self.angles[1] = (self.angles[1] + rotate.drag_delta().y * 0.012).clamp(-1.5, 1.5);
@@ -1763,6 +1736,7 @@ impl Preview {
                 Stroke::new(1.2_f32, ui.visuals().text_color()),
             );
         }
+        self.areas.finish_tools(ui,canvas,&response,self.zoom,&mut self.positions);
         reload
     }
 }
@@ -1914,7 +1888,6 @@ mod tests {
             dirty: false,
             error: Some("current".into()),
             gpu_error: Default::default(),
-            selected: None,
             positions: HashMap::new(),
             thumbnails: HashMap::new(),
             pan: Vec2::ZERO,

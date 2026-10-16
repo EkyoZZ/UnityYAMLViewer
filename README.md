@@ -12,7 +12,7 @@ A desktop viewer for Unity assets, with property editing and material previews.
 
 - **资源查看**：打开 Prefab、Scene、Material 等文本资源，显示 Hierarchy 与 Inspector，支持搜索、引用定位和多标签页。
 - **属性编辑**：编辑已识别的属性、颜色、向量和列表，支持校验、撤销与保存。
-- **材质预览**：Material 和 Shader 使用 **Node-based UI** 预览，在节点内临时调参、拖图替换纹理，切换 2D / 3D 输出；Render State 可临时调整 Cull / Blend，Vert / Frag 与普通函数以可移动、可拉伸的淡色分组区分（包含参与计算的常量），拆为 In → 步骤 → Out，颜色节点支持快照，纯计算不预览，Out 文本自动换行，按依赖横向排列，画布支持 10%～175% 缩放。
+- **材质预览**：Material / Shader 使用 **Node-based UI**，支持节点内临时调参、拖图换纹理、2D / 3D 输出与 Cull / Blend 调节；常见公式拆成100 点宽运算节点，颜色预览按需展开，可见时约 60 帧/秒更新，支持左键选择 / 框选（不受输出节点可见性影响）、统一选框的节点与组多选拖动、右键平移、带框折叠 / 展开和眼睛预览按钮（含 R/G/B/A 单通道及其运算）的可拖动函数分组及具名边界接口与 10%～175% 缩放。
 - **场景与动画**：预览受支持的 2D / UI、Spine 和模型资源，查看 Animator 状态图、编辑动画曲线。
 - **音视频播放**：支持播放列表、波形、全屏和播放进度记忆；解码依赖外部 FFmpeg，可在设置中安装 / 检测。
 - **日常使用**：最近文件、标签恢复、深浅主题、七种语言和在线更新。
@@ -29,7 +29,7 @@ A desktop viewer for Unity assets, with property editing and material previews.
 
 - Unity 二进制序列化资源暂不支持；未知类型、原始 YAML 和 fileID 引用保持只读。
 - 场景、Spine 和 Shader 为部分兼容，不能完整替代 Unity 渲染；URP / HDRP、多 Pass、复杂 Shader 与完整光照仍有限制。
-- 节点界面目前用于预览，不支持创建节点、编辑连线或生成 Shader；函数快照限可唯一定位到阶段调用处的数值参数函数，复杂调用只展示拆分。
+- 节点界面目前用于预览，不支持创建节点、编辑连线或生成 Shader；函数快照限可唯一定位到阶段调用处的数值参数函数，复杂调用只展示拆分；不支持的表达式保留为源码语句。
 
 ### 🛠️ 源码构建
 
@@ -48,7 +48,7 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。技术栈：Rust · eg
 
 - **Asset browsing**: Open text assets such as Prefabs, Scenes and Materials with a Hierarchy, Inspector, search, reference navigation and tabs.
 - **Property editing**: Edit recognized properties, colors, vectors and lists, with validation, undo and saving.
-- **Material previews**: Preview Materials and Shaders in a **node-based UI**; adjust inputs, drop replacement textures and switch between 2D / 3D output, with temporary Cull / Blend controls in Render State and draggable, resizable tinted scopes including supporting constants with separate In → step → Out nodes for stages and helpers. Color nodes have snapshots; calculations have no preview. Out text wraps within its node; dependencies flow horizontally, with 10%–175% canvas zoom.
+- **Material previews**: A **node-based UI** for Materials / Shaders, with temporary inputs, texture drops, 2D / 3D output and Cull / Blend controls. Common formulas use 100-point-wide operation nodes with expandable color previews refreshed at up to about 60 fps while visible, left-click selection and marquee selection even with the output offscreen, unified selection and dragging of nodes and groups, right-drag panning, draggable function groups with framed fold / expand and eye preview buttons (including R/G/B/A channels and their operations) and named boundary ports and 10%–175% zoom.
 - **Scenes and animation**: Preview supported 2D / UI, Spine and model assets, inspect Animator graphs and edit animation curves.
 - **Media playback**: Playlists, waveforms, fullscreen and remembered playback positions. Decoding requires external FFmpeg, installable / detectable in Settings.
 - **Everyday tools**: Recent files, restored tabs, light / dark themes, seven languages and online updates.
@@ -65,7 +65,7 @@ See the [user guide](docs/user-guide.md#english) for detailed controls, formats 
 
 - Unity binary serialization is unsupported. Unknown types, raw YAML and fileID references remain read-only.
 - Scene, Spine and Shader compatibility is partial and does not reproduce Unity rendering completely. URP / HDRP, multiple passes, complex shaders and full lighting remain limited.
-- The node interface is for previews; creating nodes, editing connections and generating shaders are unsupported. Helper snapshots require a unique direct stage call with numeric parameters; complex calls are display-only.
+- The node interface is for previews; creating nodes, editing connections and generating shaders are unsupported. Helper snapshots require a unique direct stage call with numeric parameters; complex calls are display-only. Unsupported expressions remain source statements.
 
 ### 🛠️ Build from source
 
@@ -81,3 +81,7 @@ Issues and PRs are welcome; run `cargo check` before submitting.
 ## License
 
 [MIT](LICENSE)
+
+图标生成：安装 Pillow 后运行 `python assets/generate_icons.py`，优先使用 1024 源图，否则使用 512，两者缺失时报错；两次双线性缩放生成 16～256 PNG，覆盖小尺寸图标。
+
+Icon generation: install Pillow and run `python assets/generate_icons.py`. It prefers the 1024 source, falls back to 512, and errors if neither exists. Two bilinear passes regenerate and replace the 16–256 PNG icons.

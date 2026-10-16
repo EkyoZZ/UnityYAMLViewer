@@ -8,6 +8,7 @@ pub(super) struct Probe {
     pub target: String,
     pub alpha: bool,
     pub vertex: bool,
+    pub expression: Option<(String,usize)>,
 }
 pub(super) fn target(statement: &str) -> Result<String, String> {
     let declaration = re(r"^\s*(?:fixed|half|float|int|uint|bool)[1-4]?\s+(\w+)\s*=");
@@ -33,7 +34,15 @@ pub(super) fn candidate(group: &stages::Group, step: usize) -> Result<Probe, Str
     if group.stage == stages::Stage::Vert && statement.trim_start().starts_with("return") && width(&group.result_type).is_none() {
         return Err("Select an output struct field instead of the entire vertex result".into());
     }
-    Ok(Probe { function: group.name.clone(), step, target: target(statement)?, statement: statement.clone(), alpha: false, vertex: group.stage == stages::Stage::Vert })
+    Ok(Probe { function: group.name.clone(), step, target: target(statement)?, statement: statement.clone(), alpha: false, vertex: group.stage == stages::Stage::Vert, expression:None })
+}
+pub(super) fn expression_candidate(group:&stages::Group,step:usize,expression:&str,width:usize)->Result<Probe,String>{
+    if !(1..=4).contains(&width){return Err("Expression type unavailable".into());}
+    let original=group.statements.get(step).ok_or("Expression step unavailable")?.clone();
+    let mut shadow=group.clone();
+    if shadow.stage==stages::Stage::Function{shadow.stage=stages::Stage::Frag;}
+    shadow.statements[step]="float4 preview_expression = 0;".into();
+    let mut p=candidate(&shadow,step)?;p.statement=original;p.target=expression.to_owned();p.expression=Some((expression.into(),width));Ok(p)
 }
 pub(super) fn width(ty: &str) -> Option<usize> {
     re(r"^(?:fixed|half|float|int|uint|bool)([1-4]?)$").captures(ty)
@@ -93,7 +102,7 @@ pub(super) fn instrument(source: &str, probe: &Probe) -> Result<String, String> 
     if prefix.contains('{') || prefix.contains('}') || re(r"\b(if|else|for|while|switch|do)\b").is_match(prefix) {
         return Err("Step preview requires a straight-line fragment prefix".into());
     }
-    let count = result_width(&source,prefix,&capture[1],&capture[2],&probe.target)?;
+    let count = if let Some((_,width))=&probe.expression{*width}else{result_width(&source,prefix,&capture[1],&capture[2],&probe.target)?};
     let value = &probe.target;
     let result = if probe.alpha && count == 4 {format!("float4({value}.a,{value}.a,{value}.a,1)")}
         else if probe.alpha && count != 1 {return Err("Alpha view requires a scalar or four-component result".into());}
@@ -104,8 +113,8 @@ pub(super) fn instrument(source: &str, probe: &Probe) -> Result<String, String> 
             4=>format!("float4({value}.rgb,1)"),
             _=>return Err("Unsupported step value width".into()),
         }};
-    if probe.vertex { return vertex_instrument(&source, start, end, step_end, &result); }
-    let prefix = if body[step_start..step_end].trim_start().starts_with("return") { &body[..step_start] } else { prefix };
+    if probe.vertex { return vertex_instrument(&source, start, end, if probe.expression.is_some(){step_start}else{step_end}, &result); }
+    let prefix = if probe.expression.is_some() || body[step_start..step_end].trim_start().starts_with("return") { &body[..step_start] } else { prefix };
     Ok(format!("{}\n{}\nreturn {};\n{}",&source[..start],prefix,result,&source[end..]))
 }
 fn vertex_instrument(source: &str, start: usize, end: usize, step_end: usize, result: &str) -> Result<String, String> {
@@ -149,6 +158,12 @@ fn vertex_instrument(source: &str, start: usize, end: usize, step_end: usize, re
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expression_probe_reads_the_rhs_before_compound_assignment(){
+        let source="CGPROGRAM\n#pragma fragment f\nfloat4 f(float4 color):SV_Target{color.rgb*=2;return color;}\nENDCG";
+        let graph=stages::parse(source,&[]);let node=graph.groups[0].operations.nodes.iter().find(|n|n.title=="Multiply").unwrap();let p=node.probe.as_ref().unwrap();let instrumented=instrument(source,p).unwrap();
+        let body=instrumented.split("SV_Target{").nth(1).unwrap();assert!(!body.contains("color.rgb*=2"));assert!(body.contains("* 2"));assert!(!body.contains("preview_step_saved"));
+    }
     const SOURCE: &str = "Shader \"x\" { SubShader { CGPROGRAM\n#pragma fragment frag\nstruct V {float2 uv:TEXCOORD0;}; fixed4 frag(V i):SV_Target { fixed4 c = tex2D(_MainTex,i.uv); c.a *= 0.5; c.rgb *= c.a; return c; } ENDCG } }";
     const VERTEX_SOURCE: &str = r#"Shader "vertex-step" {SubShader {Cull Off ZWrite Off Blend One OneMinusSrcAlpha Pass {CGPROGRAM
 #pragma vertex vert
@@ -161,8 +176,12 @@ F vert(V v){F o;o.uv=v.uv;o.uv*=2;o.vertex=UnityObjectToClipPos(v.vertex);return
 fixed4 frag(F i):SV_Target{return tex2D(_MainTex,i.uv);}
 ENDCG }}}"#;
     #[test]
+    fn vertex_expression_probe_preserves_original_assignments_and_position(){
+        let graph=stages::parse(VERTEX_SOURCE,&[]);let group=graph.groups.iter().find(|g|g.name=="vert").unwrap();let p=expression_candidate(group,1,"float3(v.uv,0)",3).unwrap();let output=instrument(VERTEX_SOURCE,&p).unwrap();assert!(output.contains("o.uv=v.uv"));assert!(output.contains("o.vertex=UnityObjectToClipPos(v.vertex)"));assert!(output.contains("preview_step_saved=float4(float3(v.uv,0),1)"));assert!(output.contains("preview_step_value"));
+    }
+    #[test]
     fn vertex_probe_captures_selected_value_and_keeps_later_geometry() {
-        let probe = Probe { function:"vert".into(),step:1,statement:"o.uv=v.uv;".into(),target:"o.uv".into(),alpha:false,vertex:true };
+        let probe = Probe { function:"vert".into(),step:1,statement:"o.uv=v.uv;".into(),target:"o.uv".into(),alpha:false,vertex:true,expression:None };
         let source = instrument(VERTEX_SOURCE,&probe).unwrap();
         assert!(source.find("preview_step_saved=float4(o.uv,0,1)").unwrap()<source.find("o.uv*=2").unwrap());
         assert!(source.contains("o.vertex=UnityObjectToClipPos(v.vertex)"));
@@ -177,7 +196,7 @@ ENDCG }}}"#;
     }
     #[test]
     fn vertex_probe_rejects_early_returns_or_exhausted_varyings() {
-        let probe = Probe { function:"vert".into(),step:1,statement:"o.uv=v.uv;".into(),target:"o.uv".into(),alpha:false,vertex:true };
+        let probe = Probe { function:"vert".into(),step:1,statement:"o.uv=v.uv;".into(),target:"o.uv".into(),alpha:false,vertex:true,expression:None };
         assert!(instrument(&VERTEX_SOURCE.replace("o.uv*=2;","if(v.uv.x>0)return o;o.uv*=2;"),&probe).is_err());
         let fields = (1..16).map(|i|format!("float2 extra{i}:TEXCOORD{i};")).collect::<String>();
         assert!(instrument(&VERTEX_SOURCE.replace("float2 uv:TEXCOORD0;};\nsampler",&format!("float2 uv:TEXCOORD0;{fields}}};\nsampler")),&probe).is_err());
@@ -189,7 +208,7 @@ ENDCG }}}"#;
     }
     #[test]
     fn fragment_probe_keeps_prefix_and_omits_later_operations() {
-        let probe = Probe { function:"frag".into(),step:1,statement:"c . a *= 0.5 ;".into(),target:"c.a".into(),alpha:false,vertex:false };
+        let probe = Probe { function:"frag".into(),step:1,statement:"c . a *= 0.5 ;".into(),target:"c.a".into(),alpha:false,vertex:false,expression:None };
         let source = instrument(SOURCE,&probe).unwrap();
         assert!(source.contains("c.a *= 0.5;")); assert!(!source.contains("c.rgb *= c.a;"));
         assert!(source.contains("return float4(c.a,c.a,c.a,1);"));
@@ -208,7 +227,7 @@ F vert(V v){F o;o.vertex=UnityObjectToClipPos(v.vertex);o.uv=v.uv;return o;}
 float change(float x){return x*0.5;}
 fixed4 frag(F i):SV_Target {float2 p=i.uv;p.y+=_Time.y*0.1;fixed4 c=tex2D(_MainTex,p);c.a=change(c.a);c.rgb*=c.a;return c;}
 ENDCG } } }"#;
-        let probe = Probe { function:"frag".into(),step:3,statement:"c.a=change(c.a);".into(),target:"c.a".into(),alpha:false,vertex:false };
+        let probe = Probe { function:"frag".into(),step:3,statement:"c.a=change(c.a);".into(),target:"c.a".into(),alpha:false,vertex:false,expression:None };
         let source = instrument(source,&probe).unwrap();
         let (program, state) = crate::render_system::shader::translate_preview_source(&source, "").unwrap();
         assert!(program.fragment.contains("texture(_MainTex,p)"));
@@ -219,7 +238,7 @@ ENDCG } } }"#;
     }
     #[test]
     fn alpha_and_uv_types_are_explicit_and_branching_is_rejected() {
-        let probe = Probe { function:"frag".into(),step:0,statement:"fixed4 c = tex2D(_MainTex,i.uv);".into(),target:"c".into(),alpha:true,vertex:false };
+        let probe = Probe { function:"frag".into(),step:0,statement:"fixed4 c = tex2D(_MainTex,i.uv);".into(),target:"c".into(),alpha:true,vertex:false,expression:None };
         assert!(instrument(SOURCE,&probe).unwrap().contains("return float4(c.a,c.a,c.a,1);"));
         assert_eq!(result_width(SOURCE,"float2 p = i.uv;","V","i","i.uv.y").unwrap(),1);
         assert!(instrument(&SOURCE.replace("fixed4 c =", "if(i.uv.x>0){} fixed4 c ="), &probe).is_err());

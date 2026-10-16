@@ -1,1 +1,6 @@
 /target
+/ref
+
+# Python-generated caches
+__pycache__/
+*.pyc

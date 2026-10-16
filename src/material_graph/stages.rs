@@ -18,6 +18,8 @@ pub(super) struct Group {
     pub statements: Vec<String>,
     pub(super) probes: Vec<Result<super::probe::Probe, String>>,
     pub(super) flow: super::flow::Plan,
+    pub(super) operations:super::operations::Graph,
+    pub(super) interface:std::sync::Arc<super::interfaces::Interface>,
     pub inputs: Vec<(usize, String, String)>,
     pub calls: Vec<usize>,
     pub result_type: String,
@@ -152,6 +154,8 @@ fn functions(code: &str, pass: Option<usize>, vert: &str, frag: &str, graph: &mu
             statements,
             probes: Vec::new(),
             flow: Default::default(),
+            operations:Default::default(),
+            interface:Default::default(),
             inputs: Vec::new(),
             calls: Vec::new(),
             result_type: t[i - 2].clone(),
@@ -214,7 +218,7 @@ pub(super) fn draw(
     mini_source: Option<&super::mini::Source>,
 ) -> Option<super::probe::Probe> {
     use super::{input_color, output_y};
-    use eframe::egui::{self, Color32, Rect, Sense, Stroke};
+    use eframe::egui::{self, Color32, Rect, Stroke};
     let mut request = None;
     let painter = ui.painter().with_clip_rect(canvas);
     let color = |stage| match stage {
@@ -317,7 +321,7 @@ pub(super) fn draw(
         let tint=color(group.stage);
         painter.rect_filled(bounds,8.,Color32::from_rgba_unmultiplied(tint.r(),tint.g(),tint.b(),if ui.visuals().dark_mode{10}else{8}));
         painter.rect_stroke(bounds,8.,Stroke::new(1.2_f32,tint.gamma_multiply(0.65)),egui::StrokeKind::Inside);
-        painter.line_segment([bounds.right_bottom()-egui::vec2(15.,3.),bounds.right_bottom()-egui::vec2(3.,15.)],Stroke::new(1.5_f32,tint));
+        if !areas.collapsed(index){painter.line_segment([bounds.right_bottom()-egui::vec2(15.,3.),bounds.right_bottom()-egui::vec2(3.,15.)],Stroke::new(1.5_f32,tint));}
     }
     for (index, _) in graph.interfaces.iter().enumerate() {
         painter.rect_filled(interfaces[index], 7., fill);
@@ -345,7 +349,7 @@ pub(super) fn draw(
             );
         }
     };
-    let property_port = |group: usize, row: usize| super::flow::input_port(&graph.groups[group],groups[group],zoom,Some(row));
+    let property_port = |group: usize, row: usize| areas.input_port(group,groups[group],zoom,Some(row));
     for (index, group) in graph.groups.iter().enumerate() {
         for (row, (input, channel, _)) in group.inputs.iter().enumerate() {
             line(
@@ -358,12 +362,16 @@ pub(super) fn draw(
                 "",
             );
         }
+        if areas.collapsed(index){continue;}
         for &called in &group.calls {
-            for (step,statement) in group.statements.iter().enumerate() {
-                if !re(&format!(r"\b{}\s*\(",regex::escape(&graph.groups[called].name))).is_match(statement){continue;}
+            for (step,operation) in group.operations.nodes.iter().enumerate() {
+                if operation.title!=graph.groups[called].name{continue;}
                 let (left,right)=super::flow::step_ports(group,index,groups[index],zoom,positions,step);
-                line(right,super::flow::input_port(&graph.groups[called],groups[called],zoom,None),color(Stage::Function),super::tr("函数调用"));
-                line(super::flow::output_port(&graph.groups[called],groups[called],zoom),left,color(Stage::Function),super::tr("返回值"));
+                for port in &operation.inputs{let targets=areas.parameter_ports(called,groups[called],zoom,&port.name);
+                    let source=areas.source_port(index,group,groups[index],zoom,positions,port);
+                    for target in targets{line(source,target,color(Stage::Function),"");}
+                }
+                let _=left;line(areas.output_port(called,groups[called],zoom),right,color(Stage::Function),super::tr("返回值"));
             }
         }
     }
@@ -377,21 +385,17 @@ pub(super) fn draw(
             let right = egui::pos2(interfaces[index].right(), left.y);
             if let Some(from) = interface.from {
                 line(
-                    super::flow::output_port(&graph.groups[from],groups[from],zoom),
+                    areas.output_port(from,groups[from],zoom),
                     left,
                     Color32::from_rgb(100, 190, 175),
                     "",
                 );
             }
-            line(
-                right,
-                egui::pos2(
-                    super::flow::input_port(&graph.groups[interface.to],groups[interface.to],zoom,None).x,
-                    super::flow::input_port(&graph.groups[interface.to],groups[interface.to],zoom,None).y,
-                ),
-                Color32::from_rgb(100, 190, 175),
-                "",
-            );
+            let parameter=graph.groups[interface.to].parameters.first().map_or("",String::as_str);
+            for target in areas.parameter_ports(interface.to,groups[interface.to],zoom,&format!("{parameter}.{}",interface.fields[field].1)){
+                line(right,target,Color32::from_rgb(100,190,175),"");
+            }
+
         }
     }
     for &(from, to) in &graph.varyings {
@@ -417,7 +421,7 @@ pub(super) fn draw(
         .collect::<Vec<_>>();
     if fragments.len() == 1 {
         line(
-            super::flow::output_port(&graph.groups[fragments[0]],groups[fragments[0]],zoom),
+            areas.output_port(fragments[0],groups[fragments[0]],zoom),
             egui::pos2(output.left(), output.top() + 55. * zoom),
             color(Stage::Frag),
             "Output",
@@ -437,7 +441,7 @@ pub(super) fn draw(
             6.,
             color(group.stage).gamma_multiply(if ui.visuals().dark_mode { 0.3 } else { 0.85 }),
         );
-        painter.with_clip_rect(header.intersect(canvas)).text(
+        painter.with_clip_rect(Rect::from_min_max(header.min,header.max-egui::vec2(34.*zoom,0.)).intersect(canvas)).text(
             header.left_center() + egui::vec2(12. * zoom, 0.),
             egui::Align2::LEFT_CENTER,
             format!(
@@ -450,6 +454,19 @@ pub(super) fn draw(
             egui::FontId::proportional(15. * zoom),
             ui.visuals().text_color(),
         );
+        let toggle=areas.toggle_rect(index,r,zoom);
+        let response = ui.ctx().read_response(ui.id().with(("function_fold", index)));
+        let visuals = response.as_ref().map_or(&ui.visuals().widgets.inactive, |response| ui.style().interact(response));
+        // Draw after the group header so its fill cannot cover the button.
+        painter.rect(toggle, 3.0 * zoom, visuals.bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        let icon = Rect::from_center_size(toggle.center(), egui::vec2(12., 12.) * zoom);
+        let stroke = Stroke::new((1.5 * zoom).max(1.0), visuals.fg_stroke.color);
+        // These simple shapes need no asynchronous SVG texture loading.
+        if areas.collapsed(index) {
+            painter.rect_stroke(icon, 0., stroke, egui::StrokeKind::Inside);
+        } else {
+            painter.line_segment([icon.left_center(), icon.right_center()], stroke);
+        }
         if let Some(selected)=super::flow::draw(ui,group,index,r,canvas,zoom,positions,areas,inputs,selected,mini,mini_source){request=Some(selected);}
     }
 
@@ -471,14 +488,7 @@ pub(super) fn draw(
             egui::FontId::proportional(14. * zoom),
             ui.visuals().text_color(),
         );
-        let drag = ui.interact(
-            header.intersect(canvas),
-            ui.id().with(("interface_group", index)),
-            Sense::drag(),
-        );
-        if drag.dragged() {
-            *positions.get_mut(&(2000 + index)).unwrap() += drag.drag_delta() / zoom;
-        }
+        areas.tools.node(ui,super::tools::Target::Position(2000+index),r,header,canvas,zoom);
         for (field, (ty, name, semantic)) in interface.fields.iter().enumerate() {
             let point = egui::pos2(r.left(), r.top() + (66. + field as f32 * 28.) * zoom);
             painter.circle_filled(point, 4. * zoom, Color32::from_rgb(100, 190, 175));
@@ -499,7 +509,9 @@ pub(super) fn draw(
     request
 }
 
-pub(super) fn parse(source: &str, inputs: &[Input]) -> Graph {
+pub(super) fn parse(source: &str, inputs: &[Input]) -> Graph {parse_impl(source,inputs,true)}
+pub(super) fn structure(source:&str)->Graph{parse_impl(source,&[],false)}
+fn parse_impl(source: &str, inputs: &[Input], with_operations:bool) -> Graph {
     let mut graph = Graph::default();
     // Strip comments without touching quoted strings containing // or braces.
     let source = re(r#"(?s)/\*.*?\*/|//[^\r\n]*|"(?:\\.|[^"\\])*""#).replace_all(
@@ -739,6 +751,12 @@ pub(super) fn parse(source: &str, inputs: &[Input]) -> Graph {
         if graph.groups[index].stage==Stage::Function {
             graph.groups[index].probes=(0..graph.groups[index].statements.len()).map(|step|super::helper::candidate(&graph,index,step)).collect();
         }
+    }
+    if !with_operations{return graph;}
+    let calls=graph.groups.iter().map(|g|(g.name.clone(),(g.result_type.clone(),g.parameters.clone()))).collect::<std::collections::HashMap<_,_>>();
+    let diagrams=graph.groups.iter().enumerate().map(|(index,g)|super::operations::build(g,&source,inputs,&calls,super::helper::vertex_context(&graph,index))).collect::<Vec<_>>();
+    for (group,operations) in graph.groups.iter_mut().zip(diagrams){
+        group.flow=super::operations::plan(&operations,&group.flow);group.operations=operations;group.interface=std::sync::Arc::new(super::interfaces::build(group,inputs));
     }
     for group in &mut graph.groups {
         let (layout,output)=super::flow::arrange(group);group.flow.layout=layout;group.flow.output=output;

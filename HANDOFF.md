@@ -1,3 +1,9 @@
+# 当前交接：1.2.1 本地构建与发布准备（2026-10-16）
+
+用户确认此前 60 帧节点预览构建检查通过，明确授权升级 1.2.1、重新编译并发布 GitHub。更新内容为替换 AppIcon、优化 Material 和 Shader 预览操作体验。
+
+Release 构建成功，文件 / 产品版本 1.2.1，21479936 字节，SHA-256：9D5A27D0F5381C8A02FECC5232323229EFF9485534B266EF84A7600E5474DBF7。附件 target/release/UnityYAMLViewer-v1.2.1-windows-x64.exe；日志 target/version-1.2.1-release-build.log。已核对版本顺序、默认两版、重新打开折叠逻辑与 704 条七语言目录；测试源码编译通过，断言未执行。升级后 EXE 未启动，实际关于界面待验证。正式发布结果完成后补记。
+
 # 最新本地构建：Vert / Frag 单步预览（2026-10-15）
 
 ## Vert / Frag 单步预览本地构建（2026-10-15）
@@ -1467,3 +1473,170 @@ Out 文本已改为按内容宽度换行、节点内裁剪，悬停查看全文�
 - 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21457920 字节；SHA-256：B1C437D63F46018EBEB862C7F64ADBEF798AC653C97034E466A230900632A14C。
 - 包含依赖横向分层布局、输入分点连线、淡化分组底色、10% 最小缩放，以及参与计算的局部常量随分组移动修正。日志 target/ase-layout-release-build.log，保留 Spine Runtime 158 条既有警告。
 - 未启动程序；实际布局、缩放、常量随动和 GPU 画面待运行验证，新增测试断言未执行。仅更新本地产物，GitHub 正式发布未改。
+
+## 2026-10-16：紧凑运算节点源码
+
+已自行实现表达式解析及紧凑运算图（src/material_graph/operations.rs），宽 200 点，源码悬停，颜色快照默认收起、按需展开，直接 RGB / A 端口及声明宽度转换保留。复杂表达式回退源码语句；引用目录仅供阅读，未复制 ASE 实现。普通与测试编译检查通过，新测试断言、UI / GPU 与交互未运行。没有本轮 EXE；最新本地产物仍为 2026-10-15 ASE 参考布局版，SHA-256 B1C437D63F46018EBEB862C7F64ADBEF798AC653C97034E466A230900632A14C，GitHub 未更新。详见 docs/versions/1.2.0.md。
+
+## 紧凑运算节点本地构建（2026-10-16）
+
+- 用户明确授权编译；构建前进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（36.39 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21565952 字节；SHA-256：C833532E0701D43270946C0E7FA5CA864F7A365962CF0C448F9E30A4E781C40A。
+- 包含常见表达式运算节点、紧凑布局、源码悬停详情、RGB / A 等对应端口连接、声明宽度转换、按需展开颜色快照和复杂语句回退。日志 target/operation-nodes-release-build.log，保留 Spine Runtime 158 条既有警告。
+- 未启动程序；实际紧凑排版、展开 / 收起、拖动、性能和 GPU 画面待运行验证，新测试断言未执行。仅更新本地产物，GitHub 正式发布及 ref 参考目录未改。
+
+基础运算节点收窄源码：基础节点 140 点、其他节点 200 点，默认列距按列宽加 60 点计算，快照仍 128 点。cargo check 通过，未生成本轮 EXE；本地 EXE 仍为上一轮紧凑运算节点版（C833532E0701D43270946C0E7FA5CA864F7A365962CF0C448F9E30A4E781C40A），实际视觉待验证。
+
+基础运算宽度按最终要求改为 100 点；展开预览至少 148 点、图像仍 128 点，输入文字独立裁剪。cargo check 通过，尚未生成新 EXE，实际视觉待验证。
+
+## 100 点宽运算节点本地构建（2026-10-16）
+
+- 用户明确授权编译；构建前进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（38.25 秒）。
+- 本地产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21624320 字节；SHA-256：B04F62BB30B2260FBCED71D1FF1181BDB8541703827EFF128C617B2F8B159923。
+- 包含基础运算默认 100 点宽、随列宽调整默认间距、展开颜色预览时至少 148 点宽及输入文字独立裁剪，预览图仍为 128 点。日志 target/100-point-operation-nodes-release-build.log，保留 Spine Runtime 158 条既有警告。
+- 未启动程序；实际窄节点文本、展开 / 收起及连线视觉待运行验证。仅更新本地产物，GitHub 正式发布未改。
+
+函数 Out 定位修正源码：Out 标题可独立拖动、分组拉伸按相对位置跟随并约束框内，所有外部连线使用新端口。普通及测试编译检查通过，断言 / 实际交互未运行，未生成本轮 EXE；最新 EXE 仍为 100 点宽版，SHA-256 B04F62BB30B2260FBCED71D1FF1181BDB8541703827EFF128C617B2F8B159923。
+
+## View / Move 与多选源码（2026-10-16）
+
+新增 src/material_graph/tools.rs：画布左上角矢量手型 View（Q）/ 箭头十字 Move（W）浮动 Tab；View 左键平移、不选择节点，Move 点选 / Shift / 框选 / 多选标题拖动。两模式均 10%～175% 滚轮缩放。选择 / 位移集中应用，覆盖 Property、运算、接口、函数 In / Out、Render State、输出；标题点击仅选择，点击展开快照查看诊断。普通与测试编译检查通过，测试断言与实际 UI 未运行；无新 EXE，最新本地仍为 100 点宽版本 B04F62BB30B2260FBCED71D1FF1181BDB8541703827EFF128C617B2F8B159923。之前 Out 拖动 / 拉伸跟随源码也仍未打包。
+
+## 函数边界与折叠源码（2026-10-16）
+
+新增 interfaces.rs：具名边界输入与返回接口取代独立 In / Out 卡片，简单单路径 Return 合并；函数右上角折叠 / 展开保留布局与尺寸，折叠跳过内部快照。旧 Out 独立拖动约束已被边界方案替代。普通 / 测试编译检查通过，断言与 UI / GPU 未运行。无新 EXE，最新本地产物仍为 B04F62BB30B2260FBCED71D1FF1181BDB8541703827EFF128C617B2F8B159923。
+
+## 函数边界与折叠本地构建（2026-10-16）
+
+- 用户明确授权编译；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21607936 字节；SHA-256：3732A2ECBBD03B9C238EB696BDC08207BC4893BEC09ECA1BDA3EFCA4A5384716。
+- 包含具名函数边界接口、单一简单 Return 合并、右上角折叠 / 展开，以及此前 View / Move 多选与紧凑运算节点修改。日志 target/function-boundary-release-build.log。
+- 未启动程序，实际 UI / GPU 与交互待运行验证；仅更新本地产物，未发布 GitHub。
+
+## 工具条显示修正（2026-10-16）
+
+Q/W 工具条移除独立 Area，改为画布内末尾绘制并仅按画布可见范围裁剪。编译检查通过，实际缩放 / 面板伸缩及点击待验证，无新 EXE。
+
+## Move 画布平移源码（2026-10-16）
+
+Move 左拖空白平移，Shift 左拖空白保留框选；两模式右键可从节点上起拖平移。节点 / 分组 / 拉伸拖动限制为左键。编译检查通过，交互待验证，无新 EXE。
+
+## 组多选源码（2026-10-16）
+
+函数组加入 Tools 选择注册，组标题点选 / Shift，框选按组边界命中；混选统一位移并去重成员，非成员补偿保持原位。普通 / 测试编译检查通过，断言及实际交互未运行，无新 EXE。
+
+## 画布工具与组多选本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21597696 字节；SHA-256：1F9359381E184E53ACEE7C4CBFB6680A2C9CB38CD28D4CFB389E8B3F36F4F4AE。
+- 包含画布内固定工具条、Move 空白左拖平移、Shift 框选、跨节点右键平移，以及函数组与节点混合多选 / 成员移动去重。保留前轮函数边界接口与折叠。日志 target/group-multi-selection-release-build.log。
+- 未启动程序，实际 UI / GPU 与交互待用户运行验证；仅更新本地 EXE，GitHub 发布未变。
+
+## 紧急：画布平移死锁修复源码（2026-10-16）
+
+pan_delta 在 Ui::input 内调用 dragged_by 重入 Context 锁，已将拖动判断与 clip_rect 提前读取。编译检查通过，未生成 EXE；最新 1F9359381E184E53ACEE7C4CBFB6680A2C9CB38CD28D4CFB389E8B3F36F4F4AE 仍含死锁，需用户授权且检查占用后重编译。不得自动关闭卡死进程。
+
+## 画布平移死锁修复本地构建（2026-10-16）
+
+- 用户明确授权；重新检查进程与目标 EXE 独占读写均通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21601280 字节；SHA-256：C5A8878B9F0C97382EB67B1DD12857FB2F720D40D283516FFB6F0223C597121A。
+- 包含 pan_delta 避免 Context 输入锁重入的修复，保留工具条、画布平移及组多选功能；日志 target/canvas-pan-deadlock-release-build.log。此产物替代此前包含死锁的本地 EXE。
+- 未启动程序，实际左 / 右键平移交互待运行验证；GitHub 发布未改。
+
+## 折叠卡片拖动源码（2026-10-16）
+
+折叠函数主体改为拖动面，保留右侧按钮 / 端口列；展开仅标题拖动。检查通过，实际交互待验证，无新 EXE。
+
+## 折叠函数拖动修正本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21597696 字节；SHA-256：E6EEF8872325D6FCF0C0C4705020EBB76AA6465AF9C12A0515BFF9AC6C4430B5。
+- 包含折叠函数主体拖动面修正，保留右侧按钮 / 端口列和组多选去重；包含此前画布平移死锁修复。日志 target/collapsed-function-drag-release-build.log。
+- 未启动程序，实际折叠拖动与多选待运行验证；仅更新本地 EXE，GitHub 发布未改。
+
+## 统一节点选择源码（2026-10-16）
+
+移除旧 Preview.selected 橙框；Tools.node 改单一点击 / 拖动响应，非控件主体可移动，控件仍优先。编译检查通过，实际交互待验证，无新 EXE。
+
+## 统一节点选择与拖动本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21566976 字节；SHA-256：82B180BA22B41407B90327336BA9B90BA2D4B5897E085D14CBC07D654A1172C8。
+- 包含移除旧 Property 橙色单选框、统一蓝框与单一点击 / 拖动响应，节点非控件主体可拖动；保留折叠组拖动、多选及平移死锁修复。日志 target/unified-node-selection-release-build.log。
+- 未启动程序，实际节点拖动、输入控件优先级及选择显示待运行验证；仅更新本地 EXE，GitHub 发布未改。
+
+## 图标脚本（2026-10-16）
+
+assets/generate_icons.py 已添加，Pillow 两次双线性缩放及预乘 Alpha，1024 优先 / 512 回退 / 缺失报错，13 档与 build.rs 同步。实际验证通过，测试输出在 target/icon-script-validation，原 assets PNG 未覆盖，无新 EXE。
+
+## 统一鼠标交互源码（2026-10-16）
+
+移除 Q/W 模式与工具条。左键选择 / 框选与节点拖动，右键画布平移，滚轮缩放，Shift 增减选择。按钮栏下新增七语言操作提示。普通 / 测试编译检查通过，实际交互待验证，无新 EXE。
+
+## 统一鼠标交互本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21463552 字节；SHA-256：A9B6EF434792F75B0A8CF164C648FC902618A2783108F141406F75EE33CDE8F7。
+- 移除 Q/W 模式与图标，包含左键选择 / 框选及节点拖动、右键画布平移、滚轮缩放和顶部七语言操作说明。保留组多选、折叠与统一蓝框；日志 target/mouse-graph-interaction-release-build.log。
+- 未启动程序，实际拖动 / 框选 / 平移与提示布局待运行验证；仅更新本地 EXE，GitHub 发布未改。
+
+## 连续拖动生命周期源码（2026-10-16）
+
+Tools 增加 active_drag、画布作用域 ID、统一 finish 位移，按下 / 松开 / 失焦清理；成员更新兼容丢失释放事件。当前链路未发现嵌套输入锁，现场根因仍需运行核对。连续两次 egui 拖动序列测试仅编译；普通 / 测试检查通过，无新 EXE。
+
+## 连续拖动状态修正本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21465088 字节；SHA-256：3C6A0799DF6995CAF25CB3FF09440B84722F9F11B61B96291D3BA5BC847F0124。
+- 包含画布级拖动捕获、统一位移与按下 / 松开 / 失焦清理，保留统一鼠标操作和顶部说明。日志 target/repeated-graph-drag-release-build.log。
+- 未启动程序，连续拖动问题是否解决待用户实际验证；新增测试仅编译，断言未执行。仅更新本地 EXE，GitHub 发布未改。
+
+## 明确根因：输出离屏跳过交互提交（2026-10-16）
+
+show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖动位移及框选均失效；现离屏返回也先收尾。popup 开启时画布保留滚轮给菜单并暂停右拖。普通 / 测试检查通过，实际交互待验证，无新 EXE。
+
+## 离屏交互与菜单滚轮修复本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21466112 字节；SHA-256：191293927279C7680F28E6157DA96D72A1042A32FF48606F260F0EB92D14C27C。
+- 包含输出预览离屏分支补执行交互收尾，恢复该场景节点 / 组位移和空白框选；popup 开启时画布不消费滚轮并暂停平移。日志 target/graph-output-culling-interaction-release-build.log。
+- 未启动程序，实际离屏拖动 / 框选和下拉菜单滚轮待用户验证；仅更新本地 EXE，GitHub 发布未改。
+
+## 矢量按钮与 EXE 图标核对（2026-10-16）
+
+函数 Minus / Square SVG，运算预览共享 Eye SVG；检查通过，无新 EXE。最新 191293... EXE 内两张 256 PNG 与当前 assets 256 PNG 像素相同，旧图标显示疑似 Windows 缓存，未修改源图 / 系统缓存。
+
+## 矢量节点按钮本地构建（2026-10-16）
+
+- 用户明确授权；进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21466112 字节；SHA-256：44C44BB2A92FF462BABD811523244E1538D93B1310C9363502FD24C012CE4B88。
+- 包含函数框右上角 Minus / Square SVG 和复用 Hierarchy Eye 的运算预览按钮，保留离屏交互与下拉滚轮修复。日志 target/vector-graph-controls-release-build.log。
+- 未启动程序，矢量按钮视觉与交互待运行验证；仅更新本地 EXE，GitHub 发布未改。
+
+## RGBA 预览与带框按钮本地构建（2026-10-16）
+
+- 用户明确授权；编译前进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（存在工程与依赖警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21487104 字节；SHA-256：9E12A4B747D4B701954AD9848C8B293DA688AE8799401B2E0EE8D2887C9D68A8。
+- 包含直接绘制的折叠 / 展开图标与按钮边框、RGBA 单通道及相关运算预览恢复、带框眼睛预览按钮。日志 target/rgba-preview-framed-controls-release-build.log。
+- 未启动程序；实际按钮显示 / 交互与颜色通道快照仍待运行验证，回归测试仅完成编译检查。仅更新本地 EXE，未发布。
+
+## 眼睛按钮显示与点击修复本地构建（2026-10-16）
+
+- 用户明确授权；编译前程序进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（存在工程及依赖警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21483520 字节；SHA-256：62AB8EE486B35FADD5314B705298EF172A34126B6CA19C1C030F0F0B4D382283。
+- 包含直接绘制矢量眼睛图标、保留按钮边框与高亮、节点背景先于眼睛按钮注册交互，展开 / 收起请求重绘。日志 target/eye-button-interaction-release-build.log。
+- 未启动程序；实际图标、点击展开 / 收起、拖动及 GPU 快照待运行验证，新增回归测试仅完成编译检查。仅更新本地 EXE，未发布。
+
+## 节点预览持续更新本地构建（2026-10-16）
+
+- 用户明确授权；编译前程序进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（存在工程及依赖警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21484032 字节；SHA-256：9BF1306002E1E1D67FD624BD876A279FE7F8CCBCC92249ACCB4C1AD6BE89930B。
+- 包含展开且可见节点预览约每 100 毫秒按当前 Shader 时间更新、收起 / 离屏暂停、场景与贴图复用及每节点单一在途采集；保留此前眼睛按钮显示与点击修复。日志 target/live-node-preview-release-build.log。
+- 未启动程序；实际动画、参数更新、离屏恢复与多节点性能待运行验证；新增回归测试仅完成编译检查。仅更新本地 EXE，未发布。
+
+## 60 帧节点预览本地构建（2026-10-16）
+
+- 用户明确授权；编译前程序进程与目标 EXE 独占读写检查通过，cargo build --release --locked --offline 成功（存在工程及依赖警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.0，21484032 字节；SHA-256：BF57E1963B8FD9A611A3FCF7C8F6638D7B732D79467FC099B545942B84B04A1F。
+- 包含节点预览采集间隔 16,666,667 纳秒、目标约 60 帧/秒，保留收起 / 离屏暂停、场景 / 贴图复用与每节点单一在途采集。日志 target/live-node-preview-60fps-release-build.log。
+- 未启动程序；实际刷新率、动画与多节点性能仍待运行验证，不将构建成功视为稳定 60 帧验证。回归测试仅完成编译检查。仅更新本地 EXE，未发布。

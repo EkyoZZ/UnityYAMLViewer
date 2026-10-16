@@ -2,6 +2,8 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
+- [1.2.1：替换 AppIcon、优化 Material 和 Shader 预览操作体验（已构建，待发布）](docs/versions/1.2.1.md) · [发布说明](docs/releases/1.2.1.md)
+
 - [1.2.0：Material / Shader Node-based UI 预览（已正式发布）](docs/versions/1.2.0.md) · [发布说明](docs/releases/1.2.0.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.0)
 
 - [1.1.9：播放列表、界面与音视频体验（已正式发布）](docs/versions/1.1.9.md) · [发布说明](docs/releases/1.1.9.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.1.9)
