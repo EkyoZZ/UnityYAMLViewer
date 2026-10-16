@@ -15,7 +15,7 @@ A desktop viewer for Unity assets, with property editing and material previews.
 - **材质预览**：Material / Shader 使用 **Node-based UI**，支持节点内临时调参、拖图换纹理、2D / 3D 输出与 Cull / Blend 调节；常见公式拆成100 点宽运算节点，颜色预览按需展开，可见时约 60 帧/秒更新，支持左键选择 / 框选（不受输出节点可见性影响）、统一选框的节点与组多选拖动、右键平移、带框折叠 / 展开和眼睛预览按钮（含 R/G/B/A 单通道及其运算）的可拖动函数分组及具名边界接口与 10%～175% 缩放。
 - **场景与动画**：预览受支持的 2D / UI、Spine 和模型资源，查看 Animator 状态图、编辑动画曲线。
 - **音视频播放**：支持播放列表、波形、全屏和播放进度记忆；解码依赖外部 FFmpeg，可在设置中安装 / 检测。
-- **日常使用**：最近文件、标签恢复、深浅主题、七种语言和在线更新。
+- **日常使用**：最近文件、标签恢复、深浅主题、七种语言和在线更新；GitHub 接口限流时提示等待重试，也可打开发布页手动更新。
 
 ### 🚀 快速开始
 
@@ -51,7 +51,7 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。技术栈：Rust · eg
 - **Material previews**: A **node-based UI** for Materials / Shaders, with temporary inputs, texture drops, 2D / 3D output and Cull / Blend controls. Common formulas use 100-point-wide operation nodes with expandable color previews refreshed at up to about 60 fps while visible, left-click selection and marquee selection even with the output offscreen, unified selection and dragging of nodes and groups, right-drag panning, draggable function groups with framed fold / expand and eye preview buttons (including R/G/B/A channels and their operations) and named boundary ports and 10%–175% zoom.
 - **Scenes and animation**: Preview supported 2D / UI, Spine and model assets, inspect Animator graphs and edit animation curves.
 - **Media playback**: Playlists, waveforms, fullscreen and remembered playback positions. Decoding requires external FFmpeg, installable / detectable in Settings.
-- **Everyday tools**: Recent files, restored tabs, light / dark themes, seven languages and online updates.
+- **Everyday tools**: Recent files, restored tabs, light / dark themes, seven languages and online updates; when GitHub rate limits checks, wait before retrying or open the release page to update manually.
 
 ### 🚀 Quick start
 

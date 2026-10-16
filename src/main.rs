@@ -2332,6 +2332,7 @@ impl eframe::App for ViewerApp {
                         ui.label(RichText::new("1.2.1").strong());
                         ui.label(localization::tr("• 替换 AppIcon"));
                         ui.label(localization::tr("• 优化 Material 和 Shader 预览操作体验"));
+                        ui.label(localization::tr("• 更新检查识别 GitHub 限流并等待重试，支持手动打开发布页"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.2.0").strong());
                         ui.label(localization::tr("• 材质与 Shader 共用节点预览，分别载入材质输入与 Shader 默认值"));

@@ -53,8 +53,32 @@ fn client() -> Result<reqwest::blocking::Client, String> {
         .connect_timeout(Duration::from_secs(20)).timeout(Duration::from_secs(300)).build().map_err(|e| e.to_string())
 }
 fn check() -> Result<Option<Release>, String> {
+    // Respect server backoff even when the user clicks Check again.
+    static RETRY_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let rate_limit_message = |seconds: u64| format!("GitHub 更新接口已限流，请在 {seconds} 秒后重试，或打开发布页面手动更新。");
+    {
+        let retry_at = RETRY_AT.lock().map_err(|e| e.to_string())?;
+        if let Some(remaining) = retry_at.and_then(|at| at.checked_duration_since(std::time::Instant::now())) {
+            return Err(rate_limit_message(remaining.as_secs().saturating_add(1)));
+        }
+    }
     let response = client()?.get(RELEASE_API).header("Accept", "application/vnd.github+json").send().map_err(|e| e.to_string())?;
     if response.status() == reqwest::StatusCode::NOT_FOUND { return Err("尚未发布可用的更新版本。".into()); }
+    if matches!(response.status(), reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::TOO_MANY_REQUESTS) {
+        let status = response.status();
+        let header_number = |name| response.headers().get(name).and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok());
+        let retry_after = header_number("retry-after");
+        let exhausted = header_number("x-ratelimit-remaining") == Some(0);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        let reset_wait = if exhausted { header_number("x-ratelimit-reset").map(|reset| reset.saturating_sub(now)) } else { None };
+        let body = response.text().map_err(|e| e.to_string())?;
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS || exhausted || retry_after.is_some() || body.to_ascii_lowercase().contains("rate limit") {
+            let seconds = retry_after.unwrap_or(0).max(reset_wait.unwrap_or(0)).max(60);
+            *RETRY_AT.lock().map_err(|e| e.to_string())? = std::time::Instant::now().checked_add(Duration::from_secs(seconds));
+            return Err(rate_limit_message(seconds));
+        }
+        return Err("GitHub 拒绝访问更新接口（HTTP 403），请检查网络或打开发布页面手动更新。".into());
+    }
     let release: Release = response.error_for_status().map_err(|e| e.to_string())?.json().map_err(|e| e.to_string())?;
     let latest = semver::Version::parse(release.tag_name.trim().trim_start_matches(['v', 'V'])).map_err(|e| e.to_string())?;
     let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|e| e.to_string())?;
