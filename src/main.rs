@@ -172,6 +172,7 @@ struct ViewerApp {
     query: String,
     show_search: bool,
     show_supported_formats: bool,
+    show_command_help: bool,
     file_associations: file_associations::Dialog,
     cache_panel: app_cache::Panel,
     show_url: bool,
@@ -358,6 +359,14 @@ impl ViewerApp {
 
     fn update_windows(&mut self, ctx: &egui::Context) {
         self.url_window(ctx);
+        if self.show_command_help {
+            native_window::Window::new(localization::tr("命令行用法")).id(egui::Id::new("command_help")).open(&mut self.show_command_help).default_width(760.).default_height(600.).solid_scroll().show(ctx,|ui| {
+                ui.label(localization::tr("slice9 默认原位替换，不创建备份；建议先用 --dry-run 查看方案。"));
+                ui.label(localization::tr("简单路径可不加引号；包含空格或命令行特殊字符时，请分别给每个路径加引号。"));
+                if ui.button(localization::tr("复制指令说明")).clicked() {ui.ctx().copy_text(asset_viewer::nine_slice::cli::HELP.to_owned());}
+                ui.label(egui::RichText::new(asset_viewer::nine_slice::cli::HELP).monospace());
+            });
+        }
         if self.show_supported_formats {
             native_window::Window::new(localization::tr("支持的文件格式"))
                 .id(egui::Id::new("supported_formats")).open(&mut self.show_supported_formats)
@@ -605,6 +614,18 @@ impl ViewerApp {
         }
     }
 
+    fn accept_open_request(&mut self,request:command_line::OpenRequest,ctx:&egui::Context) {
+        let mut omitted=0;
+        for path in request.paths {
+            if let Some(settings)=&request.preview {
+                if !self.assets.open_slice_preview(&path,settings.clone(),ctx){omitted+=1;continue}
+            }
+            // Preview dialogs must survive opening another image tab.
+            if request.preview.is_none(){self.open_file(path);}else{self.open_file_with_directory_tracking(path,false);}
+        }
+        let notice=format!("{}{}",request.notice,if omitted>0 {format!("\n{}: {omitted}",localization::tr("超出预览上限，未打开"))}else{String::new()});
+        if !notice.trim().is_empty(){rfd::MessageDialog::new().set_title(localization::tr("九宫格预览" )).set_description(notice).show();}
+    }
     fn open_file(&mut self, path: PathBuf) {
         self.open_file_with_directory_tracking(path, true);
     }
@@ -1327,13 +1348,14 @@ impl eframe::App for ViewerApp {
         if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("spine_reload_request"))).unwrap_or(false) {self.reload_current_file(ctx);}
         if let Some(inbox) = &mut self.command_inbox {
             let requests = inbox.receive();
-            for paths in requests {
-                for path in paths { self.open_file(path); }
+            for request in requests {
+                self.accept_open_request(request,ctx);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
+        self.assets.show_slice_previews(ctx);
         localization::set_language(&self.settings.language);
         self.updater.poll();
         if self.path.as_ref().is_some_and(|path| !self.edits.contains_key(path))
@@ -1516,7 +1538,8 @@ impl eframe::App for ViewerApp {
                         let text_width = ui.painter().layout_no_wrap(text.into(),font.clone(),ui.visuals().weak_text_color()).size().x;
                         let button_text = localization::tr("格式支持");
                         let button_width = ui.painter().layout_no_wrap(button_text.into(),egui::TextStyle::Button.resolve(ui.style()),ui.visuals().text_color()).size().x + 12.0;
-                        let width = (text_width + button_width + 10.0).min(ui.available_width().max(0.0));
+                        let command_width=ui.painter().layout_no_wrap(localization::tr("指令查看").into(),egui::TextStyle::Button.resolve(ui.style()),ui.visuals().text_color()).size().x+ui.spacing().button_padding.x*2.+ui.spacing().item_spacing.x;
+                        let width = (text_width + button_width + 10.0).min((ui.available_width()-command_width).max(0.0));
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::hover());
                         let button_rect = egui::Rect::from_min_max(egui::pos2((rect.right()-button_width).max(rect.left()),rect.center().y-10.0),egui::pos2(rect.right(),rect.center().y+10.0));
                         let text_rect = egui::Rect::from_min_max(rect.min,egui::pos2((button_rect.left()-4.0).max(rect.left()),rect.bottom()));
@@ -1529,6 +1552,7 @@ impl eframe::App for ViewerApp {
                             if ui.put(button_rect,egui::Button::new(button_text)).clicked() { self.show_supported_formats = true; }
                         });
                     }
+                    if ui.button(localization::tr("指令查看")).clicked() {self.show_command_help=true;native_window::wake(ui.ctx(),egui::Id::new("command_help"));}
                     ui.spacing_mut().item_spacing.x = previous_spacing;
                 });
                 });
@@ -2188,7 +2212,8 @@ impl eframe::App for ViewerApp {
                         }
                     }));
                     if previous_language != self.settings.language {
-                        localization::set_language(&self.settings.language);
+
+        localization::set_language(&self.settings.language);
                         self.status = localization::retranslate(&self.status);
                         self.encoding = localization::retranslate(&self.encoding);
                         for tab in &mut self.tabs {
@@ -2329,11 +2354,21 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.2").strong());
+                        ui.label(localization::tr("• 九宫格无损精简：完整 RGBA 判重、拉伸 / 重复自动识别，可编辑预览与原位替换"));
+                        ui.label(localization::tr("• slice9 支持批量 / 目录 / dry-run，--preview 最多 10 个可编辑窗口；顶部指令查看提供示例"));
+                        ui.label(localization::tr("• 对齐补白不计入 Unity Border；仅写回已读取且受支持的单 Sprite meta，保留 GUID"));
+                        ui.label(localization::tr("• 普通弹窗恢复焦点保留位置，首次打开或按钮唤醒时才居中"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.1").strong());
                         ui.label(localization::tr("• 替换 AppIcon"));
                         ui.label(localization::tr("• 优化 Material 和 Shader 预览操作体验"));
                         ui.label(localization::tr("• 更新检查识别 GitHub 限流并等待重试，支持手动打开发布页"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.0").strong());
                         ui.label(localization::tr("• 材质与 Shader 共用节点预览，分别载入材质输入与 Shader 默认值"));
                         ui.label(localization::tr("• 材质与 Shader 通过统一预览开关打开独立节点面板"));
@@ -2341,10 +2376,7 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 交互参考 Amplify Shader Editor，模块内输入与重置，输出模块可切换 2D / 3D 并拉伸"));
                         ui.label(localization::tr("• 预览输入可临时调整与重置，不写回文件；渲染限受支持的 Built-in Shader"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
+
                         ui.label(RichText::new("1.1.9").strong());
                         ui.label(localization::tr("• 查找栏可收起并自适应换行，最近记录可删除或清空，按钮靠右对齐"));
                         ui.label(localization::tr("• 支持 HTTP / HTTPS 文件直链下载打开，浅色音频电平线更清晰"));
@@ -4133,6 +4165,7 @@ fn show_game_object_properties(ui:&mut egui::Ui,text:&str) {
 }
 
 fn main() -> eframe::Result {
+    if let Some(code)=asset_viewer::nine_slice::cli::dispatch() {std::process::exit(code);}
     let (command_inbox, startup_paths) = match command_line::start() {
         Ok(command_line::Startup::Primary(inbox, paths)) => (inbox, paths),
         Ok(command_line::Startup::Forwarded) => return Ok(()),
@@ -4164,7 +4197,7 @@ fn main() -> eframe::Result {
             };
             localization::set_language(&app.settings.language);
             app.restore_open_tabs();
-            for path in startup_paths { app.open_file(path); }
+            app.accept_open_request(startup_paths,&creation_context.egui_ctx);
             if app.settings.auto_check_updates { app.updater.check(&creation_context.egui_ctx, false); }
             Ok(Box::new(app))
         }),

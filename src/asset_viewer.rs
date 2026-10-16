@@ -1,6 +1,7 @@
-//! Read-only text and image reference tabs. Image decoding and channel conversion run off-thread.
+//! Text and image reference tabs, with nine-slice editing and in-place replacement.
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, mpsc}};
 use eframe::egui::{self, Color32};
+pub(crate) mod nine_slice;
 
 /// egui's painter blends in gamma space, so asset RGB must be premultiplied there.
 /// Color32::from_rgba_unmultiplied instead premultiplies in linear space.
@@ -63,6 +64,7 @@ impl Channel {
 type Loaded = Result<(Arc<image::RgbaImage>, egui::ColorImage), String>;
 #[derive(Default)]
 struct ImageTab {
+    editor: nine_slice::Editor,
     original: Option<Arc<image::RgbaImage>>,
     pending: Option<mpsc::Receiver<Loaded>>,
     texture: Option<egui::TextureHandle>,
@@ -155,10 +157,31 @@ impl Assets {
         let reload=ui.push_id(("material_graph_file",path),|ui|preview.show(ui)).inner;
         if reload{self.material_graphs.remove(path);}
     }
+    pub fn open_slice_preview(&mut self,path:&Path,request:nine_slice::processing::Request,ctx:&egui::Context)->bool {
+        if self.images.get(path).is_some_and(|t|t.editor.open) {crate::native_window::wake(ctx,egui::Id::new(("nine_slice",path)));return true}
+        if self.images.values().filter(|t|t.editor.open||t.editor.busy()).count()>=10 {return false}
+        let tab=self.images.entry(path.to_owned()).or_default();tab.channel=Channel::Rgba;
+        tab.editor.open_preview(request);if tab.original.is_none()&&tab.pending.is_none(){tab.load(path.to_owned(),ctx.clone());}
+        crate::native_window::wake(ctx,egui::Id::new(("nine_slice",path)));true
+    }
+    pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
+        for (path,tab) in &mut self.images {
+            if !tab.editor.open&&!tab.editor.busy(){continue}
+            if let Some(message)=nine_slice::Editor::refresh_message(ctx,path) {tab.original=None;tab.texture=None;tab.pending=None;tab.editor.replaced(message);}
+            if tab.original.is_none()&&tab.pending.is_none()&&tab.error.is_none(){tab.load(path.clone(),ctx.clone());}
+            if let Some(result)=tab.pending.as_ref().and_then(|r|r.try_recv().ok()) {
+                tab.pending=None;
+                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,egui::TextureOptions::LINEAR));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;}}
+            }
+            if let (Some(original),Some(texture))=(&tab.original,&tab.texture) {
+                if tab.editor.show(ctx,path,original,texture){tab.original=None;tab.texture=None;tab.pending=None;}
+            }
+        }
+    }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
-            if other != path { tab.original = None; tab.texture = None; tab.pending = None; }
+            if other != path&&!tab.editor.open&&!tab.editor.busy() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
         }
         if crate::playlist::is_playlist(path){self.playlists.show(ui,path,false);return;}
         if crate::media_preview::is_media(path) {
@@ -204,7 +227,12 @@ impl Assets {
             });
             return;
         }
+        let can_open_preview=self.images.values().filter(|t|t.editor.open||t.editor.busy()).count()<10;
         let tab = self.images.entry(path.to_owned()).or_insert_with(|| ImageTab { zoom: Some(1.0), ..Default::default() });
+        if let Some(message)=nine_slice::Editor::refresh_message(ui.ctx(),path) {
+            tab.original=None;tab.pending=None;tab.texture=None;tab.error=None;
+            tab.editor.replaced(message);tab.pan=egui::Vec2::ZERO;tab.zoom=None;
+        }
         if tab.pending.is_none() && tab.original.is_none() && tab.error.is_none() { tab.load(path.to_owned(), ui.ctx().clone()); }
         if let Some(result) = tab.pending.as_ref().and_then(|receiver| receiver.try_recv().ok()) {
             tab.pending = None;
@@ -218,7 +246,7 @@ impl Assets {
         }
         ui.horizontal_wrapped(|ui| {
             let previous = tab.channel;
-            ui.add_enabled_ui(tab.pending.is_none(), |ui| {
+            ui.add_enabled_ui(tab.pending.is_none() && !tab.editor.open && !tab.editor.busy(), |ui| {
                 for channel in [Channel::R,Channel::G,Channel::B,Channel::A,Channel::Rgb,Channel::Rgba] {
                     ui.selectable_value(&mut tab.channel, channel, channel.label());
                 }
@@ -228,8 +256,15 @@ impl Assets {
             for (label, zoom) in [("50%", 0.5), ("100%", 1.0), ("200%", 2.0)] {
                 if ui.button(label).clicked() { tab.zoom = Some(zoom); tab.pan = egui::Vec2::ZERO; }
             }
-            if ui.button(crate::localization::tr("重载")).clicked() { tab.original = None; tab.load(path.to_owned(), ui.ctx().clone()); }
+            if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
+            if ui.add_enabled(tab.original.is_some()&&(tab.editor.open||can_open_preview), egui::Button::new(crate::localization::tr("九宫格精简"))).clicked() {
+                tab.editor.open = true;
+                crate::native_window::wake(ui.ctx(),egui::Id::new(("nine_slice",path)));
+                if tab.channel != Channel::Rgba {tab.channel=Channel::Rgba;tab.load(path.to_owned(),ui.ctx().clone());}
+            }
         });
+        let reload=false;
+        if reload {tab.original=None;tab.pan=egui::Vec2::ZERO;tab.zoom=None;tab.load(path.to_owned(),ui.ctx().clone());}
         if let Some(error) = &tab.error { ui.label(error); return; }
         let Some(texture) = &tab.texture else { ui.spinner(); return; };
         let size = texture.size_vec2();

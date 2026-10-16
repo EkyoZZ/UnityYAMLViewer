@@ -1,5 +1,11 @@
 use std::{fs, io, path::PathBuf};
 
+#[derive(Clone,serde::Serialize,serde::Deserialize)]
+pub struct OpenRequest {
+    pub paths:Vec<PathBuf>,
+    pub preview:Option<crate::asset_viewer::nine_slice::processing::Request>,
+    #[serde(default)] pub notice:String,
+}
 pub struct Inbox {
     _lock: fs::File,
     directory: PathBuf,
@@ -7,27 +13,29 @@ pub struct Inbox {
 }
 
 pub enum Startup {
-    Primary(Option<Inbox>, Vec<PathBuf>),
+    Primary(Option<Inbox>, OpenRequest),
     Forwarded,
 }
 
 pub fn start() -> io::Result<Startup> {
-    let cwd = std::env::current_dir()?;
-    let paths = std::env::args_os().skip(1).map(|argument| {
-        let path = PathBuf::from(argument);
-        let absolute = if path.is_absolute() { path } else { cwd.join(path) };
-        fs::canonicalize(&absolute).unwrap_or(absolute)
-    }).collect::<Vec<_>>();
+    let args:Vec<_>=std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a|a=="slice9") {
+        let request=crate::asset_viewer::nine_slice::cli::preview_request(args.into_iter().skip(1).collect()).map_err(io::Error::other)?;
+        return start_with_paths(request)
+    }
+    let cwd=std::env::current_dir()?;
+    let paths=args.into_iter().map(|a|{let p=PathBuf::from(a);let p=if p.is_absolute(){p}else{cwd.join(p)};fs::canonicalize(&p).unwrap_or(p)}).collect();
+    let paths=OpenRequest {paths,preview:None,notice:String::new()};
     start_with_paths(paths)
 }
 
 #[cfg(not(windows))]
-fn start_with_paths(paths: Vec<PathBuf>) -> io::Result<Startup> {
+fn start_with_paths(paths: OpenRequest) -> io::Result<Startup> {
     Ok(Startup::Primary(None, paths))
 }
 
 #[cfg(windows)]
-fn start_with_paths(paths: Vec<PathBuf>) -> io::Result<Startup> {
+fn start_with_paths(paths: OpenRequest) -> io::Result<Startup> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     let directory = PathBuf::from(std::env::var_os("LOCALAPPDATA")
@@ -63,13 +71,13 @@ fn start_with_paths(paths: Vec<PathBuf>) -> io::Result<Startup> {
     }
 }
 
-fn serde_json_bytes(paths: &[PathBuf]) -> io::Result<Vec<u8>> {
+fn serde_json_bytes(paths: &OpenRequest) -> io::Result<Vec<u8>> {
     // A JSON array preserves spaces, Unicode and multiple file arguments.
     serde_json::to_vec(paths).map_err(io::Error::other)
 }
 
 impl Inbox {
-    pub fn receive(&mut self) -> Vec<Vec<PathBuf>> {
+    pub fn receive(&mut self) -> Vec<OpenRequest> {
         let now = std::time::Instant::now();
         if now < self.next_poll { return Vec::new(); }
         self.next_poll = now + std::time::Duration::from_millis(250);
@@ -80,7 +88,8 @@ impl Inbox {
         requests.sort();
         requests.into_iter().filter_map(|path| {
             if fs::metadata(&path).ok()?.len() > 1024 * 1024 { return None; }
-            let paths = serde_json::from_slice::<Vec<PathBuf>>(&fs::read(&path).ok()?).ok()?;
+            let bytes=fs::read(&path).ok()?;
+            let paths=serde_json::from_slice::<OpenRequest>(&bytes).or_else(|_|serde_json::from_slice::<Vec<PathBuf>>(&bytes).map(|paths|OpenRequest {paths,preview:None,notice:String::new()})).ok()?;
             fs::remove_file(path).ok()?;
             Some(paths)
         }).collect()

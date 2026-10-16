@@ -97,6 +97,11 @@ pub fn toolbar_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("light", "浅色"), ("dark", "深色"), ("system", "系统")]);
 }
 
+/// Compact joined segments, sharing the toolbar theme selector's implementation.
+pub fn compact_selector<const N:usize>(ui:&mut egui::Ui,value:&mut String,labels:[(&str,&str);N])->bool {
+    let previous=value.clone();selector_inner(ui,value,true,labels);*value!=previous
+}
+
 pub fn background_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("", "棋盘格"), ("gray", "灰色"), ("custom", "自定义")]);
 }

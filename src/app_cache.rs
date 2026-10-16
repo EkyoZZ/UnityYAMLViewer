@@ -134,7 +134,7 @@ fn cleanup(in_use: &[PathBuf]) -> Snapshot {
         let Ok(boundary) = std::fs::canonicalize(&path) else { continue; };
         if root().as_ref() == Some(&path) {
             // Only known disposable locations; configuration, recent files, tabs and unknown files stay.
-            for name in ["project_indexes", "network_cache", "updates", "playlist_positions"] {
+            for name in ["project_indexes", "network_cache", "updates", "playlist_positions", "image_edit_temp"] {
                 clean_tree(&path.join(name), &boundary, in_use, &mut errors);
             }
             if let Err(error) = crate::media_history::clear() { errors.push(error); }

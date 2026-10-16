@@ -29,7 +29,6 @@ struct Placement {
     stable: u8,
     last_size: Option<egui::Vec2>,
     closed: bool,
-    focused: Option<bool>,
 }
 
 /// An explicit reopen action also restores an existing dialog's placement and focus.
@@ -49,13 +48,14 @@ pub struct Window<'a> {
     maximum_width: Option<f32>,
     modal: bool,
     fit_height: bool,
+    solid_scroll: bool,
 }
 
 impl<'a> Window<'a> {
     pub fn new(title: impl Into<String>) -> Self {
         let title = title.into();
         Self { id: egui::Id::new(&title), title, open: None, width: 380.0,
-            height: 480.0, resizable: true, minimum_width: None, maximum_width: None, modal: false, fit_height: false }
+            height: 480.0, resizable: true, minimum_width: None, maximum_width: None, modal: false, fit_height: false, solid_scroll: false }
     }
     pub fn id(mut self, id: egui::Id) -> Self { self.id = id; self }
     pub fn open(mut self, open: &'a mut bool) -> Self { self.open = Some(open); self }
@@ -64,6 +64,7 @@ impl<'a> Window<'a> {
     pub fn min_width(mut self, width: f32) -> Self { self.minimum_width = Some(width + 16.0); self }
     pub fn max_width(mut self, width: f32) -> Self { self.maximum_width = Some(width + 16.0); self }
     pub fn resizable(mut self, value: bool) -> Self { self.resizable = value; self }
+    pub fn solid_scroll(mut self) -> Self { self.solid_scroll = true; self }
     pub fn fit_height(mut self) -> Self { self.fit_height = true; self }
     pub fn modal(mut self) -> Self { self.modal = true; self }
     // Native title bars are managed by the OS; fresh dialogs are centered on the main window.
@@ -113,11 +114,7 @@ impl<'a> Window<'a> {
                 if self.open.is_some() { window.open(&mut open).show(child_ctx, contents); }
                 else { window.show(child_ctx, contents); }
             } else {
-                let focused=child_ctx.input(|input|input.viewport().focused).unwrap_or(false);
-                let regained=placement.focused==Some(false)&&focused;
-                placement.focused=Some(focused);
-                if regained {placement.pending=true;placement.attempts=0;placement.stable=0;placement.last_size=None;}
-                if fresh||regained {
+                if fresh {
                     child_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     child_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     child_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -129,6 +126,7 @@ impl<'a> Window<'a> {
                 let mut target_inner = child_ctx.input(|input| input.screen_rect().size());
                 let mut resizing = false;
                 egui::CentralPanel::default().show(child_ctx, |ui| {
+                    if self.solid_scroll { ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid(); }
                     let scroll = egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, contents);
                     if !self.resizable || self.fit_height {
                         let maximum_height = child_ctx.input(|input| input.viewport().monitor_size)
