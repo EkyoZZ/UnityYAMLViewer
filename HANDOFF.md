@@ -1,8 +1,8 @@
-# 当前交接：1.2.1 本地构建与发布准备（2026-10-16）
+# 当前交接：1.2.1 已正式发布（2026-10-16）
 
 用户确认此前 60 帧节点预览构建检查通过，明确授权升级 1.2.1、重新编译并发布 GitHub。更新内容为替换 AppIcon、优化 Material 和 Shader 预览操作体验。
 
-Release 构建成功，文件 / 产品版本 1.2.1，21479936 字节，SHA-256：9D5A27D0F5381C8A02FECC5232323229EFF9485534B266EF84A7600E5474DBF7。附件 target/release/UnityYAMLViewer-v1.2.1-windows-x64.exe；日志 target/version-1.2.1-release-build.log。已核对版本顺序、默认两版、重新打开折叠逻辑与 704 条七语言目录；测试源码编译通过，断言未执行。升级后 EXE 未启动，实际关于界面待验证。正式发布结果完成后补记。
+Release 构建成功，文件 / 产品版本 1.2.1，21479936 字节，SHA-256：9D5A27D0F5381C8A02FECC5232323229EFF9485534B266EF84A7600E5474DBF7。附件 target/release/UnityYAMLViewer-v1.2.1-windows-x64.exe；日志 target/version-1.2.1-release-build.log。已核对版本顺序、默认两版、重新打开折叠逻辑与 704 条七语言目录；测试源码编译通过，断言未执行。升级后 EXE 未启动，实际关于界面待验证。北京时间 2026-10-16 17:54:57 已发布 GitHub v1.2.1 并确认为最新正式版，非草稿 / 非预发布；附件大小与 GitHub asset.digest 核对一致。发布页 https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.1，标签指向 d970776ff4f31d1476bbc8c16204eb352724e6fa。
 
 # 最新本地构建：Vert / Frag 单步预览（2026-10-15）
 
