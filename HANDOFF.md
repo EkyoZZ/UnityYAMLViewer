@@ -1842,3 +1842,9 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 在非受限环境使用新建临时图片完成真实 EXE 测试：带空格路径 dry-run 不变、自动原位替换、meta 写回 Full Rect / 保留 GUID、帮助包含 preview / 批量打开示例、preview 与 dry-run 冲突返回退出码 2，均通过。仅处理 target 下测试资源，未修改用户图片。该验证补齐此前受限环境拒绝访问导致未完成的 CLI 写回验证。
 - 879 项七语言列数 / 非空 / 唯一键、git diff --check、关于当前 / 上一版顺序与历史默认折叠 / 重开重置源码核对通过；设置末两项顺序未改。
 - 日志 target/v1.2.2-tests.log、target/v1.2.2-build.log、target/v1.2.2-smoke-cd9d7111206649439fd4edf4246e3465/。GUI 多窗口 / 转发、关于历史实际点击和 Unity 运行仍待验证，未将测试或构建等同于完整验收。
+
+# 1.2.2 已正式发布（2026-10-17）
+
+- 用户要求的重新编译、测试、上传已完成；EXE 文件 / 产品版本均 1.2.2，18 条九宫格测试和真实 CLI 写回验证通过。
+- GitHub Release：https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.2，latest=v1.2.2；附件 UnityYAMLViewer-v1.2.2-windows-x64.exe，22322688 字节，SHA-256 AAE927FC6DF60C20AD23BD41108685216E2AEBB92B5B988B3D587332C3F3A58D，GitHub asset digest 核验一致。
+- 源码标签 v1.2.2 / commit 5069d9e92135188b505198cc350a4b864f2c3f7f 已推送 master；发布状态文档随后提交。GUI 多窗口、关于历史实际点击与 Unity 全面验收仍待验证，限制未隐去。
