@@ -1848,3 +1848,46 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 用户要求的重新编译、测试、上传已完成；EXE 文件 / 产品版本均 1.2.2，18 条九宫格测试和真实 CLI 写回验证通过。
 - GitHub Release：https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.2，latest=v1.2.2；附件 UnityYAMLViewer-v1.2.2-windows-x64.exe，22322688 字节，SHA-256 AAE927FC6DF60C20AD23BD41108685216E2AEBB92B5B988B3D587332C3F3A58D，GitHub asset digest 核验一致。
 - 源码标签 v1.2.2 / commit 5069d9e92135188b505198cc350a4b864f2c3f7f 已推送 master；发布状态文档随后提交。GUI 多窗口、关于历史实际点击与 Unity 全面验收仍待验证，限制未隐去。
+
+## 2026-10-17 音频剪切本地体验构建
+
+- 用户明确授权编译以体验音频剪切；未升级版本、未发布。
+- 构建前 Get-Process 未发现 UnityYAMLViewer 进程，target/release/unity_yaml_viewer.exe 独占读写通过；CIM 查询不可用，改用前述检查。
+- cargo build --release --locked --offline 成功，21.81 秒，保留既有警告。日志 target/media-trim-build.log。
+- 体验产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.2，22497280 字节，SHA-256 67E588737C0CDF8ED810416EB01A84CBC2776A27F4849A47848908553D3A405C。
+- 音视频播放页顶部“剪切/格式转换”入口；音频绿色起止边界 / 双侧黑色遮罩、左右键标记、黄色游标定位，底部播放 / 剪切播放 / 停止 / 音量 / 时间轴；按格式提供 MP3 / M4A 码率或 WAV / FLAC 位深，选择路径与名称后导出。视频新布局按用户要求等待设计。
+- cargo check、七语言列数 / 唯一键、真实 FFmpeg 参数验证通过；实际 GUI 体验与导出流程待用户验证。完整限制见 docs/versions/1.2.2.md 工作区新增部分。此本地 EXE 与旧 GitHub v1.2.2 发布产物不同，未改动旧发布附件。
+
+
+## 2026-10-17 剪切原生独立窗口修复
+
+- 独立原生窗口修复后的体验构建：沿用用户已明确授权的本地编译范围，构建前重新检查 Get-Process 无程序进程、Release EXE 独占读写通过；cargo build --release --locked --offline 成功（18.39 秒），保留既有警告。产物 target/release/unity_yaml_viewer.exe，版本 1.2.2，22596096 字节，SHA-256 098796B4C9C9FF764094932A2584884443574C19C244B474F634F47561618903；日志 target/media-trim-build.log 已更新。仅本地构建，原生窗口实际运行体验待验证，未发布。
+- 播放页入口和剪切内容不变，宿主由 egui 浮层改用 native_window::Window；源文件路径作为窗口 ID，入口再次点击唤醒。视频只更换宿主，新布局继续等待用户设计。
+
+## 2026-10-17 最新音频体验调整待重新构建
+
+- 最新音频体验调整的构建未成功：cargo check 通过；Release EXE 独占检查提示文件被占用，但临时 PowerShell 检查未设置终止错误，错误后仍误启动 cargo build --release --locked --offline，最终因 os error 5 失败。未生成可交付的新版本。已停止构建重试，遵循 AGENTS.md 等待用户关闭占用程序并再次明确授权；下次使用终止式检查，任何占用检查失败均不得启动构建。最新 UI 修改仅源码 / check 完成，现有 EXE 不代表此次修改。
+
+## 2026-10-17 最新音频体验修改编译完成
+
+- 用户确认已关闭并再次授权后，重新检查 Get-Process 无相关进程、目标 EXE 独占读写通过；cargo build --release --locked --offline 成功（18.55 秒），保留既有警告。产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.2，22621184 字节，SHA-256 1148CA26587C7923310B5CB45C5C49AF2C93374D6EBE6E2260E67D49ECAA2FC0。日志 target/media-trim-build.log。本次包含简写导出、同尺寸实心绿色箭头及细线、原弹出音量、居中进度时间、范围工具条单行常显、底部固定控制与自适应波形、音频标题本地化及去除内容区文件名 / 大小。此前构建占用阻塞已解除；实际 GUI 操作与缩放仍待体验验证，未发布。
+
+## 2026-10-17 独立剪切播放与统一图标体验构建
+
+- 本轮用户明确授权后，重新检查无相关程序进程、目标 Release EXE 独占读写通过；cargo build --release --locked --offline 成功（18.62 秒），保留既有警告。最新产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.2，22528000 字节，SHA-256 27AA2A14F474AB3E2BCB2A48D9D517953702ECCE6FA20B2A4EE874A5277B685C。日志 target/media-trim-build.log。包含独立播放 / 音量 / 游标、全局多文件剪切窗及切换或关闭来源页签后保留、打开时停止来源播放、右上绿色大导出按钮、第三排范围操作、主播放页同尺寸的播放 / 暂停与停止图标、Next 同款实心剪切播放图标，以及底部去分隔线保留间距。实际声音、生命周期、多窗口并播和视觉布局仍待 GUI 验证，未发布。
+
+## 2026-10-17 导出按钮居中与边界拖动显示修复构建
+
+- 本轮用户明确授权后，检查无相关程序进程、目标 EXE 独占读写通过；cargo build --release --locked --offline 成功（17.99 秒），保留既有警告。最新产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.2，22532608 字节，SHA-256 F47B45DFB1689317CEC55D925BD16CBB205D4D1EE1A59FCFC3DFFE27AC50E41C。日志 target/media-trim-build.log。本次包含导出按钮高度 40 / 文字水平垂直居中，以及绿色边界悬停和拖动时持续显示时间刻度、网格、黄色播放竖线与箭头。实际布局和拖动显示待 GUI 验证，未发布。
+
+## 2026-10-17 另存为按钮体验构建
+
+- 用户明确授权后，检查无相关程序进程、目标 Release EXE 独占读写通过；cargo build --release --locked --offline 成功（18.65 秒），保留既有警告。最新产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.2，22534144 字节，SHA-256 A8E5738FB19A9139968D27D50545A7CEB1514951B8C3E6876DCE3406F447700A。日志 target/media-trim-build.log。本次包含右上绿色按钮改名“另存为”、本地化文字居中及宽度随译文适配；保存流程不变。实际界面显示待 GUI 验证，未发布。
+
+## 2026-10-17 升级 1.2.3 与功能归属迁移
+
+- Cargo.toml / Cargo.lock 当前版本为 1.2.3，未发布，尚未构建 1.2.3 EXE。
+- 当前音频剪切 / 转换功能、独立播放与多窗口、相关布局和限制集中记录在 docs/versions/1.2.3.md。原 1.2.2 工作区新增记录和构建阻塞过程迁至 docs/versions/archive/1.2.3-development.md，保留当时体验 EXE 真实版本与哈希；docs/versions/1.2.2.md 只保留正式版原有功能与发布事实。
+- 关于默认显示 1.2.3 / 1.2.2，1.2.1 移入默认收起历史，旧摘要及七语言保留；当前音频摘要七语言完整。版本索引和 CHANGELOG 已加入 1.2.3；README 不新增版本日志。
+- cargo check --locked --offline 与 cargo check --tests --locked --offline 通过，915 项翻译结构 / 唯一键和关于窗口顺序及折叠重置源码检查通过，未运行 GUI 或测试 EXE。日志 target/v1.2.3-check.log、target/v1.2.3-check-tests.log。
+- 现有 target/release/unity_yaml_viewer.exe 仍为升级前 1.2.2 体验构建（22534144 字节，SHA-256 A8E5738FB19A9139968D27D50545A7CEB1514951B8C3E6876DCE3406F447700A），不得标注为 1.2.3 产物。正式发布状态未改变。

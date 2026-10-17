@@ -66,6 +66,7 @@ fn is_mp4_header(bytes:&[u8])->bool {
     }
     false
 }
+#[derive(Clone)]
 struct AudioTrack {bit_rate:u64,index:u64,label:String,default:bool,ordinal:usize,language_name:Option<&'static str>,details:String}
 impl AudioTrack {
     fn display_label(&self)->String {
@@ -110,6 +111,7 @@ fn audio_language_name(title:&str,language:&str)->Option<&'static str> {
         })
     })
 }
+#[derive(Clone)]
 struct Info { ffmpeg:PathBuf,ffprobe:PathBuf,duration:f64,start_time:f64,video:Option<[usize;2]>,audio:bool,channels:usize,sample_rate:u64,bits:u64,source_channels:u64,file_size:u64,fps:f64,audio_tracks:Vec<AudioTrack>,video_codec:String,pixel_format:String,container:String,bit_rate:u64,audio_bit_rate:u64,subtitle_count:usize,sample_aspect:String,video_bits:Option<u64>,dynamic_range:String,color_transfer:String }
 fn probe(path:&Path)->Result<Info,String> {
     let ffmpeg=find_tool("ffmpeg").ok_or("未安装 FFmpeg，请前往设置中的视频解码安装。")?;
@@ -324,10 +326,25 @@ impl VideoGesture {
         self.last=point;delta
     }
 }
-pub struct Preview { overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
+thread_local! {
+    static TRIM_EDITORS: std::cell::RefCell<std::collections::HashMap<PathBuf,Preview>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Pump independent editors from the application, rather than the selected tab.
+pub fn show_trim_windows(ctx:&egui::Context) {
+    TRIM_EDITORS.with(|editors| {
+        editors.borrow_mut().retain(|path,player| {
+            let mut host=egui::Ui::new(ctx.clone(),egui::Id::new(("trim_host",path)),egui::UiBuilder::new().max_rect(ctx.screen_rect()));
+            player.show_trim_editor(&mut host,path);
+            player.trim.is_open()
+        });
+    });
+}
+
+pub struct Preview { trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
     waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {trim:crate::media_trim::Trim::default(),trim_preview_end:None,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
 impl Preview {
     pub fn new(path: &Path) -> Self {
         let identity = crate::media_history::Identity::read(path);
@@ -401,6 +418,28 @@ impl Preview {
         if let Some(zoom)=self.zoom {ui.small(format!("{:.1}%",zoom*100.0));}
     }
     pub fn file_size(&self)->Option<u64> {self.info.as_ref().map(|info|info.file_size)}
+    pub fn trim_entry_button(&mut self,ui:&mut egui::Ui,path:&Path) {
+        let duration=self.info.as_ref().map_or(0.0,|info|info.duration);
+        if ui.add_enabled(duration>0.0,egui::Button::new(crate::localization::tr("剪切/格式转换"))).clicked() {
+            self.autoplay_pending=false;self.initial_seek=None;self.stop_playback();
+            self.playlist_ended=false;self.playlist_next=false;
+            let key=std::fs::canonicalize(path).unwrap_or_else(|_|path.to_owned());
+            TRIM_EDITORS.with(|editors| {
+                let mut editors=editors.borrow_mut();
+                editors.entry(key.clone()).or_insert_with(|| {
+                    self.detached_trim_player(duration)
+                });
+            });
+            crate::native_window::wake(ui.ctx(),egui::Id::new(("media_trim",&key)));
+        }
+    }
+    fn detached_trim_player(&self,duration:f64)->Self {
+        let mut player=Self::default();
+        player.info=self.info.clone();player.selected_audio=self.selected_audio;
+        player.waveform=self.waveform.clone();player.volume=self.volume;player.remembered_volume=self.remembered_volume;
+        player.trim.open(duration);
+        player
+    }
     fn is_playing(&self)->bool {self.playback.as_ref().is_some_and(|job|!job.control.paused.load(Ordering::Relaxed))}
     fn position_now(&self)->f64 {if self.is_playing(){self.playback_origin+self.started.map_or(0.0,|start|start.elapsed().as_secs_f64())}else{self.position}}
     pub fn pause(&mut self) {
@@ -419,6 +458,49 @@ impl Preview {
         self.save_position();
         if let Some(frame)=self.current_frame.and_then(|index|self.cache.lock().unwrap().get(index)){self.poster=Some(preview_poster(&frame));}
         self.texture=None;self.wave_job=None;self.index_job=None;self.frame_job=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}
+    fn show_trim_editor(&mut self,ui:&mut egui::Ui,path:&Path) {
+        let mut failed=false;
+        if let Some(job)=&self.playback {
+            self.started=if job.control.paused.load(Ordering::Relaxed){None}else{*job.control.clock.lock().unwrap()};
+            while let Ok((index,_))=job.frames.try_recv(){self.current_frame=Some(index);}
+            if let Ok(error)=job.errors.try_recv(){self.error=Some(error);failed=true;}
+            job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);
+            if job.done.load(Ordering::Relaxed) && self.error.is_none() {
+                self.stop_playback();self.position=self.info.as_ref().map_or(0.0,|info|info.duration);
+            }
+        }
+        if failed {self.stop_playback();}
+        if self.playback.is_some(){ui.ctx().request_repaint_after(Duration::from_millis(16));}
+        if let Some(info)=&self.info {
+            if info.video.is_none() && self.waveform.is_none() && self.wave_job.is_none() && self.wave_error.is_none() {
+                self.wave_job=Some(waveform(info,path,ui.ctx()));
+            }
+        }
+        if let Some(job)=&self.wave_job {match job.receiver.try_recv(){
+            Ok(result)=>{self.wave_job=None;match result{Ok(wave)=>self.waveform=Some(wave),Err(error)=>self.wave_error=Some(error)}},
+            Err(mpsc::TryRecvError::Disconnected)=>{self.wave_job=None;self.wave_error=Some("波形生成失败".into());},
+            Err(mpsc::TryRecvError::Empty)=>{ui.ctx().request_repaint_after(Duration::from_millis(50));}
+        }}
+        if let Some(end)=self.trim_preview_end {
+            if self.position_now()>=end {self.stop_playback();self.position=end;self.trim_preview_end=None;self.seek_frame(ui.ctx(),path);}
+        }
+        if let Some(info)=&self.info {
+            let position=self.position_now();
+            let description=format!("{} Hz · {} bit · {} ch",info.sample_rate,info.bits,info.source_channels);
+            let view=crate::media_trim::AudioView {wave:self.waveform.as_deref(),wave_error:self.wave_error.as_deref(),playing:self.is_playing(),volume:self.volume,playback_error:self.error.as_deref(),description};
+            let action=self.trim.show(ui,path,&info.ffmpeg,info.duration,position,info.video.is_some(),self.selected_audio,view);
+            if let Some(volume)=action.volume {
+                self.volume=volume;if volume>0.0{self.remembered_volume=volume;}
+
+            }
+            if let Some(position)=action.seek {self.trim_preview_end=None;self.playlist_seek(ui.ctx(),path,position);}
+            if action.toggle {self.trim_preview_end=None;if self.is_playing(){self.pause();}else{if self.info.as_ref().is_some_and(|info|self.position>=info.duration){self.position=0.0;}self.play(ui.ctx(),path);}}
+            if action.stop {self.trim_preview_end=None;self.stop_playback();}
+            if let Some((start,end))=action.audition {
+                self.stop_playback();self.position=start;self.trim_preview_end=Some(end);self.play(ui.ctx(),path);
+            }
+        }
+    }
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path) {
         self.canvas_rect=None;self.sidebar_rect=None;self.overlay_rect=None;
         let fullscreen=is_fullscreen(ui.ctx());
@@ -647,32 +729,7 @@ impl Preview {
             toggle|=transport_button(ui,if playing{crate::icons::Icon::Pause}else{crate::icons::Icon::Play},crate::localization::tr(if playing{"暂停"}else{"播放"}));
             if self.playlist_mode{next=transport_button(ui,crate::icons::Icon::Next,crate::localization::tr("下一项"));}
             else{stop=transport_button(ui,crate::icons::Icon::Stop,crate::localization::tr("停止"));}
-            let volume_response=ui.add_sized([28.0,28.0],egui::Button::new(""));
-            paint_volume_icon(ui,volume_response.rect.shrink(5.0),self.volume);
-            let popup_id=ui.make_persistent_id(("media_volume",path));
-            if volume_response.clicked(){if self.volume>0.0 {self.remembered_volume=self.volume;self.volume=0.0;}else{self.volume=self.remembered_volume.max(0.01);}}
-            if volume_response.hovered() || volume_response.has_focus(){self.volume_hover=Some(Instant::now());ui.memory_mut(|memory|memory.open_popup(popup_id));}
-            let mut popup_active=false;
-            let volume_response=volume_response.on_hover_text(crate::localization::tr("音量"));
-            egui::popup::popup_above_or_below_widget(ui,popup_id,&volume_response,egui::AboveOrBelow::Above,egui::popup::PopupCloseBehavior::CloseOnClickOutside,|ui| {
-                ui.horizontal(|ui| {
-                    let (rect,response)=ui.allocate_exact_size(egui::vec2(18.0,120.0),egui::Sense::click_and_drag());
-                    if response.clicked() || response.dragged(){if let Some(pointer)=response.interact_pointer_pos(){self.volume=((rect.bottom()-pointer.y)/rect.height()).clamp(0.0,1.0);}}
-                    if response.has_focus(){ui.input(|input| {if input.key_pressed(egui::Key::ArrowUp){self.volume=(self.volume+0.01).min(1.0);}if input.key_pressed(egui::Key::ArrowDown){self.volume=(self.volume-0.01).max(0.0);}});}
-                    if response.clicked(){response.request_focus();}
-                    popup_active=response.hovered() || response.dragged() || response.has_focus();
-                    if self.volume>0.0 {self.remembered_volume=self.volume;}
-                    let inner=rect.shrink(1.0);let mut fill=inner;fill.min.y=inner.bottom()-inner.height()*self.volume;
-                    ui.painter().rect_filled(fill,0.0,ui.visuals().selection.bg_fill);
-                    ui.painter().rect_stroke(rect,0.0,egui::Stroke::new(1.0_f32,ui.visuals().widgets.noninteractive.fg_stroke.color),egui::StrokeKind::Inside);
-                });
-                popup_active|=ui.rect_contains_pointer(ui.min_rect());
-            });
-            if popup_active {self.volume_hover=Some(Instant::now());}
-            if ui.memory(|memory|memory.is_popup_open(popup_id)) {
-                if self.volume_hover.is_some_and(|last|last.elapsed()>Duration::from_millis(250)) {ui.memory_mut(|memory|memory.close_popup());self.volume_hover=None;}
-                else {ui.ctx().request_repaint_after(Duration::from_millis(50));}
-            }
+            volume_control(ui,path,&mut self.volume,&mut self.remembered_volume,&mut self.volume_hover);
             if let Some(job)=&self.playback {job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);}
             let video=self.has_video();
             let (rect,response)=ui.allocate_exact_size(egui::vec2((ui.available_width()-if video{28.0+ui.spacing().item_spacing.x}else{0.0}).max(1.0),28.0),egui::Sense::click_and_drag());
@@ -769,7 +826,36 @@ fn paint_rounded_play(ui:&egui::Ui,rect:egui::Rect,color:egui::Color32,radius:f3
     }
     ui.painter().add(egui::Shape::convex_polygon(outline,color,egui::Stroke::NONE));
 }
-fn paint_volume_icon(ui:&egui::Ui,rect:egui::Rect,volume:f32) {
+pub(crate) fn volume_control(ui:&mut egui::Ui,path:&Path,volume:&mut f32,remembered:&mut f32,hover:&mut Option<Instant>) {
+            let volume_response=ui.add_sized([28.0,28.0],egui::Button::new(""));
+            paint_volume_icon(ui,volume_response.rect.shrink(5.0),*volume);
+            let popup_id=ui.make_persistent_id(("media_volume",path));
+            if volume_response.clicked(){if (*volume)>0.0 {(*remembered)=*volume;(*volume)=0.0;}else{(*volume)=(*remembered).max(0.01);}}
+            if volume_response.hovered() || volume_response.has_focus(){(*hover)=Some(Instant::now());ui.memory_mut(|memory|memory.open_popup(popup_id));}
+            let mut popup_active=false;
+            let volume_response=volume_response.on_hover_text(crate::localization::tr("音量"));
+            egui::popup::popup_above_or_below_widget(ui,popup_id,&volume_response,egui::AboveOrBelow::Above,egui::popup::PopupCloseBehavior::CloseOnClickOutside,|ui| {
+                ui.horizontal(|ui| {
+                    let (rect,response)=ui.allocate_exact_size(egui::vec2(18.0,120.0),egui::Sense::click_and_drag());
+                    if response.clicked() || response.dragged(){if let Some(pointer)=response.interact_pointer_pos(){(*volume)=((rect.bottom()-pointer.y)/rect.height()).clamp(0.0,1.0);}}
+                    if response.has_focus(){ui.input(|input| {if input.key_pressed(egui::Key::ArrowUp){(*volume)=((*volume)+0.01).min(1.0);}if input.key_pressed(egui::Key::ArrowDown){(*volume)=((*volume)-0.01).max(0.0);}});}
+                    if response.clicked(){response.request_focus();}
+                    popup_active=response.hovered() || response.dragged() || response.has_focus();
+                    if (*volume)>0.0 {(*remembered)=*volume;}
+                    let inner=rect.shrink(1.0);let mut fill=inner;fill.min.y=inner.bottom()-inner.height()*(*volume);
+                    ui.painter().rect_filled(fill,0.0,ui.visuals().selection.bg_fill);
+                    ui.painter().rect_stroke(rect,0.0,egui::Stroke::new(1.0_f32,ui.visuals().widgets.noninteractive.fg_stroke.color),egui::StrokeKind::Inside);
+                });
+                popup_active|=ui.rect_contains_pointer(ui.min_rect());
+            });
+            if popup_active {(*hover)=Some(Instant::now());}
+            if ui.memory(|memory|memory.is_popup_open(popup_id)) {
+                if (*hover).is_some_and(|last|last.elapsed()>Duration::from_millis(250)) {ui.memory_mut(|memory|memory.close_popup());(*hover)=None;}
+                else {ui.ctx().request_repaint_after(Duration::from_millis(50));}
+            }
+}
+
+pub(crate) fn paint_volume_icon(ui:&egui::Ui,rect:egui::Rect,volume:f32) {
     let percent=(volume.clamp(0.0,1.0)*100.0).round() as u32;
     let active=percent.div_ceil(20).min(5);
     let width=rect.width()/9.0;
@@ -787,12 +873,12 @@ fn paint_volume_icon(ui:&egui::Ui,rect:egui::Rect,volume:f32) {
         ui.painter().line_segment([rect.center()-offset,rect.center()+offset],stroke);
     }
 }
-fn transport_button(ui:&mut egui::Ui,icon:crate::icons::Icon,label:&str)->bool {
+pub(crate) fn transport_button(ui:&mut egui::Ui,icon:crate::icons::Icon,label:&str)->bool {
     let response=ui.add_sized([28.0,28.0],egui::Button::new(""));
     crate::icons::paint(ui,icon,response.rect.shrink(5.0),ui.visuals().text_color());
     let clicked=response.clicked();response.on_hover_text(label);clicked
 }
-fn time(seconds:f64)->String {let ms=(seconds.max(0.0)*1000.0).round() as u64;let seconds=ms/1000;format!("{:02}:{:02}:{:02}.{:03}",seconds/3600,seconds/60%60,seconds%60,ms%1000)}
+pub(crate) fn time(seconds:f64)->String {let ms=(seconds.max(0.0)*1000.0).round() as u64;let seconds=ms/1000;format!("{:02}:{:02}:{:02}.{:03}",seconds/3600,seconds/60%60,seconds%60,ms%1000)}
 
 struct WaveJob {control:Arc<Control>,receiver:mpsc::Receiver<Result<Vec<Vec<f32>>,String>>}
 struct IndexJob {control:Arc<Control>,receiver:mpsc::Receiver<Result<Vec<f64>,String>>}
@@ -879,7 +965,7 @@ fn waveform(info:&Info,path:&Path,ctx:&egui::Context)->WaveJob {
     WaveJob{control,receiver}
 }
 // The meter uses the source waveform envelope; it is not an output-device meter.
-fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,position:f64,duration:f64,trails:&mut [f32;2]) {
+pub(crate) fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,position:f64,duration:f64,trails:&mut [f32;2]) {
     let decay=ui.input(|input|input.stable_dt.clamp(0.0,0.1))*(5.0/60.0);
     let channels=wave.map_or(1,|wave|wave.len());
     for channel in 0..channels {
@@ -920,8 +1006,69 @@ fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,position:f64,dura
     }
 }
 
+pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,start:&mut f64,end:&mut f64)->Option<f64> {
+    let rect=ui.available_rect_before_wrap();
+    let left=rect.left()+62.0_f32.min(rect.width()*0.3);
+    let width=(rect.right()-left).max(1.0);
+    let bottom=(rect.bottom()-26.0).max(rect.top());
+    let center=(rect.top()+bottom)*0.5;
+    let background=ui.interact(egui::Rect::from_min_max(egui::pos2(left,rect.top()),egui::pos2(rect.right(),bottom)),ui.make_persistent_id("trim_range_click"),egui::Sense::click());
+    let mut boundary_active=false;
+    if duration>0.0 {
+        for first in [true,false] {
+            let time=if first {*start}else{*end};
+            let x=left+width*(time/duration).clamp(0.0,1.0) as f32;
+            // The triangle sits outside the kept range and points inward.
+            let hit=egui::Rect::from_min_max(egui::pos2(x-10.0,rect.top()),egui::pos2(x+10.0,bottom));
+            let grip=egui::Rect::from_center_size(egui::pos2(x+if first {-18.0}else{18.0},center),egui::vec2(32.0,36.0));
+            let response=ui.interact(hit,ui.make_persistent_id(("trim_boundary",first)),egui::Sense::click_and_drag()).on_hover_text(crate::localization::tr(if first {"保留起点"}else{"保留终点"})).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            let grip_response=ui.interact(grip,ui.make_persistent_id(("trim_grip",first)),egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            boundary_active|=ui.input(|input|input.pointer.hover_pos().is_some_and(|pos|hit.contains(pos)||grip.contains(pos)));
+            boundary_active|=response.hovered() || response.is_pointer_button_down_on() || response.dragged() || response.drag_stopped() || grip_response.hovered() || grip_response.is_pointer_button_down_on() || grip_response.dragged() || grip_response.drag_stopped();
+            if response.dragged() || response.clicked() || grip_response.dragged() {
+                if let Some(pointer)=response.interact_pointer_pos().or_else(||grip_response.interact_pointer_pos()) {
+                    let offset=if grip_response.dragged(){if first {-18.0}else{18.0}}else{0.0};
+                    let time=((pointer.x-offset-left)/width).clamp(0.0,1.0) as f64*duration;
+                    let gap=0.001_f64.min(duration);
+                    if first {*start=time.clamp(0.0,(*end-gap).max(0.0));}
+                    else {*end=time.clamp((*start+gap).min(duration),duration);}
+                }
+            }
+        }
+    }
+    if duration>0.0 && !boundary_active {
+        if let Some(pointer)=background.interact_pointer_pos() {
+            let time=((pointer.x-left)/width).clamp(0.0,1.0) as f64*duration;
+            let gap=0.001_f64.min(duration);
+            let playhead=left+width*(position/duration).clamp(0.0,1.0) as f32;
+            if background.clicked_by(egui::PointerButton::Primary) && !(playhead-14.0..=playhead+30.0).contains(&pointer.x) {*start=time.clamp(0.0,(*end-gap).max(0.0));}
+            if background.clicked_by(egui::PointerButton::Secondary) {*end=time.clamp((*start+gap).min(duration),duration);}
+        }
+    }
+    let seek=paint_waveform_interactive(ui,wave,position,duration,!boundary_active,false);
+    if duration>0.0 {
+        let x1=left+width*(*start/duration).clamp(0.0,1.0) as f32;
+        let x2=left+width*(*end/duration).clamp(0.0,1.0) as f32;
+        let painter=ui.painter_at(rect);
+        for (a,b) in [(left,x1),(x2,rect.right())] {
+            if b>a {painter.rect_filled(egui::Rect::from_min_max(egui::pos2(a,rect.top()),egui::pos2(b,bottom)),0.0,egui::Color32::from_black_alpha(150));}
+        }
+        let color=egui::Color32::from_rgb(45,255,95);
+        for (x,first) in [(x1,true),(x2,false)] {
+            painter.line_segment([egui::pos2(x,rect.top()),egui::pos2(x,bottom+5.0)],egui::Stroke::new(1.5_f32,color));
+            let tip=x+if first {-5.0}else{5.0};
+            let base=x+if first {-26.333334}else{26.333334};
+            painter.add(egui::Shape::convex_polygon(vec![egui::pos2(base,center-10.666667),egui::pos2(tip,center),egui::pos2(base,center+10.666667)],color,egui::Stroke::NONE));
+        }
+    }
+    seek.map(|seek|seek.position)
+}
+
 struct WaveSeek {position:f64,started:bool,finished:bool}
-fn paint_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64,duration:f64)->Option<WaveSeek> {
+fn paint_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64)->Option<WaveSeek> {
+    paint_waveform_interactive(ui,wave,position,duration,true,true)
+}
+fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64,duration:f64,allow_seek:bool,allow_background:bool)->Option<WaveSeek> {
     let height=ui.available_height().max(1.0);
     let (rect,response)=ui.allocate_exact_size(egui::vec2(ui.available_width(),height),egui::Sense::hover());
     response.on_hover_text(crate::localization::tr("dBFS 为源音频近似峰值，不受播放音量影响"));
@@ -929,17 +1076,18 @@ fn paint_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64,duration:f6
     let plot_left=rect.left()+62.0_f32.min(rect.width()*0.3);let plot_width=(rect.right()-plot_left).max(1.0);
     let wave_height=(height-26.0).max(1.0);
     let mut gesture=None;
-    if duration>0.0 {
+    if duration>0.0 && allow_seek {
         let x=plot_left+(position/duration).clamp(0.0,1.0) as f32*plot_width;
         let handle_rect=egui::Rect::from_min_max(egui::pos2(x-14.0,rect.top()),egui::pos2(x+30.0,rect.top()+wave_height+5.0));
         let handle=ui.interact(handle_rect,ui.make_persistent_id("waveform_playhead"),egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         // Disjoint hit regions: a press on the playhead cannot also become a
         // background seek, even when the drag leaves the handle's original area.
         for (side,left,right) in [(0,plot_left,handle_rect.left().max(plot_left)),(1,handle_rect.right().min(rect.right()),rect.right())] {
+            if !allow_background {continue;}
             if right<=left{continue;}
             let area=egui::Rect::from_min_max(egui::pos2(left,rect.top()),egui::pos2(right,rect.bottom()));
             let click=ui.interact(area,ui.make_persistent_id(("waveform_seek_area",side)),egui::Sense::click());
-            if !handle.is_pointer_button_down_on() && !handle.dragged() && !handle.drag_stopped() && !handle.clicked() && click.clicked_by(egui::PointerButton::Primary) {
+            if allow_background && !handle.is_pointer_button_down_on() && !handle.dragged() && !handle.drag_stopped() && !handle.clicked() && click.clicked_by(egui::PointerButton::Primary) {
                 if let Some(pointer)=click.interact_pointer_pos(){position=((pointer.x-plot_left)/plot_width).clamp(0.0,1.0) as f64*duration;gesture=Some(WaveSeek {position,started:true,finished:true});}
             }
         }
@@ -971,6 +1119,8 @@ fn paint_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64,duration:f6
         let channel_label=if wave.len()==1{"Mono"}else if channel==0{"L"}else{"R"};
         painter.text(egui::pos2(plot_left+8.0,top+3.0),egui::Align2::LEFT_TOP,channel_label,egui::FontId::proportional(12.0),ui.visuals().text_color());
     }
+    // Disabling playhead input while a trim boundary is dragged must not hide
+    // the ruler, grid or current playback cursor.
     if duration>0.0 {
         let ruler_top=rect.top()+wave_height;
         let color=ui.visuals().weak_text_color();
@@ -1027,6 +1177,43 @@ fn ruler_time(seconds:f64,step:f64)->String {
 fn fit_scale(native:egui::Vec2,available:egui::Vec2)->f32 {(available.x/native.x).min(available.y/native.y)}
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detached_trim_has_independent_transport_and_waveform() {
+        let mut source=super::Preview::default();
+        source.position=23.0;source.autoplay_pending=true;source.playlist_mode=true;
+        source.volume=0.35;source.waveform=Some(vec![vec![0.2,0.7]]);
+        let mut editor=source.detached_trim_player(60.0);
+        assert_eq!(editor.position,0.0);
+        assert!(!editor.autoplay_pending && !editor.playlist_mode);
+        assert!(editor.history_file.is_none() && editor.playback.is_none());
+        assert!(editor.trim.is_open());
+        editor.position=7.0;editor.volume=0.8;
+        editor.waveform.as_mut().unwrap()[0][0]=0.9;
+        assert_eq!(source.position,23.0);
+        assert_eq!(source.volume,0.35);
+        assert_eq!(source.waveform.as_ref().unwrap()[0][0],0.2);
+    }
+    #[test]
+    fn multiple_trim_sessions_outlive_the_source_player() {
+        let source=super::Preview::default();
+        let a=std::path::PathBuf::from("trim-session-a.wav");
+        let b=std::path::PathBuf::from("trim-session-b.wav");
+        super::TRIM_EDITORS.with(|editors| {
+            let mut editors=editors.borrow_mut();
+            editors.insert(a.clone(),source.detached_trim_player(10.0));
+            editors.insert(b.clone(),source.detached_trim_player(20.0));
+        });
+        drop(source);
+        super::TRIM_EDITORS.with(|editors| {
+            let mut editors=editors.borrow_mut();
+            assert!(editors.get(&a).unwrap().trim.is_open());
+            assert!(editors.get(&b).unwrap().trim.is_open());
+            editors.remove(&a);
+            assert!(editors.contains_key(&b));
+            editors.remove(&b);
+        });
+    }
+
     use super::*;
     #[test]
     fn frame_cache_respects_budget_and_recent_access() {

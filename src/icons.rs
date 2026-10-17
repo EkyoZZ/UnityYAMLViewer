@@ -2,9 +2,13 @@
 use eframe::egui;
 
 #[derive(Clone, Copy)]
-pub enum Icon { Gear, Eye, Hand, Play, Pause, Stop, Next, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, Square }
+pub enum Icon { Gear, Eye, Hand, Play, Pause, Stop, Next, TrimPlay, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, Square }
 
 pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) {
+    // Keep Next's triangle and bar at their original scale; TrimPlay adds a bar.
+    let rect = if matches!(icon, Icon::TrimPlay) {
+        egui::Rect::from_center_size(rect.center(), egui::vec2(rect.height()*28.0/24.0, rect.height()))
+    } else { rect };
     let source = match icon {
         Icon::Square => egui::include_image!("../assets/icons/square.svg"),
         Icon::Minus => egui::include_image!("../assets/icons/minus.svg"),
@@ -17,6 +21,7 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         Icon::ChevronLeft => egui::include_image!("../assets/icons/chevron-left.svg"),
         Icon::ChevronRight => egui::include_image!("../assets/icons/chevron-right.svg"),
         Icon::Next => egui::include_image!("../assets/icons/next.svg"),
+        Icon::TrimPlay => egui::include_image!("../assets/icons/trim-play.svg"),
         Icon::Stop => egui::include_image!("../assets/icons/stop.svg"),
         Icon::Pause => egui::include_image!("../assets/icons/pause.svg"),
         Icon::TriangleRight => egui::include_image!("../assets/icons/triangle-right.svg"),

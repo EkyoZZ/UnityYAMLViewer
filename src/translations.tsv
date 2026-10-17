@@ -878,3 +878,40 @@ slice9 默认原位替换，不创建备份；建议先用 --dry-run 查看方�
 • slice9 支持批量 / 目录 / dry-run，--preview 最多 10 个可编辑窗口；顶部指令查看提供示例	• slice9 支援批次 / 目錄 / dry-run，--preview 最多 10 個可編輯視窗；頂部指令查看提供範例	• slice9 supports batches, directories and dry-run; --preview opens up to 10 editable windows; Commands shows examples	• slice9 は一括・フォルダ・dry-run に対応。--preview は最大10個、上部コマンドに使用例	• slice9 일괄/폴더/dry-run 지원, --preview 최대 10개 편집 창, 상단 명령에 예시 제공	• slice9 für Stapel, Ordner und dry-run; --preview bis zu 10 editierbare Fenster; Befehle zeigt Beispiele	• slice9 pour lots, dossiers et dry-run ; --preview ouvre 10 fenêtres maximum ; exemples dans Commandes
 • 对齐补白不计入 Unity Border；仅写回已读取且受支持的单 Sprite meta，保留 GUID	• 對齊補白不計入 Unity Border；僅寫回已讀取且受支援的單 Sprite meta，保留 GUID	• Alignment padding excluded from Unity Border; write only readable supported single-Sprite meta, preserving GUID	• 整列用余白は Unity Border に含めず、対応する読込済み単一 Sprite meta のみ更新、GUID 維持	• 정렬 여백은 Unity Border 제외, 읽은 지원 단일 Sprite meta만 갱신하고 GUID 유지	• Ausrichtungsfüllung nicht im Unity Border; nur lesbare unterstützte Einzel-Sprite-meta aktualisieren, GUID bleibt	• Marges exclues du Unity Border ; mise à jour des meta mono-Sprite lisibles et pris en charge, GUID conservé
 • 普通弹窗恢复焦点保留位置，首次打开或按钮唤醒时才居中	• 一般彈窗恢復焦點保留位置，首次開啟或按鈕喚醒時才置中	• Dialog focus restores preserve position; center only on first opening or button wake	• 通常のフォーカス復帰は位置を維持し、初回表示またはボタン呼出時のみ中央配置	• 일반 팝업 초점 복귀 시 위치 유지, 처음 열거나 버튼 호출 시에만 중앙 배치	• Dialogfokus behält Position; Zentrierung nur beim Öffnen oder Aufruf per Schaltfläche	• Le retour du focus conserve la position ; centrage à la première ouverture ou via un bouton
+
+剪切视频	剪切影片	Trim video	動画をトリミング	동영상 자르기	Video zuschneiden	Découper la vidéo
+剪切音频	剪切音訊	Trim audio	音声をトリミング	오디오 자르기	Audio zuschneiden	Découper l’audio
+剪切任务意外中断	剪切工作意外中斷	Trim task interrupted	トリミング処理が中断しました	자르기 작업 중단됨	Zuschnitt unterbrochen	Découpe interrompue
+设置要保留的时间范围（秒）	設定要保留的時間範圍（秒）	Set the range to keep (seconds)	残す時間範囲（秒）	유지할 시간 범위(초)	Beizubehaltender Bereich (Sekunden)	Plage à conserver (secondes)
+保留起点	保留起點	Start	開始点	시작점	Anfang	Début
+保留终点	保留終點	End	終了点	종료점	Ende	Fin
+以当前位置为起点	以目前位置為起點	Mark start here	現在位置を開始点に	현재 위치를 시작점으로	Hier Anfang setzen	Définir le début ici
+以当前位置为终点	以目前位置為終點	Mark end here	現在位置を終了点に	현재 위치를 종료점으로	Hier Ende setzen	Définir la fin ici
+重置范围	重設範圍	Reset range	範囲をリセット	범위 초기화	Bereich zurücksetzen	Réinitialiser la plage
+试听保留片段	試聽保留片段	Preview kept segment	残す部分を試聴	유지할 구간 미리 듣기	Auswahl abspielen	Lire la sélection
+跳到起点	跳到起點	Go to start	開始点へ	시작점으로	Zum Anfang	Aller au début
+跳到终点	跳到終點	Go to end	終了点へ	종료점으로	Zum Ende	Aller à la fin
+另存 MP4（H.264 / AAC），仅保留主视频和当前音轨；不保留字幕。	另存 MP4（H.264 / AAC），僅保留主影片和目前音軌；不保留字幕。	Save MP4 (H.264 / AAC), main video and current audio track only; no subtitles.	MP4（H.264 / AAC）保存。主映像と現在の音声のみ、字幕なし。	MP4(H.264 / AAC) 저장, 주 영상과 현재 오디오 트랙만 유지, 자막 제외.	MP4 (H.264 / AAC), nur Hauptvideo und aktuelle Audiospur; ohne Untertitel.	MP4 (H.264 / AAC), vidéo principale et piste audio actuelle ; sans sous-titres.
+另存 WAV（16 位 PCM），仅保留当前音轨。	另存 WAV（16 位元 PCM），僅保留目前音軌。	Save WAV (16-bit PCM), current audio track only.	WAV（16ビット PCM）保存。現在の音声トラックのみ。	WAV(16비트 PCM) 저장, 현재 오디오 트랙만 유지.	WAV (16-Bit-PCM), nur aktuelle Audiospur.	WAV (PCM 16 bits), piste audio actuelle uniquement.
+重新编码，边界受帧 / 采样精度限制；不覆盖原文件或已有文件。	重新編碼，邊界受影格 / 取樣精度限制；不覆寫原檔或已有檔案。	Re-encodes with frame/sample boundary precision; never overwrites existing files.	再エンコード。境界はフレーム・サンプル精度。既存ファイルは上書きしません。	재인코딩, 경계는 프레임/샘플 정밀도로 제한, 기존 파일 덮어쓰기 없음.	Neukodierung mit Bild-/Samplegenauigkeit; vorhandene Dateien werden nicht überschrieben.	Réencodage à la précision image/échantillon ; aucun fichier existant écrasé.
+终点必须大于起点且不超过媒体时长	終點必須大於起點且不超過媒體時長	End must follow start and be within media duration	終了点は開始点より後で、メディアの長さ以内にしてください	종료점은 시작점 이후이며 미디어 길이 이내여야 합니다	Ende muss nach Anfang und innerhalb der Mediendauer liegen	La fin doit suivre le début et rester dans la durée du média
+导出剪切片段	匯出剪切片段	Export trimmed segment	切り出しをエクスポート	자른 구간 내보내기	Zuschnitt exportieren	Exporter la sélection
+目标已存在，请选择新的文件名	目標已存在，請選擇新的檔名	Destination exists; choose a new filename	保存先が存在します。別の名前を選択してください	대상이 존재합니다. 새 파일명을 선택하세요	Zieldatei vorhanden; anderen Namen wählen	Le fichier existe ; choisir un autre nom
+正在导出剪切片段…	正在匯出剪切片段…	Exporting trimmed segment…	エクスポート中…	자른 구간 내보내는 중…	Zuschnitt wird exportiert…	Export en cours…
+剪切导出完成	剪切匯出完成	Trim export complete	エクスポート完了	자르기 내보내기 완료	Zuschnitt exportiert	Découpe exportée
+剪切导出失败	剪切匯出失敗	Trim export failed	エクスポート失敗	자르기 내보내기 실패	Zuschnitt fehlgeschlagen	Échec de l’export
+正在生成波形…	正在產生波形…	Generating waveform…	波形を生成中…	파형 생성 중…	Wellenform wird erstellt…	Création de la forme d’onde…
+停止	停止	Stop	停止	정지	Stopp	Arrêter
+• 音视频剪切：视频另存 MP4，音频可选 MP3 / WAV / FLAC / M4A 及适用参数；需 FFmpeg	• 音影片剪切：影片另存 MP4，音訊可選 MP3 / WAV / FLAC / M4A 及適用參數；需 FFmpeg	• Trim video to MP4 or audio to MP3 / WAV / FLAC / M4A with format-specific settings; requires FFmpeg	• 動画は MP4、音声は MP3 / WAV / FLAC / M4A と形式別設定で切り出し。FFmpeg 必須	• 영상 MP4, 오디오 MP3 / WAV / FLAC / M4A 및 형식별 설정으로 자르기, FFmpeg 필요	• Videozuschnitt als MP4, Audio als MP3 / WAV / FLAC / M4A mit passenden Parametern; FFmpeg erforderlich	• Découpe vidéo en MP4, audio en MP3 / WAV / FLAC / M4A avec réglages adaptés ; FFmpeg requis
+波形左键设置起点，右键设置终点；拖动绿色边界调整范围。	波形左鍵設定起點，右鍵設定終點；拖動綠色邊界調整範圍。	Left-click the waveform for start, right-click for end; drag green boundaries to adjust.	波形の左クリックで開始、右クリックで終了。緑の境界をドラッグして調整。	파형 왼쪽 클릭으로 시작, 오른쪽 클릭으로 종료 설정; 녹색 경계를 드래그하여 조정.	Linksklick setzt Anfang, Rechtsklick Ende; grüne Grenzen zum Anpassen ziehen.	Clic gauche : début, clic droit : fin ; faire glisser les limites vertes.
+• 音频剪切：绿色另存为、独立播放与统一图标，拖动边界保留刻度和黄色播放游标	• 音訊剪切：綠色另存為、獨立播放與統一圖示，拖動邊界保留刻度和黃色播放游標	• Audio trimming: green Save As, independent playback and matching icons; ruler and yellow playhead stay visible while dragging boundaries	• 音声トリミング：緑の名前を付けて保存、独立再生と統一アイコン。境界ドラッグ中も目盛と黄色カーソルを表示	• 오디오 자르기: 녹색 다른 이름으로 저장, 독립 재생 및 통일 아이콘, 경계 드래그 중에도 눈금과 노란 재생 커서 유지	• Audiozuschnitt: grünes Speichern unter, unabhängige Wiedergabe und einheitliche Symbole; Skala und gelber Cursor bleiben beim Ziehen sichtbar	• Découpe audio : bouton vert Enregistrer sous, lecture indépendante et icônes uniformes ; règle et curseur jaune visibles pendant le déplacement des limites
+剪切播放	剪切播放	Play trimmed range	選択範囲を再生	자른 구간 재생	Zuschnitt abspielen	Lire la sélection
+导出设置	匯出設定	Export settings	出力設定	내보내기 설정	Exporteinstellungen	Paramètres d’export
+导出格式	匯出格式	Export format	出力形式	내보내기 형식	Exportformat	Format d’export
+采样率	取樣率	Sample rate	サンプルレート	샘플 레이트	Abtastrate	Fréquence d’échantillonnage
+位深	位元深度	Bit depth	ビット深度	비트 깊이	Bittiefe	Profondeur de bits
+仅导出当前音轨；音量控件仅影响试听。	僅匯出目前音軌；音量控制僅影響試聽。	Exports the current audio track only; volume controls affect preview only.	現在の音声トラックのみ出力。音量操作は試聴のみに適用。	현재 오디오 트랙만 내보냅니다. 음량 조절은 미리 듣기에만 적용됩니다.	Nur aktuelle Audiospur; Lautstärke gilt nur für die Vorschau.	Piste actuelle uniquement ; le volume agit seulement sur l’aperçu.
+剪切/格式转换	剪切/格式轉換	Trim/Convert	トリミング/形式変換	자르기/형식 변환	Zuschneiden/Konvertieren	Découper/Convertir
+• 剪切窗独立播放，打开即停止来源页签；支持多文件弹窗，切换或关闭页签仍保留	• 剪切視窗獨立播放，開啟即停止來源頁籤；支援多檔視窗，切換或關閉頁籤仍保留	• Independent trim playback stops the source tab on open; multiple file windows survive tab changes and closure	• 独立したトリミング再生。開くと元タブを停止し、複数ファイルのウィンドウはタブ切替・終了後も保持	• 독립 자르기 재생, 열면 원본 탭 정지; 여러 파일 창은 탭 전환 및 닫기 후에도 유지	• Unabhängige Zuschnittwiedergabe stoppt den Quelltab beim Öffnen; mehrere Fenster bleiben nach Tabwechsel oder Schließen	• Lecture indépendante arrêtant le lecteur source ; plusieurs fenêtres persistent après changement ou fermeture des onglets
+导出	匯出	Export	エクスポート	내보내기	Exportieren	Exporter
+剪切/转换音频	剪切/轉換音訊	Cut/Convert Audio	音声のカット/変換	오디오 자르기/변환	Audio schneiden/konvertieren	Couper/Convertir audio

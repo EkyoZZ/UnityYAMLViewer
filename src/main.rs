@@ -25,6 +25,7 @@ mod theme;
 mod icons;
 mod asset_viewer;
 mod media_tools;
+mod media_trim;
 mod media_preview;
 mod spine_preview;
 mod particle_preview;
@@ -1334,6 +1335,7 @@ impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         native_window::track_main_window(ctx);
         native_window::track_file_drop(ctx, _frame);
+        media_preview::show_trim_windows(ctx);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
         if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
@@ -2354,21 +2356,27 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.3").strong());
+                        ui.label(localization::tr("• 剪切窗独立播放，打开即停止来源页签；支持多文件弹窗，切换或关闭页签仍保留"));
+                        ui.label(localization::tr("• 音频剪切：绿色另存为、独立播放与统一图标，拖动边界保留刻度和黄色播放游标"));
+                        ui.label(localization::tr("• 音视频剪切：视频另存 MP4，音频可选 MP3 / WAV / FLAC / M4A 及适用参数；需 FFmpeg"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.2").strong());
                         ui.label(localization::tr("• 九宫格无损精简：完整 RGBA 判重、拉伸 / 重复自动识别，可编辑预览与原位替换"));
                         ui.label(localization::tr("• slice9 支持批量 / 目录 / dry-run，--preview 最多 10 个可编辑窗口；顶部指令查看提供示例"));
                         ui.label(localization::tr("• 对齐补白不计入 Unity Border；仅写回已读取且受支持的单 Sprite meta，保留 GUID"));
                         ui.label(localization::tr("• 普通弹窗恢复焦点保留位置，首次打开或按钮唤醒时才居中"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.1").strong());
                         ui.label(localization::tr("• 替换 AppIcon"));
                         ui.label(localization::tr("• 优化 Material 和 Shader 预览操作体验"));
                         ui.label(localization::tr("• 更新检查识别 GitHub 限流并等待重试，支持手动打开发布页"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
+
                         ui.label(RichText::new("1.2.0").strong());
                         ui.label(localization::tr("• 材质与 Shader 共用节点预览，分别载入材质输入与 Shader 默认值"));
                         ui.label(localization::tr("• 材质与 Shader 通过统一预览开关打开独立节点面板"));

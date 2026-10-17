@@ -49,13 +49,14 @@ pub struct Window<'a> {
     modal: bool,
     fit_height: bool,
     solid_scroll: bool,
+    scrollable: bool,
 }
 
 impl<'a> Window<'a> {
     pub fn new(title: impl Into<String>) -> Self {
         let title = title.into();
         Self { id: egui::Id::new(&title), title, open: None, width: 380.0,
-            height: 480.0, resizable: true, minimum_width: None, maximum_width: None, modal: false, fit_height: false, solid_scroll: false }
+            height: 480.0, resizable: true, minimum_width: None, maximum_width: None, modal: false, fit_height: false, solid_scroll: false, scrollable: true }
     }
     pub fn id(mut self, id: egui::Id) -> Self { self.id = id; self }
     pub fn open(mut self, open: &'a mut bool) -> Self { self.open = Some(open); self }
@@ -65,6 +66,7 @@ impl<'a> Window<'a> {
     pub fn max_width(mut self, width: f32) -> Self { self.maximum_width = Some(width + 16.0); self }
     pub fn resizable(mut self, value: bool) -> Self { self.resizable = value; self }
     pub fn solid_scroll(mut self) -> Self { self.solid_scroll = true; self }
+    pub fn scrollable(mut self, value: bool) -> Self { self.scrollable = value; self }
     pub fn fit_height(mut self) -> Self { self.fit_height = true; self }
     pub fn modal(mut self) -> Self { self.modal = true; self }
     // Native title bars are managed by the OS; fresh dialogs are centered on the main window.
@@ -127,11 +129,16 @@ impl<'a> Window<'a> {
                 let mut resizing = false;
                 egui::CentralPanel::default().show(child_ctx, |ui| {
                     if self.solid_scroll { ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid(); }
-                    let scroll = egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, contents);
+                    let content_size = if self.scrollable {
+                        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, contents).content_size
+                    } else {
+                        contents(ui);
+                        ui.min_size()
+                    };
                     if !self.resizable || self.fit_height {
                         let maximum_height = child_ctx.input(|input| input.viewport().monitor_size)
                             .map_or(800.0, |size| (size.y - 100.0).max(120.0));
-                        let height = (scroll.content_size.y + 16.0).clamp(80.0, maximum_height);
+                        let height = (content_size.y + 16.0).clamp(80.0, maximum_height);
                         let current_height = child_ctx.input(|input| input.screen_rect().height());
                         if (current_height - height).abs() > 1.0 {
                             target_inner = egui::vec2(if self.resizable { child_ctx.input(|input| input.screen_rect().width()) } else { self.width }, height);
