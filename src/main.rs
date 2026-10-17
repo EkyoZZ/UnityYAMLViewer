@@ -26,6 +26,7 @@ mod icons;
 mod asset_viewer;
 mod media_tools;
 mod media_trim;
+mod audio_edit;
 mod media_preview;
 mod spine_preview;
 mod particle_preview;
@@ -200,6 +201,9 @@ struct ViewerApp {
     table_horizontal_offsets: HashMap<String, f32>,
     tabs: Vec<ViewerTab>,
     active_tab: usize,
+    tab_group_active: HashMap<String, PathBuf>,
+    close_group_queue: std::collections::VecDeque<PathBuf>,
+    closing_tab_group: Option<String>,
     show_about: bool,
     show_older_history: bool,
     restoring_session: bool,
@@ -683,7 +687,7 @@ impl ViewerApp {
             if let Some(error)=self.assets.playlist_error(&path){ui.colored_label(ui.visuals().warn_fg_color,error);}
             ui.horizontal(|ui|{save=ui.button(localization::tr("保存列表")).clicked();discard=ui.button(localization::tr("放弃修改")).clicked();cancel=ui.button(localization::tr("取消")).clicked();});
         });
-        if cancel{self.pending_playlist_close=None;self.playlist_exit_requested=false;}
+        if cancel{self.pending_playlist_close=None;self.playlist_exit_requested=false;self.close_group_queue.clear();self.closing_tab_group=None;}
         else if (save||discard)&&self.assets.resolve_playlist_dirty(&path,save){
             self.pending_playlist_close=None;
             if !self.playlist_exit_requested{if let Some(index)=self.tabs.iter().position(|tab|tab.path==path){self.close_tab(index,ctx);}}
@@ -719,6 +723,7 @@ impl ViewerApp {
         self.assets.pause_media();
         self.locate_target = None;
         let tab = self.tabs[index].clone();
+        self.tab_group_active.insert(tab_group_key(&tab.path), tab.path.clone());
         self.active_tab = index;
         self.path = Some(tab.path);
         self.raw = tab.raw;
@@ -732,13 +737,27 @@ impl ViewerApp {
         self.persist_open_tabs();
     }
 
-    fn close_tab(&mut self, index: usize, ctx: &egui::Context) {
+    fn close_tab(&mut self, mut index: usize, ctx: &egui::Context) {
         if self.assets.playlist_dirty(&self.tabs[index].path){self.pending_playlist_close=Some(self.tabs[index].path.clone());return;}
         if let Some(session) = self.edits.get(&self.tabs[index].path) {
             if session.lock().unwrap().has_changes() {
                 self.pending_close_tab = Some(self.tabs[index].path.clone());
                 return;
             }
+        }
+        // Pack members at their visible group position before the 4 -> 3 transition.
+        // This also keeps batch-close confirmations anchored while the group shrinks.
+        let closing_path = self.tabs[index].path.clone();
+        let key = tab_group_key(&closing_path);
+        let members: Vec<_> = self.tabs.iter().enumerate().filter(|(_, tab)| tab_group_key(&tab.path) == key).map(|(i, _)| i).collect();
+        if members.len() == 4 {
+            let order = packed_tab_group_indices(self.tabs.len(), &members);
+            self.save_active_tab();
+            let active = self.path.clone();
+            let mut previous: Vec<_> = std::mem::take(&mut self.tabs).into_iter().map(Some).collect();
+            self.tabs = order.into_iter().map(|i| previous[i].take().unwrap()).collect();
+            self.active_tab = self.tabs.iter().position(|tab| Some(&tab.path) == active.as_ref()).unwrap_or(0);
+            index = self.tabs.iter().position(|tab| tab.path == closing_path).unwrap();
         }
         self.edits.remove(&self.tabs[index].path);
         self.saved_histories.remove(&self.tabs[index].path);
@@ -1335,6 +1354,7 @@ impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         native_window::track_main_window(ctx);
         native_window::track_file_drop(ctx, _frame);
+        audio_edit::set_undo_limit(self.settings.undo_steps);
         media_preview::show_trim_windows(ctx);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
@@ -1570,40 +1590,117 @@ impl eframe::App for ViewerApp {
                 let tab_width=(ctx.screen_rect().right()-ui.min_rect().left()-8.0).max(1.0);
                 let spacing=ui.spacing().item_spacing;
                 let mut slots=Vec::new();let mut x=0.0;let mut y=0.0;
-                for tab in &self.tabs {
+                let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+                for (index, tab) in self.tabs.iter().enumerate() {
+                    let key = tab_group_key(&tab.path);
+                    if let Some((_, members)) = groups.iter_mut().find(|(kind, _)| *kind == key) { members.push(index); }
+                    else { groups.push((key, vec![index])); }
+                }
+                let mut visible = Vec::new();
+                for (key, members) in &groups {
+                    if members.len() > 3 || self.closing_tab_group.as_ref() == Some(key) {
+                        let index = members.iter().copied().find(|&i| i == self.active_tab)
+                            .or_else(|| members.iter().copied().find(|&i| self.tab_group_active.get(key) == Some(&self.tabs[i].path))).unwrap_or(members[0]);
+                        visible.push(TabGroup { selected: index, members: members.clone() });
+                    } else { for &index in members { visible.push(TabGroup { selected: index, members: vec![index] }); } }
+                }
+                visible.sort_by_key(|group| group.members[0]);
+                let mut close_group = None;
+                for group in &visible {
+                    let tab = &self.tabs[group.selected];
+
                     let title=tab.path.file_name().and_then(|name|name.to_str()).unwrap_or(crate::localization::tr("未命名"));
-                    let dirty=self.edits.get(&tab.path).is_some_and(|session|session.lock().unwrap().has_changes());
+                    let dirty=self.assets.playlist_dirty(&tab.path) || self.edits.get(&tab.path).is_some_and(|session|session.lock().unwrap().has_changes());
                     let title=if dirty{format!("{title} *")}else{title.to_owned()};
-                    let width=(ui.painter().layout_no_wrap(title,egui::FontId::proportional(14.0),ui.visuals().text_color()).size().x+38.0).min(350.0).min(tab_width);
+                    let width=(ui.painter().layout_no_wrap(title,egui::FontId::proportional(14.0),ui.visuals().text_color()).size().x + 14.0 + tab_action_width(ui, group.members.len())).min(350.0).min(tab_width);
                     if x>0.0 && x+width>tab_width {x=0.0;y+=24.0+spacing.y;}
                     slots.push(egui::Rect::from_min_size(egui::pos2(x,y),egui::vec2(width,24.0)));x+=width+spacing.x;
                 }
                 let (strip_rect,strip_response)=ui.allocate_exact_size(egui::vec2(tab_width,y+24.0),egui::Sense::hover());
-                    for (index, tab) in self.tabs.iter().enumerate() {
+                    for (position, group) in visible.iter().enumerate() {
+                        let index = group.selected;
+                        let members = &group.members;
+                        let tab = &self.tabs[index];
+                        let grouped = group.is_collapsed();
                         let title = tab
                             .path
                             .file_name()
                             .and_then(|name| name.to_str())
                             .unwrap_or(crate::localization::tr("未命名"));
                         let is_active = self.active_tab == index;
-                        let dirty = self.edits.get(&tab.path).is_some_and(|session| session.lock().unwrap().has_changes());
+                        let dirty = self.assets.playlist_dirty(&tab.path) || self.edits.get(&tab.path).is_some_and(|session| session.lock().unwrap().has_changes());
                         let title = if dirty { format!("{title} *") } else { title.to_string() };
-                        let slot=slots[index].translate(strip_rect.min.to_vec2());
-                        let (open_clicked, close_clicked, response, slot) = unified_tab(ui, &title, is_active, &tab.path,slot);
+                        let slot=slots[position].translate(strip_rect.min.to_vec2());
+                        let (open_clicked, close_clicked, response, slot) = unified_tab(ui, &title, is_active, &tab.path,slot,members.len());
                         tab_rects.push(slot);
+                        if grouped {
+                            let popup_id = ui.id().with(("tab_group", tab_group_key(&tab.path)));
+                            if close_clicked { ui.memory_mut(|memory| memory.toggle_popup(popup_id)); }
+                            egui::popup::popup_below_widget(ui, popup_id, &response, egui::popup::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                                let row_height = ui.text_style_height(&egui::TextStyle::Button) + 4.0;
+                                let widest = members.iter().map(|&member| {
+                                    let path = &self.tabs[member].path;
+                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                    ui.painter().layout_no_wrap(format!("{name} *"), egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color()).size().x
+                                }).fold(0.0_f32, f32::max);
+                                let row_width = (widest + row_height + 20.0).clamp(180.0, 420.0).min((ctx.screen_rect().width() - 32.0).max(80.0));
+                                ui.set_width(row_width);
+                                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                                    for &member in members {
+                                        let path = &self.tabs[member].path;
+                                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(localization::tr("未命名"));
+                                        let dirty = self.assets.playlist_dirty(path) || self.edits.get(path).is_some_and(|edit| edit.lock().unwrap().has_changes());
+                                        let title = if dirty { format!("{name} *") } else { name.to_owned() };
+                                        ui.push_id(path, |ui| {
+                                            let (row, _) = ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::hover());
+                                            let close_rect = egui::Rect::from_min_max(egui::pos2(row.right() - row_height, row.top()), row.max);
+                                            let name_rect = egui::Rect::from_min_max(row.min, egui::pos2(close_rect.left() - 4.0, row.bottom()));
+                                            ui.spacing_mut().interact_size.y = row_height;
+                                            ui.spacing_mut().button_padding.y = 2.0;
+                                            if member == index { ui.painter().rect_filled(name_rect, 3.0, ui.visuals().selection.bg_fill); }
+                                            let name_response = ui.put(name_rect, egui::Button::new("").frame(false));
+                                            let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
+                                            let galley = ui.painter().layout(title, egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color(), text_rect.width());
+                                            let mut job = galley.job.as_ref().clone();
+                                            job.wrap.max_rows = 1;
+                                            job.wrap.break_anywhere = true;
+                                            let galley = ui.painter().layout_job(job);
+                                            ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
+                                                egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
+                                            if name_response.on_hover_text(path.display().to_string()).clicked() {
+                                                activate = Some(member); ui.memory_mut(|memory| memory.close_popup());
+                                            }
+                                            let close_response = ui.put(close_rect, egui::Button::new("").frame(false));
+                                            icons::paint(ui, icons::Icon::Close, close_response.rect.shrink(5.0), ui.visuals().text_color());
+                                            if close_response.clicked() { close = Some(member); ui.memory_mut(|memory| memory.close_popup()); }
+                                        });
+                                    }
+                                });
+                                ui.separator();
+                                if ui.add(egui::Button::new(localization::tr("关闭全部")).frame(false)).clicked() {
+                                    close_group = Some(members.iter().map(|&i| self.tabs[i].path.clone()).collect::<Vec<_>>());
+                                    ui.memory_mut(|memory| memory.close_popup());
+                                }
+                            });
+                        }
                         if response.drag_started_by(egui::PointerButton::Primary) {
                             let origin=ui.input(|i|i.pointer.press_origin()).unwrap_or(slot.center());
-                            if origin.x<slot.right()-24.0 {
+                            if origin.x<slot.right()-tab_action_width(ui, members.len()) {
                                 ctx.data_mut(|d|{d.insert_temp(egui::Id::new("tab_drag_path"),tab.path.clone());d.insert_temp(egui::Id::new("tab_drag_offset"),origin-slot.min);});
                             }
                         }
                         if open_clicked {
                             activate = Some(index);
                         }
-                        if close_clicked {
+                        if close_clicked && !grouped {
                             close = Some(index);
                         }
                     }
+                if let Some(paths) = close_group {
+                    self.closing_tab_group = paths.first().map(|path| tab_group_key(path));
+                    self.close_group_queue = paths.into();
+                    ctx.request_repaint();
+                }
                 let strip=strip_response;
                 let dragged=ctx.data_mut(|d|d.get_temp::<PathBuf>(egui::Id::new("tab_drag_path")));
                 if let Some(path)=dragged {
@@ -1613,12 +1710,17 @@ impl eframe::App for ViewerApp {
                             let x=if slot<tab_rects.len(){rect.left()-2.0}else{rect.right()+2.0};
                             ui.painter().line_segment([egui::pos2(x,rect.top()),egui::pos2(x,rect.bottom())],egui::Stroke::new(2.0_f32,egui::Color32::from_rgb(0,122,255)));
                         }
-                        if let Some(from)=self.tabs.iter().position(|t|t.path==path) {
-                            let to=if slot>from {slot-1}else{slot};
-                            if from!=to {
+                        if let Some(from) = visible.iter().position(|group| {
+                            group.members.iter().any(|&i| self.tabs[i].path == path)
+                        }) {
+                            let blocks: Vec<Vec<usize>> = visible.iter().map(|group| group.members.clone()).collect();
+                            if let Some(order) = reordered_tab_indices(&blocks, from, slot) {
                                 self.save_active_tab();
-                                let active=self.path.clone();let tab=self.tabs.remove(from);self.tabs.insert(to,tab);
-                                if let Some(index)=self.tabs.iter().position(|t|Some(&t.path)==active.as_ref()){self.active_tab=index;}
+                                let active = self.path.clone();
+                                // Move each visible tab as a block, including noncontiguous group members.
+                                let mut previous: Vec<_> = std::mem::take(&mut self.tabs).into_iter().map(Some).collect();
+                                self.tabs = order.into_iter().map(|index| previous[index].take().unwrap()).collect();
+                                if let Some(index) = self.tabs.iter().position(|tab| Some(&tab.path) == active.as_ref()) { self.active_tab = index; }
                                 ctx.request_repaint();
                             }
                         }
@@ -2357,8 +2459,14 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.3").strong());
+                        ui.label(localization::tr("• 逐项关闭至 3 个时在原位展开；关闭全部期间保持成组，取消后恢复自动展开"));
+                        ui.label(localization::tr("• 页签支持整组拖拽与文件堆叠数量，修复选中或悬停时页签栏高度变化"));
+                        ui.label(localization::tr("• 相同后缀超过 3 个文件自动折叠为下拉页签，支持逐项关闭、关闭全部与未保存提醒"));
+                        ui.label(localization::tr("• 淡入淡出支持预设及贝塞尔手柄，淡入起点 / 淡出终点幅度可调，参数窗置顶"));
+                        ui.label(localization::tr("• 选择模式旁显示区间时长，区间模式另显示剪切后时长；停止播放回到零点"));
+                        ui.label(localization::tr("• 主窗口与音频编辑支持波形缩放、水平浏览与播放居中跟随"));
                         ui.label(localization::tr("• 剪切窗独立播放，打开即停止来源页签；支持多文件弹窗，切换或关闭页签仍保留"));
-                        ui.label(localization::tr("• 音频剪切：绿色另存为、独立播放与统一图标，拖动边界保留刻度和黄色播放游标"));
+                        ui.label(localization::tr("• 音频统一左右键选区，剪切 / 淡入淡出 / dB 可按区间处理；未选范围的 dB 作用于当前整段"));
                         ui.label(localization::tr("• 音视频剪切：视频另存 MP4，音频可选 MP3 / WAV / FLAC / M4A 及适用参数；需 FFmpeg"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.2.2").strong());
@@ -2469,6 +2577,17 @@ impl eframe::App for ViewerApp {
                     });
                 });
         }
+        if self.pending_close_tab.is_none() && self.pending_playlist_close.is_none() && self.pending_save.is_none() {
+            while let Some(path) = self.close_group_queue.pop_front() {
+                if let Some(index) = self.tabs.iter().position(|tab| tab.path == path) {
+                    self.close_tab(index, ctx);
+                    if self.pending_close_tab.is_some() || self.pending_playlist_close.is_some() { break; }
+                }
+            }
+        }
+        if self.close_group_queue.is_empty() && self.pending_close_tab.is_none() && self.pending_playlist_close.is_none() {
+            self.closing_tab_group = None;
+        }
         if let Some(path) = self.pending_save.take() {
             if let Some(session) = self.edits.get(&path).cloned() {
                 let result = editing::save(&session.lock().unwrap());
@@ -2477,6 +2596,11 @@ impl eframe::App for ViewerApp {
                         session.lock().unwrap().mark_saved(&text);
                         self.saved_histories.insert(path.clone(), session.clone());
                         self.edits.remove(&path);
+                        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.path == path) {
+                            tab.raw = text.clone().into();
+                            tab.documents = parse_unity_yaml(&tab.raw);
+                            tab.encoding = "UTF-8".into();
+                        }
                         if self.path.as_ref() == Some(&path) {
                             self.raw = text.into();
                             self.documents = parse_unity_yaml(&self.raw);
@@ -2493,18 +2617,21 @@ impl eframe::App for ViewerApp {
         if let Some(path) = self.pending_close_tab.clone() {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or(crate::localization::tr("未命名"));
             let mut discard = false;
+            let mut save = false;
             let mut cancel = false;
-            crate::native_window::Window::new(crate::localization::tr("⚠ 放弃编辑？")).id(egui::Id::new("discard_edit_on_close")).modal().resizable(false).default_width(420.0).show(ctx, |ui| {
-                ui.heading(crate::localization::tr("⚠ 放弃编辑？"));
+            crate::native_window::Window::new(crate::localization::tr("未保存的修改")).id(egui::Id::new("discard_edit_on_close")).modal().resizable(false).default_width(420.0).show(ctx, |ui| {
+                ui.heading(crate::localization::tr("未保存的修改"));
                 ui.label(crate::lf!("“{0}”有未保存的修改。是否放弃编辑并关闭文件？", name));
-                ui.label(crate::localization::tr("选择“是”将直接关闭，不写入文件；选择“否”继续编辑。"));
+                ui.label(crate::localization::tr("可保存后关闭、放弃修改，或取消关闭。"));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
+                    save = ui.button(localization::tr("保存并关闭")).clicked();
                     discard = ui.add_sized([110.0, 30.0], egui::Button::new(crate::localization::tr("是，放弃并关闭"))).clicked();
                     cancel = ui.add_sized([88.0, 30.0], egui::Button::new(crate::localization::tr("否，继续编辑"))).clicked();
                 });
             });
-            if discard {
+            if save { self.pending_save = Some(path.clone()); }
+            if !self.edits.contains_key(&path) || discard {
                 self.pending_close_tab = None;
                 self.edits.remove(&path);
                 if let Some(index) = self.tabs.iter().position(|tab| tab.path == path) {
@@ -2513,7 +2640,9 @@ impl eframe::App for ViewerApp {
                 editing::publish(ctx, None, 0..0);
             } else if cancel {
                 self.pending_close_tab = None;
+                self.close_group_queue.clear();self.closing_tab_group=None;
             }
+            if save || discard || cancel || self.pending_close_tab.is_none() { ctx.request_repaint(); }
         }
         for session in self.edits.values() {
             let message = session.lock().unwrap().warning.clone();
@@ -4031,6 +4160,24 @@ fn settings_control<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -
     ui.allocate_ui_with_layout(egui::vec2(208.0, 30.0), egui::Layout::right_to_left(egui::Align::Center), contents)
 }
 
+/// Place scattered members at their first member's slot, retaining all file order within the group.
+fn packed_tab_group_indices(count: usize, members: &[usize]) -> Vec<usize> {
+    let Some(&first) = members.first() else { return (0..count).collect(); };
+    (0..first).chain(members.iter().copied()).chain((first..count).filter(|index| !members.contains(index))).collect()
+}
+
+/// Translate a visible insertion boundary into a complete file permutation.
+/// A collapsed group is one block; member order is preserved when it moves or expands.
+fn reordered_tab_indices(blocks: &[Vec<usize>], from: usize, slot: usize) -> Option<Vec<usize>> {
+    if from >= blocks.len() || slot > blocks.len() { return None; }
+    let to = if slot > from { slot - 1 } else { slot };
+    if from == to { return None; }
+    let mut reordered: Vec<_> = blocks.iter().collect();
+    let moving = reordered.remove(from);
+    reordered.insert(to, moving);
+    Some(reordered.into_iter().flatten().copied().collect())
+}
+
 fn tab_drop_slot(rects:&[egui::Rect],pointer:egui::Pos2)->usize {
     let Some(nearest)=rects.iter().min_by(|a,b|(a.center().y-pointer.y).abs().total_cmp(&(b.center().y-pointer.y).abs())) else{return 0};
     let row_y=nearest.center().y;
@@ -4042,6 +4189,49 @@ fn tab_drop_slot(rects:&[egui::Rect],pointer:egui::Pos2)->usize {
 #[cfg(test)]
 mod tab_reorder_tests {
     use super::*;
+    #[test]
+    fn tab_icon_states_do_not_change_strip_height() {
+        for active in [0, 1, 2] {
+            for pointer in [egui::pos2(40.0, 12.0), egui::pos2(160.0, 12.0), egui::pos2(280.0, 12.0), egui::pos2(480.0, 200.0)] {
+                let ctx = egui::Context::default();
+                let input = egui::RawInput { events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
+                let _ = ctx.run(input, |ctx| {
+                    let mut ui = egui::Ui::new(ctx.clone(), egui::Id::new("tab_height_test"),
+                        egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0))));
+                    let (strip, _) = ui.allocate_exact_size(egui::vec2(500.0, 24.0), egui::Sense::hover());
+                    let before = ui.min_rect();
+                    for index in 0..3 {
+                        let slot = egui::Rect::from_min_size(strip.min + egui::vec2(index as f32 * 120.0, 0.0), egui::vec2(112.0, 24.0));
+                        let path = PathBuf::from(format!("file{index}.png"));
+                        unified_tab(&mut ui, "file.png", active == index, &path, slot, if index == 1 { 12 } else { 1 });
+                    }
+                    assert_eq!(ui.min_rect(), before, "active={active}, pointer={pointer:?}");
+                });
+            }
+        }
+    }
+    #[test]
+    fn dissolving_group_stays_at_its_slot_and_preserves_member_order() {
+        assert_eq!(packed_tab_group_indices(8, &[1, 3, 5, 7]), vec![0, 1, 3, 5, 7, 2, 4, 6]);
+        assert_eq!(packed_tab_group_indices(5, &[0, 1, 2, 3]), vec![0, 1, 2, 3, 4]);
+        assert_eq!(packed_tab_group_indices(3, &[]), vec![0, 1, 2]);
+        assert!(!TabGroup { members: vec![0], selected: 0 }.is_collapsed());
+        assert!(TabGroup { members: vec![0, 1], selected: 0 }.is_collapsed());
+    }
+    #[test]
+    fn collapsed_groups_move_as_blocks_and_preserve_every_member() {
+        // Group members can be interleaved in the stored file order before dragging.
+        let blocks = vec![vec![0, 2, 4, 6], vec![1], vec![3, 5, 7, 8], vec![9]];
+        assert_eq!(reordered_tab_indices(&blocks, 0, 4), Some(vec![1, 3, 5, 7, 8, 9, 0, 2, 4, 6]));
+        assert_eq!(reordered_tab_indices(&blocks, 2, 0), Some(vec![3, 5, 7, 8, 0, 2, 4, 6, 1, 9]));
+        assert_eq!(reordered_tab_indices(&blocks, 1, 3), Some(vec![0, 2, 4, 6, 3, 5, 7, 8, 1, 9]));
+        assert_eq!(reordered_tab_indices(&blocks, 2, 2), None);
+        assert_eq!(reordered_tab_indices(&blocks, 2, 3), None);
+        assert_eq!(reordered_tab_indices(&blocks, 4, 0), None);
+        assert_eq!(reordered_tab_indices(&blocks, 0, 5), None);
+        let singles = vec![vec![0], vec![1], vec![2]];
+        assert_eq!(reordered_tab_indices(&singles, 0, 3), Some(vec![1, 2, 0]));
+    }
     #[test]
     fn insertion_handles_gaps_end_and_wrapped_rows() {
         let rect=|x,y|egui::Rect::from_min_size(egui::pos2(x,y),egui::vec2(100.0,24.0));
@@ -4074,7 +4264,28 @@ fn shortened_tab_title(ui: &egui::Ui, title: &str, width: f32, font: &egui::Font
     format!("{prefix}{tail}")
 }
 
-fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::Path,slot:egui::Rect) -> (bool, bool,egui::Response,egui::Rect) {
+/// Every visible tab is a nonempty group. Ordinary tabs have one member;
+/// collapsed tabs keep all members and the selected representative together.
+struct TabGroup {
+    members: Vec<usize>,
+    selected: usize,
+}
+
+impl TabGroup {
+    fn is_collapsed(&self) -> bool { self.members.len() > 1 }
+}
+
+fn tab_group_key(path: &std::path::Path) -> String {
+    path.extension().and_then(|extension| extension.to_str()).unwrap_or("").to_ascii_lowercase()
+}
+
+fn tab_action_width(ui: &egui::Ui, member_count: usize) -> f32 {
+    if member_count <= 1 { return 24.0; }
+    26.0 + ui.painter().layout_no_wrap(member_count.to_string(), egui::FontId::proportional(12.0), ui.visuals().text_color()).size().x
+}
+
+fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::Path,slot:egui::Rect, member_count: usize) -> (bool, bool,egui::Response,egui::Rect) {
+    let grouped = member_count > 1;
     let tab_id=ui.id().with(path);
     let font = egui::FontId::proportional(14.0);
     let text_color = ui.visuals().text_color();
@@ -4090,8 +4301,8 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
     let response=ui.interact(rect,tab_id.with("tab_button"),egui::Sense::click_and_drag());
     let painter=if dragged {ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground,tab_id.with("dragged_tab")))}else{ui.painter().clone()};
     let close_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.right() - 24.0, rect.top()),
-        egui::vec2(24.0, rect.height()),
+        egui::pos2(rect.right() - tab_action_width(ui, member_count), rect.top()),
+        egui::vec2(tab_action_width(ui, member_count), rect.height()),
     );
     let tab_hovered = response.hovered();
     let close_hovered = ui.input(|input| {
@@ -4101,7 +4312,7 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
             .is_some_and(|pointer| close_rect.contains(pointer))
     });
     let response = if !close_hovered && !dragged { response.on_hover_text(path.display().to_string()) } else { response };
-    let show_close = is_active || tab_hovered;
+    let show_close = grouped || is_active || tab_hovered;
     let (fill, stroke) = if is_active {
         (
             ui.visuals().selection.bg_fill,
@@ -4137,17 +4348,17 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
                 ui.visuals().widgets.active.bg_fill,
             );
         }
-        painter.text(
-            close_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "×",
-            egui::FontId::proportional(14.0),
-            if close_hovered {
-                ui.visuals().widgets.active.fg_stroke.color
-            } else {
-                ui.visuals().weak_text_color()
-            },
-        );
+        let color = if close_hovered { ui.visuals().widgets.active.fg_stroke.color } else { ui.visuals().weak_text_color() };
+        // Use the same embedded vector assets as other menus, including on the drag layer.
+        // Painting icons must not allocate another row in the parent tab strip.
+        let icon_ui = ui.new_child(egui::UiBuilder::new().id_salt(tab_id.with("icon"))
+            .max_rect(close_rect).layer_id(painter.layer_id()));
+        let icon_rect = egui::Rect::from_center_size(egui::pos2(close_rect.left() + 12.0, close_rect.center().y), egui::vec2(12.0, 12.0));
+        icons::paint(&icon_ui, if grouped { icons::Icon::TabGroup } else { icons::Icon::Close }, icon_rect, color);
+        if grouped {
+            painter.text(egui::pos2(close_rect.left() + 22.0, close_rect.center().y), egui::Align2::LEFT_CENTER,
+                member_count.to_string(), egui::FontId::proportional(12.0), color);
+        }
     }
     (
         response.clicked() && !close_hovered,

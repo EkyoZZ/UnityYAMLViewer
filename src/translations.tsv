@@ -904,7 +904,7 @@ slice9 默认原位替换，不创建备份；建议先用 --dry-run 查看方�
 停止	停止	Stop	停止	정지	Stopp	Arrêter
 • 音视频剪切：视频另存 MP4，音频可选 MP3 / WAV / FLAC / M4A 及适用参数；需 FFmpeg	• 音影片剪切：影片另存 MP4，音訊可選 MP3 / WAV / FLAC / M4A 及適用參數；需 FFmpeg	• Trim video to MP4 or audio to MP3 / WAV / FLAC / M4A with format-specific settings; requires FFmpeg	• 動画は MP4、音声は MP3 / WAV / FLAC / M4A と形式別設定で切り出し。FFmpeg 必須	• 영상 MP4, 오디오 MP3 / WAV / FLAC / M4A 및 형식별 설정으로 자르기, FFmpeg 필요	• Videozuschnitt als MP4, Audio als MP3 / WAV / FLAC / M4A mit passenden Parametern; FFmpeg erforderlich	• Découpe vidéo en MP4, audio en MP3 / WAV / FLAC / M4A avec réglages adaptés ; FFmpeg requis
 波形左键设置起点，右键设置终点；拖动绿色边界调整范围。	波形左鍵設定起點，右鍵設定終點；拖動綠色邊界調整範圍。	Left-click the waveform for start, right-click for end; drag green boundaries to adjust.	波形の左クリックで開始、右クリックで終了。緑の境界をドラッグして調整。	파형 왼쪽 클릭으로 시작, 오른쪽 클릭으로 종료 설정; 녹색 경계를 드래그하여 조정.	Linksklick setzt Anfang, Rechtsklick Ende; grüne Grenzen zum Anpassen ziehen.	Clic gauche : début, clic droit : fin ; faire glisser les limites vertes.
-• 音频剪切：绿色另存为、独立播放与统一图标，拖动边界保留刻度和黄色播放游标	• 音訊剪切：綠色另存為、獨立播放與統一圖示，拖動邊界保留刻度和黃色播放游標	• Audio trimming: green Save As, independent playback and matching icons; ruler and yellow playhead stay visible while dragging boundaries	• 音声トリミング：緑の名前を付けて保存、独立再生と統一アイコン。境界ドラッグ中も目盛と黄色カーソルを表示	• 오디오 자르기: 녹색 다른 이름으로 저장, 독립 재생 및 통일 아이콘, 경계 드래그 중에도 눈금과 노란 재생 커서 유지	• Audiozuschnitt: grünes Speichern unter, unabhängige Wiedergabe und einheitliche Symbole; Skala und gelber Cursor bleiben beim Ziehen sichtbar	• Découpe audio : bouton vert Enregistrer sous, lecture indépendante et icônes uniformes ; règle et curseur jaune visibles pendant le déplacement des limites
+• 音频统一左右键选区，剪切 / 淡入淡出 / dB 可按区间处理；未选范围的 dB 作用于当前整段	• 音訊統一左右鍵選區，剪切 / 淡入淡出 / dB 可按區間處理；未選範圍的 dB 作用於目前整段	• Consistent range selection for cuts, fades and dB; with no range, gain affects the complete current audio	• 範囲選択を統一しカット・フェード・dB を区間処理。未選択時のゲインは現在の音声全体に適用	• 자르기·페이드·dB의 구간 선택 통일, 선택 범위가 없으면 현재 전체 오디오에 게인 적용	• Einheitliche Auswahl für Schnitt, Fades und dB; ohne Bereich gilt die Verstärkung für das gesamte aktuelle Audio	• Sélection cohérente pour coupe, fondus et dB ; sans plage, le gain agit sur toute la piste actuelle
 剪切播放	剪切播放	Play trimmed range	選択範囲を再生	자른 구간 재생	Zuschnitt abspielen	Lire la sélection
 导出设置	匯出設定	Export settings	出力設定	내보내기 설정	Exporteinstellungen	Paramètres d’export
 导出格式	匯出格式	Export format	出力形式	내보내기 형식	Exportformat	Format d’export
@@ -915,3 +915,79 @@ slice9 默认原位替换，不创建备份；建议先用 --dry-run 查看方�
 • 剪切窗独立播放，打开即停止来源页签；支持多文件弹窗，切换或关闭页签仍保留	• 剪切視窗獨立播放，開啟即停止來源頁籤；支援多檔視窗，切換或關閉頁籤仍保留	• Independent trim playback stops the source tab on open; multiple file windows survive tab changes and closure	• 独立したトリミング再生。開くと元タブを停止し、複数ファイルのウィンドウはタブ切替・終了後も保持	• 독립 자르기 재생, 열면 원본 탭 정지; 여러 파일 창은 탭 전환 및 닫기 후에도 유지	• Unabhängige Zuschnittwiedergabe stoppt den Quelltab beim Öffnen; mehrere Fenster bleiben nach Tabwechsel oder Schließen	• Lecture indépendante arrêtant le lecteur source ; plusieurs fenêtres persistent après changement ou fermeture des onglets
 导出	匯出	Export	エクスポート	내보내기	Exportieren	Exporter
 剪切/转换音频	剪切/轉換音訊	Cut/Convert Audio	音声のカット/変換	오디오 자르기/변환	Audio schneiden/konvertieren	Couper/Convertir audio
+头尾	頭尾	Ends	先頭・末尾	앞뒤	Anfang/Ende	Début/fin
+区间	區間	Interval	区間	구간	Bereich	Intervalle
+剪切	剪切	Cut	カット	자르기	Schneiden	Couper
+淡入	淡入	Fade in	フェードイン	페이드 인	Einblenden	Fondu entrant
+淡出	淡出	Fade out	フェードアウト	페이드 아웃	Ausblenden	Fondu sortant
+音量(dB)	音量(dB)	Gain (dB)	ゲイン(dB)	게인(dB)	Verstärkung (dB)	Gain (dB)
+撤销	復原	Undo	元に戻す	실행 취소	Rückgängig	Annuler
+重做	重做	Redo	やり直す	다시 실행	Wiederholen	Rétablir
+时长	時長	Duration	長さ	길이	Dauer	Durée
+平滑	平滑	Smooth	スムーズ	부드럽게	Sanft	Lisse
+等功率	等功率	Equal power	等電力	등전력	Gleiche Leistung	Puissance constante
+增益可能导致削波失真	增益可能導致削波失真	Gain may cause clipping	ゲインによりクリッピングが発生する場合があります	게인으로 클리핑이 발생할 수 있습니다	Verstärkung kann Übersteuerung verursachen	Le gain peut provoquer un écrêtage
+确认后刷新音频与波形，可撤销；取消恢复预览前状态。	確認後更新音訊與波形，可復原；取消則恢復預覽前狀態。	Apply updates audio and waveform and supports Undo; cancel restores the previous state.	適用で音声と波形を更新し、元に戻せます。キャンセルでプレビュー前に戻ります。	적용하면 오디오와 파형을 갱신하며 취소할 수 있습니다. 취소하면 이전 상태로 복원됩니다.	Anwenden aktualisiert Audio und Wellenform, rückgängig möglich; Abbrechen stellt den vorherigen Zustand wieder her.	Appliquer actualise audio et forme et permet une annulation ; Annuler restaure l’état précédent.
+区间起点	區間起點	Interval start	区間開始	구간 시작	Bereichsanfang	Début de plage
+区间终点	區間終點	Interval end	区間終了	구간 종료	Bereichsende	Fin de plage
+区间：左键设起点，右键设终点；删除两条边界之间的范围并拼接两端。	區間：左鍵設起點，右鍵設終點；刪除兩條邊界之間的範圍並拼接兩端。	Interval: left-click sets start, right-click sets end; delete between the markers and join the ends.	区間：左クリックで開始、右クリックで終了。境界間を削除して両端を結合。	구간: 왼쪽 클릭 시작, 오른쪽 클릭 종료. 경계 사이를 삭제하고 양 끝을 연결합니다.	Bereich: Linksklick Anfang, Rechtsklick Ende; zwischen den Markern löschen und Enden verbinden.	Intervalle : clic gauche début, clic droit fin ; supprimer entre les repères et joindre les extrémités.
+正在处理无损音频…	正在處理無損音訊…	Processing lossless audio…	無損失音声を処理中…	무손실 오디오 처리 중…	Verlustfreies Audio wird verarbeitet…	Traitement audio sans perte…
+选择仅作预览；点击剪切提交，另存为输出当前完整时间轴。	選取僅作預覽；點擊剪切套用，另存為輸出目前完整時間軸。	Selection is a preview; Cut commits it. Save As exports the complete edited timeline.	選択はプレビューです。カットで適用し、名前を付けて保存で編集済み全体を出力します。	선택은 미리보기입니다. 자르기로 적용하고 다른 이름으로 저장으로 편집된 전체를 출력합니다.	Auswahl ist Vorschau; Schneiden wendet sie an. Speichern unter exportiert die gesamte bearbeitete Zeitleiste.	La sélection est un aperçu ; Couper applique la modification. Enregistrer sous exporte toute la piste éditée.
+音频编辑任务意外中断	音訊編輯工作意外中斷	Audio edit worker disconnected	音声編集処理が中断しました	오디오 편집 작업이 중단됨	Audiobearbeitung unterbrochen	Traitement audio interrompu
+剪切后没有保留的音频	剪切後沒有保留的音訊	No audio would remain	カット後に音声が残りません	자른 후 남는 오디오가 없습니다	Nach dem Schnitt bleibt kein Audio	Aucun audio ne serait conservé
+应用	套用	Apply	適用	적용	Anwenden	Appliquer
+作用范围：整段音频	作用範圍：整段音訊	Scope: entire current audio	適用範囲：現在の音声全体	적용 범위: 현재 전체 오디오	Bereich: gesamtes aktuelles Audio	Portée : audio actuel complet
+作用范围	作用範圍	Scope	適用範囲	적용 범위	Bereich	Portée
+• 音效参数窗置顶并适配内容宽度，淡入淡出默认选区时长，应用 / 取消居中	• 音效參數窗置頂並適配內容寬度，淡入淡出預設選區時長，套用 / 取消置中	• Effect dialogs stay on top and fit their contents; fades default to selection duration, Apply/Cancel are centered	• 音声効果設定を最前面に表示し内容幅に調整、フェードは選択区間の長さを初期値にし、ボタンを中央配置	• 효과 창을 항상 위에 표시하고 내용 너비에 맞추며 페이드는 선택 길이를 기본값으로 사용하고 버튼을 중앙 배치	• Effektdialoge bleiben im Vordergrund und passen zur Inhaltsbreite; Fades nutzen die Auswahldauer, Schaltflächen sind zentriert	• Fenêtres des effets toujours au premier plan et adaptées au contenu, durée de sélection pour les fondus, boutons centrés
+
+区间时长	區間時長	Selection duration	選択区間の長さ	선택 구간 길이	Auswahldauer	Durée de sélection
+剪切后时长	剪切後時長	Duration after cut	切り取り後の長さ	잘라내기 후 길이	Dauer nach Schnitt	Durée après découpe
+• 选择模式旁显示区间时长，区间模式另显示剪切后时长；停止播放回到零点	• 選擇模式旁顯示區間時長，區間模式另顯示剪切後時長；停止播放回到零點	• Selection duration beside mode tabs; Interval also shows duration after cutting; Stop returns to zero	• モード横に選択区間の長さ、区間モードでは切り取り後の長さも表示。停止で先頭に戻る	• 모드 옆에 선택 길이 및 구간 모드의 편집 후 길이 표시, 정지 시 처음으로 이동	• Auswahldauer neben Modus-Tabs, im Intervall auch Schnittdauer; Stopp kehrt zum Anfang zurück	• Durée de sélection près des onglets et durée après découpe en mode Intervalle ; Arrêter revient au début
+
+音频编辑	音訊編輯	Audio Editor	音声編集	오디오 편집	Audio bearbeiten	Édition audio
+视频编辑	影片編輯	Video Editor	動画編集	비디오 편집	Video bearbeiten	Édition vidéo
+• 音频波形支持滚轮缩放与水平浏览，修复绘制缝隙，入口统一为音频编辑 / 视频编辑	• 音訊波形支援滾輪縮放與水平瀏覽，修復繪製縫隙，入口統一為音訊編輯 / 影片編輯	• Audio waveforms support wheel zoom and horizontal browsing with rendering gaps fixed; Audio Editor / Video Editor entry points	• 音声波形のホイール拡大縮小と横スクロールに対応、描画の隙間を修正、入口を音声編集・動画編集に統一	• 오디오 파형 휠 확대 및 가로 탐색 지원, 렌더링 틈 수정, 오디오 편집/비디오 편집 진입점	• Audio-Wellenformen mit Mausrad-Zoom und horizontaler Navigation, Zeichenlücken behoben; Audio/Video bearbeiten	• Zoom audio à la molette et navigation horizontale, espaces de rendu corrigés ; Édition audio / vidéo
+
+二次曲线	二次曲線	Quadratic	二次曲線	2차 곡선	Quadratisch	Quadratique
+三次曲线	三次曲線	Cubic	三次曲線	3차 곡선	Kubisch	Cubique
+平方根曲线	平方根曲線	Square root	平方根曲線	제곱근 곡선	Quadratwurzel	Racine carrée
+更平滑	更平滑	Smootherstep	より滑らか	더 부드럽게	Smootherstep	Lissage renforcé
+• 淡入淡出提供七种下拉曲线预设，参数窗置顶，默认选区时长，应用 / 取消居中	• 淡入淡出提供七種下拉曲線預設，參數窗置頂，預設選區時長，套用 / 取消置中	• Fades offer seven curve presets in a dropdown; dialogs stay on top, default to selection duration and center Apply/Cancel	• フェードは7種類の曲線をドロップダウンで選択、設定は最前面、選択区間の長さが初期値、ボタンは中央配置	• 페이드 곡선 7종을 드롭다운으로 선택, 설정 창은 항상 위, 선택 길이가 기본값, 버튼 중앙 배치	• Fades mit sieben Kurven im Dropdown; Dialoge im Vordergrund, Auswahldauer als Vorgabe, Schaltflächen zentriert	• Sept courbes de fondu dans une liste ; fenêtres au premier plan, durée de sélection par défaut, boutons centrés
+
+点击添加点，拖动调整，右键删除；首尾固定，最多16点。	點擊新增點，拖曳調整，右鍵刪除；首尾固定，最多16點。	Click to add, drag to adjust, right-click to delete; fixed endpoints, up to 16 points.	クリックで点を追加、ドラッグで調整、右クリックで削除。両端固定、最大16点。	클릭하여 점 추가, 드래그로 조정, 우클릭으로 삭제. 양 끝 고정, 최대 16개.	Klicken zum Hinzufügen, Ziehen zum Ändern, Rechtsklick zum Löschen; feste Endpunkte, bis zu 16 Punkte.	Cliquer pour ajouter, glisser pour régler, clic droit pour supprimer ; extrémités fixes, 16 points maximum.
+• 淡入淡出支持七种预设及可编辑自定义曲线，参数窗置顶，应用 / 取消居中	• 淡入淡出支援七種預設及可編輯自訂曲線，參數窗置頂，套用 / 取消置中	• Fades support seven presets and editable custom curves; dialogs stay on top with centered Apply/Cancel	• フェードは7種のプリセットと編集可能なカスタム曲線に対応、設定は最前面、ボタン中央配置	• 페이드 프리셋 7종 및 사용자 곡선 편집 지원, 창 항상 위, 버튼 중앙 배치	• Fades mit sieben Vorgaben und editierbaren eigenen Kurven; Dialoge im Vordergrund, Schaltflächen zentriert	• Sept préréglages de fondu et courbes personnalisables ; fenêtres au premier plan, boutons centrés
+
+拖动圆点调整位置，拖动方形手柄调整曲率；点击添加，右键删除，最多8点。	拖曳圓點調整位置，拖曳方形手柄調整曲率；點擊新增，右鍵刪除，最多8點。	Drag round anchors to move them and square handles to bend the curve; click to add, right-click to delete, up to 8 anchors.	丸い点で位置、四角いハンドルで曲率を調整。クリックで追加、右クリックで削除、最大8点。	원형 점은 위치, 사각 핸들은 곡률 조정. 클릭 추가, 우클릭 삭제, 최대 8점.	Runde Anker verschieben, quadratische Griffe für die Krümmung ziehen; Klicken fügt hinzu, Rechtsklick löscht, bis zu 8 Anker.	Déplacer les points ronds et les poignées carrées pour courber ; clic pour ajouter, clic droit pour supprimer, 8 points maximum.
+• 淡入淡出支持七种预设及贝塞尔手柄曲线编辑，参数窗置顶，应用 / 取消居中	• 淡入淡出支援七種預設及貝塞爾手柄曲線編輯，參數窗置頂，套用 / 取消置中	• Fades support seven presets and Bezier handle editing; dialogs stay on top with centered Apply/Cancel	• フェードは7種のプリセットとベジェハンドル編集に対応、設定は最前面、ボタン中央配置	• 페이드 프리셋 7종 및 베지어 핸들 편집 지원, 창 항상 위, 버튼 중앙 배치	• Fades mit sieben Vorgaben und Bézier-Griffen; Dialoge im Vordergrund, Schaltflächen zentriert	• Sept préréglages et édition par poignées de Bézier ; fenêtres au premier plan, boutons centrés
+
+• 淡入淡出支持预设及贝塞尔手柄，淡入起点 / 淡出终点幅度可调，参数窗置顶
+• 淡入淡出支援預設及貝塞爾手柄，淡入起點 / 淡出終點幅度可調，參數窗置頂
+• Fades support presets and Bezier handles, adjustable fade-in start / fade-out end amplitude, and topmost dialogs
+• フェードはプリセットとベジェハンドルに対応、フェードイン始点・アウト終点の音量を調整可能、設定は最前面
+• 페이드 프리셋 및 베지어 핸들 지원, 페이드인 시작/아웃 끝 진폭 조정, 설정 창 항상 위
+• Fades mit Vorgaben und Bézier-Griffen, Startpegel beim Einblenden / Endpegel beim Ausblenden einstellbar, Dialoge im Vordergrund
+• Fondus avec préréglages et poignées de Bézier, amplitude initiale/finale réglable, fenêtres au premier plan
+
+• 音频波形支持缩放、水平浏览与主窗口播放居中跟随，入口统一为音频编辑 / 视频编辑
+• 音訊波形支援縮放、水平瀏覽與主視窗播放置中跟隨，入口統一為音訊編輯 / 影片編輯
+• Audio waveforms support zoom, horizontal browsing and centered playback following in the main window; Audio Editor / Video Editor entry points
+• 音声波形の拡大縮小、横スクロール、メイン画面の再生位置中央追従に対応、音声編集・動画編集の入口
+• 오디오 파형 확대, 가로 탐색 및 메인 창 재생 위치 중앙 추적 지원, 오디오/비디오 편집 진입점
+• Audio-Zoom, horizontale Navigation und zentrierte Wiedergabeverfolgung im Hauptfenster; Audio/Video bearbeiten
+• Zoom audio, navigation horizontale et suivi centré de lecture dans la fenêtre principale ; Édition audio / vidéo
+
+• 主窗口与音频编辑支持波形缩放、水平浏览与播放居中跟随
+• 主視窗與音訊編輯支援波形縮放、水平瀏覽與播放置中跟隨
+• Main playback and Audio Editor support waveform zoom, horizontal browsing and centered playback following
+• メイン画面と音声編集で波形の拡大縮小、横スクロール、再生位置の中央追従に対応
+• 메인 창과 오디오 편집에서 파형 확대, 가로 탐색 및 재생 위치 중앙 추적 지원
+• Hauptfenster und Audio-Editor mit Wellenform-Zoom, horizontaler Navigation und zentrierter Wiedergabeverfolgung
+• Lecture principale et édition audio : zoom, navigation horizontale et suivi centré de lecture
+
+关闭全部	關閉全部	Close All	すべて閉じる	모두 닫기	Alle schließen	Tout fermer
+保存并关闭	儲存並關閉	Save and Close	保存して閉じる	저장 후 닫기	Speichern und schließen	Enregistrer et fermer
+• 相同后缀超过 3 个文件自动折叠为下拉页签，支持逐项关闭、关闭全部与未保存提醒	• 相同副檔名超過 3 個檔案自動摺疊為下拉頁籤，支援逐項關閉、全部關閉與未儲存提醒	• More than 3 files with the same extension collapse into a dropdown tab, with individual closure, Close All and unsaved-change prompts	• 同じ拡張子のファイルが3個を超えるとドロップダウンタブに集約。個別・一括クローズと未保存の確認に対応	• 같은 확장자 파일이 3개를 초과하면 드롭다운 탭으로 접으며 개별 닫기, 모두 닫기 및 저장 알림 지원	• Mehr als 3 Dateien gleicher Endung werden in einem Dropdown-Tab zusammengefasst, mit einzelnem Schließen, Alle schließen und Speicherhinweisen	• Plus de 3 fichiers de même extension sont regroupés dans un onglet déroulant, avec fermeture individuelle ou globale et rappel des modifications non enregistrées
+未保存的修改	未儲存的修改	Unsaved Changes	未保存の変更	저장하지 않은 변경 사항	Ungespeicherte Änderungen	Modifications non enregistrées
+可保存后关闭、放弃修改，或取消关闭。	可儲存後關閉、放棄修改，或取消關閉。	Save and close, discard changes, or cancel closing.	保存して閉じるか、変更を破棄するか、閉じる操作をキャンセルできます。	저장 후 닫기, 변경 사항 버리기 또는 닫기 취소를 선택하세요.	Speichern und schließen, Änderungen verwerfen oder Schließen abbrechen.	Enregistrez et fermez, abandonnez les modifications ou annulez la fermeture.
+• 页签支持整组拖拽与文件堆叠数量，修复选中或悬停时页签栏高度变化	• 頁籤支援整組拖曳與檔案堆疊數量，修復選取或懸停時頁籤列高度變化	• Group dragging and file-stack counts; fixed tab-strip height changes on selection or hover	• グループ単位のタブ移動とファイルスタック数の表示。選択・ホバー時の高さ変化を修正	• 그룹 드래그 및 파일 스택 개수 표시, 선택 또는 마우스 오버 시 탭 표시줄 높이 변경 수정	• Gruppenweises Ziehen und Dateistapel-Anzahl; wechselnde Tab-Leistenhöhe bei Auswahl oder Hover behoben	• Déplacement par groupe et nombre de fichiers empilés ; correction de la hauteur variable à la sélection ou au survol
+• 逐项关闭至 3 个时在原位展开；关闭全部期间保持成组，取消后恢复自动展开	• 逐項關閉至 3 個時在原位展開；全部關閉期間維持群組，取消後恢復自動展開	• Closing individually to 3 files expands in place; Close All keeps the group together until finished or cancelled	• 個別に閉じて3個になると元の位置で展開。一括クローズ中はグループを維持し、キャンセル後に自動展開を再開	• 개별 닫기로 3개가 되면 원래 위치에 펼치며 모두 닫기 중에는 그룹을 유지하고 취소 후 자동 펼침을 재개	• Beim einzelnen Schließen auf 3 Dateien an Ort und Stelle aufklappen; Alle schließen hält die Gruppe bis zum Abschluss oder Abbruch zusammen	• La fermeture individuelle à 3 fichiers déploie le groupe sur place ; Tout fermer maintient le groupe jusqu’à la fin ou à l’annulation

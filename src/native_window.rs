@@ -47,6 +47,7 @@ pub struct Window<'a> {
     minimum_width: Option<f32>,
     maximum_width: Option<f32>,
     modal: bool,
+    always_on_top: bool,
     fit_height: bool,
     solid_scroll: bool,
     scrollable: bool,
@@ -56,7 +57,7 @@ impl<'a> Window<'a> {
     pub fn new(title: impl Into<String>) -> Self {
         let title = title.into();
         Self { id: egui::Id::new(&title), title, open: None, width: 380.0,
-            height: 480.0, resizable: true, minimum_width: None, maximum_width: None, modal: false, fit_height: false, solid_scroll: false, scrollable: true }
+            height: 480.0, resizable: true, minimum_width: None, maximum_width: None, modal: false, always_on_top: false, fit_height: false, solid_scroll: false, scrollable: true }
     }
     pub fn id(mut self, id: egui::Id) -> Self { self.id = id; self }
     pub fn open(mut self, open: &'a mut bool) -> Self { self.open = Some(open); self }
@@ -69,6 +70,7 @@ impl<'a> Window<'a> {
     pub fn scrollable(mut self, value: bool) -> Self { self.scrollable = value; self }
     pub fn fit_height(mut self) -> Self { self.fit_height = true; self }
     pub fn modal(mut self) -> Self { self.modal = true; self }
+    pub fn always_on_top(mut self) -> Self { self.always_on_top = true; self }
     // Native title bars are managed by the OS; fresh dialogs are centered on the main window.
     pub fn collapsible(self, _: bool) -> Self { self }
     pub fn title_bar(self, _: bool) -> Self { self }
@@ -100,6 +102,7 @@ impl<'a> Window<'a> {
         let mut builder = egui::ViewportBuilder::default().with_title(&self.title)
             .with_inner_size([self.width, self.height]).with_resizable(self.resizable)
             .with_close_button(self.open.is_some()).with_icon(crate::application_icon());
+        if self.always_on_top { builder = builder.with_window_level(egui::WindowLevel::AlwaysOnTop); }
         if let Some(width) = self.minimum_width { builder = builder.with_min_inner_size([width, 120.0]); }
         if let Some(width) = self.maximum_width { builder = builder.with_max_inner_size([width, f32::INFINITY]); }
         if fresh {

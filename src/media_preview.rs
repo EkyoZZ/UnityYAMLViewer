@@ -341,10 +341,10 @@ pub fn show_trim_windows(ctx:&egui::Context) {
     });
 }
 
-pub struct Preview { trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
+pub struct Preview { edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
     waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {trim:crate::media_trim::Trim::default(),trim_preview_end:None,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None}}}
 impl Preview {
     pub fn new(path: &Path) -> Self {
         let identity = crate::media_history::Identity::read(path);
@@ -420,7 +420,8 @@ impl Preview {
     pub fn file_size(&self)->Option<u64> {self.info.as_ref().map(|info|info.file_size)}
     pub fn trim_entry_button(&mut self,ui:&mut egui::Ui,path:&Path) {
         let duration=self.info.as_ref().map_or(0.0,|info|info.duration);
-        if ui.add_enabled(duration>0.0,egui::Button::new(crate::localization::tr("剪切/格式转换"))).clicked() {
+        let label=if self.info.as_ref().is_some_and(|info|info.video.is_some()){"视频编辑"}else{"音频编辑"};
+        if ui.add_enabled(duration>0.0,egui::Button::new(crate::localization::tr(label))).clicked() {
             self.autoplay_pending=false;self.initial_seek=None;self.stop_playback();
             self.playlist_ended=false;self.playlist_next=false;
             let key=std::fs::canonicalize(path).unwrap_or_else(|_|path.to_owned());
@@ -450,6 +451,10 @@ impl Preview {
         self.resume_position=Some(self.position);
     }
     fn stop_playback(&mut self){self.pause();self.playback=None;self.started=None;self.resume_position=None;}
+    fn stop_and_rewind(&mut self){
+        self.stop_playback();self.position=0.0;self.initial_seek=None;
+        self.trim_preview_next=None;self.trim_preview_end=None;
+    }
     pub fn deactivate(&mut self) {
         self.autoplay_pending = false;
         self.meter_trails=[0.0;2];
@@ -459,6 +464,21 @@ impl Preview {
         if let Some(frame)=self.current_frame.and_then(|index|self.cache.lock().unwrap().get(index)){self.poster=Some(preview_poster(&frame));}
         self.texture=None;self.wave_job=None;self.index_job=None;self.frame_job=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}
     fn show_trim_editor(&mut self,ui:&mut egui::Ui,path:&Path) {
+        if let Some(info)=&self.info {
+            if info.video.is_none() {
+                self.trim.prepare_audio(&info.ffmpeg,path,info.duration,self.selected_audio.unwrap_or(0),info.source_channels as usize,ui.ctx());
+            }
+        }
+        if let Some(clip)=self.trim.clip() {
+            if self.edit_clip.as_ref().is_none_or(|old|old.path!=clip.path){
+                self.stop_playback();self.trim_preview_end=None;self.frame_job=None;self.wave_job=None;
+                self.waveform=None;self.wave_error=None;self.error=None;
+                self.position=self.position.min(clip.duration);self.selected_audio=Some(0);
+                if let Some(info)=&mut self.info{info.duration=clip.duration;}
+                self.edit_clip=Some(clip);
+            }
+        }
+        let playback_path=self.edit_clip.as_ref().map_or_else(||path.to_owned(),|clip|clip.path.clone());
         let mut failed=false;
         if let Some(job)=&self.playback {
             self.started=if job.control.paused.load(Ordering::Relaxed){None}else{*job.control.clock.lock().unwrap()};
@@ -473,7 +493,7 @@ impl Preview {
         if self.playback.is_some(){ui.ctx().request_repaint_after(Duration::from_millis(16));}
         if let Some(info)=&self.info {
             if info.video.is_none() && self.waveform.is_none() && self.wave_job.is_none() && self.wave_error.is_none() {
-                self.wave_job=Some(waveform(info,path,ui.ctx()));
+                self.wave_job=Some(waveform(info,&playback_path,ui.ctx()));
             }
         }
         if let Some(job)=&self.wave_job {match job.receiver.try_recv(){
@@ -482,7 +502,11 @@ impl Preview {
             Err(mpsc::TryRecvError::Empty)=>{ui.ctx().request_repaint_after(Duration::from_millis(50));}
         }}
         if let Some(end)=self.trim_preview_end {
-            if self.position_now()>=end {self.stop_playback();self.position=end;self.trim_preview_end=None;self.seek_frame(ui.ctx(),path);}
+            if self.position_now()>=end {
+                self.stop_playback();
+                if let Some((start,next_end))=self.trim_preview_next.take(){self.position=start;self.trim_preview_end=Some(next_end);self.play(ui.ctx(),&playback_path);}
+                else{self.position=end;self.trim_preview_end=None;}
+            }
         }
         if let Some(info)=&self.info {
             let position=self.position_now();
@@ -493,11 +517,11 @@ impl Preview {
                 self.volume=volume;if volume>0.0{self.remembered_volume=volume;}
 
             }
-            if let Some(position)=action.seek {self.trim_preview_end=None;self.playlist_seek(ui.ctx(),path,position);}
-            if action.toggle {self.trim_preview_end=None;if self.is_playing(){self.pause();}else{if self.info.as_ref().is_some_and(|info|self.position>=info.duration){self.position=0.0;}self.play(ui.ctx(),path);}}
-            if action.stop {self.trim_preview_end=None;self.stop_playback();}
+            if let Some(position)=action.seek {self.trim_preview_next=None;self.trim_preview_end=None;self.playlist_seek(ui.ctx(),&playback_path,position);}
+            if action.toggle {self.trim_preview_next=None;self.trim_preview_end=None;if self.is_playing(){self.pause();}else{if self.info.as_ref().is_some_and(|info|self.position>=info.duration){self.position=0.0;}self.play(ui.ctx(),&playback_path);}}
+            if action.stop {self.trim_preview_next=None;self.trim_preview_end=None;if action.rewind{self.stop_and_rewind();}else{self.stop_playback();}}
             if let Some((start,end))=action.audition {
-                self.stop_playback();self.position=start;self.trim_preview_end=Some(end);self.play(ui.ctx(),path);
+                self.stop_playback();self.position=start;self.trim_preview_next=action.audition_tail;self.trim_preview_end=Some(end);self.play(ui.ctx(),&playback_path);
             }
         }
     }
@@ -622,7 +646,7 @@ impl Preview {
         if self.playlist_mode {let arrow=Some(egui::Rect::from_center_size(egui::pos2(canvas.right()-12.0,canvas.center().y),egui::vec2(24.0,60.0)));self.overlay_rect=arrow;if self.overlay_interactive{overlay_exclusion=arrow;}}
         let (video_clicked,previous_audio,wave_seek)=ui.scope_builder(egui::UiBuilder::new().max_rect(canvas),|ui|{
             ui.set_clip_rect(canvas.intersect(ui.clip_rect()));
-        let wave_seek=self.waveform.as_ref().and_then(|wave|paint_waveform(ui,wave,position,duration));
+        let wave_seek=self.waveform.as_ref().and_then(|wave|ui.push_id(path,|ui|paint_waveform(ui,wave,position,duration,self.is_playing())).inner);
         if let Some(gesture)=&wave_seek {
             if gesture.started {self.pause();self.frame_job=None;self.seek_drag=Some((gesture.position,true));}
             position=gesture.position;
@@ -734,7 +758,7 @@ impl Preview {
             let video=self.has_video();
             let (rect,response)=ui.allocate_exact_size(egui::vec2((ui.available_width()-if video{28.0+ui.spacing().item_spacing.x}else{0.0}).max(1.0),28.0),egui::Sense::click_and_drag());
             ui.painter().rect_filled(rect,3.0,ui.visuals().extreme_bg_color);
-            if duration>0.0 {let mut fill=rect;fill.max.x=rect.left()+rect.width()*(position/duration).clamp(0.0,1.0) as f32;ui.painter().rect_filled(fill,3.0,ui.visuals().selection.bg_fill);
+            if duration>0.0 {let mut fill=rect;fill.max.x=rect.left()+rect.width()*(position/duration) as f32;ui.painter().rect_filled(fill,3.0,ui.visuals().selection.bg_fill);
                 if response.drag_started(){let playing=self.is_playing();self.pause();self.frame_job=None;self.seek_drag=Some((self.position,playing));}
                 if response.clicked() || response.dragged() || response.drag_stopped(){if let Some(pointer)=response.interact_pointer_pos(){position=((pointer.x-rect.left())/rect.width()).clamp(0.0,1.0) as f64*duration;if let Some(drag)=&mut self.seek_drag {drag.0=position;}if !response.dragged() || response.drag_stopped(){seek=true;}}}
                 if response.drag_stopped(){seek=true;}
@@ -765,7 +789,7 @@ impl Preview {
             let mut preference=volume_preference().lock().unwrap();
             if preference.volume!=self.volume || preference.remembered!=self.remembered_volume {preference.volume=self.volume;preference.remembered=self.remembered_volume;preference.dirty=true;}
         }
-        if !ui.input(|input|input.pointer.primary_down()){persist_volume();}
+        if !ui.input(|input|input.pointer.any_down()){persist_volume();}
     }
     fn display_frame(&mut self,ctx:&egui::Context,path:&Path,target:usize) {
         self.frame_job=None;
@@ -791,7 +815,7 @@ impl Preview {
     }
 
 }
-impl Drop for Preview {fn drop(&mut self){self.save_position();persist_volume();}}
+impl Drop for Preview {fn drop(&mut self){self.save_position();self.stop_playback();persist_volume();}}
 fn display_menu(ui:&mut egui::Ui,flip_x:&mut bool,flip_y:&mut bool) {
     ui.menu_button(crate::localization::tr("镜像"),|ui| {
         ui.checkbox(flip_x,crate::localization::tr("左右镜像"));
@@ -947,13 +971,14 @@ fn waveform(info:&Info,path:&Path,ctx:&egui::Context)->WaveJob {
     std::thread::spawn(move|| {
         let result=(|| {
             let mut reader=spawn_decoder(&worker,&ffmpeg,&path,0.0,false,None,&["-map".into(),"0:a:0".into(),"-vn".into(),"-ac".into(),channels.to_string(),"-ar".into(),"8000".into(),"-f".into(),"s16le".into()])?;
-            let mut peaks=vec![vec![0.0f32;2048];channels];let mut bytes=vec![0u8;16000*channels];let mut sample=0usize;
+            let bins=(duration*8000.0).ceil().clamp(2048.0,4_000_000.0) as usize;
+            let mut peaks=vec![vec![0.0f32;bins];channels];let mut bytes=vec![0u8;16000*channels];let mut sample=0usize;
             loop {
                 if worker.stop.load(Ordering::Relaxed){return Err("Cancelled".into());}
                 let mut count=0;while count<bytes.len(){let n=reader.read(&mut bytes[count..]).map_err(|e|e.to_string())?;if n==0{break;}count+=n;}
                 if count==0{break;}
                 for frame in bytes[..count-count%(channels*2)].chunks_exact(channels*2) {
-                    let column=((sample as f64/(duration*8000.0)*2048.0) as usize).min(2047);
+                    let column=((sample as f64/(duration*8000.0)*bins as f64) as usize).min(bins-1);
                     for channel in 0..channels {let offset=channel*2;let value=i16::from_le_bytes([frame[offset],frame[offset+1]]) as f32/32768.0;peaks[channel][column]=peaks[channel][column].max(value.abs());}
                     sample+=1;
                 }
@@ -1006,7 +1031,91 @@ pub(crate) fn paint_level_meter(ui:&mut egui::Ui,wave:Option<&[Vec<f32>]>,positi
     }
 }
 
-pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,start:&mut f64,end:&mut f64)->Option<f64> {
+#[derive(Clone,Copy,Default)]
+struct WaveViewport { offset:f64, span:f64, total:f64 }
+impl WaveViewport {
+    fn follow(&mut self,position:f64){self.offset=(position-self.span*0.5).clamp(0.0,(self.total-self.span).max(0.0));}
+    fn zoom(&mut self,scroll:f64,anchor:f64,minimum:f64){
+        let span=(self.span*(-scroll*0.005).exp()).clamp(minimum,self.total);
+        self.offset=(self.offset+anchor.clamp(0.0,1.0)*(self.span-span)).clamp(0.0,self.total-span);
+        self.span=span;
+    }
+}
+
+fn wave_view<T>(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,follow_playback:bool,paint:impl FnOnce(&mut egui::Ui,&[Vec<f32>],f64,f64,f64)->Option<T>)->Option<(T,f64)> {
+    if duration<=0.0{return None;}
+    let id=ui.make_persistent_id(("audio_wave_viewport",ui.ctx().viewport_id()));
+    let navigation_id=id.with("last_navigation");
+    let now=ui.input(|input|input.time);
+    let mut last_navigation=ui.ctx().data_mut(|data|data.get_temp::<f64>(navigation_id));
+    let mut view=ui.ctx().data_mut(|data|data.get_temp::<WaveViewport>(id)).unwrap_or_default();
+    if view.total!=duration||view.span<=0.0 {view=WaveViewport{offset:0.0,span:duration,total:duration};last_navigation=None;}
+    let rect=ui.available_rect_before_wrap();
+    let left=rect.left()+62.0_f32.min(rect.width()*0.3);
+    let width=(rect.right()-left).max(1.0);
+    let minimum=(width as f64/90.0*0.01).min(duration);
+    if ui.is_enabled(){ui.input_mut(|input|{
+        if let Some(pointer)=input.pointer.hover_pos().filter(|p|rect.contains(*p)){
+            let scroll=input.smooth_scroll_delta.y;
+            if scroll!=0.0 {
+                let anchor=((pointer.x-left)/width).clamp(0.0,1.0) as f64;
+                view.zoom(scroll as f64,anchor,minimum);
+                last_navigation=Some(now);
+                input.smooth_scroll_delta=egui::Vec2::ZERO;
+            }
+        }
+    });}
+    let zoomed=view.span<duration-0.000001;
+    if follow_playback&&zoomed {
+        if let Some(last)=last_navigation {
+            if now-last>=0.1&&!ui.input(|input|input.pointer.any_down()) {view.follow(position);}
+            else {ui.ctx().request_repaint_after(Duration::from_secs_f64((0.1-(now-last)).max(0.001)));}
+        }
+    }
+    let plot=egui::Rect::from_min_max(rect.min,egui::pos2(rect.right(),(rect.bottom()-if zoomed{18.0}else{0.0}).max(rect.top()+1.0)));
+    let columns=(width*ui.ctx().pixels_per_point()).ceil() as usize;
+    // Aggregate original fine-grained peaks into screen pixels, never stretch the overview bins.
+    let visible:Vec<Vec<f32>>=wave.iter().map(|peaks|(0..columns).map(|column|{
+        let first=(((view.offset+view.span*column as f64/columns as f64)/duration)*peaks.len() as f64).floor() as usize;
+        let last=(((view.offset+view.span*(column+1) as f64/columns as f64)/duration)*peaks.len() as f64).ceil() as usize;
+        peaks.get(first..last.max(first+1).min(peaks.len())).unwrap_or(&[]).iter().copied().fold(0.0_f32,f32::max)
+    }).collect()).collect();
+    let result=ui.scope_builder(egui::UiBuilder::new().max_rect(plot),|ui|paint(ui,&visible,position-view.offset,view.span,view.offset)).inner.map(|value|(value,view.offset));
+    if zoomed {
+        let track=egui::Rect::from_min_max(egui::pos2(left,rect.bottom()-14.0),rect.max);
+        let thumb_width=(track.width()*(view.span/duration) as f32).max(20.0).min(track.width());
+        let travel=(track.width()-thumb_width).max(1.0);
+        let x=track.left()+travel*(view.offset/(duration-view.span)) as f32;
+        let thumb=egui::Rect::from_min_size(egui::pos2(x,track.top()),egui::vec2(thumb_width,track.height()));
+        let response=ui.interact(track,id.with("scroll"),egui::Sense::click_and_drag());
+        if response.clicked()||response.dragged(){if let Some(pointer)=response.interact_pointer_pos(){
+            let grab_id=id.with("grab");
+            let grab=if response.drag_started(){let grab=if thumb.contains(pointer){pointer.x-thumb.left()}else{thumb_width*0.5};ui.ctx().data_mut(|d|d.insert_temp(grab_id,grab));grab}else{ui.ctx().data_mut(|d|d.get_temp::<f32>(grab_id)).unwrap_or(thumb_width*0.5)};
+            view.offset=(((pointer.x-track.left()-grab)/travel).clamp(0.0,1.0) as f64)*(duration-view.span);
+            last_navigation=Some(now);
+            ui.ctx().request_repaint();
+        }}
+        ui.painter().rect_filled(track,4.0,ui.visuals().extreme_bg_color);
+        ui.painter().rect_filled(thumb,4.0,ui.visuals().widgets.inactive.fg_stroke.color);
+    }
+    ui.ctx().data_mut(|data|data.insert_temp(id,view));
+    ui.ctx().data_mut(|data|{if let Some(last)=last_navigation{data.insert_temp(navigation_id,last);}else{data.remove::<f64>(navigation_id);}});
+    ui.allocate_rect(rect,egui::Sense::hover());
+    result
+}
+
+pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,start:&mut f64,end:&mut f64,interval:bool,playing:bool)->Option<f64> {
+    wave_view(ui,wave,position,duration,playing,|ui,wave,position,span,origin|{
+        let mut a=*start-origin;let mut b=*end-origin;
+        let before=(a,b);
+        let seek=paint_trim_waveform_local(ui,wave,position,span,&mut a,&mut b,interval,origin);
+        if a!=before.0{*start=(a+origin).clamp(0.0,duration);}
+        if b!=before.1{*end=(b+origin).clamp(0.0,duration);}
+        seek
+    }).map(|(seek,origin)|seek+origin)
+}
+
+fn paint_trim_waveform_local(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,start:&mut f64,end:&mut f64,interval:bool,origin:f64)->Option<f64> {
     let rect=ui.available_rect_before_wrap();
     let left=rect.left()+62.0_f32.min(rect.width()*0.3);
     let width=(rect.right()-left).max(1.0);
@@ -1017,11 +1126,12 @@ pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64
     if duration>0.0 {
         for first in [true,false] {
             let time=if first {*start}else{*end};
-            let x=left+width*(time/duration).clamp(0.0,1.0) as f32;
+            if time<0.0||time>duration {continue;}
+            let x=left+width*(time/duration) as f32;
             // The triangle sits outside the kept range and points inward.
             let hit=egui::Rect::from_min_max(egui::pos2(x-10.0,rect.top()),egui::pos2(x+10.0,bottom));
             let grip=egui::Rect::from_center_size(egui::pos2(x+if first {-18.0}else{18.0},center),egui::vec2(32.0,36.0));
-            let response=ui.interact(hit,ui.make_persistent_id(("trim_boundary",first)),egui::Sense::click_and_drag()).on_hover_text(crate::localization::tr(if first {"保留起点"}else{"保留终点"})).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            let response=ui.interact(hit,ui.make_persistent_id(("trim_boundary",first)),egui::Sense::click_and_drag()).on_hover_text(crate::localization::tr(if interval {if first {"区间起点"}else{"区间终点"}}else if first {"保留起点"}else{"保留终点"})).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             let grip_response=ui.interact(grip,ui.make_persistent_id(("trim_grip",first)),egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             boundary_active|=ui.input(|input|input.pointer.hover_pos().is_some_and(|pos|hit.contains(pos)||grip.contains(pos)));
             boundary_active|=response.hovered() || response.is_pointer_button_down_on() || response.dragged() || response.drag_stopped() || grip_response.hovered() || grip_response.is_pointer_button_down_on() || grip_response.dragged() || grip_response.drag_stopped();
@@ -1030,8 +1140,8 @@ pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64
                     let offset=if grip_response.dragged(){if first {-18.0}else{18.0}}else{0.0};
                     let time=((pointer.x-offset-left)/width).clamp(0.0,1.0) as f64*duration;
                     let gap=0.001_f64.min(duration);
-                    if first {*start=time.clamp(0.0,(*end-gap).max(0.0));}
-                    else {*end=time.clamp((*start+gap).min(duration),duration);}
+                    if first {*start=if interval{time}else{time.clamp(0.0,(*end-gap).max(0.0))};}
+                    else {*end=if interval{time}else{time.clamp((*start+gap).min(duration),duration)};}
                 }
             }
         }
@@ -1040,18 +1150,19 @@ pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64
         if let Some(pointer)=background.interact_pointer_pos() {
             let time=((pointer.x-left)/width).clamp(0.0,1.0) as f64*duration;
             let gap=0.001_f64.min(duration);
-            let playhead=left+width*(position/duration).clamp(0.0,1.0) as f32;
-            if background.clicked_by(egui::PointerButton::Primary) && !(playhead-14.0..=playhead+30.0).contains(&pointer.x) {*start=time.clamp(0.0,(*end-gap).max(0.0));}
-            if background.clicked_by(egui::PointerButton::Secondary) {*end=time.clamp((*start+gap).min(duration),duration);}
+            let playhead=left+width*(position/duration) as f32;
+            if background.clicked_by(egui::PointerButton::Primary) && !(playhead-14.0..=playhead+30.0).contains(&pointer.x) {*start=if interval{time}else{time.clamp(0.0,(*end-gap).max(0.0))};}
+            if background.clicked_by(egui::PointerButton::Secondary) {*end=if interval{time}else{time.clamp((*start+gap).min(duration),duration)};}
         }
     }
-    let seek=paint_waveform_interactive(ui,wave,position,duration,!boundary_active,false);
+    let seek=paint_waveform_interactive(ui,wave,position,duration,!boundary_active,false,origin);
     if duration>0.0 {
-        let x1=left+width*(*start/duration).clamp(0.0,1.0) as f32;
-        let x2=left+width*(*end/duration).clamp(0.0,1.0) as f32;
-        let painter=ui.painter_at(rect);
-        for (a,b) in [(left,x1),(x2,rect.right())] {
-            if b>a {painter.rect_filled(egui::Rect::from_min_max(egui::pos2(a,rect.top()),egui::pos2(b,bottom)),0.0,egui::Color32::from_black_alpha(150));}
+        let x1=left+width*(*start/duration) as f32;
+        let x2=left+width*(*end/duration) as f32;
+        let painter=ui.painter_at(egui::Rect::from_min_max(egui::pos2(left,rect.top()),rect.max));
+        let masks=if interval{vec![(x1.min(x2),x1.max(x2))]}else{vec![(left,x1),(x2,rect.right())]};
+        for (a,b) in masks {
+            if b>a {painter.rect_filled(egui::Rect::from_min_max(egui::pos2(a,rect.top()),egui::pos2(b,bottom)),0.0,egui::Color32::from_black_alpha(77));}
         }
         let color=egui::Color32::from_rgb(45,255,95);
         for (x,first) in [(x1,true),(x2,false)] {
@@ -1065,10 +1176,10 @@ pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64
 }
 
 struct WaveSeek {position:f64,started:bool,finished:bool}
-fn paint_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64)->Option<WaveSeek> {
-    paint_waveform_interactive(ui,wave,position,duration,true,true)
+fn paint_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,playing:bool)->Option<WaveSeek> {
+    wave_view(ui,wave,position,duration,playing,|ui,wave,position,span,origin|paint_waveform_interactive(ui,wave,position,span,true,true,origin)).map(|(mut seek,origin)|{seek.position+=origin;seek})
 }
-fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64,duration:f64,allow_seek:bool,allow_background:bool)->Option<WaveSeek> {
+fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64,duration:f64,allow_seek:bool,allow_background:bool,origin:f64)->Option<WaveSeek> {
     let height=ui.available_height().max(1.0);
     let (rect,response)=ui.allocate_exact_size(egui::vec2(ui.available_width(),height),egui::Sense::hover());
     response.on_hover_text(crate::localization::tr("dBFS 为源音频近似峰值，不受播放音量影响"));
@@ -1077,12 +1188,12 @@ fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64
     let wave_height=(height-26.0).max(1.0);
     let mut gesture=None;
     if duration>0.0 && allow_seek {
-        let x=plot_left+(position/duration).clamp(0.0,1.0) as f32*plot_width;
-        let handle_rect=egui::Rect::from_min_max(egui::pos2(x-14.0,rect.top()),egui::pos2(x+30.0,rect.top()+wave_height+5.0));
+        let x=plot_left+(position/duration) as f32*plot_width;
+        let handle_rect=egui::Rect::from_min_max(egui::pos2(x-14.0,rect.top()),egui::pos2(x+30.0,rect.top()+wave_height+5.0)).intersect(egui::Rect::from_min_max(egui::pos2(plot_left,rect.top()),rect.max));
         let handle=ui.interact(handle_rect,ui.make_persistent_id("waveform_playhead"),egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         // Disjoint hit regions: a press on the playhead cannot also become a
         // background seek, even when the drag leaves the handle's original area.
-        for (side,left,right) in [(0,plot_left,handle_rect.left().max(plot_left)),(1,handle_rect.right().min(rect.right()),rect.right())] {
+        for (side,left,right) in [(0,plot_left,handle_rect.left().clamp(plot_left,rect.right())),(1,handle_rect.right().clamp(plot_left,rect.right()),rect.right())] {
             if !allow_background {continue;}
             if right<=left{continue;}
             let area=egui::Rect::from_min_max(egui::pos2(left,rect.top()),egui::pos2(right,rect.bottom()));
@@ -1114,8 +1225,17 @@ fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64
             }
         }
         if row_height>=100.0 {painter.text(egui::pos2(plot_left-5.0,center),egui::Align2::RIGHT_CENTER,"−∞",egui::FontId::proportional(10.0),ui.visuals().weak_text_color());}
-        for (index,peak) in peaks.iter().enumerate(){let x=plot_left+index as f32/peaks.len() as f32*plot_width;let amplitude=peak*full_height;
-            painter.line_segment([egui::pos2(x,center-amplitude),egui::pos2(x,center+amplitude)],egui::Stroke::new(1.0_f32,egui::Color32::from_rgb(45,125,250)));}
+        // A shared-edge triangle mesh avoids antialiased line fringes between columns.
+        // Use physical pixel boundaries so fractional DPI does not introduce periodic gaps.
+        let mut mesh=egui::Mesh::default();
+        let scale=ui.ctx().pixels_per_point();
+        for (index,peak) in peaks.iter().enumerate(){
+            let left=wave_column_edge(plot_left,plot_width,index,peaks.len(),scale);
+            let right=wave_column_edge(plot_left,plot_width,index+1,peaks.len(),scale);
+            let amplitude=peak.clamp(0.0,1.0)*full_height;
+            mesh.add_colored_rect(egui::Rect::from_min_max(egui::pos2(left,center-amplitude),egui::pos2(right,center+amplitude)),egui::Color32::from_rgb(45,125,250));
+        }
+        painter.add(egui::Shape::mesh(mesh));
         let channel_label=if wave.len()==1{"Mono"}else if channel==0{"L"}else{"R"};
         painter.text(egui::pos2(plot_left+8.0,top+3.0),egui::Align2::LEFT_TOP,channel_label,egui::FontId::proportional(12.0),ui.visuals().text_color());
     }
@@ -1136,13 +1256,14 @@ fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64
             painter.line_segment([egui::pos2(x,rect.top()),egui::pos2(x,ruler_top)],egui::Stroke::new(0.5_f32,ui.visuals().widgets.noninteractive.bg_stroke.color));
             painter.line_segment([egui::pos2(x,ruler_top),egui::pos2(x,ruler_top+5.0)],egui::Stroke::new(1.0_f32,color));
             if tick==0 || rect.right()-x>75.0 {
-                painter.text(egui::pos2(x,ruler_top+8.0),if tick==0{egui::Align2::LEFT_TOP}else{egui::Align2::CENTER_TOP},ruler_time(seconds,step),egui::FontId::proportional(11.0),color);
+                painter.text(egui::pos2(x,ruler_top+8.0),if tick==0{egui::Align2::LEFT_TOP}else{egui::Align2::CENTER_TOP},ruler_time(seconds+origin,step),egui::FontId::proportional(11.0),color);
             }
             for minor in 1..5 {let t=seconds+step*minor as f64/5.0;if t>=duration{break;}let x=plot_left+(t/duration) as f32*plot_width;
                 painter.line_segment([egui::pos2(x,ruler_top),egui::pos2(x,ruler_top+3.0)],egui::Stroke::new(0.5_f32,color));}
         }
-        if plot_width>=150.0 {painter.text(egui::pos2(rect.right(),ruler_top+8.0),egui::Align2::RIGHT_TOP,ruler_time(duration,step),egui::FontId::proportional(11.0),color);}
-        let x=plot_left+(position/duration).clamp(0.0,1.0) as f32*plot_width;
+        if plot_width>=150.0 {painter.text(egui::pos2(rect.right(),ruler_top+8.0),egui::Align2::RIGHT_TOP,ruler_time(duration+origin,step),egui::FontId::proportional(11.0),color);}
+        let painter=ui.painter_at(egui::Rect::from_min_max(egui::pos2(plot_left,rect.top()),rect.max));
+        let x=plot_left+(position/duration) as f32*plot_width;
         let center_y=rect.top()+wave_height*0.5;
         let handle=egui::Rect::from_center_size(egui::pos2(x+2.0,center_y),egui::vec2(25.6,25.6));
         let stroke=egui::Stroke::new(1.5_f32,egui::Color32::from_rgb(255,175,40));
@@ -1163,6 +1284,10 @@ fn paint_waveform_interactive(ui:&mut egui::Ui,wave:&[Vec<f32>],mut position:f64
     gesture
 }
 
+fn wave_column_edge(left:f32,width:f32,index:usize,count:usize,scale:f32)->f32 {
+    ((left+width*index as f32/count.max(1) as f32)*scale).round()/scale
+}
+
 fn paint_smooth_cursor(painter:&egui::Painter,x:f32,top:f32,bottom:f32,stroke:egui::Stroke) {
     let half=stroke.width*0.5;
     // A filled polygon retains fractional positions; thin line primitives may
@@ -1177,6 +1302,50 @@ fn ruler_time(seconds:f64,step:f64)->String {
 fn fit_scale(native:egui::Vec2,available:egui::Vec2)->f32 {(available.x/native.x).min(available.y/native.y)}
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn waveform_follow_centers_playhead_and_clamps_at_both_ends(){
+        let mut view=super::WaveViewport{offset:0.0,span:10.0,total:80.0};
+        view.follow(23.0);assert_eq!(view.offset,18.0);
+        view.follow(2.0);assert_eq!(view.offset,0.0);
+        view.follow(79.0);assert_eq!(view.offset,70.0);
+        view.span=80.0;view.follow(40.0);assert_eq!(view.offset,0.0);
+    }
+    #[test]
+    fn stop_rewinds_and_clears_pending_trim_playback(){
+        let mut player=super::Preview::default();
+        player.position=13.457;player.initial_seek=Some(8.0);player.resume_position=Some(13.457);
+        player.trim_preview_end=Some(20.0);player.trim_preview_next=Some((25.0,30.0));
+        player.stop_and_rewind();
+        assert_eq!(player.position_now(),0.0);
+        assert!(!player.is_playing());
+        assert!(player.initial_seek.is_none()&&player.resume_position.is_none());
+        assert!(player.trim_preview_end.is_none()&&player.trim_preview_next.is_none());
+    }
+    #[test]
+    fn waveform_columns_cover_fractional_dpi_without_gaps(){
+        for scale in [1.0,1.25,1.5,2.0] {
+            let count=(721.37_f32*scale).ceil() as usize;
+            let edges:Vec<_>=(0..=count).map(|i|super::wave_column_edge(71.23,721.37,i,count,scale)).collect();
+            for pair in edges.windows(2){
+                assert!(pair[1]>=pair[0]);
+                let pixels=(pair[1]-pair[0])*scale;
+                assert!(pixels<=1.001 && (pixels-pixels.round()).abs()<0.001);
+            }
+        }
+    }
+    #[test]
+    fn waveform_zoom_preserves_anchor_and_limits_visible_range(){
+        let mut view=super::WaveViewport{offset:0.0,span:80.0,total:80.0};
+        let anchor=0.37;
+        let time=view.offset+view.span*anchor;
+        view.zoom(120.0,anchor,0.1);
+        assert!((view.offset+view.span*anchor-time).abs()<1e-10);
+        view.zoom(100000.0,anchor,0.1);
+        assert_eq!(view.span,0.1);
+        assert!(view.offset>=0.0&&view.offset+view.span<=view.total);
+        view.zoom(-100000.0,anchor,0.1);
+        assert_eq!(view.span,80.0);assert_eq!(view.offset,0.0);
+    }
     #[test]
     fn detached_trim_has_independent_transport_and_waveform() {
         let mut source=super::Preview::default();

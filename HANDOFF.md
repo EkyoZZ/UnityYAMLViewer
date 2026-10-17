@@ -1891,3 +1891,83 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 关于默认显示 1.2.3 / 1.2.2，1.2.1 移入默认收起历史，旧摘要及七语言保留；当前音频摘要七语言完整。版本索引和 CHANGELOG 已加入 1.2.3；README 不新增版本日志。
 - cargo check --locked --offline 与 cargo check --tests --locked --offline 通过，915 项翻译结构 / 唯一键和关于窗口顺序及折叠重置源码检查通过，未运行 GUI 或测试 EXE。日志 target/v1.2.3-check.log、target/v1.2.3-check-tests.log。
 - 现有 target/release/unity_yaml_viewer.exe 仍为升级前 1.2.2 体验构建（22534144 字节，SHA-256 A8E5738FB19A9139968D27D50545A7CEB1514951B8C3E6876DCE3406F447700A），不得标注为 1.2.3 产物。正式发布状态未改变。
+
+## 2026-10-17 1.2.3 音频编辑能力实现
+
+- 新增 src/audio_edit.rs：临时目录浮点 PCM 不可变版本、后台头尾 / 区间剪切、片段并集拼接、三条淡入淡出曲线与整体 dB、按窗口 Undo / Redo。历史沿用设置中的缓存撤销步数，编辑成功提交、失败恢复，拖动合并一步，新编辑清空重做链。
+- 头尾 / 区间复用主题式分段 Tab；区间反转左右键设置目标，允许交叉，按并集保留两端，重叠不重复音频。剪切后刷新实际音频 / 波形 / 时长。淡入 / 淡出与音量(dB)各自原生设置窗口，设置时预览包络，确认后生成新缓存版本，取消恢复。黑色遮罩 30% 不透明。
+- 保存当前已提交完整时间轴，未点击剪切仅为范围预览；另存为读取临时音频而非重新读取原文件，保留原文件、最终编码一次。缓存由当前状态 / 历史 / 工作线程 / 导出引用共同持有，关闭尽量清理，Windows 短暂句柄占用重试，崩溃仍可能残留。
+- cargo check / cargo check --tests 仅编译检查通过；新增 5 项编辑状态、包络、曲线、区间并集与 FFmpeg 缓存历史测试源码，尚未运行测试 EXE。本轮未构建应用 EXE。
+- 实际 FFmpeg 参数验证：4 秒音频删除中间 2 秒，缓存 2.000000 秒；+6.0206 dB 与 1 秒淡入 / 淡出抽样振幅 0、0.25、0.5、0.25，符合预期。曾发现 aeval 声道布局导致 concat 失败，已补 c=same 后重测通过。测试资源 target/audio-edit-smoke-e5604f5b38e7467cb164effdf1f8b272/。
+- 待验证实际 GUI 编辑、应用 / 取消、Ctrl+Z / Ctrl+Y、缓存释放、多声道与最终另存为流程。完整限制见 docs/versions/1.2.3.md；七语言及 README 中英同步，关于默认当前 / 上一版和设置末两项顺序保持。
+
+## 2026-10-17 1.2.3 音频编辑 EXE 与针对性测试完成
+
+- 用户明确授权后，构建前检查无相关程序进程、目标 Release EXE 独占读写通过；cargo build --release --locked --offline 成功（21.36 秒），保留既有警告。产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22672384 字节，SHA-256 55CD375A4899184CAF0F35D2FA569DDDDE49DA0C7BACD23973A17EF48BC0E51A。日志 target/v1.2.3-audio-edit-build.log。
+- 测试编译前再次检查程序进程及 Release / 测试 EXE 独占访问，通过后 cargo test --release --locked --offline audio_edit::tests -- --nocapture：5 passed，0 failed，269 filtered out，执行 0.72 秒；日志 target/v1.2.3-audio-edit-tests.log。另使用已生成测试 EXE 以 Start-Process -Wait -PassThru 执行两个独立会话测试，各退出码 0；日志 target/v1.2.3-lifecycle-1.log、target/v1.2.3-lifecycle-2.log。
+- 仅本地体验构建与针对性测试，不标记正式发布；设置弹窗实际布局、鼠标操作、快捷键焦点、声音试听及另存为整条 GUI 流程待体验确认。
+
+## 2026-10-17 1.2.3 选区 dB 与统一左右键构建
+
+- 本轮按用户明确授权，构建前检查无相关程序进程、Release / 测试 EXE 独占访问通过；cargo build --release --locked --offline 成功（19.73 秒），再次占用检查后 cargo test --release --locked --offline audio_edit::tests -- --nocapture：6 passed，0 failed，269 filtered out，执行 0.90 秒。保留既有警告。
+- 最新产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22769664 字节，SHA-256 23A47740274074ABE70D64E0DB1AA365D0F74BBF0EE4DF5AA9CA7412ADFC6B37；日志 target/v1.2.3-audio-edit-build.log、target/v1.2.3-audio-edit-tests.log。包含左右键统一与反向选区归一化、选区 dB、未选区间时作用于当前剪切阶段整段、弹窗作用范围提示。真实缓存测试验证区间降增益不改变区间外样本，并且 Undo / Redo 恢复对应临时版本、时长仍为剪切后的 2 秒、源文件不变。
+- 本地构建与针对性测试完成；实际 GUI 选区操作、设置弹窗、试听和另存为完整流程仍待验证，未发布。
+
+## 参数窗与时长显示构建（2026-10-17）
+
+- 用户明确授权后检查进程及目标 EXE 独占访问，无占用，cargo build --release --locked --offline 成功（20.03 秒，4 项警告）。包含淡入淡出 / 音量参数窗布局、默认选区时长、居中按钮及模式 Tab 后的区间 / 剪切后时长。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22701056 字节，SHA-256 9CA479EC555281DA94AFD45D46F65BEB60EAB44BF145980F1C87A8B1082C4B4C。日志 target/v1.2.3-audio-edit-build.log。未运行 GUI 验证，未发布。
+
+## 音效参数窗置顶构建（2026-10-17）
+
+- 用户明确授权后检查目标进程和 EXE 独占访问，无占用，cargo build --release --locked --offline 成功。包含淡入、淡出、音量(dB)参数窗 AlwaysOnTop 层级。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22660096 字节，SHA-256 E12E918E14A1B492A82A559CCFB061011DA93B5AD95E0E99065DE4BF04BDA93F。构建日志 target/v1.2.3-audio-edit-build.log。实际 Windows 置顶与多窗口切换待 GUI 验证，未发布。
+
+## 时间轴缩放与编辑命名构建（2026-10-17）
+
+- 用户明确授权后检查目标进程和 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.95 秒，4 项警告）。包含主窗口音频 / 音频编辑的滚轮缩放、水平浏览滑条，以及音频编辑 / 视频编辑入口和标题。
+- 重新检查占用后执行 cargo test --release --locked --offline waveform_zoom_preserves_anchor_and_limits_visible_range -- --nocapture：1 项通过，0 失败，275 项过滤。验证鼠标时间锚点保持、最大缩放边界与缩回全长；不能代替 GUI 交互验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22809088 字节，SHA-256 329626F75EB17D8E097A221ED6A28EFBCCBBDEE28D2E15000D748853E99CAA64。日志 target/v1.2.3-audio-edit-build.log、target/v1.2.3-wave-zoom-tests.log。实际窗口缩放、滑条、拖动、多语言及长音频性能待 GUI 验证，未发布。
+## 曲线预设与波形填充构建（2026-10-17）
+
+- 用户明确授权后检查进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（18.55 秒，4 项警告）。包含七种淡入淡出下拉预设、共享波形填充网格及物理像素对齐修复。
+- 再次检查占用后编译并运行 all_fade_presets 测试，1 项通过；随后直接运行同一最新测试程序的 waveform_columns_cover_fractional_dpi_without_gaps，1 项通过。覆盖七条曲线端点 / 有界 / 单调性及四种 DPI 列边缘覆盖。新增曲线的实际 FFmpeg 执行、GUI 预设选择与用户音频缝隙仍待验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22784512 字节，SHA-256 7806B15F7DCBDF2C2E8A59CEB14311072E85067EA9CFAE860DE1BA4B96D706F8。日志 target/v1.2.3-audio-edit-build.log、target/v1.2.3-fade-presets-tests.log、target/v1.2.3-wave-gaps-tests.log。未发布。
+## 自定义曲线与停止归零构建（2026-10-17）
+
+- 用户明确授权后检查进程及目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（18.74 秒，5 项警告）。包含可编辑淡入淡出曲线、预设 / 自定义切换及音频编辑停止归零。
+- 再次检查占用后 cargo test --release --locked --offline custom_curve_interpolates_and_survives_history -- --nocapture：1 项通过；直接运行最新测试程序的 stop_rewinds_and_clears_pending_trim_playback：1 项通过。分别覆盖自定义插值与 Undo / Redo 点集恢复，以及停止归零 / 清除片段续播状态。实际 FFmpeg 自定义曲线执行与 GUI 交互仍待验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22789632 字节，SHA-256 60B3835778D3C73C79D066C9F2D7FE9044F3B1B1D2807AB779419E3F262BC9AB。日志 target/v1.2.3-audio-edit-build.log、target/v1.2.3-custom-curve-tests.log、target/v1.2.3-stop-rewind-tests.log。未发布。
+## 贝塞尔手柄构建与 FFmpeg 兼容修复
+
+- 用户明确授权后检查进程及 EXE 独占访问，无占用并构建 Release。首次音频测试发现当前 FFmpeg 已移除 filter_complex_script 旧参数，改为优先使用 -/filter_complex 文件参数，不识别时回退旧参数；修正后重新检查占用并构建成功。
+- cargo test --release --locked --offline audio_edit::tests -- --nocapture：9 项通过，0 失败，包含曲率手柄、历史恢复、预设及真实 FFmpeg 缓存剪切 / 效果。GUI 手柄交互与完整另存为流程仍待验证，未发布。
+- 最终产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22744576 字节，SHA-256 FFEE892CE2DC6922EAAAF715A78DDB598906EA22EF143371BBC26C236F1CA8FE。日志 target/v1.2.3-audio-edit-build.log、target/v1.2.3-bezier-tests.log。
+
+## 播放居中跟随与端点幅度构建（2026-10-18）
+
+- 用户明确授权后检查程序进程及目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.61 秒，6 项警告）。包含淡入起点 / 淡出终点上下拖动、主窗口及音频编辑播放时缩放后 0.1 秒居中跟随；全长未放大时不跟随，两端限制在实际时间轴范围。
+- 重新检查占用后编译运行 waveform_follow_centers_playhead_and_clamps_at_both_ends：1 项通过；直接运行最新测试程序 audio_edit::tests：9 项通过、0 失败。覆盖跟随中心 / 两端计算，以及曲线、历史与真实 FFmpeg 缓存处理。0.1 秒交互时机、实际端点拖动、播放 / 暂停及手动浏览仍待 GUI 验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22820864 字节，SHA-256 BB3F7906E6C47E8A3008F85A79BA1B7D194DC3AED4E4EDFE0ECCFCDE0A461B05。日志 target/v1.2.3-audio-edit-build.log、target/v1.2.3-wave-follow-tests.log、target/v1.2.3-bezier-tests.log。未发布。
+## 页签分组与整组拖拽构建（2026-10-18）
+
+- 用户明确授权后检查程序进程及目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.13 秒，6 项警告）。包含同后缀超过 3 个自动折叠、统一单成员 / 多成员页签组、整组拖拽、逐项关闭至 3 个原位展开，以及关闭全部期间保持成组与未保存提醒。
+- 再次检查程序及测试 EXE 占用后执行 cargo test --release --locked --offline tab_reorder_tests -- --nocapture：3 项通过，0 失败。覆盖整组 / 单成员移动、首尾与跨行插入、成员原位归拢与单成员显示判断；实际 GUI 拖拽、菜单、批量关闭与保存 / 取消、多语言仍待验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22823936 字节，SHA-256 F886E9F4957A2836B6AB0B4F019BBDA319A289089E17B3AD6D984201896228DE。日志 target/tab-group-release-build.log、target/tab-group-tests.log。未发布。
+
+## 页签菜单样式与矢量图标构建（2026-10-18）
+
+- 用户明确授权后检查程序进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（18.59 秒，6 项警告）。包含页签 SVG 下拉 / 关闭图标，以及参照最近打开的自适应宽度、左对齐单行截断、路径提示和无边框分组菜单。
+- 本轮仅样式调整，cargo check --tests --locked --offline 已通过，未重复运行排序测试。实际菜单、深浅主题、DPI 与拖拽前景图标仍待 GUI 验证，未发布。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22854144 字节，SHA-256 7A916C67781E233BF58CA2F8634C4F67BFD92F791DE3BE75DC218C25DACC7FC3。构建日志 target/tab-menu-style-release-build.log。
+
+## 文件堆叠数量与页签高度修复构建（2026-10-18）
+
+- 用户明确授权后检查程序进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.95 秒，6 项警告）。包含文件堆叠 SVG 图标、组内数量与多位数字宽度适配，以及选中 / 悬停图标绘制不再推进父布局的高度修复。
+- 再次检查程序与测试 EXE 占用后执行 cargo test --release --locked --offline tab_reorder_tests -- --nocapture：4 项通过，0 失败。覆盖整组排序、跨行插入、原位归拢，以及三个选中状态和四个鼠标位置下父布局矩形不变（含两位数数量）。实际 GUI、DPI、文件关闭后的数量更新和拖拽动画仍待验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22856192 字节，SHA-256 B7A271C2BF180899E5F7111796385CD9387A46062C0B4DEADA2ABAF4FE4C6D20。日志 target/tab-stack-release-build.log、target/tab-stack-tests.log。未发布。
+
+## 文件堆叠效果反馈与提交（2026-10-18）
+
+- 用户实际查看最新构建后反馈文件堆叠效果满意，并授权 Git 提交和推送，明确不发布版本。该反馈确认整体显示效果，不等同于全部 GUI 边界场景、七语言或 DPI 验证完成。
+- 本次提交包含此前音频编辑完善、文件堆叠数量、整组拖拽与页签栏高度修复；版本仍为 1.2.3 开发中 / 未发布，不创建发布标签或 Release。
