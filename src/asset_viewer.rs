@@ -2,6 +2,22 @@
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, mpsc}};
 use eframe::egui::{self, Color32};
 pub(crate) mod nine_slice;
+mod svg_preview;
+pub(crate) mod pdf_preview;
+pub fn is_pdf(path: &Path) -> bool { extension(path) == "pdf" }
+
+/// Shared by tabs, grouped file rows, and preview file headings.
+pub(crate) fn file_context_menu(response:&egui::Response,path:&Path){
+    response.context_menu(|ui|{
+        if ui.add_enabled(path.is_file(),egui::Button::new(crate::localization::tr("打开文件所在目录"))).clicked(){
+            let result=crate::media_tools::command("explorer.exe").arg("/select,").arg(path).spawn();
+            if let Err(error)=result{ui.ctx().data_mut(|data|data.insert_temp(response.id.with("file_location_error"),error.to_string()));}
+            else{ui.close_menu();}
+        }
+        if ui.button(crate::localization::tr("复制文件地址")).clicked(){ui.ctx().copy_text(path.to_string_lossy().into_owned());ui.close_menu();}
+        if let Some(error)=ui.ctx().data(|data|data.get_temp::<String>(response.id.with("file_location_error"))){ui.colored_label(ui.visuals().error_fg_color,error);}
+    });
+}
 
 /// egui's painter blends in gamma space, so asset RGB must be premultiplied there.
 /// Color32::from_rgba_unmultiplied instead premultiplies in linear space.
@@ -10,9 +26,10 @@ pub(crate) fn preview_color([r,g,b,a]: [u8;4]) -> Color32 {
     Color32::from_rgba_premultiplied(multiply(r),multiply(g),multiply(b),a)
 }
 
-pub fn is_image(path: &Path) -> bool {
+pub fn is_bitmap(path: &Path) -> bool {
     matches!(extension(path).as_str(), "png" | "jpg" | "jpeg" | "tga" | "bmp" | "webp")
 }
+pub fn is_image(path: &Path) -> bool { is_bitmap(path) || extension(path) == "svg" }
 
 #[cfg(test)]
 mod tests {
@@ -34,6 +51,7 @@ mod tests {
             assert!(is_text(Path::new(&format!("example.{extension}"))));
         }
         assert!(is_image(Path::new("texture.JPG")));
+        assert!(is_image(Path::new("vector.SVG")));
         assert!(!is_text(Path::new("program.exe")));
     }
 }
@@ -111,10 +129,14 @@ pub struct Assets {
     media: HashMap<PathBuf, crate::media_preview::Preview>,
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
+    pdfs: HashMap<PathBuf, pdf_preview::Preview>,
+    svgs: HashMap<PathBuf, svg_preview::Preview>,
     spine: HashMap<PathBuf, Result<crate::spine_preview::Preview,String>>,
 
 }
 impl Assets {
+    pub fn show_pdf_fullscreen(&mut self,ui:&mut egui::Ui,path:&Path){self.pdfs.entry(path.to_owned()).or_default().show(ui,path);}
+    pub fn retry_pdf_components(&mut self){for preview in self.pdfs.values_mut(){preview.retry_component();}}
     pub fn request_media_playback(&mut self, path: &Path) {
         self.playlists.request(path);
         if let Some(preview) = self.media.get_mut(path) { preview.request_playback(); }
@@ -147,7 +169,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); }
+    pub fn forget(&mut self, path: &Path) { self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -158,6 +180,7 @@ impl Assets {
         if reload{self.material_graphs.remove(path);}
     }
     pub fn open_slice_preview(&mut self,path:&Path,request:nine_slice::processing::Request,ctx:&egui::Context)->bool {
+        if !is_bitmap(path) { return false; }
         if self.images.get(path).is_some_and(|t|t.editor.open) {crate::native_window::wake(ctx,egui::Id::new(("nine_slice",path)));return true}
         if self.images.values().filter(|t|t.editor.open||t.editor.busy()).count()>=10 {return false}
         let tab=self.images.entry(path.to_owned()).or_default();tab.channel=Channel::Rgba;
@@ -179,6 +202,7 @@ impl Assets {
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
+        self.svgs.retain(|other, _| other == path);
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
             if other != path&&!tab.editor.open&&!tab.editor.busy() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
@@ -189,7 +213,7 @@ impl Assets {
             self.playlists.show_creator(ui,path,preview);
             return;
         }
-        ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
+        if !is_pdf(path){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
         self.models.retain(|other,_|other==path);
         if crate::model_preview::is_model(path) {
             let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
@@ -215,6 +239,13 @@ impl Assets {
             return;
         }
         self.spine.clear();
+        self.pdfs.retain(|other, _| other == path);
+        if is_pdf(path) { self.pdfs.entry(path.to_owned()).or_default().show(ui,path); return; }
+        self.svgs.retain(|other, _| other == path);
+        if extension(path) == "svg" {
+            self.svgs.entry(path.to_owned()).or_default().show(ui, path);
+            return;
+        }
         if !is_image(path) {
             egui::ScrollArea::both().id_salt(("reference_text", path)).auto_shrink([false, false]).show(ui, |ui| {
                 let language = syntax_language(path);

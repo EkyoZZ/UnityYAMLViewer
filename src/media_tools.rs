@@ -78,7 +78,8 @@ fn fresh_windows_paths()->Vec<std::ffi::OsString> {
 #[derive(Default)]
 pub struct DecoderSettings {
     installed:Option<bool>,
-    pending:Option<mpsc::Receiver<Result<bool,String>>>,
+    pending:Option<mpsc::Receiver<Result<(Option<PathBuf>,Option<PathBuf>),String>>>,
+    paths:(Option<PathBuf>,Option<PathBuf>),
     installing:bool,
     error:Option<String>,
 }
@@ -87,7 +88,7 @@ impl DecoderSettings {
         if self.pending.is_some() {return;}
         self.error=None;
         self.installing=install;
-        let notify_ready=self.installed!=Some(true);
+
         let (sender,receiver)=mpsc::channel();self.pending=Some(receiver);
         let ctx=ctx.clone();
         std::thread::spawn(move|| {
@@ -99,24 +100,26 @@ impl DecoderSettings {
                         return Err(format!("WinGet ({})\n{}\n{}",output.status,String::from_utf8_lossy(&output.stdout),String::from_utf8_lossy(&output.stderr)));
                     }
                 }
-                Ok(find_tool("ffmpeg").is_some() && find_tool("ffprobe").is_some())
+                Ok((find_tool("ffmpeg"),find_tool("ffprobe")))
             })();
-            if notify_ready && matches!(&result,Ok(true)) {
-                ctx.data_mut(|data|data.insert_temp(egui::Id::new("media_decoder_ready"),true));
-            }
             let _=sender.send(result);ctx.request_repaint();
         });
     }
-    pub fn show(&mut self,ui:&mut egui::Ui) {
+    pub fn refresh(&mut self,ctx:&egui::Context){self.start(ctx,false);}
+    pub fn poll(&mut self,ctx:&egui::Context) {
         use crate::localization::tr;
-        if self.installed.is_none() && self.pending.is_none() && self.error.is_none() {self.start(ui.ctx(),false);}
         if let Some(receiver)=&self.pending {
             match receiver.try_recv() {
-                Ok(result)=>{self.pending=None;match result {Ok(installed)=>{self.installed=Some(installed);if self.installing && !installed {self.error=Some(tr("安装后尚未检测到解码组件，请重新检测或重启程序。").into());}},Err(error)=>self.error=Some(error)}},
+                Ok(result)=>{ctx.data_mut(|data|data.insert_temp(egui::Id::new("media_decoder_ready"),true));ctx.request_repaint();self.pending=None;match result {Ok(paths)=>{let installed=paths.0.is_some()&&paths.1.is_some();self.paths=paths;self.installed=Some(installed);if self.installing && !installed {self.error=Some(tr("安装后尚未检测到解码组件，请重新检测或重启程序。").into());}},Err(error)=>self.error=Some(error)}},
                 Err(mpsc::TryRecvError::Disconnected)=>{self.pending=None;self.error=Some(tr("解码组件检测失败").into());},
                 Err(mpsc::TryRecvError::Empty)=>{},
             }
         }
+    }
+    pub fn show(&mut self,ui:&mut egui::Ui) {
+        use crate::localization::tr;
+        if self.installed.is_none() && self.pending.is_none() && self.error.is_none(){self.start(ui.ctx(),false);}
+        self.poll(ui.ctx());
         if self.pending.is_some() {
             ui.horizontal(|ui| {ui.spinner();ui.label(tr(if self.installing {"正在安装…"}else{"正在检测…"}));});
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -126,6 +129,9 @@ impl DecoderSettings {
                 if self.installed!=Some(true) && ui.button(tr("安装 FFmpeg")).clicked() {self.start(ui.ctx(),true);}
                 if ui.button(tr("重新检测")).clicked() {self.start(ui.ctx(),false);}
             });
+        }
+        for (label,path) in [("FFmpeg",&self.paths.0),("FFprobe",&self.paths.1)] {
+            if let Some(path)=path {ui.add(egui::Label::new(format!("{label}: {}",path.display())).wrap().selectable(true));}
         }
         if self.installed!=Some(true) {ui.small(tr("通过 Windows 包管理器安装 FFmpeg，需要联网；点击安装即同意第三方软件许可。"));}
         if let Some(error)=&self.error {

@@ -10,6 +10,8 @@ spine38 = { package = "rusty_spine", path = "vendor/spine38" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "webp"] }
 eframe = "0.31"
 raw-window-handle = "0.6"
+libloading = "0.8"
+resvg = { version = "0.37", default-features = false }
 ab_glyph = "0.2"
 egui_extras = { version = "0.31", default-features = false, features = ["svg", "syntect"] }
 rfd = "0.15"

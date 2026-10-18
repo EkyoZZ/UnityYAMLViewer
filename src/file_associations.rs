@@ -6,7 +6,8 @@ use crate::{localization::tr, native_window};
 // Shared with the supported-formats window, so the two entry points cannot drift.
 pub const FORMAT_GROUPS: &[(&str, &str)] = &[
     ("Unity YAML", ".prefab .unity .asset .mat .controller .overridecontroller .anim .spriteatlas .guiskin .yaml .yml .physicsmaterial2d .physicmaterial"),
-    ("图片", ".png .jpg .jpeg .tga .bmp .webp"),
+    ("图片", ".png .jpg .jpeg .tga .bmp .webp .svg .gif"),
+    ("PDF", ".pdf"),
     ("模型", ".fbx .obj"),
     ("Spine 3.8", ".skel .skel.bytes .json .json.txt"),
     ("音频", ".mp3 .wav .ogg .oga .flac .aac .m4a .wma .opus .aiff .aif"),

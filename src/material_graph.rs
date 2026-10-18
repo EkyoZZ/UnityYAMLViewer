@@ -1326,10 +1326,10 @@ impl Preview {
         let drop_position = crate::native_window::file_drop_position(ui.ctx());
         let (dropped_image, hovering_image) = ui.input(|state| {
             let dropped = if state.raw.dropped_files.len() == 1 {
-                state.raw.dropped_files[0].path.clone().filter(|path| crate::asset_viewer::is_image(path))
+                state.raw.dropped_files[0].path.clone().filter(|path| crate::asset_viewer::is_bitmap(path))
             } else { None };
             let hovering = state.raw.hovered_files.len() == 1 && state.raw.hovered_files[0]
-                .path.as_ref().is_some_and(|path| crate::asset_viewer::is_image(path));
+                .path.as_ref().is_some_and(|path| crate::asset_viewer::is_bitmap(path));
             (dropped, hovering)
         });
         // Use this frame's transformed and clipped nodes, never stale screen rectangles.

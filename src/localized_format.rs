@@ -1,6 +1,25 @@
 // Translated format templates; indices preserve argument order.
 #[macro_export]
 macro_rules! localized_format {
+    ("播放 {0} 次" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("播放 {0} 次" $(, $arg)*),
+        2 => format!("Play {0} times" $(, $arg)*),
+        3 => format!("{0}回再生" $(, $arg)*),
+        4 => format!("{0}회 재생" $(, $arg)*),
+        5 => format!("{0}-mal abspielen" $(, $arg)*),
+        6 => format!("Lire {0} fois" $(, $arg)*),
+        _ => format!("播放 {0} 次" $(, $arg)*),
+    }};
+    ("帧 {0} / {1} · {2} 秒/帧" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("影格 {0} / {1} · {2} 秒/影格" $(, $arg)*),
+        2 => format!("Frame {0} / {1} · {2} s/frame" $(, $arg)*),
+        3 => format!("フレーム {0} / {1} · {2} 秒/フレーム" $(, $arg)*),
+        4 => format!("프레임 {0} / {1} · {2} 초/프레임" $(, $arg)*),
+        5 => format!("Bild {0} / {1} · {2} s/Bild" $(, $arg)*),
+        6 => format!("Image {0} / {1} · {2} s/image" $(, $arg)*),
+        _ => format!("帧 {0} / {1} · {2} 秒/帧" $(, $arg)*),
+    }};
+
     ("扫描中有 {0} 项无法读取或存在重复 GUID；相关字段可能无法确定类型。" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
         1 => format!("掃描中有 {0} 項無法讀取或 GUID 重複；相關欄位類型可能無法確定。" $(, $arg)*),
         2 => format!("{0} unreadable items or duplicate GUIDs; some field types may be unknown." $(, $arg)*),

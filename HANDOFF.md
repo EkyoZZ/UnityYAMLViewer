@@ -1,3 +1,219 @@
+
+## 视频 / GIF 整框点击 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关程序进程检查及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（19.78 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23282176 字节，SHA-256：F634207A4470CCFF9343787BA25288364D29F18AF15C02F0F6C44164A437F358。日志 target/media-canvas-click-release-build.log。
+- 包含视频 / GIF 整个预览画布（含留白）左键单击播放 / 暂停，保持自由缩放拖动阈值和播放列表控件排除区域。
+- 未启动 EXE，实际留白单击、拖动与控件交互待 GUI 验证；未运行测试断言，未提交或发布。
+---
+
+## 视频 / GIF 整框点击播放暂停（2026-10-18）
+
+- 播放暂停的左键单击命中从实际画面扩大到整个可见预览画布，包括上下 / 左右留白，适应窗口、原尺寸、自由缩放和全屏共用。
+- 自由缩放保持原有按下 / 移动 / 松开手势及拖动阈值，拖动画布不触发播放切换；松开在框外不触发。播放列表浮层 / 外部控件排除区域继续生效，进度条不在预览画布内。右键菜单和滚轮缩放保留。
+- README 中英与当前关于摘要七语言同步。cargo check --tests --locked --offline、git diff --check 及翻译七列 / 唯一键检查通过，日志 target/media-canvas-click-check.log。未构建 EXE，实际留白单击、拖动、全屏和播放列表控件待 GUI 验证。
+
+---
+
+## 文件右键菜单用户验证（2026-10-18）
+
+- 用户在最新文件右键菜单 Release 构建后明确反馈“已验证”，据此记录本轮右键菜单、打开文件所在目录并选中文件、复制文件地址功能用户验证通过。
+- 对应 1.2.3 本地产物 SHA-256：AF8B9E49E2D72002E660F6E466A28FD457D708AFBCFF3D1ADE65D5605FBE9F80。该反馈不扩展为其他历史待验证功能、全部语言 / DPI 或所有路径场景均已验证；未发布。
+---
+
+## 文件右键菜单 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关程序进程检查及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（20.16 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23281152 字节，SHA-256：AF8B9E49E2D72002E660F6E466A28FD457D708AFBCFF3D1ADE65D5605FBE9F80。日志 target/file-location-menu-release-build.log。
+- 包含页签、堆叠文件项和预览文件名的右键定位 / 复制地址；定位使用资源管理器选中目标文件。
+- 未启动 EXE，实际右键菜单、Explorer 选中与剪贴板操作待 GUI 验证；未运行测试断言，未提交或发布。
+---
+
+## 文件定位与地址右键菜单（2026-10-18）
+
+- 页签（堆叠标题对应当前代表文件）、堆叠菜单每个文件名、图片 / PDF / 媒体预览文件名新增右键菜单：打开文件所在目录、复制文件地址。Explorer 使用 /select, 选中目标文件，含空格 / 中文路径通过独立参数传递，不使用 shell 拼接。
+- 缺失文件禁用定位，仍可复制路径；网络资源对应本地缓存文件，不作为原始 URL。定位启动失败在菜单中显示错误。README 中英、关于与菜单七语言同步。
+- cargo check --tests --locked --offline、git diff --check、七列及唯一键检查通过，日志 target/file-location-menu-check.log。未构建 EXE，实际 Windows Explorer 选中及多层菜单交互待 GUI 验证。
+- 另完成真实 GIF 帧时长只读核验：D:/Image/66b3de17ly1hzt5zili3qg20b40b4x6u.gif 共 877 帧，原始 GCE 延时与 FFprobe 一致：0.030 秒 584 帧、0.040 秒 292 帧、0.200 秒 1 帧。前八帧 3,4,3,3,4,3,3,4 百分之一秒，显示可变帧时长符合源文件。
+
+---
+
+## GIF 进度格式 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关程序进程检查及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（22.46 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23211008 字节，SHA-256：04EFD78F056953155BA48345A61807DFCF27660118D1FDCAF03602ECF2146F65。日志 target/gif-progress-release-build.log。
+- 包含 GIF 进度和悬停提示格式 h:mm:ss.mmm(f00)/h:mm:ss.mmm(f00) · 0.030 s/f；f 前置，与视频一致，f / s/f 不翻译。原有按帧实际时长分布的进度条刻度保留。
+- 未启动 EXE，实际进度文字、悬停、窄窗口与刻度显示仍待 GUI 验证；未运行测试断言，未提交或发布。
+---
+
+## GIF 进度时间与固定单位（2026-10-18）
+
+- GIF 进度文字及悬停提示统一为 当前时间(当前帧f)/总时间(总帧数f) · 0.030 s/f。时间为 h:mm:ss.mmm，帧号从 1 开始、至少两位，不截断大帧号；f 在数字后，s/f 固定不翻译。视频 / 普通音频格式不变。
+- 可变帧率 GIF 的 s/f 仍取当前帧实际时长；时间索引未就绪时保留时间和已知帧数，显示 — s/f，不用总时长猜测当前帧时长。
+- README 中英及关于摘要七语言同步。cargo check --tests --locked --offline、git diff --check 及七列 / 唯一键检查通过，日志 target/gif-progress-check.log。未构建 EXE，实际窄窗口显示、播放 / 拖动与悬停提示待 GUI 验证，未发布。
+
+---
+
+## PDF 过渡菜单 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关进程检查及目标 EXE 独占读写通过；cargo build --release --locked --offline 成功（19.95 秒，保留既有警告）。本次恢复仅核对上次已完成产物，未重复构建。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23268864 字节，SHA-256：C7D471CA187BA40A3F3229B995E3731126904F1D4AC05B999FB436EB625B10E7。日志 target/pdf-transition-release-build.log。
+- 包含单页隐藏自动翻页设置、翻页保留旧画面、超过 1 秒才显示加载提示，以及六项过渡菜单。中文首项仅显示“无”，不附加英文或默认标记；英文语言显示 None。
+- 未启动 EXE，实际过渡动画、不同页面尺寸、加载提示与单页布局待 GUI 验证；未运行测试断言，未提交或发布。
+---
+
+## PDF 翻页过渡下拉菜单（2026-10-18）
+
+- 按用户最新要求，循环后使用“过渡”下拉菜单，第一项 / 默认“无”（英文 None），其后为淡入淡出、左右滑动、推页、擦除、缩放淡入。不开启翻书效果。单页与页数未知时随自动翻页设置一起隐藏。
+- 非无效果时，新页面就绪才捕获旧纹理并开始 0.25 秒平滑动画；保留原先等待时显示旧页及超过 1 秒才显示转圈。手动 / 自动 / 全屏共用效果；滑动、推页和擦除根据页码前后决定方向，循环末页回首页按向前页码方向处理。
+- 动画最多额外保留一张旧页面纹理，结束或切换样式后释放；缩放刷新不触发翻页动画。不同尺寸页面在新页面矩形内过渡，旧纹理短暂适配到新矩形，不是纸张卷曲或透视翻书。关闭 / 重载按现有生命周期清理。
+- README 中英、关于摘要与选项七语言同步。cargo check --tests --locked --offline、git diff --check 及七列 / 唯一键检查通过，日志 target/pdf-transition-check.log。未生成 EXE，实际五种效果、不同尺寸与 DPI、全屏和循环的视觉与性能待验证，未发布。
+
+---
+
+## PDF 翻页保持画面与延迟加载提示（2026-10-18）
+
+- 翻页不再清空当前纹理 / 尺寸；独立记录请求页和已显示页，即使新旧页尺寸相同仍请求新页面。新页结果成功后统一更新纹理、尺寸、页码，并重置平移；加载期间保持上一页画面与页码，避免空白闪烁。自动 / 方向键 / 圆形按钮翻页共用此行为。
+- 每次后台渲染记录单调时钟起点，等待达到 1 秒后才显示转圈；首次打开无画面时同样延迟，保留 100ms 重绘以便跨过阈值；有旧画面时转圈叠在画布左上，不替换旧页面。
+- README 中英和关于摘要七语言同步。cargo check --tests --locked --offline、git diff --check、七列和唯一键静态检查通过，日志 target/pdf-page-transition-check.log。未生成 EXE，实际连续翻页、不同纸张尺寸、慢加载与全屏仍待 GUI 验证，未发布。
+
+---
+
+## 单页 PDF 隐藏自动翻页设置（2026-10-18）
+
+- 仅页数大于 1 时显示文件名后的自动翻页开关、秒数 / 单位和循环开关。页数未知及单页隐藏整组设置，单页停止自动计时，避免无意义刷新。文件名及其他预览工具保留。
+- README 中英及当前关于摘要七语言同步。cargo check --tests --locked --offline、git diff --check、七列与唯一键检查通过，日志 target/pdf-single-page-check.log。未构建新 EXE，实际单页 / 多页及加载过渡 GUI 待验证。
+
+---
+
+## PDF 循环与重载按钮修复 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关程序进程检查及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（19.86 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23318016 字节，SHA-256：21102A7C73516DB6137C5B01D2F523E988B4EE07CF2549335C8BDD1506CEA4FF。日志 target/pdf-loop-release-build.log。
+- 包含秒数后的循环开关、开启后末页回到第一页（全屏同样生效），以及缩放 / 翻页期间重载按钮保持稳定、在途渲染完成后处理合并的重载请求。
+- 未启动 EXE，实际开关布局、循环 / 末页行为和重载按钮视觉待 GUI 验证；未运行测试断言，未提交或发布。
+
+---
+
+## PDF 自动翻页循环开关（2026-10-18）
+
+- 在自动翻页秒数 / 单位之后新增“循环”，复用现有主题开关样式，默认关闭，不持久化。自动翻页开启时，循环开启会在末页停留完整间隔后回到第一页继续；关闭循环则在末页停止。单页 PDF 循环保持当前页，不重复渲染。
+- 切换循环重置计时；循环本身不启动自动翻页，全屏沿用当前设置。README 中英及关于摘要七语言同步。
+- cargo check --tests --locked --offline、git diff --check 及七列 / 唯一键检查通过，日志 target/pdf-loop-check.log。未构建 EXE，实际开关布局 / 全屏循环与末页行为待 GUI 验证，未发布。
+
+---
+
+## PDF 重载按钮闪烁修复（2026-10-18）
+
+- 原因是缩放 / 翻页的每次后台渲染都将“重载”切换为禁用，任务完成后恢复启用。按钮改为保持启用与稳定样式；渲染期间点击重载只登记一次请求，当前任务结束后再重载，避免叠加原生任务或旧结果覆盖新状态。
+- 当前关于摘要七语言同步；README 能力范围不变。cargo check --tests --locked --offline、git diff --check 及翻译静态检查通过，日志 target/pdf-reload-button-check.log。未构建新 EXE，连续缩放 / 翻页及渲染中重载的实际 GUI 待验证。
+
+---
+
+## PDF 清晰度与自动翻页 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关程序进程检查及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（21.28 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23321600 字节，SHA-256：412A96CB4A19193B9CA0AD7B9A3730630743788B5DC3730B187FB1B29F240F4A。日志 target/pdf-auto-page-release-build.log。
+- 包含 PDF 100% 的 96 DPI 基准换算、物理像素对齐、屏幕文字抗锯齿，以及文件名后现有样式的自动翻页开关、默认 5 秒及 1–3600 秒设置，全屏继续、末页停止。
+- 未启动 EXE，实际清晰度与 Adobe 对照、定时翻页、末页停止和 GUI 布局待运行验证；未运行测试断言，未提交或发布。
+
+---
+
+## PDF 自动翻页（2026-10-18）
+
+- 文件名同行后新增“自动翻页”，复用 theme::toggle_switch 开关，跟随当前主题；后接整数秒输入和单位，默认 5 秒，范围 1–3600 秒，默认关闭，不持久化。
+- 开启后对当前显示的 PDF 定时向后翻页，全屏隐藏标题栏但继续计时；末页停留一个间隔后关闭自动翻页，不循环。渲染期间暂停计时，出现错误停止；修改开关 / 间隔或手动翻页重置累计时间。离开预览不后台翻页、不补跳漏过的页面。
+- 自动翻页不改变文件，不执行 PDF 编辑。README 中英与关于摘要七语言同步。
+- cargo check --tests --locked --offline、git diff --check 及七列 / 唯一键检查通过，日志 target/pdf-auto-page-check.log。未构建 EXE，实际定时 / 全屏 / 多页末页 / 鼠标输入与主题待 GUI 验证，未发布。
+
+---
+
+## PDF 100% 清晰度与 DPI 修正（2026-10-18）
+
+- 修正 PDFium 返回的 1/72 英寸页面尺寸直接作为 UI 逻辑像素的问题：转换为 96 DPI 基准，再叠加当前窗口 pixels_per_point；100% 页面宽高约为此前的 4/3，适应窗口仍按可用尺寸计算，不承诺与 Adobe 自定义显示 DPI 设置完全一致。
+- 页面绘制起点与显示尺寸对齐实际物理像素，减少半像素平移及纹理二次缩放模糊；启用 FPDF_ANNOT | FPDF_LCD_TEXT（屏幕文字抗锯齿）。来源依据 PDFium public/fpdfview.h 的页面单位与渲染标志定义。
+- 单边 4096 上限保持；超过该上限仍会放大有限分辨率纹理，内嵌低分辨率扫描图无法恢复原本不存在的细节。文字与图片、不同 DPI 下的实际观感及 Adobe 同文档对照尚待运行验证，不能宣称已达到相同清晰度。
+- README 中英及关于七语言同步。cargo check --tests --locked --offline、差异与翻译静态检查通过，日志 target/pdf-sharpness-check.log。未构建 EXE或执行 GUI，未发布。
+
+---
+
+## PDF 悬浮翻页与全屏 Release 构建（2026-10-18）
+
+- 用户明确授权编译后，检查无相关程序进程，目标 EXE 独占读写通过；cargo build --release --locked --offline 成功（19.44 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23296512 字节，SHA-256：952C8597A9F761B2884B0B728861545BC0F3890528EC6C8CA5D3B67B010789B2。日志 target/pdf-fullscreen-release-build.log。
+- 包含底部页码 / 缩放悬浮显示、等高圆底矢量翻页按钮、上 / 左上一页及下 / 右下一页，以及重载后的全屏按钮、F11 切换和 Esc 退出，黑底全屏保留底部控件。
+- 未启动 EXE，实际浮层布局、DPI、翻页及 Windows 全屏交互待 GUI 验证；未运行测试断言，未提交或发布。
+
+---
+
+## PDF 黑底全屏查看（2026-10-18）
+
+- “全屏”按钮放在“重载”之后，F11 同样可进入。全屏隐藏主工具栏、页签和 PDF 顶部工具栏 / 说明，以黑色背景显示页面，保留底部页码 / 缩放浮层、圆形翻页按钮、方向键、滚轮缩放及拖动。
+- 再按 F11 或 Esc 退出；切换到其他文件也退出 PDF 全屏。保留当前页码、缩放及平移状态，适应窗口模式随全屏可用尺寸重新计算。PDF 全屏使用独立状态，不改变媒体全屏标志。
+- README 中英文、关于摘要七语言同步。cargo check --tests --locked --offline、git diff --check 和七列 / 唯一键静态检查通过；日志 target/pdf-fullscreen-check.log。未生成 EXE，实际 Windows 全屏、快捷键、底部控件和恢复窗口待 GUI 验证，未发布。
+
+---
+
+## PDF 底部悬浮翻页与方向键（2026-10-18）
+
+- 移除顶部翻页 / 页码输入控件，底部居中显示“当前页/总页数 缩放%”；左右各独立半透明黑色圆底按钮，间隔 12，直径与信息底板高度一致。复用图片缩放浮层的 13pt 字体、水平 12 / 垂直 6 内边距及底部 8 间距。
+- 三角形用矢量多边形绘制，以几何重心对齐圆心；边界或加载期间按钮置灰。左 / 上键上一页，右 / 下键下一页，不越界；输入控件获得键盘焦点时不抢方向键。翻页重置平移，保留缩放模式。顶部适应窗口 / 宽度、固定倍率及重载保留。
+- README 中英及当前关于摘要七语言同步。cargo check --tests --locked --offline 通过（target/pdf-floating-nav-check.log），git diff --check 及七列 / 唯一键静态检查通过。未构建 EXE或运行 GUI，按钮中心、浮层位置、DPI、方向键及多页切换实际交互待验证。
+
+---
+
+## 第三方检测同步与主题标题 Release 构建（2026-10-18）
+
+- 用户明确授权后，相关进程检查及目标 EXE 独占读写检查通过；cargo build --release --locked --offline 成功（19.65 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23308288 字节，SHA-256：0963AA18B7529FB9A7EEB02CCE24D44D84CA75A32F4D3D455AD388C1776132F1。日志 target/third-party-refresh-release-build.log。
+- 包含 PDFium / FFmpeg 安装后检测与重新检测结果同步、PDF 失败预览重试，以及深色亮蓝 / 浅色深蓝组件标题。关闭第三方窗口不再触发额外检测或刷新；已启动任务关闭后仍可完成结果同步。
+- 未启动 EXE，实际安装 / 检测同步、PDF 渲染和深浅主题显示待 GUI 验证；未运行测试断言，未提交或发布。
+
+---
+
+## 组件检测结果同步时机调整（2026-10-18）
+
+- 按用户最新要求取消第三方窗口关闭时的检测 / 主窗口刷新。FFmpeg 安装后执行检测，PDFium 下载登记后再次读取并校验实际安装；安装后检测及“重新检测”结果到达时同步主窗口一次。未安装 / 检测失败结果同样触发一次结果同步，不循环重试。
+- FFmpeg 通知移至主线程接收结果时；PDFium 沿用 Manager 接收完成后的单次通知。已关闭窗口时后台任务仍可完成同步，关闭动作本身不触发同步。
+- README 中英及关于摘要七语言同步。真实安装 / 重新检测及 GUI 待验证，未构建新 EXE或发布。本节取代上方历史关闭刷新行为。
+
+---
+
+## FFmpeg 检测生命周期迁移补齐（2026-10-18）
+
+- FFmpeg 检测由第三方管理窗口打开 / 关闭触发，设置窗口只提供入口；后台任务在管理窗口关闭后仍由 Manager 轮询接收。安装中关闭不另启并行检测，沿用任务完成通知。
+- 每次成功检测到 FFmpeg / FFprobe 都发送就绪通知，主窗口立即重试当前失败媒体，不再等待第三方窗口关闭。保留 PDFium 就绪 / 关闭重试逻辑。
+- README 中英、当前关于摘要七语言同步。cargo check --tests --locked --offline 通过；实际 WinGet 安装、手动安装后重新打开 / 关闭窗口及主界面恢复仍待 GUI 验证，未重新构建 EXE或发布。
+
+---
+
+## PDF 组件就绪与窗口关闭刷新修复（2026-10-18）
+
+- 修复 PDFium 安装完成后 PDF 页签仍停留于缺组件提示：安装或检测成功通知主窗口刷新并重试失败的 PDF 预览，不要求先关闭第三方支持窗口；关闭管理窗口也触发一次重试，以覆盖手动安装。
+- 重试通知保留到已有后台渲染完成后再消费，防止旧任务稍后返回缺组件错误。成功预览不重新加载；无组件或文件仍有错误时只重试一次，不持续循环。FFmpeg 原有通知处理保留。
+- README 中英文与当前关于摘要七语言同步。cargo check --tests --locked --offline 通过，日志 target/pdf-component-retry-check.log；实际安装 / 关闭窗口后的 GUI 刷新仍待验证。本次未重新构建 EXE，最新 EXE 不含本修复，未发布。
+
+---
+
+## PDFium 只读预览 Release 构建（2026-10-18）
+
+- 用户明确授权编译后，检查无相关程序进程，目标 EXE 独占读写通过；cargo build --release --locked --offline 成功（20.38 秒，保留既有警告）。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.3，23301120 字节，SHA-256：93A9EC56F241F80E2ABB7A711C1171A913C318CE0BA6AF40CF067D4BF6EDA254。日志 target/pdf-preview-release-build.log。包含第三方支持管理与 PDFium 只读多页预览。
+- 未启动 EXE，真实 PDFium 下载 / DLL 加载、PDF 渲染及翻页缩放等 GUI 操作仍待验证；未运行测试断言，未提交或发布。
+
+---
+
+# 最新接续：PDFium 只读多页预览源码（2026-10-18）
+
+已按用户要求接入只读 PDFium 预览，暂不做编辑。实现 src/asset_viewer/pdf_preview.rs，稳定 API 动态加载、后台串行渲染、当前页纹理、页码 / 翻页 / 缩放 / 拖动 / 重载、缺组件直达管理和手动重试，详情与限制见 docs/versions/1.2.3.md。真实 DLL 和 GUI 尚未运行验证；本轮未获生成 EXE 授权，未构建、提交或发布。最新 EXE 仍是下述 SVG 背景版，不含第三方管理和 PDF 预览。下方专项交接的“PDF 尚未实现”为此前状态，以本节为准。
+
+---
+# 最新接续入口：PDF 预览与编辑（2026-10-18）
+
+请优先阅读 [PDF 专项交接](docs/handoffs/2026-10-18-pdf-preview-editing.md)。当前版本 1.2.3，第三方支持管理源码已接入，**PDF 预览 / 编辑尚未实现，最新 EXE 也不含第三方管理窗口**。下一会话从此处继续，保留现有未提交 / 未跟踪改动；不自动构建、提交或发布。组件目录在缓存清理范围之外。下方为历史交接记录，较旧标题不代表当前状态。
+
+---
+
 # 当前交接：1.2.1 已正式发布（2026-10-16）
 
 用户确认此前 60 帧节点预览构建检查通过，明确授权升级 1.2.1、重新编译并发布 GitHub。更新内容为替换 AppIcon、优化 Material 和 Shader 预览操作体验。
@@ -1971,3 +2187,21 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 
 - 用户实际查看最新构建后反馈文件堆叠效果满意，并授权 Git 提交和推送，明确不发布版本。该反馈确认整体显示效果，不等同于全部 GUI 边界场景、七语言或 DPI 验证完成。
 - 本次提交包含此前音频编辑完善、文件堆叠数量、整组拖拽与页签栏高度修复；版本仍为 1.2.3 开发中 / 未发布，不创建发布标签或 Release。
+
+## SVG 与 GIF 循环预览构建（2026-10-18）
+
+- 用户明确授权后检查程序进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（21.16 秒，6 项警告）。包含 SVG 只读缩放预览与位图操作禁用，以及 FFmpeg GIF 播放、四种循环模式、帧数 / 每帧秒数和按实际时长分布的帧边界时间轴。
+- 检查程序及测试 EXE 占用后编译运行 GIF 专用测试：2 项通过；再通过 Cargo 运行 SVG 渲染测试 1 项、SVG 文件类型识别 1 项、GIF 媒体扩展识别 1 项，合计 5 项通过，0 失败。覆盖循环扩展 / 截断、有限 / 无限 / 自定义计数、可变帧时长与末帧停留计算、viewBox、透明像素、无效 SVG 及尺寸上限。未用测试代替实际 GIF 解码播放 / 循环与 GUI 验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，23014400 字节，SHA-256 F50D3D32F3949AF2FFB51E105ED353E23920D8EF4C986FD6A1C678E9CF8A5927。构建日志 target/svg-gif-release-build.log，测试日志 target/svg-gif-tests.log、target/svg-render-tests.log、target/reference_types_and_syntaxes_include_common_scripts.log、target/media_extensions_are_case_insensitive_and_do_not_capture_yaml.log。实际界面与真实媒体播放仍待验证，未发布。
+
+## GIF 音频界面与调色板布局构建（2026-10-18）
+
+- 用户明确授权后检查程序进程及目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.39 秒，6 项警告）。包含 GIF 隐藏音量 / 音轨相关界面、在原音频信息行显示全局 / 局部调色板最大容量；普通视频保持原样。
+- 再次检查程序及测试 EXE 占用后执行 cargo test --release --locked --offline gif_playback::tests -- --nocapture：3 项通过，0 失败，覆盖色表容量、循环扩展与策略、可变帧时长 / 末帧时长计算。实际界面位置、音频界面隐藏与真实 GIF 播放仍待 GUI 验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，23042560 字节，SHA-256 E3B63363273300041214271C86A4152F41C00FBFCB6D6FACA5183A88E1F0EE8F。日志 target/gif-palette-release-build.log、target/gif-palette-tests.log。未发布。
+
+## SVG 背景设置构建（2026-10-18）
+
+- 用户明确授权后检查程序进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.69 秒，6 项警告）。包含移除 SVG 通道显示、隐藏九宫格入口，以及复用 Prefab 预览的棋盘格 / 灰色 / 自定义背景与重载保留背景设置。
+- 再次检查程序及测试 EXE 占用后运行 cargo test --release --locked --offline asset_viewer::svg_preview::tests -- --nocapture：1 项通过，0 失败，覆盖 SVG viewBox、透明像素、无效输入及渲染尺寸上限。背景切换、自定义颜色与重载实际 GUI 仍待验证。
+- 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22957568 字节，SHA-256 576E149087C6C5BAF94E22CD924BB9628C793C7202E164F0B4E84686B75EFDE4。日志 target/svg-background-release-build.log、target/svg-background-tests.log。未发布。

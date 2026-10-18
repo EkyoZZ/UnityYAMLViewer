@@ -32,7 +32,7 @@ fn download(input: &str) -> Result<PathBuf, String> {
     let mut path = PathBuf::from(&name);
     if !supported(&path) {
         let extension = match mime.as_str() {
-            "image/png" => "png", "image/jpeg" => "jpg", "image/webp" => "webp", "image/bmp" => "bmp",
+            "application/pdf" => "pdf", "image/gif" => "gif", "image/svg+xml" => "svg", "image/png" => "png", "image/jpeg" => "jpg", "image/webp" => "webp", "image/bmp" => "bmp",
             "audio/mpeg" => "mp3", "audio/wav" | "audio/x-wav" => "wav", "audio/flac" => "flac",
             "audio/ogg" => "ogg", "audio/mp4" => "m4a", "video/mp4" => "mp4", "video/webm" => "webm",
             "video/x-matroska" => "mkv", "text/plain" => "txt",
@@ -66,7 +66,7 @@ fn download(input: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 fn supported(path: &Path) -> bool {
-    crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_text(path)
+    crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_pdf(path) || crate::asset_viewer::is_text(path)
         || crate::model_preview::is_model(path)
         || matches!(path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str(), "unity" | "prefab" | "asset" | "controller" | "anim" | "mat")
 }

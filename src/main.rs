@@ -25,9 +25,11 @@ mod theme;
 mod icons;
 mod asset_viewer;
 mod media_tools;
+mod third_party;
 mod media_trim;
 mod audio_edit;
 mod media_preview;
+mod gif_playback;
 mod spine_preview;
 mod particle_preview;
 mod model_preview;
@@ -215,7 +217,7 @@ struct ViewerApp {
     playlist_exit_requested: bool,
     show_settings: bool,
     settings: AppSettings,
-    decoder_settings: media_tools::DecoderSettings,
+    third_party: third_party::Manager,
     updater: updater::Updater,
     preview: static_preview::Preview,
     preview_text: Arc<str>,
@@ -604,7 +606,8 @@ impl ViewerApp {
                 "yml",
             ],
         ).add_filter("Spine 3.8", &["skel", "bytes", "json", "txt"])
-        .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp"])
+        .add_filter("PDF", &["pdf"])
+        .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp", "svg", "gif"])
         .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
         .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
         .add_filter(crate::localization::tr("播放列表"), &["m3u8", "m3u"])
@@ -648,7 +651,7 @@ impl ViewerApp {
             self.remember_recent_file();
             return;
         }
-        if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
+        if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -667,7 +670,7 @@ impl ViewerApp {
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
@@ -1358,11 +1361,14 @@ impl eframe::App for ViewerApp {
         media_preview::show_trim_windows(ctx);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
-        if !self.show_settings && ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
+        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {
             if let Some(path)=self.path.as_deref(){self.assets.retry_media_decoder(path);}
             ctx.request_repaint();
         }
-        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("media_settings_request"))).unwrap_or(false) {native_window::wake(ctx,egui::Id::new("settings_window"));self.show_settings=true;}
+        if ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("pdf_component_retry"))).unwrap_or(false){
+            self.assets.retry_pdf_components();ctx.request_repaint();
+        }
+        if third_party::take_open_request(ctx) {self.third_party.open(ctx);}
         if let Some(path)=ctx.data_mut(|data|data.remove_temp::<PathBuf>(egui::Id::new("spine_window_request"))) {
             self.open_file_with_directory_tracking(path,false);
         }
@@ -1459,6 +1465,13 @@ impl eframe::App for ViewerApp {
                 }
                 self.remember_recent_file();
             }else{self.open_file(list);}
+        }
+        if asset_viewer::pdf_preview::update_fullscreen(ctx,self.path.as_deref()) {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ctx,|ui|{
+                ui.visuals_mut().clone_from(&egui::Visuals::dark());
+                if let Some(path)=self.path.clone(){self.assets.show_pdf_fullscreen(ui,&path);}
+            });
+            return;
         }
         if self.assets.media_fullscreen(ctx,self.path.as_deref()) {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::BLACK)).show(ctx,|ui| {
@@ -1632,6 +1645,7 @@ impl eframe::App for ViewerApp {
                         let title = if dirty { format!("{title} *") } else { title.to_string() };
                         let slot=slots[position].translate(strip_rect.min.to_vec2());
                         let (open_clicked, close_clicked, response, slot) = unified_tab(ui, &title, is_active, &tab.path,slot,members.len());
+                        asset_viewer::file_context_menu(&response,&tab.path);
                         tab_rects.push(slot);
                         if grouped {
                             let popup_id = ui.id().with(("tab_group", tab_group_key(&tab.path)));
@@ -1659,6 +1673,7 @@ impl eframe::App for ViewerApp {
                                             ui.spacing_mut().button_padding.y = 2.0;
                                             if member == index { ui.painter().rect_filled(name_rect, 3.0, ui.visuals().selection.bg_fill); }
                                             let name_response = ui.put(name_rect, egui::Button::new("").frame(false));
+                                            asset_viewer::file_context_menu(&name_response,path);
                                             let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
                                             let galley = ui.painter().layout(title, egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color(), text_rect.width());
                                             let mut job = galley.job.as_ref().clone();
@@ -1741,7 +1756,7 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
-        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_pdf(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -2269,7 +2284,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
+                    if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();
@@ -2353,11 +2368,10 @@ impl eframe::App for ViewerApp {
                         }
                     });
                     ui.end_row();
-                    settings_label(ui, localization::tr("视频解码"));
-                    settings_group(ui, "decoder_settings_group", |ui| {
+                    settings_label(ui, localization::tr("第三方支持"));
+                    settings_group(ui, "third_party_settings_group", |ui| {
                         ui.set_width(208.0);
-                        ui.style_mut().wrap_mode=Some(egui::TextWrapMode::Wrap);
-                        self.decoder_settings.show(ui);
+                        if ui.add_sized([208.0,30.0],egui::Button::new(localization::tr("管理第三方组件…")).wrap()).clicked() {self.third_party.open(ctx);}
                     });
                     ui.end_row();
                     settings_label(ui, localization::tr("文件关联"));
@@ -2444,7 +2458,8 @@ impl eframe::App for ViewerApp {
                 ui.add_space(8.0);
             });
         }
-        if !self.show_settings && ctx.data(|data|data.get_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {ctx.request_repaint();}
+        self.third_party.show(ctx);
+        if ctx.data(|data|data.get_temp::<bool>(egui::Id::new("media_decoder_ready"))).unwrap_or(false) {ctx.request_repaint();}
         self.update_windows(ctx);
         if self.show_about {
             crate::native_window::Window::new(crate::localization::tr("关于 Unity YAML Viewer")).id(egui::Id::new("about_window")).fit_height()
@@ -2459,6 +2474,23 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.3").strong());
+                        ui.label(localization::tr("• 第三方支持集中管理 FFmpeg、PDFium 和 LibreOffice，组件不参与缓存清理"));
+                        ui.label(localization::tr("• 视频与 GIF 支持点击整个预览框播放 / 暂停，包括画面留白"));
+                        ui.label(localization::tr("• 页签、堆叠文件项及预览文件名支持右键定位文件和复制地址"));
+                        ui.label(localization::tr("• GIF 进度显示时间、帧号与每帧秒数，固定使用 f 和 s/f"));
+                        ui.label(localization::tr("• PDF 过渡菜单提供无、淡入淡出、左右滑动、推页、擦除和缩放淡入"));
+                        ui.label(localization::tr("• PDF 翻页保留上一页直到新页就绪，加载超过 1 秒才显示转圈"));
+                        ui.label(localization::tr("• 多页 PDF 支持定时与循环翻页，单页隐藏相关设置"));
+                        ui.label(localization::tr("• PDF 修正 DPI 与像素对齐、文字抗锯齿，消除重载按钮渲染闪烁"));
+                        ui.label(localization::tr("• PDF 支持黑底全屏查看，F11 切换、Esc 退出"));
+                        ui.label(localization::tr("• PDF 底部悬浮显示页码与缩放，圆形矢量按钮及方向键翻页"));
+                        ui.label(localization::tr("• 第三方组件标题按深浅主题使用蓝色，便于识别分区"));
+                        ui.label(localization::tr("• FFmpeg / PDFium 安装后检测及重新检测完成时同步预览状态"));
+                        ui.label(localization::tr("• 新增 PDFium 多页只读预览，支持翻页、缩放与拖动；暂不支持编辑"));
+                        ui.label(localization::tr("• SVG 支持棋盘格 / 灰色 / 自定义预览背景，隐藏通道与九宫格入口"));
+                        ui.label(localization::tr("• GIF 隐藏音量与音轨界面，显示全局及局部调色板的最大容量"));
+                        ui.label(localization::tr("• GIF 复用视频控件，支持文件循环设置与自定义次数，时间轴显示帧数及逐帧时长"));
+                        ui.label(localization::tr("• 新增 SVG 只读缩放预览与 FFmpeg GIF 播放，禁用九宫格与编辑操作"));
                         ui.label(localization::tr("• 逐项关闭至 3 个时在原位展开；关闭全部期间保持成组，取消后恢复自动展开"));
                         ui.label(localization::tr("• 页签支持整组拖拽与文件堆叠数量，修复选中或悬停时页签栏高度变化"));
                         ui.label(localization::tr("• 相同后缀超过 3 个文件自动折叠为下拉页签，支持逐项关闭、关闭全部与未保存提醒"));
@@ -4410,7 +4442,7 @@ fn main() -> eframe::Result {
                 command_inbox,
                 last_open_dir: load_last_open_dir(),
                 settings: AppSettings::load(),
-                decoder_settings: media_tools::DecoderSettings::default(),
+                third_party: third_party::Manager::default(),
                 recent_files: recent_files::RecentFiles::load(),
                 ..Default::default()
             };

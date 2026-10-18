@@ -374,7 +374,7 @@ impl Session {
         let (arrow_now,arrow_pointer,arrow_moved)=ui.input(|input|(input.time,input.pointer.hover_pos(),input.events.iter().any(|event|matches!(event,egui::Event::PointerMoved(_)))));
         if arrow_moved&&arrow_pointer.is_some_and(|pos|self.preview.as_ref().and_then(Preview::canvas_rect).is_some_and(|rect|rect.contains(pos))){self.arrow_last_motion=Some(arrow_now);}
         let mut preview=self.preview.take();
-        if !fullscreen{ui.horizontal_wrapped(|ui|{ui.heading(media_path.file_name().unwrap_or_default().to_string_lossy());if let Some(p)=&mut preview{if let Some(bytes)=p.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}p.header_controls(ui,&media_path);}if preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(audio(&media_path),|p|!p.has_video()){ui.label(tr(["顺序播放","随机播放","单曲循环"][self.state.mode as usize]));}if let Some(p)=&mut preview{p.trim_entry_button(ui,&media_path);}});}
+        if !fullscreen{ui.horizontal_wrapped(|ui|{crate::asset_viewer::file_context_menu(&ui.heading(media_path.file_name().unwrap_or_default().to_string_lossy()),&media_path);if let Some(p)=&mut preview{if let Some(bytes)=p.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}p.header_controls(ui,&media_path);}if preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(audio(&media_path),|p|!p.has_video()){ui.label(tr(["顺序播放","随机播放","单曲循环"][self.state.mode as usize]));}if let Some(p)=&mut preview{p.trim_entry_button(ui,&media_path);}});}
         let max_height=(bounds.height()-136.0).max(1.0);
         let min_height=240.0_f32.min(max_height);
         let ratio=if self.state.height_ratio.is_finite(){self.state.height_ratio}else{0.5};
@@ -511,7 +511,7 @@ impl Creator {
     }
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path,preview:&mut Preview){
         let bounds=ui.available_rect_before_wrap();
-        let top=ui.horizontal_wrapped(|ui|{ui.heading(path.file_name().unwrap_or_default().to_string_lossy());if let Some(bytes)=preview.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}preview.header_controls(ui,path);preview.trim_entry_button(ui,path);if ui.button(tr("播放列表")).clicked(){self.open=!self.open;if self.open&&self.entries.is_empty(){self.scan(ui.ctx());}}}).response;
+        let top=ui.horizontal_wrapped(|ui|{crate::asset_viewer::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);if let Some(bytes)=preview.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}preview.header_controls(ui,path);preview.trim_entry_button(ui,path);if ui.button(tr("播放列表")).clicked(){self.open=!self.open;if self.open&&self.entries.is_empty(){self.scan(ui.ctx());}}}).response;
         let fraction=ui.ctx().animate_bool(ui.id().with("playlist_creator_open"),self.open);
         let max_width=(bounds.width()/3.0-6.0).max(1.0);let min_width=214.0_f32.min(max_width);
         self.width=self.width.clamp(min_width,max_width);
