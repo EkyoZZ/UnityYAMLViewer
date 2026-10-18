@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, RichText, Stroke};
 
-const BLUE: Color32 = Color32::from_rgb(0, 127, 255);
+pub(crate) const BLUE: Color32 = Color32::from_rgb(0, 127, 255);
 
 // Separate styles let System preference retain egui's live OS theme detection.
 pub fn install(ctx: &egui::Context) {

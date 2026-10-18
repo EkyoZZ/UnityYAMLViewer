@@ -12,6 +12,8 @@ pub struct Trim {
     result: Option<Result<PathBuf, String>>,
     meter_trails: [f32; 2],
     settings: AudioSettings,
+    video_settings: VideoSettings,
+    video_tracks: crate::export_tracks::Tracks,
     remembered_volume: f32,
     volume_hover: Option<std::time::Instant>,
     session:Option<crate::audio_edit::Session>,
@@ -20,6 +22,131 @@ pub struct Trim {
     gain_dialog:bool,
     dialog_before:Option<crate::audio_edit::State>,
     history_changed:bool,
+}
+
+#[derive(Clone)]
+struct VideoSettings { codec: usize, container: usize, quality: u32, bitrate_mode:bool, two_pass:bool, video_bitrate:u32, fps:String, audio_bitrate: u32, audio_codec:usize, audio_rate:u32, gif_colors:u32, gif_dither:usize, gif_bayer:u32, crop:crate::video_crop::Crop }
+impl Default for VideoSettings {fn default()->Self{Self{codec:0,container:0,quality:18,bitrate_mode:false,two_pass:false,video_bitrate:6000,fps:"source".into(),audio_bitrate:192,audio_codec:0,audio_rate:48000,gif_colors:256,gif_dither:4,gif_bayer:2,crop:Default::default()}}}
+impl VideoSettings {
+    const CONTAINERS:[(&'static str,&'static str,&'static str);10]=[
+        ("MP4","mp4","mp4"),("WebM","webm","webm"),("Matroska (MKV)","mkv","matroska"),
+        ("QuickTime (MOV)","mov","mov"),("AVI","avi","avi"),("FLV","flv","flv"),
+        ("MPEG-TS","ts","mpegts"),("3GP","3gp","3gp"),("NUT","nut","nut"),("GIF","gif","gif")];
+    fn extension(&self)->&'static str {Self::CONTAINERS[self.container].1}
+    fn muxer(&self)->&'static str {Self::CONTAINERS[self.container].2}
+    const CODECS:[&'static str;11]=["H.264","VP8","VP9","H.265 (HEVC)","未压缩 RGB 24位","MJPEG","MPEG-4 Part 2","ProRes 422","AV1","MPEG-2","GIF"];
+    fn compatible(&self,codec:usize)->bool{match self.container{
+        0=>matches!(codec,0|2|3|6|8|9),1=>matches!(codec,1|2|8),2=>codec<10&&codec!=4,
+        3=>matches!(codec,0|3|4|5|6|7|9),4=>matches!(codec,0|1|2|3|4|5|6|9),
+        5=>matches!(codec,0|2|3),6=>matches!(codec,0|3|9),7=>matches!(codec,0|6),8=>codec<10,9=>codec==10,_=>false
+    }}
+    fn encoder(&self)->&'static str {["libx264","libvpx","libvpx-vp9","libx265","rawvideo","mjpeg","mpeg4","prores_ks","libsvtav1","mpeg2video","gif"][self.codec]}
+    fn h26x(&self)->bool{matches!(self.codec,0|3)}
+    const AUDIO:[(&'static str,&'static str);8]=[("AAC","aac"),("Opus","libopus"),("PCM 16-bit","pcm_s16le"),("MP3","libmp3lame"),("AC-3","ac3"),("FLAC","flac"),("Vorbis","libvorbis"),("E-AC-3","eac3")];
+    fn audio_compatible(&self,codec:usize)->bool{match self.container{
+        0=>matches!(codec,0|1|3|4|5|7),1=>matches!(codec,1|6),2|8=>codec<8,
+        3=>matches!(codec,0|2|3|4|7),4=>matches!(codec,0|2|3|4),5=>matches!(codec,0|3),6=>matches!(codec,0|3|4|7),7=>codec==0,_=>false
+    }}
+    fn audio_encoder(&self)->&'static str{Self::AUDIO[self.audio_codec].1}
+    fn audio_rates(&self)->&'static [u32]{match self.audio_codec{
+        1=>&[48000],3|4|7=>&[32000,44100,48000],2|5=>&[8000,16000,22050,32000,44100,48000,96000],_=>&[32000,44100,48000,96000]
+    }}
+    fn default_quality(&self)->u32{match self.codec{0=>18,3=>24,5|6|9=>3,8=>30,_=>32}}
+    const DITHER:[(&'static str,&'static str);5]=[("无抖动","none"),("Bayer","bayer"),("Floyd–Steinberg","floyd_steinberg"),("Sierra2","sierra2"),("Sierra2 4A","sierra2_4a")];
+    fn bitrate_available(&self)->bool{matches!(self.codec,0|1|2|3|6|8|9)}
+    fn two_pass_available(&self)->bool{matches!(self.codec,0|1|2|6|9)}
+    fn use_two_pass(&self)->bool{self.bitrate_mode&&self.two_pass&&self.two_pass_available()}
+    const FPS:[(&'static str,&'static str);9]=[("source","跟随源视频"),("24000/1001","23.976 fps"),("24","24 fps"),("25","25 fps"),("30000/1001","29.97 fps"),("30","30 fps"),("50","50 fps"),("60000/1001","59.94 fps"),("60","60 fps")];
+    fn configure(&self,cmd:&mut std::process::Command){
+        if self.fps!="source"{cmd.args(["-r",&self.fps,"-fps_mode","cfr"]);}
+        else if self.codec==9 {cmd.args(["-r","25","-fps_mode","cfr"]);}
+        if self.codec==10 {
+            cmd.args(["-c:v","gif","-vf",&format!("{},split[a][b];[a]palettegen=max_colors={}:reserve_transparent=0[p];[b][p]paletteuse=dither={}:bayer_scale={}",self.crop.filter(),self.gif_colors,Self::DITHER[self.gif_dither].1,self.gif_bayer),"-loop","0","-f","gif"]);
+            return;
+        }
+        let pixel=match self.codec{4=>if self.container==4{"bgr24"}else{"rgb24"},5=>"yuvj422p",7=>"yuv422p10le",_=>"yuv420p"};
+        cmd.args(["-c:v",self.encoder(),"-vf",&self.crop.filter(),"-pix_fmt",pixel]);
+        if self.bitrate_mode&&self.bitrate_available(){
+            cmd.args(["-b:v",&format!("{}k",self.video_bitrate)]);
+            if self.h26x(){cmd.args(["-preset","medium"]);}
+            if self.codec==8{cmd.args(["-preset","8"]);}
+        }else{match self.codec{
+            0|3=>{cmd.args(["-crf",&self.quality.to_string(),"-preset","medium"]);}
+            1|2=>{cmd.args(["-crf",&self.quality.to_string(),"-b:v",if self.codec==1{"2M"}else{"0"}]);}
+            5|6|9=>{cmd.args(["-q:v",&self.quality.to_string()]);}
+            7=>{cmd.args(["-profile:v","2"]);}
+            8=>{cmd.args(["-crf",&self.quality.to_string(),"-preset","8"]);}
+            _=>{}
+        }}
+        if self.codec==3 && matches!(self.container,0|3){cmd.args(["-tag:v","hvc1"]);}
+        if matches!(self.container,0|3|7){cmd.args(["-movflags","+faststart"]);}
+        cmd.args(["-f",self.muxer()]);
+    }
+    fn controls(&mut self,ui:&mut egui::Ui){
+        ui.label(tr("视频封装格式 & 编码格式"));
+        ui.horizontal(|ui|{
+        let width=((ui.available_width()-ui.spacing().item_spacing.x)*0.5).max(1.0);
+        egui::ComboBox::from_id_salt("video_container").width(width).truncate().selected_text(Self::CONTAINERS[self.container].0).show_ui(ui,|ui|{
+            for (index,(label,_,_)) in Self::CONTAINERS.into_iter().enumerate(){
+                if ui.selectable_value(&mut self.container,index,label).changed(){
+                    if !self.compatible(self.codec){self.codec=match index{1=>2,9=>10,_=>0};self.quality=self.default_quality();}
+                    if !self.audio_compatible(self.audio_codec){self.audio_codec=if index==1{1}else{0};}
+                }
+            }
+        }).response.on_hover_text(Self::CONTAINERS[self.container].0);
+        egui::ComboBox::from_id_salt("video_codec").width(width).truncate().selected_text(tr(Self::CODECS[self.codec])).show_ui(ui,|ui|{
+            for (index,label) in Self::CODECS.into_iter().enumerate(){
+                if !self.compatible(index){continue;}
+                if ui.selectable_value(&mut self.codec,index,tr(label)).changed(){self.quality=self.default_quality();}
+            }
+        }).response.on_hover_text(tr(Self::CODECS[self.codec]));
+        });
+        if self.bitrate_available(){
+            let mut mode=if self.bitrate_mode{"bitrate"}else{"quality"}.to_owned();
+            crate::theme::compact_selector(ui,&mut mode,[("quality","质量模式"),("bitrate","目标码率")]);
+            self.bitrate_mode=mode=="bitrate";
+        }
+        if self.bitrate_mode&&self.bitrate_available(){
+            ui.add(egui::DragValue::new(&mut self.video_bitrate).range(32..=200000).speed(100.0).suffix(" kb/s"));
+            if self.two_pass_available(){
+                egui::ComboBox::from_id_salt("video_passes").selected_text(if self.two_pass{"2 pass"}else{"1 pass"}).show_ui(ui,|ui|{
+                    ui.selectable_value(&mut self.two_pass,false,"1 pass");ui.selectable_value(&mut self.two_pass,true,"2 pass");
+                });
+            }
+        }else if !matches!(self.codec,4|7|10){
+            let quantizer=matches!(self.codec,5|6|9);
+            let (min,max)=if quantizer{(2,31)}else if self.h26x(){(0,51)}else{(0,63)};
+            ui.horizontal(|ui|{ui.label(if quantizer{"q:v"}else{"CRF"});ui.add(egui::DragValue::new(&mut self.quality).range(min..=max));});
+        }
+        if self.codec==9&&self.fps=="source"{self.fps="25".into();}
+        ui.horizontal(|ui|{
+            ui.label(tr("帧率"));
+            let label=Self::FPS.iter().find(|(id,_)|*id==self.fps).map_or("跟随源视频",|(_,label)|*label);
+            egui::ComboBox::from_id_salt("video_fps").selected_text(tr(label)).show_ui(ui,|ui|{
+                for (id,label) in Self::FPS{if self.codec==9&&id=="source"{continue;}ui.selectable_value(&mut self.fps,id.to_owned(),tr(label));}
+            });
+        });
+        if self.container==9 {
+            ui.label(tr("调色板颜色数"));
+            egui::ComboBox::from_id_salt("gif_colors").selected_text(self.gif_colors.to_string()).show_ui(ui,|ui|{for colors in [256,128,64,32,16,8,4]{ui.selectable_value(&mut self.gif_colors,colors,colors.to_string());}});
+            ui.label(tr("滤波 / 抖动"));
+            egui::ComboBox::from_id_salt("gif_dither").selected_text(tr(Self::DITHER[self.gif_dither].0)).show_ui(ui,|ui|{for(index,(label,_))in Self::DITHER.into_iter().enumerate(){ui.selectable_value(&mut self.gif_dither,index,tr(label));}});
+            if self.gif_dither==1{ui.horizontal(|ui|{ui.label(tr("Bayer 强度"));ui.add(egui::DragValue::new(&mut self.gif_bayer).range(0..=5));});}
+            ui.label(tr("GIF 不导出音频，最多 256 色；默认循环播放。"));return;
+        }
+        ui.label(tr("音频编码"));
+        egui::ComboBox::from_id_salt("video_audio_codec").selected_text(Self::AUDIO[self.audio_codec].0).show_ui(ui,|ui|{
+            for (index,(label,_)) in Self::AUDIO.into_iter().enumerate(){if self.audio_compatible(index){ui.selectable_value(&mut self.audio_codec,index,label);}}
+        });
+        if !matches!(self.audio_codec,2|5){ui.add(egui::DragValue::new(&mut self.audio_bitrate).range(64..=320).suffix(" kb/s"));}
+        let rates=self.audio_rates();
+        if !rates.contains(&self.audio_rate){self.audio_rate=48000;}
+        ui.horizontal(|ui|{
+            ui.label(tr("采样率"));
+            egui::ComboBox::from_id_salt("video_audio_rate").selected_text(format!("{} Hz",self.audio_rate)).show_ui(ui,|ui|{for rate in rates{ui.selectable_value(&mut self.audio_rate,*rate,format!("{rate} Hz"));}});
+        });
+        ui.small(tr("按所选采样率导出双声道音频；未选音轨时不生成音频。"));
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -87,6 +214,9 @@ pub struct Action {
 }
 
 pub struct AudioView<'a> {
+    pub video_texture: Option<&'a egui::TextureHandle>,
+    pub video_size: Option<[usize;2]>,
+    pub frame_times: Option<&'a [f64]>,
     pub wave: Option<&'a [Vec<f32>]>,
     pub wave_error: Option<&'a str>,
     pub playing: bool,
@@ -203,6 +333,8 @@ impl Trim {
         else if cancel||!open {if let Some(before)=self.dialog_before.take(){session.state=before;}self.fade_dialog=None;self.gain_dialog=false;}
     }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, ffmpeg: &Path, duration: f64, position: f64, video: bool, audio: Option<u64>, view: AudioView<'_>) -> Action {
+        if video {self.video_tracks.initialize(path,audio,ui.ctx());}
+        if let Some(size)=view.video_size {self.video_settings.crop.prepare(size);}
         self.history_changed=false;
         let before=self.session.as_ref().map(|session|session.state.clone());
         if let Some(session)=&self.session{self.start=session.state.start;self.end=session.state.end;}
@@ -213,20 +345,51 @@ impl Trim {
             match receiver.try_recv() {
                 Ok(result) => { self.result = Some(result); self.pending = None; }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    self.result = Some(Err(tr("剪切任务意外中断").into())); self.pending = None;
+                    let result=Err(tr("剪切任务意外中断").into());notify_export_result(&result);
+                    self.result = Some(result); self.pending = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
         if self.pending.is_some() { ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)); }
-        let title = if video { tr("视频编辑").to_owned() } else {
+        let title = if video { format!("{} - {}",tr("视频编辑"),path.file_name().unwrap_or_default().to_string_lossy()) } else {
             format!("{} - {}", tr("音频编辑"), path.file_name().unwrap_or_default().to_string_lossy())
         };
         let mut open = self.open;
         crate::native_window::Window::new(title).id(egui::Id::new(("media_trim", path)))
-            .open(&mut open).resizable(true).default_width(if video { 560.0 } else { 900.0 })
-            .scrollable(video).min_width(560.0).default_height(if video { 360.0 } else { 640.0 }).show(ui.ctx(), |ui| {
-                if !video {
+            .open(&mut open).resizable(true).default_width(if video { 1100.0 } else { 900.0 })
+            .scrollable(false).min_width(if video {800.0}else{560.0}).default_height(640.0).show(ui.ctx(), |ui| {
+                let mut export_requested=false;
+                if video {
+                    let minimum_width=crate::video_crop::Crop::minimum_width(ui).max(260.0);
+                    let maximum_width=(ui.available_width()*0.55).max(minimum_width);
+                    egui::SidePanel::right(egui::Id::new(("video_export_settings_fixed",path))).default_width(300.0_f32.max(minimum_width)).width_range(minimum_width..=maximum_width).resizable(true).show_inside(ui,|ui|{
+                        ui.horizontal(|ui|{
+                            let title=tr("导出设置");
+                            let title_width=ui.painter().layout_no_wrap(title.to_owned(),egui::TextStyle::Heading.resolve(ui.style()),ui.visuals().text_color()).size().x;
+                            ui.allocate_ui_with_layout(egui::vec2(title_width,40.0),egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.heading(title);});
+                            let width=(ui.painter().layout_no_wrap(tr("另存为").to_owned(),egui::FontId::proportional(20.0),egui::Color32::WHITE).size().x+24.0).max(100.0);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
+                                let button=ui.add_enabled(self.pending.is_none()&&self.video_tracks.valid(self.video_settings.container)&&valid_range(self.start,self.end,duration),egui::Button::new("").fill(egui::Color32::from_rgb(30,140,65)).min_size(egui::vec2(width,40.0)));
+                                button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,button.enabled(),tr("另存为")));
+                                ui.painter().text(button.rect.center(),egui::Align2::CENTER_CENTER,tr("另存为"),egui::FontId::proportional(20.0),if button.enabled(){egui::Color32::WHITE}else{ui.visuals().weak_text_color()});
+                                export_requested=button.clicked();
+                            });
+                        });
+                        ui.separator();
+                        ui.style_mut().spacing.scroll.floating=false;
+                        egui::ScrollArea::vertical().show(ui,|ui|{
+                            ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_settings.controls(ui);});
+                            ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_tracks.controls(ui,self.video_settings.container,path,audio);});
+                            ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_settings.crop.controls(ui);});
+                            ui.small(&view.description);
+                            ui.add_space(8.0);
+                            ui.label(tr("按列表导出已勾选的音轨与字幕；语言写入轨道元数据。"));
+                            ui.small(tr("重新编码，边界受帧 / 采样精度限制；不覆盖原文件或已有文件。"));
+                        });
+                    });
+                }
+                {
                     egui::TopBottomPanel::bottom("trim_transport").exact_height(28.0+ui.spacing().item_spacing.y).resizable(false).show_separator_line(false).frame(egui::Frame::NONE).show_inside(ui, |ui| {
                         ui.add_space(ui.spacing().item_spacing.y);
                     ui.add_enabled_ui(!edit_busy,|ui| {ui.horizontal(|ui| {
@@ -262,7 +425,19 @@ impl Trim {
                     });});
                     });
                 }
-                let mut export_requested=false;
+                if video {
+                    egui::TopBottomPanel::top("video_trim_range").resizable(false).show_inside(ui,|ui|{
+                        ui.add_enabled_ui(self.pending.is_none(),|ui|{
+                            ui.horizontal_wrapped(|ui|{self.range_values(ui,duration,position);});
+                            ui.horizontal_wrapped(|ui|{self.range_actions(ui,duration,false,&mut action);ui.label(format!("{}: {:.3} s",tr("区间时长"),(self.end-self.start).max(0.0)));});
+                        });
+                    });
+                    egui::TopBottomPanel::bottom("video_edit_timeline").exact_height(88.0).resizable(false).show_inside(ui,|ui|{
+                        ui.add_enabled_ui(self.pending.is_none(),|ui|{
+                            if let Some(seek)=crate::media_preview::paint_video_edit_timeline(ui,position,duration,&mut self.start,&mut self.end,view.playing,view.frame_times){action.seek=Some(seek);}
+                        });
+                    });
+                }
                 if !video {
                     ui.add_enabled_ui(self.pending.is_none() && !edit_busy && !settings_open, |ui| {
                         ui.horizontal_top(|ui| {
@@ -301,25 +476,19 @@ impl Trim {
                     });
                 }
                 ui.add_enabled_ui(self.pending.is_none() && !edit_busy && !settings_open, |ui| {
-                    if video {
-                    egui::ScrollArea::horizontal().id_salt("trim_range_controls").auto_shrink([false,true]).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        self.range_values(ui,duration,position);
-                        self.range_actions(ui,duration,true,&mut action);
-                    });
-                    });
-                    }
-                    ui.label(tr(if video { "另存 MP4（H.264 / AAC），仅保留主视频和当前音轨；不保留字幕。" } else { "仅导出当前音轨；音量控件仅影响试听。" }));
+                    if !video {ui.label(tr("仅导出当前音轨；音量控件仅影响试听。"));
                     ui.small(tr("重新编码，边界受帧 / 采样精度限制；不覆盖原文件或已有文件。"));
+                    }
                     let valid = valid_range(self.start, self.end, duration);
                     if !valid && !self.session.as_ref().is_some_and(|session|session.state.interval()) { ui.colored_label(ui.visuals().warn_fg_color, tr("终点必须大于起点且不超过媒体时长")); }
-                    if export_requested || (video && ui.add_enabled(valid, egui::Button::new(tr("导出"))).clicked()) {
-                        let extension = if video { "mp4" } else { self.settings.format.extension() };
+                    if export_requested {
+                        let extension = if video { self.video_settings.extension() } else { self.settings.format.extension() };
                         let name = format!("{}_trim.{extension}", path.file_stem().unwrap_or_default().to_string_lossy());
-                        let dialog = rfd::FileDialog::new().set_file_name(&name).add_filter(extension, &[extension]);
+                        let dialog = rfd::FileDialog::new().set_file_name(&name);
+                        let dialog = if video {dialog}else{dialog.add_filter(extension,&[extension])};
                         let dialog = if let Some(parent) = path.parent() { dialog.set_directory(parent) } else { dialog };
                         if let Some(target) = dialog.save_file() {
-                            let target = target.with_extension(extension);
+                            let target = if video && target.extension().is_some(){target}else{target.with_extension(extension)};
                             if target.exists() {
                                 self.result = Some(Err(tr("目标已存在，请选择新的文件名").into()));
                             } else {
@@ -330,9 +499,12 @@ impl Trim {
                                 let (start,end,duration,audio)=if let Some(clip)=&clip{(0.0,clip.duration,clip.duration,Some(0))}else{(self.start,self.end,duration,audio)};let ctx = ui.ctx().clone();
                                 let filter=self.session.as_ref().map(|session|session.filter_string());
                                 let settings=self.settings.clone();
+                                let video_settings=self.video_settings.clone();
+                                let tracks=self.video_tracks.entries.clone();
                                 std::thread::spawn(move || {
                                     let _cache=clip;
-                                    let result = export(&ffmpeg, &source, &target, start, end, duration, video, audio, &settings,filter.as_deref());
+                                    let result = export(&ffmpeg, &source, &target, start, end, duration, video, audio, &settings,&video_settings,&tracks,filter.as_deref());
+                                    notify_export_result(&result);
                                     let _ = tx.send(result); ctx.request_repaint();
                                 });
                             }
@@ -368,6 +540,17 @@ impl Trim {
                         ui.colored_label(ui.visuals().warn_fg_color, error);
                     } else { ui.label(tr("正在生成波形…")); }
 
+                } else {
+                    let available=egui::vec2(ui.available_width().max(1.0),ui.available_height().max(1.0));
+                    let (rect,response)=ui.allocate_exact_size(available,egui::Sense::click());
+                    ui.painter().rect_filled(rect,0.0,egui::Color32::BLACK);
+                    if let Some(texture)=view.video_texture {
+                        let size=self.video_settings.crop.preview_size(texture.size_vec2());let scale=(rect.width()/size.x).min(rect.height()/size.y);
+                        let image=egui::Rect::from_center_size(rect.center(),size*scale);
+                        ui.painter().image(texture.id(),image,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
+                        self.video_settings.crop.overlay(ui,image,self.pending.is_none());
+                    } else {ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,tr("播放"),egui::FontId::proportional(16.0),egui::Color32::WHITE);}
+                    if response.clicked() && !self.video_settings.crop.enabled {action.toggle=true;}
                 }
             });
         self.open = open;
@@ -385,27 +568,95 @@ fn valid_range(start: f64, end: f64, duration: f64) -> bool {
     start.is_finite() && end.is_finite() && duration.is_finite() && start >= 0.0 && end > start && end <= duration
 }
 
-fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, duration: f64, video: bool, audio: Option<u64>, settings: &AudioSettings, audio_filter:Option<&str>) -> Result<PathBuf, String> {
+fn notify_export_result(result:&Result<PathBuf,String>){
+    let (title,description,level)=match result {
+        Ok(path)=>(tr("导出完成").to_owned(),path.display().to_string(),rfd::MessageLevel::Info),
+        Err(error)=>(tr("导出失败").to_owned(),error.clone(),rfd::MessageLevel::Error),
+    };
+    std::thread::spawn(move||{rfd::MessageDialog::new().set_title(title).set_description(description).set_level(level).show();});
+}
+
+struct PassLogs(PathBuf);
+#[cfg(test)]
+mod rate_control_tests {
+    use super::*;
+    #[test]
+    fn default_is_single_pass_quality_and_source_fps(){
+        let settings=VideoSettings::default();assert!(!settings.use_two_pass());assert!(!settings.bitrate_mode);assert_eq!(settings.fps,"source");
+    }
+    #[test]
+    fn two_pass_requires_bitrate_and_supported_codec(){
+        let mut settings=VideoSettings{two_pass:true,..Default::default()};assert!(!settings.use_two_pass());
+        settings.bitrate_mode=true;assert!(settings.use_two_pass());
+        settings.codec=3;assert!(!settings.use_two_pass());settings.codec=10;assert!(!settings.use_two_pass());
+    }
+    #[test]
+    fn target_bitrate_omits_quality_parameter(){
+        let settings=VideoSettings{bitrate_mode:true,fps:"30000/1001".into(),..Default::default()};
+        let mut cmd=std::process::Command::new("ffmpeg");settings.configure(&mut cmd);
+        let args:Vec<_>=cmd.get_args().map(|arg|arg.to_string_lossy().to_string()).collect();
+        assert!(!args.iter().any(|arg|arg=="-crf"));assert!(args.windows(2).any(|pair|pair==["-b:v","6000k"]));
+        assert!(args.windows(2).any(|pair|pair==["-r","30000/1001"]));
+    }
+}
+impl Drop for PassLogs {
+    fn drop(&mut self){
+        for suffix in ["-0.log","-0.log.mbtree","-0.log.temp","-0.log.mbtree.temp"] {
+            let mut path=self.0.as_os_str().to_os_string();path.push(suffix);let _=std::fs::remove_file(PathBuf::from(path));
+        }
+    }
+}
+
+fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, duration: f64, video: bool, audio: Option<u64>, settings: &AudioSettings, video_settings:&VideoSettings, tracks:&[crate::export_tracks::Track], audio_filter:Option<&str>) -> Result<PathBuf, String> {
+    let audio=if video && video_settings.container==9{None}else{audio};
     if !valid_range(start, end, duration) { return Err("Invalid trim range".into()); }
     // Encode to a unique sibling, then exclusively create the destination. This
     // works on filesystems without hard links and never replaces an existing file.
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let extension = if video { "mp4" } else { settings.format.extension() };
+    let extension = if video { video_settings.extension() } else { settings.format.extension() };
     let temp = target.with_file_name(format!(".unity-trim-{}-{}.{extension}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let reservation = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp).map_err(|e| e.to_string())?;
     drop(reservation);
     let result = (|| {
         let mut cmd = command(ffmpeg);
-        cmd.args(["-nostdin", "-v", "error", "-y", "-ss", &start.to_string()]).arg("-i").arg(source)
-            .args(["-t", &(end-start).to_string()]);
+        cmd.args(["-nostdin", "-v", "error", "-y", "-ss", &start.to_string(),"-t",&(end-start).to_string()]).arg("-i").arg(source);
+        let has_audio=video&&video_settings.container!=9&&tracks.iter().any(|t|t.enabled&&!t.subtitle);
+        let _subtitle_inputs;
         if video {
-            cmd.args(["-map", "0:V:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]);
-        } else { cmd.arg("-vn"); }
-        if let Some(index) = audio {
-            cmd.args(["-map", &format!("0:{index}")]);
-            if video {cmd.args(["-c:a","aac"]);}else{if let Some(filter)=audio_filter{cmd.args(["-af",filter]);}settings.configure(&mut cmd);}
+            _subtitle_inputs=Some(crate::export_tracks::configure(&mut cmd,tracks,source,video_settings.container,start,end-start,ffmpeg,&temp)?);
+            let encoders=command(ffmpeg).args(["-hide_banner","-encoders"]).output().map_err(|e|e.to_string())?;
+            let available=String::from_utf8_lossy(&encoders.stdout);
+            for encoder in std::iter::once(video_settings.encoder()).chain(has_audio.then_some(video_settings.audio_encoder())) {
+                if !encoders.status.success() || !available.lines().any(|line|line.split_whitespace().nth(1)==Some(encoder)){return Err(format!("FFmpeg encoder unavailable: {encoder}"));}
+            }
+            video_settings.configure(&mut cmd);
+        } else { _subtitle_inputs=None;cmd.arg("-vn"); }
+        if video {
+            if has_audio {
+                cmd.args(["-c:a",video_settings.audio_encoder()]);
+                if !matches!(video_settings.audio_codec,2|5){cmd.args(["-b:a",&format!("{}k",video_settings.audio_bitrate)]);}
+                cmd.args(["-ar",&video_settings.audio_rate.to_string(),"-ac","2"]);
+            }
+        }else if let Some(index)=audio{
+            cmd.args(["-map",&format!("0:{index}")]);
+            if let Some(filter)=audio_filter{cmd.args(["-af",filter]);}settings.configure(&mut cmd);
         } else { cmd.arg("-an"); }
-        let output = cmd.args(["-sn", "-dn", "-map_metadata", "-1"]).arg(&temp).output().map_err(|e| e.to_string())?;
+        if !video{cmd.arg("-sn");}
+        cmd.args(["-t",&(end-start).to_string(),"-dn", "-map_metadata", "-1"]);
+        let _pass_logs;
+        if video&&video_settings.use_two_pass(){
+            let prefix=temp.with_extension("pass");
+            _pass_logs=Some(PassLogs(prefix.clone()));
+            let args:Vec<_>=cmd.get_args().map(|a|a.to_os_string()).collect();
+            let inputs_end=args.iter().position(|arg|arg=="-map").ok_or("Missing video map")?;
+            let mut first=command(ffmpeg);first.args(&args[..inputs_end]);
+            video_settings.configure(&mut first);
+            first.args(["-map","0:V:0","-an","-sn","-t",&(end-start).to_string(),"-pass","1","-passlogfile"]).arg(&prefix).args(["-f","null","-"]);
+            let result=first.output().map_err(|e|e.to_string())?;
+            if !result.status.success(){return Err(format!("Pass 1: {}",String::from_utf8_lossy(&result.stderr)));}
+            cmd.args(["-pass","2","-passlogfile"]).arg(&prefix);
+        }else{_pass_logs=None;}
+        let output = cmd.arg(&temp).output().map_err(|e| e.to_string())?;
         if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).into_owned()); }
         if std::fs::metadata(&temp).map_err(|e| e.to_string())?.len() == 0 { return Err("FFmpeg produced an empty file".into()); }
         let mut input = std::fs::File::open(&temp).map_err(|e| e.to_string())?;

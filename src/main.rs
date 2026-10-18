@@ -27,6 +27,9 @@ mod asset_viewer;
 mod media_tools;
 mod third_party;
 mod media_trim;
+mod video_crop;
+mod export_tracks;
+mod subtitle_player;
 mod audio_edit;
 mod media_preview;
 mod gif_playback;
@@ -2473,6 +2476,19 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.4").strong());
+                        ui.label(localization::tr("• 播放列表菜单可退出编辑，保存成功后自动退出编辑"));
+                        ui.label(localization::tr("• 音频与视频导出结束弹窗提醒，成功显示路径、失败显示原因"));
+                        ui.label(localization::tr("• 视频导出可选质量 / 目标码率、帧率及兼容编码的 2 pass，默认单遍"));
+                        ui.label(localization::tr("• 视频导出支持多音轨与字幕、语言设置和音频采样率选择"));
+                        ui.label(localization::tr("• 播放器支持文字内嵌 / 外挂字幕、字体与独立描边投影样式；字幕可跟随音轨语言，无法匹配时提示手动选择"));
+                        ui.label(localization::tr("• 导出补充未压缩、MJPEG、MPEG-4、ProRes、AV1 与 MPEG-2，音频按容器独立选择"));
+                        ui.label(localization::tr("• 画面大小支持宽高独立或锁定比例，预览同步变化；GIF 可选颜色数与抖动"));
+                        ui.label(localization::tr("• 编码列表按容器兼容性筛选并隐藏不兼容项，新增 H.265 导出"));
+                        ui.label(localization::tr("• 视频编辑轴精简为上方帧刻度、中间选区、底部时间；范围操作在预览上方，另存为在右上角"));
+                        ui.label(localization::tr("• 视频预览叠加像素裁剪框，可拖动、输入坐标与尺寸；导出支持十种容器和自定义后缀"));
+                        ui.label(localization::tr("• 单视频编辑新增预览与底部范围操作，支持 H.264 / VP8 / VP9 导出；批量暂缓"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.3").strong());
                         ui.label(localization::tr("• 第三方支持集中管理 FFmpeg、PDFium 和 LibreOffice，组件不参与缓存清理"));
                         ui.label(localization::tr("• 视频与 GIF 支持点击整个预览框播放 / 暂停，包括画面留白"));
@@ -2501,16 +2517,16 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 音频统一左右键选区，剪切 / 淡入淡出 / dB 可按区间处理；未选范围的 dB 作用于当前整段"));
                         ui.label(localization::tr("• 音视频剪切：视频另存 MP4，音频可选 MP3 / WAV / FLAC / M4A 及适用参数；需 FFmpeg"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.2").strong());
                         ui.label(localization::tr("• 九宫格无损精简：完整 RGBA 判重、拉伸 / 重复自动识别，可编辑预览与原位替换"));
                         ui.label(localization::tr("• slice9 支持批量 / 目录 / dry-run，--preview 最多 10 个可编辑窗口；顶部指令查看提供示例"));
                         ui.label(localization::tr("• 对齐补白不计入 Unity Border；仅写回已读取且受支持的单 Sprite meta，保留 GUID"));
                         ui.label(localization::tr("• 普通弹窗恢复焦点保留位置，首次打开或按钮唤醒时才居中"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.2.1").strong());
                         ui.label(localization::tr("• 替换 AppIcon"));
                         ui.label(localization::tr("• 优化 Material 和 Shader 预览操作体验"));

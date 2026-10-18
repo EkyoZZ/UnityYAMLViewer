@@ -2243,3 +2243,71 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 按用户要求，仅修改 GitHub Release name 为对应 v版本号：v1.2.3～v1.1.8，以及 v1.1.4～v1.1.0。用户已修改的 v1.1.5～v1.1.7 保留。
 - API 回读核对标题；标签名 / 目标提交、正文、附件及草稿 / 预发布状态保持不变，latest API 仍是 v1.2.3。未重新编译或上传附件。
 - 标题规则已写入根 AGENTS.md，后续发布只用 v1.x.x 作为显示标题。该规则和发布后状态文档均需用户自行提交 / 推送。
+## 1.2.4 视频编辑本地体验构建（2026-10-18）
+- 编译前检查：未发现 unity_yaml_viewer 进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用产生 7 条警告；日志：target/video-editor-release-build.log。
+- 产物：target/release/unity_yaml_viewer.exe，版本 1.2.4，23310848 字节，SHA-256：DFB00D657DD6A7EF6EEE4BD1DDB87BEAE6205EEB098611323EF4A9C7083121D1。
+- 尚未运行应用验证新视频编辑界面与端到端导出；本地构建不代表正式发布。
+
+## 视频裁剪与编辑时间轴体验构建（2026-10-18）
+
+- 用户明确授权编译；编译前未发现程序进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用 7 条警告；日志 target/video-timeline-release-build.log。
+- 本次 EXE 包含视频裁剪叠加、九种容器、自定义后缀、独立时间 / 帧刻度编辑轴、顶部范围操作及右上角另存为。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.4，23319040 字节；SHA-256：60AEE22587CD657F209F2779E35A20DD25B37B058DCF6C856D0CC1F5BC66E065。
+- 未运行应用验证实际 GUI 和端到端导出，未发布。前述未重新构建的记录为当时状态，本次构建已包含这些修改。
+
+## 紧凑时间轴与标题对齐体验构建（2026-10-18）
+
+- 用户明确授权；编译前未发现运行进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用保留 7 条警告；日志 target/video-layout-release-build.log。
+- 已包含 88 逻辑像素紧凑编辑轴（上方帧刻度、中间选区、底部时间）及导出设置标题底部对齐。
+- 产物 target/release/unity_yaml_viewer.exe，版本 1.2.4，23318528 字节；SHA-256：59BB3246C47539AA51F7BEB007D55157E2A7C8C18E60F590FFD11DAAEEFB0D0A。
+- 实际 GUI 与导出仍待运行验证，未正式发布。此前未重新构建说明为对应修改当时状态。
+
+## 多轨、字幕与缩放体验构建（2026-10-18）
+
+- 首次编译检查发现目标 EXE 被占用，未启动构建；用户再次明确确认后重新检查，未发现运行进程且目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用保留 7 条警告；日志 target/multitrack-subtitle-release-build.log。
+- 本次包含新增视频 / 音频编码、GIF 颜色与抖动、宽高锁链缩放、默认保留与增删多音轨 / 多字幕、语言设置、播放器文字字幕样式与音轨语言跟随等当前修改。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.4，23634432 字节；SHA-256：90537DBDF44937E46F7FF7BC0652D9B2BC31261235DD65495EF90F42CCD0221F。
+- 尚未运行应用进行 GUI 与端到端验收；新增测试仅做编译检查。未正式发布，前文未重新构建说明为各阶段当时状态。
+
+## 导出参数与画面大小布局体验构建（2026-10-18）
+
+- 用户明确授权；重新检查未发现运行进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用保留 7 条警告；日志 target/video-export-settings-release-build.log。
+- 本次包含时间轴绿色全高边界 / 黄色倒三角、右侧设置延伸到底部、视频音频采样率选择、目标码率 / 通用帧率 / 兼容编码两遍处理，以及画面大小上下宽高、左侧锁链、右侧现有 Tab 与加宽输入框。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.4，23651328 字节；SHA-256：3E6CDEBEDCC50211540E73EF68ADBB8FD1A2809A732E290E268B7C0FA87D490F。
+- 实际 GUI 与端到端导出待验收；新增测试仅编译未运行。未发布，前文未重新构建说明为对应阶段状态。
+
+## 时间轴与关联按钮完善体验构建（2026-10-18）
+
+- 用户明确授权；编译前未发现运行进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用保留 7 条警告；日志 target/video-timeline-polish-release-build.log。
+- 包含 Tab 右侧避让与非浮动滚动条、PS 参考关联按钮、未锁定无底灰色图标、黄色游标连续拖动 / 松开寻址及独立刷新、每帧平均约 12 像素的放大限制、剔除区蓝灰色显示。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.4，23659008 字节；SHA-256：3E18516F8B71518EBE824682C773E1CCC4C2C2C6877ACC9D394FD318FD4ACADF。
+- 实际 GUI 平滑度与布局仍待体验验证，未正式发布；此前未重新构建说明为对应修改阶段状态。
+
+## 侧栏宽度与关联图标样式体验构建（2026-10-18）
+
+- 用户明确授权；编译前未发现运行进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用保留 7 条警告；日志 target/video-panel-link-release-build.log。
+- 包含画面大小输入固定宽度、侧栏宽度反馈修复与按文件独立状态、宽高标签对齐，以及关联图标无底框 / 锁定主题蓝 / 未锁定灰色。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.4，23691776 字节；SHA-256：D43DA798C86C3C93096BDFAD2693EE2B34ECADA1F82A4101BB98CDBCF651CF41。
+- 实际 GUI 布局与交互待体验验证，未正式发布；前述未重新构建为对应阶段状态。
+
+## 预览同步与导出参数排版体验构建（2026-10-18）
+
+- 用户明确授权；编译前未发现运行进程，目标 EXE 独占打开检查通过。
+- cargo build --release --offline --locked 成功，应用保留 7 条警告；日志 target/video-preview-layout-release-build.log。
+- 包含关联括线端点对齐文字中心、画面大小预览同步、质量 / 目标码率 Tab 样式，以及视频封装格式 & 编码格式同行和七语言标题。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.4，23693824 字节；SHA-256：A4D538F3C354B89810296506D4B6C3B65C58F77A3556FCDCAB37F2DA9D9AAE45。
+- 实际 GUI 与端到端导出待体验验收，未正式发布；前文未重新构建说明为对应阶段状态。
+
+## 最新播放列表与时间轴 Release 构建
+
+- 用户明确授权后，已检查目标程序未运行、EXE 可独占打开；cargo build --release --offline --locked 成功（7 条应用警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.4；大小 23694336 字节；SHA256：70B57F6243CC2020C7E7AC99E231B9F6261BDF6D257ECC22251301052A28C45F。
+- 包含导出完成 / 失败弹窗、播放列表菜单按编辑状态切换（普通与全屏共用）、保存成功退出编辑，以及视频时间轴橙色游标与浅色移除区域配色。实际 GUI 与端到端导出仍待验证，未正式发布。
+- 构建日志：target/playlist-timeline-release-build.log。
