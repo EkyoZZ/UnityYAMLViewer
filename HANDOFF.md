@@ -1,3 +1,25 @@
+# 当前交接：1.2.4 文档与附件准备完成，等待用户提交（2026-10-18）
+
+本节优先于下方历史阶段记录。用户确定本版功能范围，由用户自行提交 Git；用户表示提交后可以发布。**本轮只准备文档及现有 EXE 的同字节发布附件，不提交、不推送、不打标签、不发布。后续须等用户确认提交完成，并核实远端已包含目标提交。**
+
+## 最终资料
+
+- 整理前工作区干净，源码基线 bc0e243（增加 csv,tsv,psv 表格查看和编辑,格式验证,查找定位）。本轮仅修改文档并复制已有产物，未重新编译。
+- 最终功能、限制和验证边界：[版本记录](docs/versions/1.2.4.md)；对外更新内容：[发布说明](docs/releases/1.2.4.md)。逐轮原始记录完整保留到 [开发归档](docs/versions/archive/1.2.4-development-history.md)。索引与 CHANGELOG 已同步。
+- Cargo / EXE 版本 1.2.4。最新构建日志 target/table-json-kind-release-build.log；Release 构建成功，7 条既有应用警告。
+- 原 EXE：target/release/unity_yaml_viewer.exe；发布附件：target/release/UnityYAMLViewer-v1.2.4-windows-x64.exe。
+- 两份产物均为 23,726,080 字节，SHA-256 A43EFC4E0372110CB3EE4148DC9EFDC99F0D4848EB0513BEC55DBBBDE0638887。附件在 target 下，不需提交 Git。
+- 用户多轮截图反馈已用于修正布局；代理未运行最终完整 GUI 回归，新增测试仅完成 cargo check --tests，未执行测试二进制。发布授权不能替代全部语言 / DPI、多轨字幕导出、大表性能等验证，边界保留在版本记录。
+- README 保持中英文实际支持 / 限制，不添加发布流程或逐版本日志。关于窗口当前 1.2.4 / 上一版 1.2.3，其他历史默认折叠；七语言摘要保留，本轮未改源码或重打 EXE。
+
+## 用户提交后的发布步骤
+
+1. 用户确认已提交后，读取新的目标提交和工作区状态；检查本轮文档已包含，实时核实远端分支包含该提交，不仅依据本地 origin 缓存。若尚未推送，先让用户完成同步，不发布远端缺失的提交。
+2. 复核 Cargo 版本、两份 EXE 的文件版本 / 字节数 / SHA-256、发布附件及 docs/releases/1.2.4.md。沿用现有 EXE，不自动重编译；若用户授权新编译仍需先检查占用。
+3. 检查 v1.2.4 标签及 Release 是否已存在，避免覆盖。按照本会话用户提交后发布的授权，标签指向已核实的提交，使用上述更新说明和附件。Release API 的 name 只允许 v1.2.4，正式发布而非草稿 / 预发布。
+4. 核对标签实际提交、Release 状态、Latest、附件名 / 大小及 GitHub asset.digest。真实发布成功后再更新版本记录、索引、CHANGELOG、发布说明与本交接的发布时间 / 链接，不把构建成功写成已发布。
+
+---
 # 当前交接：1.2.3 已正式发布（2026-10-18）
 
 北京时间 2026-10-18 13:30:30，用户确认已推送后，GitHub v1.2.3 正式发布，非草稿 / 非预发布，已核对 latest API 为 v1.2.3。发布页 https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.3 ，Release ID 416256040，目标提交 eab07a7b741eeb188c8b08a2b2eefa3a51c6d2df。
