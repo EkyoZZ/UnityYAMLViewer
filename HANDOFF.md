@@ -2311,3 +2311,57 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 产物：target/release/unity_yaml_viewer.exe；版本 1.2.4；大小 23694336 字节；SHA256：70B57F6243CC2020C7E7AC99E231B9F6261BDF6D257ECC22251301052A28C45F。
 - 包含导出完成 / 失败弹窗、播放列表菜单按编辑状态切换（普通与全屏共用）、保存成功退出编辑，以及视频时间轴橙色游标与浅色移除区域配色。实际 GUI 与端到端导出仍待验证，未正式发布。
 - 构建日志：target/playlist-timeline-release-build.log。
+
+## CSV / TSV / PSV Release 构建验证
+
+- 用户明确授权后检查程序未运行且目标 EXE 无占用，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4，产物 target/release/unity_yaml_viewer.exe，大小 23754240 字节，SHA256：203AD2F6513D2BD638B705AAFC93B789CDFE8DF12FE76C3B5147342116CB582B。构建日志 target/delimited-release-build.log。
+- 包含 CSV / TSV / PSV 表格预览、原文切换、列宽调整及七语言文案；实际 GUI 与解析测试执行仍待验证。未正式发布。
+
+## 表格编辑 Release 构建验证
+
+- 用户明确授权后检查程序未运行且目标 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23650304 字节；SHA256：CBAA1FF92A2E53F585FE43065EA2F71D1F7279455B546F10B5B4D3024DCF8B72。日志 target/table-edit-release-build.log。
+- 包含 CSV / TSV / PSV 表格固定边缘非浮动滑条、单元格编辑与修改高亮、Ctrl+Z 撤销、保存编辑及放弃编辑。GUI 交互与解析 / 撤销测试执行仍待验证，未正式发布。
+
+## 表格类型检查 Release 构建验证
+
+- 用户明确授权后确认程序未运行、目标 EXE 无占用，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23654912 字节；SHA256：497AB85F0D13475B332492810172A4BB08D8B8A95512BC11AAE4E741FE67EFCB。日志 target/table-validation-release-build.log。
+- 包含三种分隔文本的列类型检查、错误标红和数量、上一个 / 下一个双向定位，以及先采样 3 行、不确定再扩展 5 行的策略。实际 GUI 与测试执行待验证，未正式发布。
+
+## 表格查找 Release 构建验证
+
+- 用户明确授权后确认程序未运行且目标 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23721984 字节；SHA256：B61AD1A5E300117EDF226C8B04B5C6737F46A2C6062055B36FF240EC3DACD6A1。日志 target/table-search-release-build.log。
+- 包含表格滚动条常显、简化的上一个 / 下一个文案、单元格查找与淡绿色匹配标记。实际 GUI 与测试执行待验证，未正式发布。
+
+## 分档查找 Release 构建验证
+
+- 用户明确授权后确认程序未运行且目标 EXE 无占用，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23801856 字节；SHA256：197094E0B9EBBF1EF1017336FA3A70101900923A61712BD02BAEE5F3C2B22BD7。日志 target/table-search-tier-release-build.log。
+- 包含 Ctrl+F 聚焦查找、小表实时 / 中表延迟 / 大表回车后台查找，以及淡绿匹配标记和前后定位。测试实际执行、GUI 交互和性能仍待验证，未正式发布。
+
+## 表格查找导航布局修复 Release 构建
+
+- 用户明确授权后确认程序未运行且 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23758336 字节；SHA256：80298AF76ABF56C861C2555001DA834C9A8CADA49086D61334AC7B750D2E7EA8。日志 target/table-toolbar-release-build.log。
+- 包含匹配导航栏限制单行高度、恢复表格视口的布局修复。实际 GUI 仍待运行验证，未正式发布。
+
+## 单元格编辑栏与翻译清理 Release 构建
+
+- 用户明确授权后确认程序未运行且目标 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23707648 字节；SHA256：DD39601D9A83472FA232A6E18559FF17DB5D9974A2E488C41B4B42874AB281B7。日志 target/table-cell-bar-release-build.log。
+- 包含紧凑双行表格工具栏、悬浮提示去重、字母列标 / 从零行号、同步单元格编辑栏及 173 条废弃翻译清理。实际 GUI 和测试执行仍待验证，未正式发布。
+
+## 表格界面细节 Release 构建
+
+- 用户明确授权后确认程序未运行且目标 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23718400 字节；SHA256：459BF7E596C03530D28E143C4DF57E2635B21FA6531DEDAB2B2E9F78BF301155。日志 target/table-polish-release-build.log。
+- 包含高对比常显滑条、文件名同行操作按钮、工具栏分隔间距、地址对齐和弱化文字色，以及 1 px 选中描边。实际 GUI 交互仍待验证，未正式发布。
+
+## JSON 对象与数组识别 Release 构建
+
+- 用户明确授权后确认程序未运行且目标 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
+- 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23726080 字节；SHA256：A43EFC4E0372110CB3EE4148DC9EFDC99F0D4848EB0513BEC55DBBBDE0638887。日志 target/table-json-kind-release-build.log。
+- 包含 JSON 对象 / 数组类型识别与校验、编辑栏移到分隔线上方，以及顶部搜索展开隐藏指令查看。实际 GUI 与测试执行仍待验证，未正式发布。

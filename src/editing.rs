@@ -513,11 +513,17 @@ pub fn with_flow_value<R>(ui: &mut egui::Ui, index: usize, callback: impl FnOnce
     Some(output)
 }
 impl Binding {
+    pub(crate) fn replace_text(&self, value: String) { self.apply(value); }
     pub fn value(&self) -> String {
         let session = self.source.session.lock().unwrap();
         session.patches.get(&self.range.start).map(|(_, value)| value.clone()).unwrap_or_else(|| session.original[self.range.clone()].into())
     }
-    pub fn dirty(&self) -> bool { self.source.session.lock().unwrap().has_changes_in(self.range.clone()) }
+    pub fn dirty(&self) -> bool {
+        let session = self.source.session.lock().unwrap();
+        if self.range.is_empty() && session.original == session.saved_original {
+            session.patches.get(&self.range.start) != session.saved_patches.get(&self.range.start)
+        } else { session.has_changes_in(self.range.clone()) }
+    }
     fn apply(&self, value: String) { self.source.session.lock().unwrap().change(self.range.clone(), value); }
     fn apply_color(&self, ui: &egui::Ui, color: [f64; 4]) {
         if !color.iter().all(|value| value.is_finite() && value.abs() <= f32::MAX as f64) { warning(ui, crate::localization::tr("颜色分量必须为有效浮点数，已恢复之前的值。")); return; }
@@ -529,6 +535,12 @@ impl Binding {
         let original = { let mut session = self.source.session.lock().unwrap(); session.drafts.remove(&self.range.start); session.component_drafts.retain(|(start, _), _| *start != self.range.start); (session.original == session.saved_original).then(|| session.saved_patches.get(&self.range.start).map(|(_, value)| value.clone())).flatten().unwrap_or_else(|| session.original[self.range.clone()].to_string()) };
         self.apply(original);
     }
+}
+/// Byte ranges for delimited cells refer to the unchanged source, like properties.
+pub(crate) fn cell_binding(ui: &egui::Ui, range: Range<usize>) -> Option<Binding> {
+    let source = source(ui)?;
+    if range.end > source.session.lock().unwrap().original.len() { return None; }
+    Some(Binding { source, range })
 }
 pub fn dirty_scope(ui: &egui::Ui) -> bool {
     source(ui).is_some_and(|source| source.session.lock().unwrap().has_changes_in(source.range))
@@ -900,7 +912,8 @@ pub fn save(session: &Session) -> Result<String, String> {
     let current = std::fs::read(&session.path).map_err(|error| error.to_string())?;
     if current != session.disk { return Err(crate::localization::tr("文件已被其他程序修改，未覆盖磁盘文件。请放弃编辑并重新打开文件。").into()); }
     let text = session.rendered();
-    if crate::parse_unity_yaml(&text).iter().map(|doc| (&doc.file_id, &doc.type_name)).collect::<Vec<_>>() != crate::parse_unity_yaml(&session.original).iter().map(|doc| (&doc.file_id, &doc.type_name)).collect::<Vec<_>>() {
+    let delimited = session.path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "csv" | "tsv" | "psv"));
+    if !delimited && crate::parse_unity_yaml(&text).iter().map(|doc| (&doc.file_id, &doc.type_name)).collect::<Vec<_>>() != crate::parse_unity_yaml(&session.original).iter().map(|doc| (&doc.file_id, &doc.type_name)).collect::<Vec<_>>() {
         return Err(crate::localization::tr("保存验证失败：对象索引或类型发生变化。").into());
     }
     let temporary = session.path.with_file_name(format!(".{}.unity-yaml-edit-{}.tmp", session.path.file_name().unwrap().to_string_lossy(), std::process::id()));
@@ -922,6 +935,25 @@ pub fn save(session: &Session) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn delimited_cell_changes_undo_across_save_and_empty_field() {
+        let original = "中文,\"a,b\",\r\n";
+        let mut session = Session::new(PathBuf::from("table.csv"), original.into(), original.as_bytes().to_vec());
+        let start = original.find(",\r\n").unwrap() + 1;
+        session.change(start..start, "filled".into());
+        let saved = session.rendered();
+        assert_eq!(saved, "中文,\"a,b\",filled\r\n");
+        session.mark_saved(&saved);
+        assert!(!session.has_changes());
+        session.change(0.."中文".len(), "\"new,value\"".into());
+        assert_eq!(session.rendered(), "\"new,value\",\"a,b\",filled\r\n");
+        session.undo();
+        assert_eq!(session.rendered(), saved);
+        assert!(!session.has_changes());
+        session.undo();
+        assert_eq!(session.rendered(), original);
+        assert!(session.has_changes());
+    }
     #[test]
     fn animation_batch_drag_uses_one_undo_and_preserves_values() {
         let raw = "time: 0\r\nvalue: 1\r\ntime: 0.5\r\nvalue: 1\r\n";

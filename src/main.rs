@@ -24,6 +24,7 @@ mod localized_format;
 mod theme;
 mod icons;
 mod asset_viewer;
+mod delimited_table;
 mod media_tools;
 mod third_party;
 mod media_trim;
@@ -1590,7 +1591,7 @@ impl eframe::App for ViewerApp {
                             if ui.put(button_rect,egui::Button::new(button_text)).clicked() { self.show_supported_formats = true; }
                         });
                     }
-                    if ui.button(localization::tr("指令查看")).clicked() {self.show_command_help=true;native_window::wake(ui.ctx(),egui::Id::new("command_help"));}
+                    if !self.show_search && ui.button(localization::tr("指令查看")).clicked() {self.show_command_help=true;native_window::wake(ui.ctx(),egui::Id::new("command_help"));}
                     ui.spacing_mut().item_spacing.x = previous_spacing;
                 });
                 });
@@ -1759,6 +1760,7 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
+        let delimited_tab = self.path.as_ref().is_some_and(|path| path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
         let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_pdf(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
@@ -1950,7 +1952,7 @@ impl eframe::App for ViewerApp {
         let mut content_frame=egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill);
         if self.path.as_ref().is_some_and(|path|playlist::is_playlist(path)||media_preview::is_media(path)) {content_frame=content_frame.inner_margin(egui::Margin::same(8));}
         egui::CentralPanel::default().frame(content_frame).show(ctx, |ui| {
-            if reference_tab {
+            if reference_tab && !delimited_tab {
                 editing::publish(ctx, None, 0..0);
                 if material_preview && theme::preview_toggle(ui,self.preview.open).clicked(){self.preview.open=!self.preview.open;ctx.request_repaint();}
                 if !spine_preview::is_data_asset(&self.raw) && self.path.as_ref().is_some_and(|path| asset_viewer::is_text(path) && !spine_preview::is_spine(path)) && ui.button(crate::localization::tr("重载")).clicked() {
@@ -1975,7 +1977,9 @@ impl eframe::App for ViewerApp {
                     ctx.data_mut(|data|data.insert_temp(egui::Id::new("inspector_hide_property_types"),self.preview.open));
                     ctx.request_repaint();
                 }
-                ui.heading(if current_edit.is_some() { crate::localization::tr("Inspector · 编辑模式") } else { crate::localization::tr("只读 Inspector") });
+                if delimited_tab {
+                    if let Some(path) = &self.path { asset_viewer::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path); }
+                } else { ui.heading(if current_edit.is_some() { crate::localization::tr("Inspector · 编辑模式") } else { crate::localization::tr("只读 Inspector") }); }
                 if current_edit.is_some() {
                     if ui.add(egui::Button::new(RichText::new(crate::localization::tr("放弃编辑")).color(Color32::WHITE))
                         .fill(Color32::from_rgb(211, 55, 65)).stroke(egui::Stroke::NONE)).clicked() {
@@ -1996,7 +2000,7 @@ impl eframe::App for ViewerApp {
                         self.pending_save = self.path.clone();
                         ctx.memory_mut(|memory| { if let Some(id) = memory.focused() { memory.surrender_focus(id); } });
                     }
-                } else if self.path.is_some() && ui.add_enabled(!self.documents.is_empty(), egui::Button::new(crate::localization::tr("编辑模式"))).clicked() {
+                } else if self.path.is_some() && ui.add_enabled(delimited_tab || !self.documents.is_empty(), egui::Button::new(crate::localization::tr("编辑模式"))).clicked() {
                     let path = self.path.clone().unwrap();
                     if let Some(history) = self.saved_histories.get(&path).cloned().filter(|history| fs::read(&path).ok().as_ref() == Some(&history.lock().unwrap().disk)) {
                         self.raw = history.lock().unwrap().original.clone().into();
@@ -2041,6 +2045,11 @@ impl eframe::App for ViewerApp {
 					self.path.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default());
 				ui.separator();
 			}
+            if delimited_tab {
+                editing::publish(ctx, self.path.as_ref().and_then(|path| self.edits.get(path)).cloned(), 0..self.raw.len());
+                if let Some(path) = self.path.clone() { self.assets.show(ui, &path, &self.raw); }
+                return;
+            }
             let selected_object = self.selected.and_then(|index| {
                 let doc = self.documents.get(index)?;
                 if doc.type_name == "GameObject" { Some(index) }
@@ -2478,6 +2487,7 @@ impl eframe::App for ViewerApp {
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.4").strong());
                         ui.label(localization::tr("• 播放列表菜单可退出编辑，保存成功后自动退出编辑"));
+                        ui.label(localization::tr("• CSV / TSV / PSV 支持单元格编辑栏、撤销、检查与查找"));
                         ui.label(localization::tr("• 音频与视频导出结束弹窗提醒，成功显示路径、失败显示原因"));
                         ui.label(localization::tr("• 视频导出可选质量 / 目标码率、帧率及兼容编码的 2 pass，默认单遍"));
                         ui.label(localization::tr("• 视频导出支持多音轨与字幕、语言设置和音频采样率选择"));

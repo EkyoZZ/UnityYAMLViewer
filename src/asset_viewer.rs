@@ -56,7 +56,7 @@ mod tests {
     }
 }
 pub fn is_text(path: &Path) -> bool {
-    matches!(extension(path).as_str(), "cs" | "txt" | "md" | "json" | "xml" | "shader" | "hlsl" | "cginc" | "compute" | "glsl" | "uxml" | "uss" | "asmdef" | "asmref" | "meta" | "csv" | "tsv" | "log" | "ini" | "toml" | "js" | "ts" | "lua" | "py" | "pyw" | "c" | "cpp" | "h" | "hpp" | "rs" | "java" | "html" | "css" | "sh" | "ps1" | "bat" | "cmd")
+    matches!(extension(path).as_str(), "cs" | "txt" | "md" | "json" | "xml" | "shader" | "hlsl" | "cginc" | "compute" | "glsl" | "uxml" | "uss" | "asmdef" | "asmref" | "meta" | "csv" | "tsv" | "psv" | "log" | "ini" | "toml" | "js" | "ts" | "lua" | "py" | "pyw" | "c" | "cpp" | "h" | "hpp" | "rs" | "java" | "html" | "css" | "sh" | "ps1" | "bat" | "cmd")
 }
 fn extension(path: &Path) -> String { path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase() }
 
@@ -124,6 +124,7 @@ impl ImageTab {
 }
 #[derive(Default)]
 pub struct Assets {
+    table: crate::delimited_table::Preview,
     playlists: crate::playlist::Lists,
     material_graphs: HashMap<PathBuf, crate::material_graph::Preview>,
     media: HashMap<PathBuf, crate::media_preview::Preview>,
@@ -213,7 +214,7 @@ impl Assets {
             self.playlists.show_creator(ui,path,preview);
             return;
         }
-        if !is_pdf(path){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
+        if !is_pdf(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
         self.models.retain(|other,_|other==path);
         if crate::model_preview::is_model(path) {
             let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
@@ -244,6 +245,10 @@ impl Assets {
         self.svgs.retain(|other, _| other == path);
         if extension(path) == "svg" {
             self.svgs.entry(path.to_owned()).or_default().show(ui, path);
+            return;
+        }
+        if matches!(extension(path).as_str(), "csv" | "tsv" | "psv") {
+            ui.push_id(path, |ui| self.table.show(ui, text, match extension(path).as_str() { "tsv" => '\t', "psv" => '|', _ => ',' }));
             return;
         }
         if !is_image(path) {
