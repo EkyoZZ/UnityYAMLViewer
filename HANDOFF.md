@@ -1,3 +1,12 @@
+# 当前交接：1.2.3 已正式发布（2026-10-18）
+
+北京时间 2026-10-18 13:30:30，用户确认已推送后，GitHub v1.2.3 正式发布，非草稿 / 非预发布，已核对 latest API 为 v1.2.3。发布页 https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.3 ，Release ID 416256040，目标提交 eab07a7b741eeb188c8b08a2b2eefa3a51c6d2df。
+
+沿用验收 EXE，未重新编译。附件 UnityYAMLViewer-v1.2.3-windows-x64.exe，23,282,176 字节，SHA-256 F634207A4470CCFF9343787BA25288364D29F18AF15C02F0F6C44164A437F358，GitHub asset.digest 和本地一致。发布证据 target/v1.2.3-published.json。
+
+版本记录、索引、CHANGELOG、发布说明和本交接已补记真实发布状态；这些是发布后的本地文档修改，未自动提交 / 推送，用户可自行同步。不需要重打标签或重发附件。此前等待推送 / 未发布描述为历史状态，以本节为准。验证边界与功能限制仍保留。
+
+---
 # 当前交接：1.2.3 发布准备完成，等待用户推送确认（2026-10-18）
 
 本节优先于下方所有历史阶段状态。用户确认最新视频 / GIF 整框播放交互已验证并授权正式发布；为避免推送权限问题，用户自行提交 / 推送本轮文档。**当前不能创建标签或 GitHub Release，必须等用户明确确认推送完成。** 本轮未提交、未推送、未打标签、未发布，未重新编译。
@@ -2228,3 +2237,9 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 用户明确授权后检查程序进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功（19.69 秒，6 项警告）。包含移除 SVG 通道显示、隐藏九宫格入口，以及复用 Prefab 预览的棋盘格 / 灰色 / 自定义背景与重载保留背景设置。
 - 再次检查程序及测试 EXE 占用后运行 cargo test --release --locked --offline asset_viewer::svg_preview::tests -- --nocapture：1 项通过，0 失败，覆盖 SVG viewBox、透明像素、无效输入及渲染尺寸上限。背景切换、自定义颜色与重载实际 GUI 仍待验证。
 - 本地产物 target/release/unity_yaml_viewer.exe，文件版本 1.2.3，22957568 字节，SHA-256 576E149087C6C5BAF94E22CD924BB9628C793C7202E164F0B4E84686B75EFDE4。日志 target/svg-background-release-build.log、target/svg-background-tests.log。未发布。
+
+## Release 显示标题统一（2026-10-18）
+
+- 按用户要求，仅修改 GitHub Release name 为对应 v版本号：v1.2.3～v1.1.8，以及 v1.1.4～v1.1.0。用户已修改的 v1.1.5～v1.1.7 保留。
+- API 回读核对标题；标签名 / 目标提交、正文、附件及草稿 / 预发布状态保持不变，latest API 仍是 v1.2.3。未重新编译或上传附件。
+- 标题规则已写入根 AGENTS.md，后续发布只用 v1.x.x 作为显示标题。该规则和发布后状态文档均需用户自行提交 / 推送。

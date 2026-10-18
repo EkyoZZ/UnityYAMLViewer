@@ -2,7 +2,7 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
-- [1.2.3：音频编辑、PDF / SVG / GIF 预览与操作完善（待用户推送，未发布）](docs/versions/1.2.3.md) · [发布说明](docs/releases/1.2.3.md)
+- [1.2.3：音频编辑、PDF / SVG / GIF 预览与操作完善（已正式发布）](docs/versions/1.2.3.md) · [发布说明](docs/releases/1.2.3.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.3)
 
 - [1.2.2：九宫格精简与 slice9 命令行（已正式发布）](docs/versions/1.2.2.md) · [发布说明](docs/releases/1.2.2.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.2)
 
