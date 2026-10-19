@@ -996,3 +996,7 @@ Bayer 强度	Bayer 強度	Bayer scale	Bayer 強度	Bayer 강도	Bayer-Stärke	In
 匹配	符合	Matches	一致	일치	Treffer	Correspondances
 JSON 对象	JSON 物件	JSON object	JSON オブジェクト	JSON 객체	JSON-Objekt	Objet JSON
 数组	陣列	Array	配列	배열	Array	Tableau
+
+启动时自动检查更新（每天最多一次）	啟動時自動檢查更新（每天最多一次）	Check at startup (at most once daily)	起動時に更新を確認（1日1回まで）	시작 시 업데이트 확인 (하루 최대 한 번)	Beim Start prüfen (höchstens einmal täglich)	Vérifier au démarrage (une fois par jour maximum)
+• 启动自动检查更新每天最多一次，手动检查不受此限制	• 啟動自動檢查更新每天最多一次，手動檢查不受此限制	• Automatic startup update checks run at most once daily; manual checks remain available	• 起動時の自動更新確認は1日1回まで。手動確認は制限なし	• 시작 시 자동 업데이트 확인은 하루 최대 한 번, 수동 확인은 제한 없음	• Automatische Updateprüfung beim Start höchstens einmal täglich; manuelle Prüfung weiterhin verfügbar	• Vérification automatique au démarrage une fois par jour maximum ; vérification manuelle toujours disponible
+• 材质 Shader 预览的 2D / 3D 切换统一为主题 Tab 样式	• 材質 Shader 預覽的 2D / 3D 切換統一為主題 Tab 樣式	• Material Shader previews use theme-style tabs for 2D / 3D switching	• マテリアル Shader プレビューの 2D / 3D 切替をテーマと同じタブ形式に統一	• 머티리얼 Shader 미리보기의 2D / 3D 전환에 테마와 같은 탭 스타일 적용	• 2D-/3D-Umschaltung der Material-Shader-Vorschau im Tab-Stil der Designauswahl	• Aperçu des shaders de matériaux : onglets 2D / 3D au style du sélecteur de thème

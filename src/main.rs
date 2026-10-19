@@ -2449,7 +2449,7 @@ impl eframe::App for ViewerApp {
                         ui.set_width(208.0);
                         ui.spacing_mut().item_spacing.y = 6.0;
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                        if ui.add(egui::Checkbox::new(&mut self.settings.auto_check_updates, localization::tr("启动时自动检查更新"))).changed() {
+                        if ui.add(egui::Checkbox::new(&mut self.settings.auto_check_updates, localization::tr("启动时自动检查更新（每天最多一次）"))).changed() {
                             self.settings.persist();
                         }
                         if ui.add_enabled_ui(!self.updater.checking && !self.updater.downloading, |ui| {
@@ -2486,6 +2486,8 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.4").strong());
+                        ui.label(localization::tr("• 材质 Shader 预览的 2D / 3D 切换统一为主题 Tab 样式"));
+                        ui.label(localization::tr("• 启动自动检查更新每天最多一次，手动检查不受此限制"));
                         ui.label(localization::tr("• 播放列表菜单可退出编辑，保存成功后自动退出编辑"));
                         ui.label(localization::tr("• CSV / TSV / PSV 支持单元格编辑栏、撤销、检查与查找"));
                         ui.label(localization::tr("• 音频与视频导出结束弹窗提醒，成功显示路径、失败显示原因"));

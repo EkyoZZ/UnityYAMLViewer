@@ -1565,8 +1565,7 @@ impl Preview {
         style.spacing.interact_size *= self.zoom;
         style.spacing.button_padding *= self.zoom;
         output_ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.three_d, false, "2D");
-            ui.selectable_value(&mut self.three_d, true, "3D");
+            crate::theme::preview_space_selector(ui, &mut self.three_d);
             if let Some(probe) = &self.probe {
                 ui.label(tr(if probe.vertex {"Vert 顶点值（插值显示）"} else {"单步数值（不透明）"}));
             }

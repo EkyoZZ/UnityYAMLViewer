@@ -87,6 +87,7 @@ fn check() -> Result<Option<Release>, String> {
 impl Updater {
     pub fn check(&mut self, ctx: &egui::Context, manual: bool) {
         if self.checking || self.downloading { return; }
+        if !manual && !claim_auto_check() { return; }
         self.checking = true;
         self.manual = manual;
         self.check_message = None;
@@ -148,6 +149,30 @@ impl Updater {
         });
     }
     pub fn cancel_download(&self) { self.cancel.store(true, Ordering::Relaxed); }
+}
+// Persist the attempt before contacting GitHub, including failed attempts. On Windows,
+// exclusive access also prevents simultaneous app launches from checking twice.
+fn claim_auto_check() -> bool {
+    let Some(path) = crate::last_open_dir_config_path().map(|p| p.with_file_name("last_auto_update_check.txt")) else { return false };
+    let Some(parent) = path.parent() else { return false };
+    if fs::create_dir_all(parent).is_err() { return false; }
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else { return false };
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
+    }
+    let Ok(mut file) = options.open(path) else { return false };
+    let mut previous = String::new();
+    if file.read_to_string(&mut previous).is_err() { return false; }
+    let now = now.as_secs();
+    if previous.trim().parse::<u64>().ok().is_some_and(|last| now.saturating_sub(last) < 24 * 60 * 60) { return false; }
+    use std::io::{Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0)).and_then(|_| file.set_len(0))
+        .and_then(|_| write!(file, "{now}"))
+        .and_then(|_| file.sync_all()).is_ok()
 }
 fn download(asset: &Asset, sender: &mpsc::Sender<Event>, ctx: &egui::Context, cancel: &AtomicBool) -> Result<PathBuf, String> {
     let _cache_guard = crate::app_cache::mutation_guard();
