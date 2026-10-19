@@ -131,23 +131,30 @@ pub(crate) fn preview_navigation_button(label:&str)->egui::Button<'_> {
         .fill(BLUE).stroke(Stroke::new(1.0_f32,BLUE)).corner_radius(4.0)
 }
 fn selector_inner<const N:usize>(ui: &mut egui::Ui, preference: &mut String, compact: bool, labels: [(&str, &str); N]) {
+    selector_inner_scaled(ui, preference, compact, labels, 1.0);
+}
+
+// Font sizes are supplied by the caller's style; scale the remaining geometry
+// explicitly for controls embedded in a zoomable node canvas.
+fn selector_inner_scaled<const N:usize>(ui: &mut egui::Ui, preference: &mut String, compact: bool, labels: [(&str, &str); N], scale: f32) {
     let font = egui::TextStyle::Button.resolve(ui.style());
     let widths = labels.map(|(_, label)| if compact {
-        ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 12.0
-    } else { 208.0 / N as f32 });
-    let height = if compact { 24.0 } else { 30.0 };
+        ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 12.0 * scale
+    } else { 208.0 * scale / N as f32 });
+    let height = (if compact { 24.0 } else { 30.0 }) * scale;
     ui.allocate_ui_with_layout(egui::vec2(widths.iter().sum(), height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        if compact { ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0); }
+        if compact { ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0) * scale; }
         for (index, (value, label)) in labels.into_iter().enumerate() {
             let selected = preference == value;
+            let radius = (4.0 * scale).round() as u8;
             let rounding = egui::CornerRadius {
-                nw: if index == 0 { 4 } else { 0 }, sw: if index == 0 { 4 } else { 0 },
-                ne: if index == N-1 { 4 } else { 0 }, se: if index == N-1 { 4 } else { 0 },
+                nw: if index == 0 { radius } else { 0 }, sw: if index == 0 { radius } else { 0 },
+                ne: if index == N-1 { radius } else { 0 }, se: if index == N-1 { radius } else { 0 },
             };
             let button = egui::Button::new(RichText::new(crate::localization::tr(label)).color(if selected { Color32::WHITE } else { BLUE }))
                 .fill(if selected { BLUE } else { ui.visuals().window_fill })
-                .stroke(Stroke::new(1.0_f32, BLUE)).corner_radius(rounding);
+                .stroke(Stroke::new(scale, BLUE)).corner_radius(rounding);
             let response = ui.add_sized([widths[index], height], button.wrap());
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, crate::localization::tr(label)));
             if response.clicked() { *preference = value.into(); }
@@ -237,7 +244,11 @@ pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Respo
 }
 
 pub fn preview_space_selector(ui:&mut egui::Ui,three_dimensional:&mut bool) {
+    preview_space_selector_scaled(ui, three_dimensional, 1.0);
+}
+
+pub fn preview_space_selector_scaled(ui:&mut egui::Ui,three_dimensional:&mut bool,scale:f32) {
     let mut value=if *three_dimensional {"3d"} else {"2d"}.to_owned();
-    selector_inner(ui,&mut value,true,[("2d","2D"),("3d","3D")]);
+    selector_inner_scaled(ui,&mut value,true,[("2d","2D"),("3d","3D")],scale);
     *three_dimensional=value=="3d";
 }

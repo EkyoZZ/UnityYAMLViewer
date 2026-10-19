@@ -32,6 +32,8 @@ impl Editor {
         result
     }
     pub fn show(&mut self, ui: &mut egui::Ui, source: Option<&Arc<rs::Scene>>, notes: &[(String, String)]) {
+        // Popup areas start from the global style; retain the node's zoomed style.
+        let popup_style = ui.style().clone();
         ui.small(tr("临时预览输入，不修改文件"));
         if let Some(state) = source.and_then(|scene|scene.draws.first()).map(|draw|draw.material.state) {
             let mut selected = self.selected.unwrap_or_else(||Settings::from(state));
@@ -39,6 +41,7 @@ impl Editor {
             ui.horizontal(|ui| {
                 ui.label("Cull");
                 egui::ComboBox::from_id_salt("cull").width(ui.available_width() * 0.65).selected_text(if selected.cull_back {"Back"} else {"Off"}).show_ui(ui, |ui| {
+                    ui.set_style(popup_style.clone());
                     ui.selectable_value(&mut selected.cull_back, false, "Off");
                     ui.selectable_value(&mut selected.cull_back, true, "Back");
                 });
@@ -47,6 +50,7 @@ impl Editor {
                 ui.horizontal(|ui| {
                     ui.label(name);
                     egui::ComboBox::from_id_salt(name).width(ui.available_width() * 0.65).selected_text(label(*value)).show_ui(ui, |ui| {
+                        ui.set_style(popup_style.clone());
                         for factor in factors() { ui.selectable_value(value, factor, label(factor)); }
                     });
                 });

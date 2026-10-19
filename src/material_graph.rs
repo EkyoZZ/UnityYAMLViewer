@@ -1490,6 +1490,11 @@ impl Preview {
             for font in style.text_styles.values_mut() { font.size *= self.zoom; }
             style.spacing.item_spacing *= self.zoom;
             style.spacing.interact_size *= self.zoom;
+            style.spacing.button_padding *= self.zoom;
+            style.spacing.icon_width *= self.zoom;
+            style.spacing.icon_width_inner *= self.zoom;
+            style.spacing.icon_spacing *= self.zoom;
+            style.spacing.combo_height *= self.zoom;
             controls.add_enabled_ui(self.probe.is_none(), |ui| {
                 self.render_states.show(ui, self.scene.as_ref(), &data.render_notes);
             });
@@ -1564,8 +1569,13 @@ impl Preview {
         style.spacing.item_spacing *= self.zoom;
         style.spacing.interact_size *= self.zoom;
         style.spacing.button_padding *= self.zoom;
+        style.spacing.icon_width *= self.zoom;
+        style.spacing.icon_width_inner *= self.zoom;
+        style.spacing.icon_spacing *= self.zoom;
+        style.spacing.combo_height *= self.zoom;
+        let output_style = output_ui.style().clone();
         output_ui.horizontal(|ui| {
-            crate::theme::preview_space_selector(ui, &mut self.three_d);
+            crate::theme::preview_space_selector_scaled(ui, &mut self.three_d, self.zoom);
             if let Some(probe) = &self.probe {
                 ui.label(tr(if probe.vertex {"Vert 顶点值（插值显示）"} else {"单步数值（不透明）"}));
             }
@@ -1577,6 +1587,7 @@ impl Preview {
                     "纯色"
                 }))
                 .show_ui(ui, |ui| {
+                    ui.set_style(output_style.clone());
                     ui.selectable_value(&mut self.checkerboard, true, tr("棋盘格"));
                     ui.selectable_value(&mut self.checkerboard, false, tr("纯色"));
                 });
@@ -1598,6 +1609,7 @@ impl Preview {
                         .width(110. * self.zoom)
                         .selected_text(name)
                         .show_ui(ui, |ui| {
+                            ui.set_style(output_style.clone());
                             ui.selectable_value(
                                 &mut self.shape,
                                 geometry::Shape::Sphere,

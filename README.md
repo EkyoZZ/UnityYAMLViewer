@@ -199,3 +199,19 @@ Quotes are optional for simple paths without spaces or shell-special characters.
 Paths are deduplicated and sorted; each request selects at most the first 10. A process can have at most 10 preview windows, including manually opened ones. Existing previews are focused without resetting edits. Excess images are reported and neither queued nor modified; close windows and invoke again to open more. Requests forward to an existing main window. Files use tabs in the main window; their independent previews keep updating across tab switches.
 
 Preview supports recursion, retained center/cycles, edge and alignment options, but initially chooses axes and treatment automatically. It cannot combine with `--dry-run`, `--report` or explicit `--direction` / `--mode`; those controls remain editable inside the window. Ten large images can consume substantial memory.
+
+九宫格 4 倍数对齐：精简方向在中心循环区保留或补齐像素；未精简方向只在外侧补透明，Border 为 0。外补奇数像素多出部分放右 / 下，保留透明边缘选项继续生效。
+
+Nine-slice alignment to 4 retains or repeats pixels in the compacted center. Inactive axes receive transparent outer padding with zero Border. Odd extra pixels go right / bottom; the preserve-transparent-edges option still applies.
+
+Stretch 中心仅补齐所差的 1 / 2 / 3 像素；Repeat 仅补完整周期，若无法与固定边框共同对齐则外补透明。
+
+Stretch adds only the missing 1 / 2 / 3 center pixels. Repeat adds whole cycles; if fixed borders prevent alignment, transparent outer padding is used.
+
+Repeat 对齐后该方向尺寸必须小于原尺寸；否则保留该方向原像素与尺寸，不强制对齐到 4 的倍数。
+
+After Repeat alignment, each compacted axis must be smaller than its original size. Otherwise its original pixels and size are retained, without forcing alignment to 4.
+
+Stretch 为 4 倍数对齐多保留的 1～3 像素计入右 / 下 Border，可拉伸中心仍为设定值（默认 4 像素）。
+
+Stretch assigns the extra 1–3 alignment pixels to the right / bottom Border; the stretchable center stays at its configured size (4 pixels by default).

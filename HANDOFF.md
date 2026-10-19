@@ -2398,3 +2398,24 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 用户明确授权后确认程序未运行且目标 EXE 可独占打开，cargo build --release --offline --locked 成功（7 条应用警告）。
 - 版本 1.2.4；产物 target/release/unity_yaml_viewer.exe；大小 23726080 字节；SHA256：A43EFC4E0372110CB3EE4148DC9EFDC99F0D4848EB0513BEC55DBBBDE0638887。日志 target/table-json-kind-release-build.log。
 - 包含 JSON 对象 / 数组类型识别与校验、编辑栏移到分隔线上方，以及顶部搜索展开隐藏指令查看。实际 GUI 与测试执行仍待验证，未正式发布。
+
+## 每日更新检查与材质预览 Tab 构建（2026-10-19）
+
+- 用户明确授权后重新检查程序未运行、目标 EXE 可独占访问；cargo build --release --offline --locked 成功，7 条应用警告。
+- 包含启动自动检查更新每 24 小时最多一次、材质 Shader 预览 2D / 3D 主题 Tab 样式。
+- 产物 target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 23710720 字节；SHA-256：10F1E471C5A42250A03E1CF14A9C1D81C8AD983DF1CAA3BA520ABBD6DA002D04。日志 target/latest-release-build.log。
+- 实际 GUI 与跨重启节流尚未运行验证，本次为本地构建，未更新 GitHub Release。
+
+## 材质节点控件缩放修复构建（2026-10-19）
+
+- 用户明确授权后检查程序未运行、EXE 可独占访问；cargo build --release --offline --locked 成功（7 条应用警告）。
+- 包含 2D / 3D Tab 及背景 / 模型 / Cull / Blend 下拉框与菜单的缩放修复。
+- 产物 target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 23719424 字节；SHA-256：C602164FB2E96B54ADFB470C2F9314E7BA421E0BBBDC1D9D674A89D09DD84BE5。日志 target/material-zoom-release-build.log。
+- 实际缩放与菜单 GUI 待体验验证，未发布。
+
+## 九宫格方向对齐修复构建（2026-10-19）
+
+- 用户明确授权后检查程序未运行、目标 EXE 可独占访问；cargo build --release --offline --locked 成功（7 条应用警告）。
+- 包含九宫格精简方向中心区 4 倍数对齐、未精简方向透明外补与零 Border，以及七语言关于摘要。
+- 产物 target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 23724032 字节；SHA-256：4FECFA2B5D0E4774D75A4D9CE3E24ED5B21E500F7F93900D29A18ECAF320E698。日志 target/nine-slice-align-release-build.log。
+- 实际 GUI 与测试执行仍待验证；本次仅本地构建，未发布。

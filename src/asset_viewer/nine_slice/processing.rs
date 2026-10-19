@@ -53,6 +53,7 @@ pub(super) struct Plan {
     pub crop: [u32;4],
     pub values: [u32;6],
     pub padding: [u32;2],
+    pub alignment_tail: [u32;2],
     pub periods: [u32;2],
     pub blocked: [bool;2],
     pub treatment: Treatment,
@@ -129,9 +130,17 @@ fn difference(source:&image::RgbaImage,ids:&[u32],start:usize,end:usize,axis:usi
 fn retained(span:u32,border:u32,period:u32,requested:u32,align:bool) -> (u32,u32) {
     let count=(span/period).max(1);let copies=requested.max(1).min(count);
     let mut center=copies*period;
-    if align {for extra in 0..4 {let candidate=(copies+extra)*period;if candidate<=span && (border+candidate)%4==0 {center=candidate;break;}}}
-    let padding=if align {(4-(border+center)%4)%4}else{0};
-    (center,padding)
+    if !align {return (center,0);}
+    // Stretch has period 1: add exactly the missing 0/1/2/3 center pixels.
+    if period==1 {return (center+(4-(border+center)%4)%4,0);}
+    // Repeat must retain complete cycles, even when extending beyond the source span.
+    for extra in 0..4 {
+        let candidate=(copies+extra)*period;
+        if (border+candidate)%4==0 {return (candidate,0);}
+    }
+    // Some border/period combinations cannot align using whole cycles alone.
+    // Preserve the cycle and use transparent outer padding instead of clipping it.
+    (center,(4-(border+center)%4)%4)
 }
 
 impl Plan {
@@ -144,7 +153,7 @@ impl Plan {
             if request.direction!=Direction::Horizontal {crop[1]=at;crop[3]=ab-at;}
         }
         let working=image::imageops::crop_imm(source,crop[0],crop[1],crop[2],crop[3]).to_image();
-        let mut v=[0,0,0,0,crop[2],crop[3]];let mut padding=[0,0];let mut periods=[0,0];let mut blocked=[false,false];
+        let mut v=[0,0,0,0,crop[2],crop[3]];let mut padding=[0,0];let mut alignment_tail=[0,0];let mut periods=[0,0];let mut blocked=[false,false];
         let mut reports=[AxisReport::new(Reason::Disabled),AxisReport::new(Reason::Disabled)];
         for axis in 0..2 {
             let full=crop[axis+2];let origin=crop[axis];let original=if axis==0 {w}else{h};
@@ -184,15 +193,29 @@ impl Plan {
             // Keep a clipped last cycle in the fixed border, never cut a stored loop short.
             let span=if request.treatment==Treatment::Repeat {(length/period)*period}else{length} as u32;
             let (keep,pad)=retained(span,full-span,period as u32,copies,request.multiple_of_four);
+            if request.treatment==Treatment::Repeat && full-span+keep+pad>=original {
+                // Alignment is useful only if the final axis is smaller than its source.
+                // Keep original pixels and dimensions rather than enlarging a no-op result.
+                v[first]=left as u32;v[last]=full-left as u32-span;v[center]=span;
+                periods[axis]=period as u32;
+                reports[axis].kept=span;
+                reports[axis].reason=if request.multiple_of_four {Reason::AlignmentKeepsAll}else{Reason::CopiesKeepAll};
+                continue;
+            }
             v[first]=left as u32;v[last]=full-left as u32-span;v[center]=keep;
+            if request.treatment==Treatment::Stretch {
+                let base=copies.max(1).min(span);
+                let extra=keep-base;
+                v[center]=base;v[last]+=extra;alignment_tail[axis]=extra;
+            }
             periods[axis]=period as u32;padding[axis]=pad;
             reports[axis].span=length as u32;reports[axis].kept=keep;
             reports[axis].reason=if keep<span {
-                if v[first]+v[last]+keep+pad>=original {Reason::AlignmentKeepsAll}else{Reason::Reduced}
+                if v[first]+v[last]+v[center]+pad>=original {Reason::AlignmentKeepsAll}else{Reason::Reduced}
             }else if u64::from(copies)*(period as u64)<u64::from(span) {Reason::AlignmentKeepsAll}
             else if request.treatment==Treatment::Stretch {Reason::CenterKeepsAll}else{Reason::CopiesKeepAll};
         }
-        Self {reports,crop,values:v,padding,periods,blocked,treatment:request.treatment,original:[w,h]}
+        Self {reports,crop,values:v,padding,alignment_tail,periods,blocked,treatment:request.treatment,original:[w,h]}
     }
     pub fn size(&self) -> [u32;2] {[self.values[0]+self.values[2]+self.values[4]+self.padding[0],self.values[1]+self.values[3]+self.values[5]+self.padding[1]]}
     pub fn borders(&self) -> [u32;6] {self.values}
@@ -203,11 +226,15 @@ impl Plan {
     pub fn padding_sides(&self)->[u32;4] {[self.padding[0]/2,self.padding[1]/2,self.padding[0].div_ceil(2),self.padding[1].div_ceil(2)]}
     pub fn render(&self,source:&image::RgbaImage) -> image::RgbaImage {
         let [w,h]=self.size();let [l,t,r,b,cw,ch]=self.values;
-        let map=|p:u32,first:u32,last:u32,center:u32,full:u32|if p<first+center {p}else{full-last+p-first-center};
+        let map=|p:u32,first:u32,last:u32,center:u32,full:u32,period:u32,tail:u32| {
+            if p<first {p}
+            else if p<first+center+tail {if period>0 {first+(p-first)%period}else{p}}
+            else {full-last+p-first-center}
+        };
         let [pl,pt,pr,pb]=self.padding_sides();
         image::RgbaImage::from_fn(w,h,|x,y| {
             if x<pl || y<pt || x>=w-pr || y>=h-pb {image::Rgba([0;4])}
-            else {*source.get_pixel(self.crop[0]+map(x-pl,l,r,cw,self.crop[2]),self.crop[1]+map(y-pt,t,b,ch,self.crop[3]))}
+            else {*source.get_pixel(self.crop[0]+map(x-pl,l,r,cw,self.crop[2],self.periods[0],self.alignment_tail[0]),self.crop[1]+map(y-pt,t,b,ch,self.crop[3],self.periods[1],self.alignment_tail[1]))}
         })
     }
     #[cfg(test)]
@@ -307,6 +334,63 @@ mod tests {
         let plan=Plan::new(&source,&Request {borders:Some([2,0,3,0]),..Default::default()});
         assert_eq!(&plan.borders()[..4],&[2,0,3,0]);
         assert_eq!(plan.padding_sides(),[0,1,1,1]);
+    }
+    #[test]
+    fn stretch_alignment_pixels_belong_to_trailing_border() {
+        for extra in 1..=3 {
+            let right=7-extra;
+            let source=image::RgbaImage::from_fn(1+16+right,4,|x,y|image::Rgba([if x==0 {9}else if x>=17 {8}else{1},y as u8,7,255]));
+            let plan=Plan::new(&source,&Request {direction:Direction::Horizontal,..Default::default()});
+            assert_eq!(plan.values,[1,0,right+extra,0,4,4]);
+            assert_eq!(plan.padding,[0,0]);
+            assert_eq!(plan.size(),[12,4]);
+            let output=plan.render(&source);
+            for y in 0..4 {for x in 0..source.width() {assert_eq!(plan.reconstructed_pixel(&output,x,y),*source.get_pixel(x,y));}}
+        }
+    }
+    #[test]
+    fn repeat_alignment_without_size_savings_keeps_original_pixels() {
+        for width in [6,9,12] {
+            let source=image::RgbaImage::from_fn(width,4,|x,y|image::Rgba([(x%3) as u8,y as u8,7,255]));
+            let plan=Plan::new(&source,&Request {direction:Direction::Horizontal,treatment:Treatment::Repeat,..Default::default()});
+            assert_eq!(plan.size(),[width,4]);
+            assert_eq!(plan.padding,[0,0]);
+            assert_eq!(plan.render(&source),source);
+            assert_eq!(plan.reports[0].reason,Reason::AlignmentKeepsAll);
+        }
+        let source=image::RgbaImage::from_fn(15,4,|x,y|image::Rgba([(x%3) as u8,y as u8,7,255]));
+        let plan=Plan::new(&source,&Request {direction:Direction::Horizontal,treatment:Treatment::Repeat,..Default::default()});
+        assert_eq!(plan.size(),[12,4]);
+        assert_eq!(plan.reports[0].reason,Reason::Reduced);
+    }
+    #[test]
+    fn stretch_adds_only_missing_pixels_and_repeat_never_clips_cycles() {
+        for missing in 1..=3 {
+            assert_eq!(retained(8,missing,1,4,true),(8-missing,0));
+        }
+        assert_eq!(retained(9,1,3,1,true),(3,0));
+        assert_eq!(retained(9,0,3,1,true),(12,0));
+        assert_eq!(retained(8,1,2,1,true),(2,1));
+        assert_eq!(retained(8,0,2,1,true),(4,0));
+    }
+    #[test]
+    fn alignment_extends_active_centers_and_only_pads_inactive_axes() {
+        let source=image::RgbaImage::from_fn(7,7,|x,y| {
+            image::Rgba([if x==0 {9}else if x==6 {8}else{1},if y==0 {9}else if y==6 {8}else{2},7,255])
+        });
+        for direction in [Direction::Horizontal,Direction::Vertical,Direction::Both] {
+            let plan=Plan::new(&source,&Request {direction,..Default::default()});
+            assert_eq!(plan.size(),[8,8]);
+            for axis in 0..2 {
+                let active=direction==Direction::Both || (axis==0)==(direction==Direction::Horizontal);
+                assert_eq!(plan.padding[axis],if active {0}else{1});
+                assert_eq!(plan.values[axis],if active {1}else{0});
+                assert_eq!(plan.values[axis+2],if active {3}else{0});
+                assert_eq!(plan.values[axis+4],if active {4}else{7});
+            }
+            let output=plan.render(&source);
+            for y in 0..7 {for x in 0..7 {assert_eq!(plan.reconstructed_pixel(&output,x,y),*source.get_pixel(x,y));}}
+        }
     }
     #[test]
     fn hidden_rgb_and_alpha_differences_are_not_merged_and_one_axis_is_respected() {
