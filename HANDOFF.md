@@ -2468,3 +2468,22 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 包含自定义循环宽高 / 4 对齐裁剪及补背景、提取与制作 / 排列方式主题 Tab，以及图案列表固定左内边距文字绘制，保留此前拖动修复和工具栏调整。
 - 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 24105984 字节；SHA-256：53ADA538A237D0929B020A28B74814399D820592BBDD59D332DD6DE15BBF88D7。日志：target/seamless-custom-size-tabs-release-build.log。
 - 本次仅本地构建，未发布、未启动程序；自定义宽高、Tab 深浅主题、图案文字左对齐等真实 GUI 与回归断言执行仍待验证。
+
+## 无更小循环回退原图本地构建（2026-10-20）
+
+- 用户明确授权后检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 34.26 秒，8 项应用既有警告。
+- 包含提取不到更小循环时直接显示原图并用于平铺、保留原始像素和尺寸的回退逻辑，保留此前自定义循环宽高、主题 Tab、列表居左、连续拖动和工具栏修改。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 24135168 字节；SHA-256：CD3BC0CBDB28C597E869067158B9395A0E7BAD4E388DF776660DD7EC0780215F。日志：target/seamless-original-fallback-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；原图回退 / 平铺、提示及真实 GUI 与回归断言执行仍待验证。
+
+## 升级 1.2.5
+
+发布后改动已统一归入 docs/versions/1.2.5.md；升级前逐轮过程移至 docs/versions/archive/1.2.5-development-history.md。关于窗口当前版 4 条简短摘要、默认 1.2.5 / 1.2.4，1.2.3 及更早历史默认收起；原本地 1.2.4 EXE 已被本次 1.2.5 构建替换。
+
+### 本轮 1.2.5 验证与本地产物（2026-10-20）
+
+- 用户明确授权重新编译，编译前检查程序未运行、目标 EXE 可独占访问，未自动关闭程序。
+- cargo check --tests --locked --offline 通过；45 项相关回归实际执行并通过：四方连续图 16、九宫格 22、弹窗定位 5、本地化 2。其余测试未执行，不代表完整应用回归。
+- cargo build --release --locked --offline 成功（42.58 秒，8 项既有应用警告）。日志：target/v1.2.5-release-build.log；测试日志：target/v1.2.5-seamless-tests.log、target/v1.2.5-asset_viewer-nine_slice-tests.log、target/v1.2.5-native_window-tests.log、target/v1.2.5-localization-tests-tests.log。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.5；大小 24090112 字节；SHA-256：8CE57ADF24DCE0A8C6F7D63C5E62FC6DADC2F1924A26919C30F4E032316ABD76。
+- 本次未启动 GUI，未创建 GitHub Release、上传附件或改动标签；正式发布的 1.2.4 保持不变。完整运行验证仍按上方待验证范围执行。

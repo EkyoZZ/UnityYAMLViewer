@@ -2485,24 +2485,13 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.5").strong());
+                        ui.label(localization::tr("• 新增四方连续图：最小循环提取、多图案错位制作与 PNG 导出"));
+                        ui.label(localization::tr("• 图案支持实时拖动、缩放预览、间距与循环尺寸调整"));
+                        ui.label(localization::tr("• 优化九宫格 4 对齐、完整周期与 Border，修复材质预览控件缩放"));
+                        ui.label(localization::tr("• 弹窗先居中再修正屏幕越界；启动自动检查更新每 24 小时最多一次"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.4").strong());
-                        ui.label(localization::tr("• 提取不到更小循环时直接显示原图并用于平铺，保留原像素和尺寸，避免预览留空"));
-                        ui.label(localization::tr("• 连续图模式切换使用主题 Tab，图案列表按固定左内边距绘制序号与文件名"));
-                        ui.label(localization::tr("• 普通与错位排列支持自定义循环宽高，按 4 对齐裁剪或补背景，不缩放图案"));
-                        ui.label(localization::tr("• 图案列表按最长文件名统一宽度并居左，移除底部重复的像素尺寸显示"));
-                        ui.label(localization::tr("• 连续图边框开关移至编辑工具栏，PNG 另存按钮移至最小循环单元预览上方"));
-                        ui.label(localization::tr("• 修复图案连续拖动仅响应单帧位移的问题，按鼠标按下点计算完整移动，避免回跳"));
-                        ui.label(localization::tr("• 编辑区为可缩放平移的固定画布，仅显示独立图案；移动同步实际间距，中间显示裁剪后的循环结果"));
-                        ui.label(localization::tr("• 连续图预览区按三栏实际图像比例调整高度，参数区紧随其后，减少大块空白"));
-                        ui.label(localization::tr("• 新弹窗先居中于主窗口，再按屏幕可用区域修正越界，过大窗口自动缩小，保留标题栏可操作"));
-                        ui.label(localization::tr("• 连续图移动超出边界自动扩展画布，保留完整图案并对齐 4 倍数，三栏同步刷新"));
-                        ui.label(localization::tr("• 连续图采用实时编辑、最小循环单元、连续平铺三栏，参数区独立滚动，中间单元与导出一致"));
-                        ui.label(localization::tr("• 连续图自动实时预览，左侧编辑、右侧平铺，支持单图双排错位与位置拖动；尺寸和间距自动对齐 4 倍数"));
-                        ui.label(localization::tr("• 连续图窗口支持拖入图片自动加入列表和排列，逐项移除并更新编号"));
-                        ui.label(localization::tr("• 四方连续图支持精确提取最小循环及多图案制作，提供错位、间距和平铺预览；另存 PNG，不修补接缝"));
-                        ui.label(localization::tr("• 九宫格按精简方向在中心对齐 4 倍数，未精简方向仅外补透明且 Border 为 0"));
-                        ui.label(localization::tr("• 材质 Shader 预览的 2D / 3D 使用主题 Tab，尺寸随节点缩放"));
-                        ui.label(localization::tr("• 启动自动检查更新每天最多一次，手动检查不受此限制"));
                         ui.label(localization::tr("• 播放列表菜单可退出编辑，保存成功后自动退出编辑"));
                         ui.label(localization::tr("• CSV / TSV / PSV 支持单元格编辑栏、撤销、检查与查找"));
                         ui.label(localization::tr("• 音频与视频导出结束弹窗提醒，成功显示路径、失败显示原因"));
@@ -2516,6 +2505,10 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 视频预览叠加像素裁剪框，可拖动、输入坐标与尺寸；导出支持十种容器和自定义后缀"));
                         ui.label(localization::tr("• 单视频编辑新增预览与底部范围操作，支持 H.264 / VP8 / VP9 导出；批量暂缓"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.3").strong());
                         ui.label(localization::tr("• 第三方支持集中管理 FFmpeg、PDFium 和 LibreOffice，组件不参与缓存清理"));
                         ui.label(localization::tr("• 视频与 GIF 支持点击整个预览框播放 / 暂停，包括画面留白"));
@@ -2544,10 +2537,7 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 音频统一左右键选区，剪切 / 淡入淡出 / dB 可按区间处理；未选范围的 dB 作用于当前整段"));
                         ui.label(localization::tr("• 音视频剪切：视频另存 MP4，音频可选 MP3 / WAV / FLAC / M4A 及适用参数；需 FFmpeg"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
+
                         ui.label(RichText::new("1.2.2").strong());
                         ui.label(localization::tr("• 九宫格无损精简：完整 RGBA 判重、拉伸 / 重复自动识别，可编辑预览与原位替换"));
                         ui.label(localization::tr("• slice9 支持批量 / 目录 / dry-run，--preview 最多 10 个可编辑窗口；顶部指令查看提供示例"));
