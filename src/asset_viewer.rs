@@ -2,6 +2,7 @@
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, mpsc}};
 use eframe::egui::{self, Color32};
 pub(crate) mod nine_slice;
+mod seamless;
 mod svg_preview;
 pub(crate) mod pdf_preview;
 pub fn is_pdf(path: &Path) -> bool { extension(path) == "pdf" }
@@ -83,6 +84,7 @@ type Loaded = Result<(Arc<image::RgbaImage>, egui::ColorImage), String>;
 #[derive(Default)]
 struct ImageTab {
     editor: nine_slice::Editor,
+    seamless: seamless::Editor,
     original: Option<Arc<image::RgbaImage>>,
     pending: Option<mpsc::Receiver<Loaded>>,
     texture: Option<egui::TextureHandle>,
@@ -190,14 +192,18 @@ impl Assets {
     }
     pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
         for (path,tab) in &mut self.images {
-            if !tab.editor.open&&!tab.editor.busy(){continue}
+            if !tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active(){
+                if let Some(original)=&tab.original {tab.seamless.show(ctx,path,original);}
+                continue
+            }
             if let Some(message)=nine_slice::Editor::refresh_message(ctx,path) {tab.original=None;tab.texture=None;tab.pending=None;tab.editor.replaced(message);}
             if tab.original.is_none()&&tab.pending.is_none()&&tab.error.is_none(){tab.load(path.clone(),ctx.clone());}
             if let Some(result)=tab.pending.as_ref().and_then(|r|r.try_recv().ok()) {
                 tab.pending=None;
-                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,egui::TextureOptions::LINEAR));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;}}
+                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,egui::TextureOptions::LINEAR));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;tab.seamless=Default::default();}}
             }
             if let (Some(original),Some(texture))=(&tab.original,&tab.texture) {
+                tab.seamless.show(ctx,path,original);
                 if tab.editor.show(ctx,path,original,texture){tab.original=None;tab.texture=None;tab.pending=None;}
             }
         }
@@ -206,7 +212,7 @@ impl Assets {
         self.svgs.retain(|other, _| other == path);
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
-            if other != path&&!tab.editor.open&&!tab.editor.busy() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
+            if other != path&&!tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
         }
         if crate::playlist::is_playlist(path){self.playlists.show(ui,path,false);return;}
         if crate::media_preview::is_media(path) {
@@ -297,6 +303,10 @@ impl Assets {
                 tab.editor.open = true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("nine_slice",path)));
                 if tab.channel != Channel::Rgba {tab.channel=Channel::Rgba;tab.load(path.to_owned(),ui.ctx().clone());}
+            }
+            if ui.add_enabled(tab.original.is_some(),egui::Button::new(crate::localization::tr("四方连续图"))).clicked() {
+                tab.seamless.open=true;
+                crate::native_window::wake(ui.ctx(),egui::Id::new(("seamless",path)));
             }
         });
         let reload=false;

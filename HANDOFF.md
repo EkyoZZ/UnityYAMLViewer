@@ -2419,3 +2419,52 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 包含九宫格精简方向中心区 4 倍数对齐、未精简方向透明外补与零 Border，以及七语言关于摘要。
 - 产物 target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 23724032 字节；SHA-256：4FECFA2B5D0E4774D75A4D9CE3E24ED5B21E500F7F93900D29A18ECAF320E698。日志 target/nine-slice-align-release-build.log。
 - 实际 GUI 与测试执行仍待验证；本次仅本地构建，未发布。
+
+## 四方连续图正式配置本地构建（2026-10-20）
+
+- 用户明确授权编译后，检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 34.11 秒，8 项应用警告。
+- 包含独立四方连续图弹窗、精确最小循环提取、多图案排列、错位、间距、平铺预览和 PNG 另存；版本 1.2.4。
+- 产物：target/release/unity_yaml_viewer.exe；大小 23906816 字节；SHA-256：ED1C77F789769CC640F6F613BDE07E801D13BD8B63F5C77CF245951832CA013D。构建日志：target/seamless-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；回归测试执行、真实素材、独立弹窗及七语言 GUI 验证仍待完成。
+
+## 连续图后续源码修改（2026-10-20，未重新构建）
+
+- 本地已加入拖入图案自动添加、列表移除 / 编号维护、自动后台实时预览、独立参数滚动、左侧编辑 / 右侧平铺，移除原图显示和生成按钮。
+- 支持按排列位置独立选中、拖动和 X / Y 输入，以及“单图双排错位”预设；图案透明补齐 4 倍数，格距自动兼顾 4 和错位分母，导出按完整周期生成最小 4 对齐循环。
+- cargo check --tests --locked --offline、七语言静态检查（1033 条）和 git diff --check 通过；新增与更新回归用例未执行，真实界面 / 拖放 / 导出待验证。
+- 现有 target/release/unity_yaml_viewer.exe 为前文记录的 34.11 秒构建，不包含上述后续源码。用户本轮未再次要求编译，未生成新 EXE 或发布；下次构建仍须明确授权并检查进程与目标 EXE 独占访问。
+
+## 连续图实时编辑本地构建（2026-10-20）
+
+- 用户明确授权后，检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 32.51 秒，8 项应用既有警告。
+- 包含拖入图案及列表移除、自动实时预览、左右编辑 / 平铺布局、单图双排错位、独立位置拖动和 4 倍数补齐；不显示原图，无手动生成按钮。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 23937536 字节；SHA-256：DC43BA68FCDB7EEF1C368E6B4D3656BF58B2074C937732AE76E3CB0DD696DD0A。日志：target/seamless-live-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；回归断言执行、真实 GUI / 拖放 / 拖动手感 / PNG 输出验证仍待完成。
+
+## 连续图三栏与画布自动扩展本地构建（2026-10-20）
+
+- 用户明确授权后检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 31.77 秒，8 项应用既有警告。
+- 包含实时编辑 / 最小循环单元 / 连续平铺三栏，移动图案自动扩展四侧画布、4 倍数补齐、固定拖动换算比例，以及此前图案拖入、移除、双排错位和实时预览功能。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 23936512 字节；SHA-256：3FFDF670E5219F10C0DDA7C653CCB4C40BD1822FFACF35CB80BFF4474EE7270C。日志：target/seamless-expand-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；真实 GUI / 拖动手感 / 系统拖放 / PNG 输出及回归断言执行仍待验证。
+
+## 固定编辑画布与弹窗边界修正本地构建（2026-10-20）
+
+- 用户明确授权后，确认 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 30.86 秒，8 项应用既有警告。
+- 包含固定虚拟编辑视口、缩放 / 平移、独立元素拖动、无循环副本编辑、间距同步，以及三栏 / 4 对齐 / 图案拖入等既有功能；同时包含共享弹窗先居中主窗口再修正屏幕工作区越界、过大窗口缩小。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 24113664 字节；SHA-256：B6234ECBFBC578981845F0205D70C40F078537D023E7D1C9C5D9F503166A01A0。日志：target/seamless-world-canvas-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；真实 GUI / 缩放平移 / 间距联动 / 多屏边界 / PNG 输出及回归断言执行仍待验证。
+
+## 拖动修复与工具栏列表调整本地构建（2026-10-20）
+
+- 用户明确授权后检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 33.69 秒，8 项应用既有警告。
+- 包含图案连续拖动累计位移修复、真实按下点命中、边框开关与 PNG 另存工具栏归位、图案列表最长名称宽度及居左、移除底部重复像素尺寸，保留此前固定画布、三栏和弹窗边界修正。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 24151552 字节；SHA-256：BD6A36E2D919A48E16595342EDBFCDBFA76D0BA032F0F64950D7A4A80853844F。日志：target/seamless-drag-toolbar-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；连续拖动手感、工具栏 / 列表 GUI、七语言与 PNG 输出及回归断言执行仍待验证。
+
+## 自定义循环宽高与主题 Tab 本地构建（2026-10-20）
+
+- 用户明确授权后检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功，耗时 31.04 秒，8 项应用既有警告。
+- 包含自定义循环宽高 / 4 对齐裁剪及补背景、提取与制作 / 排列方式主题 Tab，以及图案列表固定左内边距文字绘制，保留此前拖动修复和工具栏调整。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.4；大小 24105984 字节；SHA-256：53ADA538A237D0929B020A28B74814399D820592BBDD59D332DD6DE15BBF88D7。日志：target/seamless-custom-size-tabs-release-build.log。
+- 本次仅本地构建，未发布、未启动程序；自定义宽高、Tab 深浅主题、图案文字左对齐等真实 GUI 与回归断言执行仍待验证。

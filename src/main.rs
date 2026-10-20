@@ -2486,6 +2486,20 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.4").strong());
+                        ui.label(localization::tr("• 提取不到更小循环时直接显示原图并用于平铺，保留原像素和尺寸，避免预览留空"));
+                        ui.label(localization::tr("• 连续图模式切换使用主题 Tab，图案列表按固定左内边距绘制序号与文件名"));
+                        ui.label(localization::tr("• 普通与错位排列支持自定义循环宽高，按 4 对齐裁剪或补背景，不缩放图案"));
+                        ui.label(localization::tr("• 图案列表按最长文件名统一宽度并居左，移除底部重复的像素尺寸显示"));
+                        ui.label(localization::tr("• 连续图边框开关移至编辑工具栏，PNG 另存按钮移至最小循环单元预览上方"));
+                        ui.label(localization::tr("• 修复图案连续拖动仅响应单帧位移的问题，按鼠标按下点计算完整移动，避免回跳"));
+                        ui.label(localization::tr("• 编辑区为可缩放平移的固定画布，仅显示独立图案；移动同步实际间距，中间显示裁剪后的循环结果"));
+                        ui.label(localization::tr("• 连续图预览区按三栏实际图像比例调整高度，参数区紧随其后，减少大块空白"));
+                        ui.label(localization::tr("• 新弹窗先居中于主窗口，再按屏幕可用区域修正越界，过大窗口自动缩小，保留标题栏可操作"));
+                        ui.label(localization::tr("• 连续图移动超出边界自动扩展画布，保留完整图案并对齐 4 倍数，三栏同步刷新"));
+                        ui.label(localization::tr("• 连续图采用实时编辑、最小循环单元、连续平铺三栏，参数区独立滚动，中间单元与导出一致"));
+                        ui.label(localization::tr("• 连续图自动实时预览，左侧编辑、右侧平铺，支持单图双排错位与位置拖动；尺寸和间距自动对齐 4 倍数"));
+                        ui.label(localization::tr("• 连续图窗口支持拖入图片自动加入列表和排列，逐项移除并更新编号"));
+                        ui.label(localization::tr("• 四方连续图支持精确提取最小循环及多图案制作，提供错位、间距和平铺预览；另存 PNG，不修补接缝"));
                         ui.label(localization::tr("• 九宫格按精简方向在中心对齐 4 倍数，未精简方向仅外补透明且 Border 为 0"));
                         ui.label(localization::tr("• 材质 Shader 预览的 2D / 3D 使用主题 Tab，尺寸随节点缩放"));
                         ui.label(localization::tr("• 启动自动检查更新每天最多一次，手动检查不受此限制"));
