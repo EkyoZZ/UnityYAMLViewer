@@ -2,6 +2,8 @@
 
 [返回首页 / Back to README](../README.md) · [中文](#中文) | [English](#english)
 
+[详细功能与限制 / Feature reference](feature-reference.md) · [命令行参考 / CLI reference](command-line.md)
+
 ---
 
 ## 中文
