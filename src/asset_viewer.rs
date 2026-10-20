@@ -1,6 +1,7 @@
 //! Text and image reference tabs, with nine-slice editing and in-place replacement.
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, mpsc}};
 use eframe::egui::{self, Color32};
+use egui::emath::GuiRounding as _;
 pub(crate) mod nine_slice;
 mod seamless;
 mod svg_preview;
@@ -81,6 +82,17 @@ impl Channel {
     }
 }
 type Loaded = Result<(Arc<image::RgbaImage>, egui::ColorImage), String>;
+#[derive(Default, PartialEq, Eq)]
+enum ImageBackground { #[default] Checkerboard, Gray, Custom }
+impl ImageBackground {
+    fn controls(&mut self, ui: &mut egui::Ui, color:&mut Option<[u8;3]>) {
+        let mut mode=match self {Self::Checkerboard=>"",Self::Gray=>"gray",Self::Custom=>"custom"}.to_owned();
+        let mut rgb=color.unwrap_or([0;3]);
+        crate::theme::shared_preview_background(ui,&mut mode,&mut rgb);
+        *self=match mode.as_str() {"gray"=>Self::Gray,"custom"=>Self::Custom,_=>Self::Checkerboard};
+        *color=Some(rgb);
+    }
+}
 #[derive(Default)]
 struct ImageTab {
     editor: nine_slice::Editor,
@@ -89,6 +101,8 @@ struct ImageTab {
     pending: Option<mpsc::Receiver<Loaded>>,
     texture: Option<egui::TextureHandle>,
     channel: Channel,
+    background: ImageBackground,
+    background_color: Option<[u8;3]>,
     error: Option<String>,
     zoom: Option<f32>,
     pan: egui::Vec2,
@@ -200,7 +214,7 @@ impl Assets {
             if tab.original.is_none()&&tab.pending.is_none()&&tab.error.is_none(){tab.load(path.clone(),ctx.clone());}
             if let Some(result)=tab.pending.as_ref().and_then(|r|r.try_recv().ok()) {
                 tab.pending=None;
-                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,egui::TextureOptions::LINEAR));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;tab.seamless=Default::default();}}
+                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,egui::TextureOptions::NEAREST));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;tab.seamless=Default::default();}}
             }
             if let (Some(original),Some(texture))=(&tab.original,&tab.texture) {
                 tab.seamless.show(ctx,path,original);
@@ -220,7 +234,7 @@ impl Assets {
             self.playlists.show_creator(ui,path,preview);
             return;
         }
-        if !is_pdf(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
+        if !is_bitmap(path) && !is_pdf(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
         self.models.retain(|other,_|other==path);
         if crate::model_preview::is_model(path) {
             let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
@@ -281,23 +295,13 @@ impl Assets {
             match result {
                 Ok((original, display)) => {
                     tab.original = Some(original);
-                    tab.texture = Some(ui.ctx().load_texture(path.display().to_string(), display, egui::TextureOptions::LINEAR));
+                    tab.texture = Some(ui.ctx().load_texture(path.display().to_string(), display, egui::TextureOptions::NEAREST));
                 }
                 Err(error) => tab.error = Some(error),
             }
         }
         ui.horizontal_wrapped(|ui| {
-            let previous = tab.channel;
-            ui.add_enabled_ui(tab.pending.is_none() && !tab.editor.open && !tab.editor.busy(), |ui| {
-                for channel in [Channel::R,Channel::G,Channel::B,Channel::A,Channel::Rgb,Channel::Rgba] {
-                    ui.selectable_value(&mut tab.channel, channel, channel.label());
-                }
-            });
-            if previous != tab.channel { tab.load(path.to_owned(), ui.ctx().clone()); }
-            if ui.button(crate::localization::tr("适应窗口")).clicked() { tab.zoom = None; tab.pan = egui::Vec2::ZERO; }
-            for (label, zoom) in [("50%", 0.5), ("100%", 1.0), ("200%", 2.0)] {
-                if ui.button(label).clicked() { tab.zoom = Some(zoom); tab.pan = egui::Vec2::ZERO; }
-            }
+            file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
             if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
             if ui.add_enabled(tab.original.is_some()&&(tab.editor.open||can_open_preview), egui::Button::new(crate::localization::tr("九宫格精简"))).clicked() {
                 tab.editor.open = true;
@@ -309,6 +313,18 @@ impl Assets {
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("seamless",path)));
             }
         });
+        ui.horizontal_wrapped(|ui| {
+            let previous = tab.channel;
+            ui.add_enabled_ui(tab.pending.is_none() && !tab.editor.open && !tab.editor.busy(), |ui| {
+                let mut channel=tab.channel.label().to_owned();
+                crate::theme::compact_selector(ui,&mut channel,[("R","R"),("G","G"),("B","B"),("A","A"),("RGB","RGB"),("RGBA","RGBA")]);
+                tab.channel=match channel.as_str() {"R"=>Channel::R,"G"=>Channel::G,"B"=>Channel::B,"A"=>Channel::A,"RGB"=>Channel::Rgb,_=>Channel::Rgba};
+            });
+            if previous != tab.channel { tab.load(path.to_owned(), ui.ctx().clone()); }
+            if ui.button(crate::localization::tr("适应窗口")).clicked() { tab.zoom = None; tab.pan = egui::Vec2::ZERO; }
+            ui.label(crate::localization::tr("背景色"));
+            tab.background.controls(ui,&mut tab.background_color);
+        });
         let reload=false;
         if reload {tab.original=None;tab.pan=egui::Vec2::ZERO;tab.zoom=None;tab.load(path.to_owned(),ui.ctx().clone());}
         if let Some(error) = &tab.error { ui.label(error); return; }
@@ -318,7 +334,7 @@ impl Assets {
         let mut zoom = tab.zoom.unwrap_or_else(|| {
             ((canvas.width() - 16.0).max(1.0) / size.x).min((canvas.height() - 16.0).max(1.0) / size.y).clamp(0.01,64.0)
         });
-        if response.dragged() { tab.pan += response.drag_delta(); }
+        if response.dragged() { tab.pan += ui.input(|input| input.pointer.delta()); }
         if response.hovered() {
             let scroll = ui.input(|input| input.smooth_scroll_delta.y);
             if scroll != 0.0 {
@@ -336,12 +352,29 @@ impl Assets {
         let rect = egui::Rect::from_center_size(canvas.center() + tab.pan, size * zoom);
         let visible = rect.intersect(canvas).intersect(ui.clip_rect());
         if visible.is_positive() {
-            let cell = 12.0;
-            for y in 0..(visible.height() / cell).ceil() as i32 {
-                for x in 0..(visible.width() / cell).ceil() as i32 {
-                    let tile = egui::Rect::from_min_size(visible.min + egui::vec2(x as f32 * cell, y as f32 * cell), egui::vec2(cell,cell)).intersect(visible);
-                    painter.rect_filled(tile, 0.0, Color32::from_gray(if (x+y)%2==0 { 190 } else { 230 }));
+            if tab.background==ImageBackground::Checkerboard {
+                // At high zoom, one background square covers exactly one source pixel.
+                let aligned = zoom >= 8.0;
+                let cell = if aligned { zoom } else { 12.0 };
+                let origin = if aligned { rect.min } else { visible.min };
+                let first = ((visible.min - origin) / cell).floor();
+                let last = ((visible.max - origin) / cell).ceil();
+                let mut background = egui::Mesh::default();
+                for y in first.y as i32..last.y as i32 {
+                    for x in first.x as i32..last.x as i32 {
+                        let tile = egui::Rect::from_min_size(origin + egui::vec2(x as f32 * cell, y as f32 * cell), egui::vec2(cell,cell)).intersect(visible);
+                        let tile = egui::Rect::from_min_max(
+                            tile.min.round_to_pixels(painter.pixels_per_point()),
+                            tile.max.round_to_pixels(painter.pixels_per_point()));
+                        background.add_colored_rect(tile, Color32::from_gray(if (x+y)%2==0 { 190 } else { 230 }));
+                    }
                 }
+                painter.add(egui::Shape::mesh(background));
+            } else {
+                let color=if tab.background==ImageBackground::Gray {[128,128,128]}else{tab.background_color.unwrap_or([0;3])};
+                let mut background=egui::Mesh::default();
+                background.add_colored_rect(visible,Color32::from_rgb(color[0],color[1],color[2]));
+                painter.add(egui::Shape::mesh(background));
             }
             painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0,1.0)), Color32::WHITE);
         }

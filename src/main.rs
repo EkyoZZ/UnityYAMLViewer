@@ -1526,33 +1526,42 @@ impl eframe::App for ViewerApp {
                             // Reset the popup's content width as well as its rows. Otherwise the
                             // separator preserves the previous Area width after deleting a long name.
                             ui.set_width(row_width);
-                            for path in self.recent_files.paths() {
-                                ui.push_id(path, |ui| {
-                                    let (row, _) = ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::hover());
-                                    let close_rect = egui::Rect::from_min_max(egui::pos2(row.right() - row_height, row.top()), row.max);
-                                    let name_rect = egui::Rect::from_min_max(row.min, egui::pos2(close_rect.left() - 4.0, row.bottom()));
-                                    ui.spacing_mut().interact_size.y = row_height;
-                                    ui.spacing_mut().button_padding.y = 2.0;
-                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                                    let name_response = ui.put(name_rect, egui::Button::new(""));
-                                    let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
-                                    let galley = ui.painter().layout(name.into_owned(), egui::TextStyle::Button.resolve(ui.style()),
-                                        ui.visuals().text_color(), text_rect.width());
-                                    let mut job = galley.job.as_ref().clone();
-                                    job.wrap.max_rows = 1;
-                                    job.wrap.break_anywhere = true;
-                                    let galley = ui.painter().layout_job(job);
-                                    ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
-                                        egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
-                                    if name_response.on_hover_text(path.display().to_string()).clicked() {
-                                        recent_path = Some(path.clone());
-                                        ui.close_menu();
+                            // Reserve footer space outside the scroll area and keep the popup in the viewport.
+                            let screen=ctx.screen_rect();
+                            let footer_height=ui.spacing().interact_size.y.max(row_height)+ui.spacing().item_spacing.y*3.0+12.0;
+                            let list_height=(screen.bottom()-ui.cursor().top().max(screen.top()+8.0)-footer_height-8.0).max(1.0);
+                            egui::ScrollArea::vertical().id_salt("recent_files_menu_scroll")
+                                .max_height(list_height).auto_shrink([false,true])
+                                .show(ui,|ui| {
+                                    let row_width=ui.available_width().min(row_width);
+                                    for path in self.recent_files.paths() {
+                                        ui.push_id(path, |ui| {
+                                            let (row, _) = ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::hover());
+                                            let close_rect = egui::Rect::from_min_max(egui::pos2(row.right() - row_height, row.top()), row.max);
+                                            let name_rect = egui::Rect::from_min_max(row.min, egui::pos2(close_rect.left() - 4.0, row.bottom()));
+                                            ui.spacing_mut().interact_size.y = row_height;
+                                            ui.spacing_mut().button_padding.y = 2.0;
+                                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                            let name_response = ui.put(name_rect, egui::Button::new(""));
+                                            let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
+                                            let galley = ui.painter().layout(name.into_owned(), egui::TextStyle::Button.resolve(ui.style()),
+                                                ui.visuals().text_color(), text_rect.width());
+                                            let mut job = galley.job.as_ref().clone();
+                                            job.wrap.max_rows = 1;
+                                            job.wrap.break_anywhere = true;
+                                            let galley = ui.painter().layout_job(job);
+                                            ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
+                                                egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
+                                            if name_response.on_hover_text(path.display().to_string()).clicked() {
+                                                recent_path = Some(path.clone());
+                                                ui.close_menu();
+                                            }
+                                            let close = ui.put(close_rect, egui::Button::new(""));
+                                            icons::paint(ui, icons::Icon::Minus, close.rect.shrink(3.0), ui.visuals().text_color());
+                                            if close.on_hover_text(localization::tr("删除记录")).clicked() { remove = Some(path.clone()); }
+                                        });
                                     }
-                                    let close = ui.put(close_rect, egui::Button::new(""));
-                                    icons::paint(ui, icons::Icon::Minus, close.rect.shrink(3.0), ui.visuals().text_color());
-                                    if close.on_hover_text(localization::tr("删除记录")).clicked() { remove = Some(path.clone()); }
                                 });
-                            }
                             if let Some(path) = remove { self.recent_files.remove(&path); }
                             if !self.recent_files.paths().is_empty() {
                                 ui.separator();
@@ -2482,15 +2491,28 @@ impl eframe::App for ViewerApp {
                     ui.heading("Unity YAML Viewer");
                     ui.label(crate::lf!("版本 {0}", APP_VERSION));
                     ui.small(crate::localization::tr("Unity 文本序列化资源查看与属性编辑工具"));
+                    ui.label(crate::lf!("作者: {0}", "EkyoZZ (Ekyo · Cheung)"));
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.6").strong());
+                        ui.label(localization::tr("• 修复图片与连续图放大模糊、预览比例，高倍棋盘格对齐像素"));
+                        ui.label(localization::tr("• 各类预览共用并记住背景设置，自定义颜色默认为黑色"));
+                        ui.label(localization::tr("• 连续图和九宫格另存支持覆盖；同名 meta 额外确认并保留"));
+                        ui.label(localization::tr("• 音视频基础摘要与分组详情完善，补充逐轨参数和音乐标签"));
+                        ui.label(localization::tr("• 字幕样式可搜索系统字体；透明 GIF 与视频显示棋盘底图"));
+                        ui.label(localization::tr("• 统一主题 Tab 与工具栏布局，最近记录滚动且清空固定底部"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.5").strong());
                         ui.label(localization::tr("• 新增四方连续图：最小循环提取、多图案错位制作与 PNG 导出"));
                         ui.label(localization::tr("• 图案支持实时拖动、缩放预览、间距与循环尺寸调整"));
                         ui.label(localization::tr("• 优化九宫格 4 对齐、完整周期与 Border，修复材质预览控件缩放"));
                         ui.label(localization::tr("• 弹窗先居中再修正屏幕越界；启动自动检查更新每 24 小时最多一次"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.4").strong());
                         ui.label(localization::tr("• 播放列表菜单可退出编辑，保存成功后自动退出编辑"));
                         ui.label(localization::tr("• CSV / TSV / PSV 支持单元格编辑栏、撤销、检查与查找"));
@@ -2505,10 +2527,7 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 视频预览叠加像素裁剪框，可拖动、输入坐标与尺寸；导出支持十种容器和自定义后缀"));
                         ui.label(localization::tr("• 单视频编辑新增预览与底部范围操作，支持 H.264 / VP8 / VP9 导出；批量暂缓"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
+
                         ui.label(RichText::new("1.2.3").strong());
                         ui.label(localization::tr("• 第三方支持集中管理 FFmpeg、PDFium 和 LibreOffice，组件不参与缓存清理"));
                         ui.label(localization::tr("• 视频与 GIF 支持点击整个预览框播放 / 暂停，包括画面留白"));

@@ -614,14 +614,14 @@ impl Preview {
             if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;self.world.fit();if let Some((_,preview))=&mut self.scene3d {preview.fit();}}
             if self.three_dimensional && ui.button(tr("重置视角")).clicked(){if let Some((_,preview))=&mut self.scene3d {preview.reset();}}
             ui.label(tr("背景色"));
-            ui.push_id("preview_background", |ui| crate::theme::background_selector(ui, &mut self.background));
-            let rgb = self.background_rgb.get_or_insert([190,190,190]);
-            ui.color_edit_button_srgb(rgb);
+            crate::theme::shared_preview_background(ui,&mut self.background,self.background_rgb.get_or_insert([0;3]));
             if !self.three_dimensional {
             ui.label(tr("排序轴"));
             let axis=self.sort_axis.get_or_insert(1);
-            ui.selectable_value(axis,0,"X");ui.selectable_value(axis,1,"Y");ui.selectable_value(axis,2,"Z");
-            crate::theme::toggle_switch(ui,tr("辅助线"),&mut self.show_guides);
+            let mut selected=match *axis {0=>"x",2=>"z",_=>"y"}.to_owned();
+            crate::theme::compact_selector(ui,&mut selected,[("x","X"),("y","Y"),("z","Z")]);
+            *axis=match selected.as_str() {"x"=>0,"z"=>2,_=>1};
+            crate::theme::compact_toggle_switch(ui,tr("辅助线"),&mut self.show_guides);
             }
         });
         let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
@@ -658,7 +658,7 @@ impl Preview {
             if self.scene3d.as_ref().is_none_or(|(previous,_)|*previous!=key) {
                 self.scene3d=Some((key,crate::model_preview::Preview::new_scene(ui.ctx(),documents.to_vec(),flags.clone(),catalog.unwrap_or_default())));
             }
-            self.scene3d.as_mut().unwrap().1.show_scene(ui,&self.background,self.background_rgb.unwrap_or([190;3]));
+            self.scene3d.as_mut().unwrap().1.show_scene(ui,&self.background,self.background_rgb.unwrap_or([0;3]));
             return None;
         }
         let first=documents.first().map_or(0,|d|d.text.as_ptr() as usize);
@@ -668,7 +668,7 @@ impl Preview {
             _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some() || (doc.type_name=="MonoBehaviour" && field(&doc.text,"skeletonDataAsset").is_some() && documents.iter().any(|t|t.type_name=="RectTransform" && t.game_object==doc.game_object)));self.ui_presence=Some((first,last,documents.len(),value));value},
         };
         if !has_ui {
-            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),&selected_components,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([190,190,190]),self.show_guides,expanding,&mut self.open);
+            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),&selected_components,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([0;3]),self.show_guides,expanding,&mut self.open);
             if !self.open {self.release();ui.ctx().request_repaint();}
             return picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())));
         }
@@ -898,7 +898,7 @@ impl Preview {
         let (rect,response)=ui.allocate_exact_size(ui.available_size().max(Vec2::splat(1.0)),egui::Sense::click_and_drag());
         let painter=ui.painter_at(rect);
         if self.background == "gray" || self.background == "custom" {
-            let [r,g,b] = if self.background == "gray" {[128,128,128]} else {self.background_rgb.unwrap_or([190,190,190])};
+            let [r,g,b] = if self.background == "gray" {[128,128,128]} else {self.background_rgb.unwrap_or([0;3])};
             painter.rect_filled(rect, 0.0, Color32::from_rgb(r,g,b));
         } else {
         let cell = 12.0;

@@ -105,9 +105,6 @@ pub fn compact_selector<const N:usize>(ui:&mut egui::Ui,value:&mut String,labels
 pub fn background_selector(ui: &mut egui::Ui, preference: &mut String) {
     selector_inner(ui, preference, true, [("", "棋盘格"), ("gray", "灰色"), ("custom", "自定义")]);
 }
-pub fn model_background_selector(ui:&mut egui::Ui,preference:&mut String) {
-    selector_inner(ui,preference,true,[("checker","棋盘格"),("gray","灰色"),("custom","自定义")]);
-}
 
 /// Filled toolbar actions use the same height and text padding as theme tabs.
 pub fn toolbar_button(ui: &egui::Ui, label: &str, update: bool) -> egui::Button<'static> {
@@ -223,10 +220,20 @@ pub fn preview_toggle(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
 
 /// Reusable labeled switch. Pass a localized label and the caller-owned state.
 /// Returns a normal response with clicked/changed state; supports ui.add_enabled_ui.
+pub fn compact_toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
+    let font=egui::TextStyle::Button.resolve(ui.style());
+    let width=ui.painter().layout_no_wrap(label.to_owned(),font,ui.visuals().text_color()).size().x+48.0;
+    toggle_switch_width(ui,label,value,width)
+}
+
 pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
+    let width=ui.available_width().max(48.0);
+    toggle_switch_width(ui,label,value,width)
+}
+
+fn toggle_switch_width(ui:&mut egui::Ui,label:&str,value:&mut bool,width:f32) -> egui::Response {
     let color=ui.visuals().text_color();
     let font=egui::TextStyle::Button.resolve(ui.style());
-    let width=ui.available_width().max(48.0);
     let galley=ui.painter().layout(label.to_owned(),font,color,(width-48.0).max(1.0));
     let height=galley.size().y.max(26.0);
     let (rect,mut response)=ui.allocate_exact_size(egui::vec2(width,height),egui::Sense::click());
@@ -251,4 +258,45 @@ pub fn preview_space_selector_scaled(ui:&mut egui::Ui,three_dimensional:&mut boo
     let mut value=if *three_dimensional {"3d"} else {"2d"}.to_owned();
     selector_inner_scaled(ui,&mut value,true,[("2d","2D"),("3d","3D")],scale);
     *three_dimensional=value=="3d";
+}
+
+#[derive(Clone,PartialEq,Eq,serde::Serialize,serde::Deserialize)]
+#[serde(default)]
+struct PreviewBackgroundSetting { mode:String, rgb:[u8;3] }
+impl Default for PreviewBackgroundSetting {
+    fn default()->Self {Self {mode:String::new(),rgb:[0;3]}}
+}
+
+/// All preview surfaces share this persisted preference; output backgrounds are separate.
+pub fn shared_preview_background(ui:&mut egui::Ui,mode:&mut String,rgb:&mut [u8;3])->bool {
+    use std::sync::{Mutex,OnceLock};
+    static SETTING:OnceLock<Mutex<(PreviewBackgroundSetting,Option<String>)>>=OnceLock::new();
+    let path=crate::app_cache::root().map(|p|p.join("preview_background.json"));
+    let state=SETTING.get_or_init(|| {
+        let mut setting=path.as_ref().and_then(|p|std::fs::read(p).ok())
+            .and_then(|bytes|serde_json::from_slice::<PreviewBackgroundSetting>(&bytes).ok()).unwrap_or_default();
+        if !matches!(setting.mode.as_str(),""|"gray"|"custom") {setting.mode.clear();}
+        Mutex::new((setting,None))
+    });
+    let mut state=state.lock().unwrap_or_else(|e|e.into_inner());
+    let old=state.0.clone();
+    let mut current=old.clone();
+    background_selector(ui,&mut current.mode);
+    if current.mode=="custom" {ui.color_edit_button_srgb(&mut current.rgb);}
+    if current!=old {
+        let saved=(||->Result<(),String>{
+            let path=path.as_ref().ok_or_else(||"Cannot locate preview settings directory".to_owned())?;
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e|e.to_string())?;
+            let bytes=serde_json::to_vec_pretty(&current).map_err(|e|e.to_string())?;
+            std::fs::write(path,bytes).map_err(|e|e.to_string())
+        })();
+        state.1=saved.err();
+        state.0=current;
+        let viewports=ui.ctx().input(|input|input.raw.viewports.keys().copied().collect::<Vec<_>>());
+        for viewport in viewports {ui.ctx().request_repaint_of(viewport);}
+    }
+    let changed=*mode!=state.0.mode || *rgb!=state.0.rgb;
+    *mode=state.0.mode.clone();*rgb=state.0.rgb;
+    if let Some(error)=&state.1 {ui.colored_label(ui.visuals().warn_fg_color,crate::localization::tr("预览背景设置保存失败")).on_hover_text(error);}
+    changed
 }

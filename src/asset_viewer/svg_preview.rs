@@ -84,8 +84,7 @@ impl Preview {
             }
             if ui.add_enabled(self.pending.is_none(), egui::Button::new(tr("重载"))).clicked() { let background=self.background.clone(); let background_rgb=self.background_rgb; *self = Self {background, background_rgb, ..Self::default()}; }
             ui.label(tr("背景色"));
-            ui.push_id("svg_background", |ui| crate::theme::background_selector(ui, &mut self.background));
-            ui.color_edit_button_srgb(self.background_rgb.get_or_insert([190,190,190]));
+            crate::theme::shared_preview_background(ui,&mut self.background,self.background_rgb.get_or_insert([0;3]));
         });
         ui.small(tr("SVG 仅支持只读预览，暂不支持编辑。"))
             .on_hover_text(tr("SVG：文字需转轮廓；暂不加载外部资源或内嵌位图，不支持动画。"));
@@ -116,7 +115,7 @@ impl Preview {
         let visible = rect.intersect(canvas).intersect(ui.clip_rect());
         if visible.is_positive() {
             if self.background == "gray" || self.background == "custom" {
-                let rgb=if self.background == "gray" {[60;3]} else {self.background_rgb.unwrap_or([190;3])};
+                let rgb=if self.background == "gray" {[128;3]} else {self.background_rgb.unwrap_or([0;3])};
                 painter.rect_filled(visible,0.0,Color32::from_rgb(rgb[0],rgb[1],rgb[2]));
             } else {
             for y in 0..(visible.height() / 12.0).ceil() as i32 {

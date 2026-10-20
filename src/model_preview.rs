@@ -181,13 +181,13 @@ impl Preview {
     pub(crate) fn new_scene(ctx:&egui::Context,documents:Vec<crate::Document>,flags:HashMap<String,crate::hierarchy_controls::Flags>,catalog:Arc<HashMap<String,PathBuf>>)->Self {
         let (send,recv)=mpsc::channel();let ctx=ctx.clone();
         std::thread::spawn(move||{let _=send.send(scene_model(&documents,&flags,&catalog));ctx.request_repaint();});
-        Self{camera_direction:-1.0,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,texture:None,yaw:0.3,pitch:0.15,zoom:1.0,pan:egui::Vec2::ZERO,background:"checker".into(),rgb:[60;3],dirty:true,size:[0;2]}
+        Self{camera_direction:-1.0,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,texture:None,yaw:0.3,pitch:0.15,zoom:1.0,pan:egui::Vec2::ZERO,background:"checker".into(),rgb:[0;3],dirty:true,size:[0;2]}
     }
     pub(crate) fn new(ctx:&egui::Context,path:&Path)->Self {
         let catalog=catalog_for(ctx);let paths=ctx.data_mut(|d|d.get_temp::<Vec<Option<PathBuf>>>(egui::Id::new(("model_materials",path)))).unwrap_or_default();
         let (send,recv)=mpsc::channel();let path=path.to_owned();let ctx=ctx.clone();
         std::thread::spawn(move||{let result=load(&path,&paths,&catalog,None).map(|mut m|{normalize(&mut m.triangles);m});let _=send.send(result);ctx.request_repaint();});
-        Self{camera_direction:1.0,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,texture:None,yaw:0.3,pitch:0.15,zoom:1.0,pan:egui::Vec2::ZERO,background:"checker".into(),rgb:[60;3],dirty:true,size:[0;2]}
+        Self{camera_direction:1.0,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,texture:None,yaw:0.3,pitch:0.15,zoom:1.0,pan:egui::Vec2::ZERO,background:"checker".into(),rgb:[0;3],dirty:true,size:[0;2]}
     }
     pub(crate) fn fit(&mut self){self.zoom=1.0;self.pan=egui::Vec2::ZERO;self.dirty=true;}
     pub(crate) fn reset(&mut self){self.fit();self.yaw=0.3;self.pitch=0.15;}
@@ -208,8 +208,7 @@ impl Preview {
             self.dirty|=previous!=self.mode;
             ui.label("静态模型");if ui.button("适应窗口").clicked(){self.zoom=1.0;self.pan=egui::Vec2::ZERO;self.dirty=true;}
             if ui.button("重置视角").clicked(){self.yaw=0.3;self.pitch=0.15;self.pan=egui::Vec2::ZERO;self.zoom=1.0;self.dirty=true;}
-            crate::theme::model_background_selector(ui,&mut self.background);
-            ui.color_edit_button_srgb(&mut self.rgb);
+            self.dirty|=crate::theme::shared_preview_background(ui,&mut self.background,&mut self.rgb);
             reload=ui.button("重载").clicked();
         });}
         ui.small(if controls {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；无光照主贴图预览，暂不还原 Shader、骨骼动画及 Prefab 骨骼姿势。FBX 多网格显示整个模型。"} else {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；网格保留父级变换与静态骨骼姿势，精灵和Spine使用静态平面。"});

@@ -16,12 +16,12 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **属性编辑**：编辑已识别的属性，支持校验、保存和撤销。
 - **材质与 Shader**：节点、2D / 3D 及部分 Shader 单步预览。
 - **场景与动画**：场景、模型、动画、Spine 和部分粒子效果预览。
-- **Unity 图片工具**：纹理通道查看、九宫格无损精简和 Sprite Border 同步，支持命令行批处理。
+- **Unity 图片工具**：像素清晰缩放、统一背景设置、九宫格无损精简和 Sprite Border 同步，支持命令行批处理。
 
 **附加工具**
 
 - **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
-- **音视频工具**：播放、剪切、画面裁剪、转码，以及多音轨和字幕支持。
+- **音视频工具**：播放、剪切、裁剪、转码、多音轨与字幕，支持媒体详情查看和字幕字体选择。
 - **文本表格**：CSV / TSV / PSV 查看、单元格编辑、类型检查与查找。
 - **文件预览**：PDF 只读预览，以及 SVG、GIF 和常见文本文件查看。
 - **日常操作**：多文件页签、最近记录、文件定位、深浅主题、七种语言、在线更新与第三方组件管理。
@@ -61,12 +61,12 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Property editing**: Edit recognized properties with validation, saving and undo.
 - **Materials and shaders**: Node views, 2D / 3D previews and step previews for supported shaders.
 - **Scenes and animation**: Preview scenes, models, animation, Spine and supported particle effects.
-- **Unity image tools**: Texture channels, lossless nine-slice compaction and Sprite Border updates, with batch CLI support.
+- **Unity image tools**: Pixel-sharp scaling, shared preview backgrounds, lossless nine-slice compaction and Sprite Border updates, with batch CLI support.
 
 **Additional tools**
 
 - **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
-- **Audio and video**: Playback, trimming, cropping and transcoding, with multiple audio tracks and subtitle support.
+- **Audio and video**: Playback, trimming, cropping, transcoding, multiple tracks and subtitles, with media details and subtitle font selection.
 - **Text tables**: View and edit CSV / TSV / PSV cells, check types and search.
 - **File previews**: Read-only PDFs, SVGs, GIFs and common text files.
 - **Everyday tools**: File tabs, recent files, file locations, light / dark themes, seven languages, updates and third-party component management.

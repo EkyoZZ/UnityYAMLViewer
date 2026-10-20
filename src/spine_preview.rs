@@ -314,7 +314,7 @@ impl Preview {
             controller.skeleton.set_to_setup_pose();
             controller.update(0.0);
         }
-        let mut preview = Self {gpu_resources:HashMap::new(),gpu_error:Arc::new(std::sync::Mutex::new(None)),gpu_status:Some("Spine material context unavailable; ordinary preview".into()),controller,textures,animations,skins,animation:0,base_track:0,tracks:Vec::new(),skin:0,dynamic:false,playing:false,looping:true,speed:1.0,time:0.0,last:Instant::now(),bounds:egui::Rect::NOTHING,zoom:1.0,pan:egui::Vec2::ZERO,background:String::new(),background_rgb:[190;3],show_guides:false,error:None };
+        let mut preview = Self {gpu_resources:HashMap::new(),gpu_error:Arc::new(std::sync::Mutex::new(None)),gpu_status:Some("Spine material context unavailable; ordinary preview".into()),controller,textures,animations,skins,animation:0,base_track:0,tracks:Vec::new(),skin:0,dynamic:false,playing:false,looping:true,speed:1.0,time:0.0,last:Instant::now(),bounds:egui::Rect::NOTHING,zoom:1.0,pan:egui::Vec2::ZERO,background:String::new(),background_rgb:[0;3],show_guides:false,error:None };
         preview.fit_bounds();
         Ok(preview)
     }
@@ -364,8 +364,7 @@ impl Preview {
                 if ui.button(label).clicked() {self.zoom=zoom;self.pan=egui::Vec2::ZERO;}
             }
             ui.label("背景色");
-            crate::theme::background_selector(ui,&mut self.background);
-            ui.color_edit_button_srgb(&mut self.background_rgb);
+            changed|=crate::theme::shared_preview_background(ui,&mut self.background,&mut self.background_rgb);
             crate::theme::toggle_switch(ui,crate::localization::tr("辅助线"),&mut self.show_guides);
             ui.menu_button("设置",|ui| {
                 changed|=ui.checkbox(&mut self.looping,"循环").changed();

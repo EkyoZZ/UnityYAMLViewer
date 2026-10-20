@@ -1,6 +1,13 @@
 // Translated format templates; indices preserve argument order.
 #[macro_export]
 macro_rules! localized_format {
+    ("作者: {0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        2 => format!("Author: {0}" $(, $arg)*),
+        4 => format!("작성자: {0}" $(, $arg)*),
+        5 => format!("Autor: {0}" $(, $arg)*),
+        6 => format!("Auteur : {0}" $(, $arg)*),
+        _ => format!("作者: {0}" $(, $arg)*),
+    }};
     ("播放 {0} 次" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
         1 => format!("播放 {0} 次" $(, $arg)*),
         2 => format!("Play {0} times" $(, $arg)*),

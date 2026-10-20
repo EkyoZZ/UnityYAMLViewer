@@ -67,7 +67,7 @@ fn is_mp4_header(bytes:&[u8])->bool {
     false
 }
 #[derive(Clone)]
-struct AudioTrack {bit_rate:u64,index:u64,label:String,default:bool,ordinal:usize,language_name:Option<&'static str>,details:String}
+struct AudioTrack {codec:String,rate:u64,channels:u64,layout:String,sample_format:String,depth:Option<u64>,profile:String,bit_rate:u64,index:u64,label:String,default:bool,ordinal:usize,language_name:Option<&'static str>,details:String}
 impl AudioTrack {
     fn display_label(&self)->String {
         match self.language_name {
@@ -112,7 +112,7 @@ pub(crate) fn audio_language_name(title:&str,language:&str)->Option<&'static str
     })
 }
 #[derive(Clone)]
-struct Info { subtitles:Vec<crate::subtitle_player::Source>,gif:Option<crate::gif_playback::Metadata>,ffmpeg:PathBuf,ffprobe:PathBuf,duration:f64,start_time:f64,video:Option<[usize;2]>,audio:bool,channels:usize,sample_rate:u64,bits:u64,source_channels:u64,file_size:u64,fps:f64,audio_tracks:Vec<AudioTrack>,video_codec:String,pixel_format:String,container:String,bit_rate:u64,audio_bit_rate:u64,subtitle_count:usize,sample_aspect:String,video_bits:Option<u64>,dynamic_range:String,color_transfer:String }
+struct Info { audio_tags:Vec<(String,String)>,video_details:Vec<(String,String)>,reported_fps:Option<f64>,subtitles:Vec<crate::subtitle_player::Source>,gif:Option<crate::gif_playback::Metadata>,ffmpeg:PathBuf,ffprobe:PathBuf,duration:f64,start_time:f64,video:Option<[usize;2]>,audio:bool,channels:usize,sample_rate:u64,bits:u64,source_channels:u64,file_size:u64,fps:f64,audio_tracks:Vec<AudioTrack>,video_codec:String,pixel_format:String,container:String,bit_rate:u64,subtitle_count:usize,sample_aspect:String,video_bits:Option<u64>,dynamic_range:String,color_transfer:String }
 fn probe(path:&Path)->Result<Info,String> {
     let ffmpeg=find_tool("ffmpeg").ok_or("未安装 FFmpeg，请前往第三方支持安装。")?;
     let ffprobe=find_tool("ffprobe").ok_or("未安装 ffprobe，请前往第三方支持安装。")?;
@@ -120,6 +120,14 @@ fn probe(path:&Path)->Result<Info,String> {
     if !output.status.success() {return Err(String::from_utf8_lossy(&output.stderr).into());}
     let data:serde_json::Value=serde_json::from_slice(&output.stdout).map_err(|e|e.to_string())?;
     let streams=data["streams"].as_array().ok_or("无法读取媒体流")?;
+    let mut audio_tags=Vec::new();
+    if let Some(tags)=data["format"]["tags"].as_object() {
+        for (label,key) in [("标题","title"),("艺术家","artist"),("专辑","album"),("专辑艺术家","album_artist"),("作曲者","composer"),("曲目编号","track"),("流派","genre"),("日期","date"),("版权","copyright")] {
+            if let Some(value)=tags.iter().find(|(name,_)|name.eq_ignore_ascii_case(key)).and_then(|(_,value)|value.as_str()).filter(|value|!value.trim().is_empty()) {
+                audio_tags.push((label.to_owned(),value.to_owned()));
+            }
+        }
+    }
     let audio_tracks=streams.iter().filter(|s|s["codec_type"]=="audio").enumerate().map(|(ordinal,s)| {
         let index=s["index"].as_u64().unwrap_or(ordinal as u64);
         let language=s["tags"]["language"].as_str().filter(|v|!v.is_empty()).unwrap_or("und");
@@ -129,10 +137,28 @@ fn probe(path:&Path)->Result<Info,String> {
         let rate=s["sample_rate"].as_str().and_then(|s|s.parse().ok()).unwrap_or(0);
         let channels=s["channels"].as_u64().unwrap_or(0);let default=s["disposition"]["default"]==1;
         let description=if title.is_empty(){language.to_owned()}else{format!("{title} ({language})")};
-        AudioTrack {bit_rate:s["bit_rate"].as_str().and_then(|v|v.parse::<u64>().ok()).or_else(||s["bit_rate"].as_u64()).unwrap_or(0),index,label:format!("{} · {description} · {codec} · {rate} Hz · {channels} ch",ordinal+1),default,
+        let depth=s["bits_per_raw_sample"].as_str().and_then(|v|v.parse::<u64>().ok()).filter(|v|*v>0)
+            .or_else(||s["bits_per_sample"].as_u64().filter(|v|*v>0));
+        AudioTrack {codec:codec.clone(),rate,channels,layout:s["channel_layout"].as_str().unwrap_or("未知").to_owned(),
+            sample_format:s["sample_fmt"].as_str().unwrap_or("未知").to_owned(),depth,profile:s["profile"].as_str().unwrap_or("未知").to_owned(),bit_rate:s["bit_rate"].as_str().and_then(|v|v.parse::<u64>().ok()).or_else(||s["bit_rate"].as_u64()).unwrap_or(0),index,label:format!("{} · {description} · {codec} · {rate} Hz · {channels} ch",ordinal+1),default,
             ordinal:ordinal+1,language_name:audio_language_name(title,language),details:format!("{codec} · {rate} Hz · {channels} ch")}
     }).collect();
     let video_stream=streams.iter().find(|s|s["codec_type"]=="video" && s["disposition"]["attached_pic"]!=1);
+    let reported_fps=video_stream.and_then(|stream|stream["avg_frame_rate"].as_str()).and_then(|rate| {
+        let (numerator,denominator)=rate.split_once('/')?;
+        let rate=numerator.parse::<f64>().ok()?/denominator.parse::<f64>().ok()?;
+        (rate.is_finite() && rate>0.0).then_some(rate)
+    });
+    let mut video_details=Vec::new();
+    if let Some(stream)=video_stream {
+        for (label,key) in [("编码配置","profile"),("编码标记","codec_tag_string"),("颜色空间","color_space"),("色域原色","color_primaries"),("颜色范围","color_range"),("场序","field_order"),("显示宽高比","display_aspect_ratio")] {
+            let value=stream[key].as_str().filter(|v|!v.is_empty() && !matches!(*v,"unknown"|"N/A"|"unspecified"));
+            video_details.push((label.to_owned(),value.unwrap_or("未知").to_owned()));
+        }
+        if let (Some(width),Some(height))=(stream["width"].as_u64(),stream["height"].as_u64()) {
+            video_details.push(("源分辨率".to_owned(),format!("{width} × {height}")));
+        }
+    }
     let video_codec=video_stream.and_then(|s|s["codec_name"].as_str()).unwrap_or("—").to_owned();
     let pixel_format=video_stream.and_then(|s|s["pix_fmt"].as_str()).unwrap_or("—").to_owned();
     let sample_aspect=video_stream.and_then(|s|s["sample_aspect_ratio"].as_str()).filter(|v|*v!="N/A" && *v!="0:1").unwrap_or("未知").to_owned();
@@ -159,7 +185,6 @@ fn probe(path:&Path)->Result<Info,String> {
     let audio=streams.iter().any(|s|s["codec_type"]=="audio");
     let channels=streams.iter().find(|s|s["codec_type"]=="audio").and_then(|s|s["channels"].as_u64()).unwrap_or(1).clamp(1,2) as usize;
     let audio_stream=streams.iter().find(|s|s["codec_type"]=="audio");
-    let audio_bit_rate=audio_stream.and_then(|s|s["bit_rate"].as_str().and_then(|v|v.parse::<u64>().ok()).or_else(||s["bit_rate"].as_u64())).unwrap_or(0);
     let sample_rate=audio_stream.and_then(|s|s["sample_rate"].as_str()).and_then(|s|s.parse().ok()).unwrap_or(0);
     let bits=audio_stream.and_then(|s|s["bits_per_raw_sample"].as_str().and_then(|v|v.parse::<u64>().ok()).filter(|v|*v>0).or_else(||s["bits_per_sample"].as_u64())).unwrap_or(0);
     let source_channels=audio_stream.and_then(|s|s["channels"].as_u64()).unwrap_or(0);
@@ -177,7 +202,7 @@ fn probe(path:&Path)->Result<Info,String> {
     if !audio && video.is_none() {return Err("没有可播放的音视频流".into());}
     let duration=data["format"]["duration"].as_str().and_then(|s|s.parse::<f64>().ok()).or_else(||streams.iter().filter_map(|s|s["duration"].as_str()?.parse::<f64>().ok()).max_by(f64::total_cmp)).unwrap_or(0.0);
     let start_time=data["format"]["start_time"].as_str().and_then(|s|s.parse::<f64>().ok()).filter(|t|t.is_finite()).unwrap_or(0.0);
-    Ok(Info {subtitles,gif:if video_codec=="gif" {Some(crate::gif_playback::read(path)?)}else{None},ffmpeg,ffprobe,start_time,duration:if duration.is_finite(){duration.max(0.0)}else{0.0},video,audio,channels,sample_rate,bits,source_channels,file_size,fps,audio_tracks,video_codec,pixel_format,container,bit_rate,audio_bit_rate,subtitle_count,sample_aspect,video_bits,dynamic_range,color_transfer})
+    Ok(Info {audio_tags,video_details,reported_fps,subtitles,gif:if video_codec=="gif" {Some(crate::gif_playback::read(path)?)}else{None},ffmpeg,ffprobe,start_time,duration:if duration.is_finite(){duration.max(0.0)}else{0.0},video,audio,channels,sample_rate,bits,source_channels,file_size,fps,audio_tracks,video_codec,pixel_format,container,bit_rate,subtitle_count,sample_aspect,video_bits,dynamic_range,color_transfer})
 }
 struct Control { stop:AtomicBool, volume:AtomicU32, children:Mutex<Vec<Child>>, clock:Mutex<Option<Instant>>,video_ready:AtomicBool,paused:AtomicBool,pause_at:Mutex<Option<Instant>> }
 struct Playback { control:Arc<Control>, frames:mpsc::Receiver<(usize,egui::ColorImage)>, errors:mpsc::Receiver<String>, done:Arc<AtomicBool> }
@@ -648,28 +673,41 @@ impl Preview {
                 self.seek_frame(ui.ctx(), path);
             }
         }
+        let previous_audio=self.selected_audio;
         let mut position=self.seek_drag.map_or(self.position_now(),|seek|seek.0);if duration>0.0 {position=position.min(duration);}
         if !fullscreen {if let Some(info)=&self.info {if let Some([w,h])=info.video {
             ui.horizontal_wrapped(|ui| {
-                let bitrate=if info.bit_rate>0{format!("{:.0} kb/s",info.bit_rate as f64/1000.0)}else{crate::localization::tr("未知").to_owned()};
-                let bits=info.video_bits.map_or_else(||crate::localization::tr("未知").to_owned(),|bits|format!("{bits} bit"));
-                ui.small(format!("{}: {} · {:.2} fps · {} · {w} × {h} · {}: {} · {} · {}",crate::localization::tr("视频信息"),info.video_codec,info.fps,bitrate,crate::localization::tr("像素宽高比"),crate::localization::tr(&info.sample_aspect),bits,crate::localization::tr(&info.dynamic_range)));
+                let tr=crate::localization::tr;
+                let fps=info.reported_fps.map_or_else(||tr("未知").to_owned(),|fps|format!("{fps:.2} fps"));
+                ui.small(format!("{}: {} · {w} × {h} · {fps}",tr("视频信息"),info.video_codec));
+                ui.push_id("video_header_details",|ui|details_menu(ui,info));
             });
-            if info.gif.is_some() { ui.horizontal_wrapped(|ui| {color_information(ui,info);}); }
-            else { ui.horizontal_wrapped(|ui| {
-                ui.small(format!("{}:",crate::localization::tr("音频信息")));
-                if let Some(track)=info.audio_tracks.iter().find(|t|Some(t.index)==self.selected_audio) {
-                    ui.small(format!("{}: {}",crate::localization::tr("当前音轨"),track.display_label())).on_hover_text(&track.label);
-                    let bitrate=if track.bit_rate>0{format!("{:.0} kb/s",track.bit_rate as f64/1000.0)}else{crate::localization::tr("未知").into()};
-                    ui.small(format!("{}: {bitrate}",crate::localization::tr("码率")));
-                }else {ui.small(crate::localization::tr(if info.audio_tracks.is_empty(){"没有音轨"}else{"关闭音频"}));}
-                ui.small(format!("{}: {}",crate::localization::tr("音轨"),info.audio_tracks.len()));
-            }); }
+            if info.gif.is_none() {ui.horizontal_wrapped(|ui| {
+                let tr=crate::localization::tr;
+                ui.small(format!("{}:",tr("音频信息")));
+                if let Some(track)=info.audio_tracks.iter().find(|track|Some(track.index)==self.selected_audio) {
+                    let language=track.language_name.map(tr).unwrap_or(tr("未知"));
+                    let rate=if track.rate>0 {format!("{} Hz",track.rate)}else{tr("未知").to_owned()};
+                    let channels=if track.channels>0 {format!("{} ch",track.channels)}else{tr("未知").to_owned()};
+                    ui.small(format!("{}. {language} · {} · {rate} · {channels}",track.ordinal,track.codec)).on_hover_text(&track.label);
+                }else {ui.small(tr(if info.audio_tracks.is_empty(){"没有音轨"}else{"关闭音频"}));}
+                ui.push_id("audio_header_details",|ui|details_menu(ui,info));
+            });}
         }else if info.audio {
-            let depth=if info.bits>0{format!("{} bit",info.bits)}else{"bit: —".into()};
-            let channels=match info.source_channels {1=>crate::localization::tr("单声道").to_owned(),2=>crate::localization::tr("双声道").to_owned(),n=>format!("{n} ch")};
-            let bitrate=if info.audio_bit_rate>0{format!("{:.0} kb/s",info.audio_bit_rate as f64/1000.0)}else{crate::localization::tr("未知").into()};
-            ui.small(format!("{} Hz · {depth} · {channels} · {}: {bitrate}",info.sample_rate,crate::localization::tr("码率")));
+            let tr=crate::localization::tr;
+            let unknown=tr("未知");
+            if let Some(track)=info.audio_tracks.iter().find(|track|Some(track.index)==self.selected_audio) {
+                let rate=if track.rate>0 {format!("{} Hz",track.rate)}else{unknown.to_owned()};
+                let channels=match track.channels {0=>unknown.to_owned(),1=>tr("单声道").to_owned(),2=>tr("双声道").to_owned(),n=>format!("{n} ch")};
+                let depth=track.depth.map(|bits|format!(" · {bits} bit")).unwrap_or_default();
+                let bitrate=if track.bit_rate>0 {format!("{:.0} kb/s",track.bit_rate as f64/1000.0)}else{unknown.to_owned()};
+                ui.small(format!("{} · {rate} · {channels} · {}{depth} · {}: {bitrate}",track.codec,tr(&track.layout),tr("码率")));
+            }else {ui.small(tr("关闭音频"));}
+            ui.horizontal_wrapped(|ui| {
+                let duration=if info.duration>0.0 {format!("{:.3} s",info.duration)}else{unknown.to_owned()};
+                ui.small(format!("{}: {} · {}: {duration} · {}: {}",tr("容器格式"),info.container,tr("时长"),tr("音轨数量"),info.audio_tracks.len()));
+                audio_menu(ui,info,&mut self.selected_audio);
+            });
         }}}
         if let Some(job)=&self.playback {job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);let fps=self.info.as_ref().map_or(30.0,|i|i.fps);ui.ctx().request_repaint_after(Duration::from_secs_f64((0.5/fps).clamp(0.001,0.03)));}
         if self.info.as_ref().is_some_and(|i|i.video.is_none()) {
@@ -709,7 +747,6 @@ impl Preview {
         }
         if self.wave_job.is_some() {ui.spinner();ui.label(crate::localization::tr("正在生成音频波形…"));ui.ctx().request_repaint_after(Duration::from_millis(100));}
         if let Some(error)=&self.wave_error {ui.small(error);}
-        let previous_audio=self.selected_audio;
         let mut video_clicked=false;
         if let Some(texture)=&self.texture {
             let uv=egui::Rect::from_min_max(egui::pos2(if self.flip_x{1.0}else{0.0},if self.flip_y{1.0}else{0.0}),egui::pos2(if self.flip_x{0.0}else{1.0},if self.flip_y{0.0}else{1.0}));
@@ -759,7 +796,13 @@ impl Preview {
                 image_rect=egui::Rect::from_min_size(aligned,image_rect.size());
             }
             if !free {video_clicked=response.clicked_by(egui::PointerButton::Primary) && response.interact_pointer_pos().is_some_and(|point|canvas.intersect(ui.clip_rect()).contains(point)&&!overlay_exclusion.is_some_and(|rect|rect.contains(point)) && !external_exclusion.is_some_and(|rect|rect.contains(point)));}
-            ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect())).image(texture.id(),image_rect,uv,egui::Color32::WHITE);
+            let painter=ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
+            let visible=image_rect.intersect(canvas).intersect(ui.clip_rect());
+            if visible.is_positive() {
+                // Composite transparent playback frames over a checkerboard, never into decoded/exported pixels.
+                painter.add(crate::static_preview::background_shape(visible,"",[0;3]));
+            }
+            painter.image(texture.id(),image_rect,uv,egui::Color32::WHITE);
             if free && response.dragged_by(egui::PointerButton::Primary){ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);}
             if let Some(info)=&self.info {response.context_menu(|ui|{display_menu(ui,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio);if info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
         }
@@ -912,14 +955,64 @@ fn color_information(ui:&mut egui::Ui,info:&Info) {
     }
 }
 
-fn audio_menu(ui:&mut egui::Ui,info:&Info,selected:&mut Option<u64>) {
+fn details_menu(ui:&mut egui::Ui,info:&Info) {
     ui.menu_button(crate::localization::tr("详细信息"),|ui| {
-        ui.label(format!("{}: {}",crate::localization::tr("容器格式"),info.container));
-        ui.label(format!("{}: {}",crate::localization::tr("像素格式"),info.pixel_format));
-        color_information(ui,info);
-        ui.label(format!("{}: {}",crate::localization::tr("传递特性"),info.color_transfer));
-        ui.label(format!("{}: {}",crate::localization::tr("内嵌字幕"),info.subtitle_count));
+        let tr=crate::localization::tr;
+        let unknown=tr("未知");
+        let bitrate=|value:u64|if value>0 {format!("{:.0} kb/s",value as f64/1000.0)}else{unknown.to_owned()};
+        ui.menu_button(tr("文件信息"),|ui| {
+            ui.label(format!("{}: {}",tr("容器格式"),info.container));
+            ui.label(format!("{}: {}",tr("文件大小"),if info.file_size>0 {format!("{} ({} B)",crate::app_cache::format_size(info.file_size),info.file_size)}else{unknown.to_owned()}));
+            ui.label(format!("{}: {}",tr("时长"),if info.duration>0.0 {format!("{:.3} s",info.duration)}else{unknown.to_owned()}));
+            ui.label(format!("{}: {}",tr("音轨数量"),info.audio_tracks.len()));
+            ui.label(format!("{}: {}",tr("内嵌字幕"),info.subtitle_count));
+            for (label,value) in &info.audio_tags {ui.label(format!("{}: {}",tr(label),value));}
+        });
+        if info.video.is_some() {ui.menu_button(tr("视频信息"),|ui| {
+            egui::ScrollArea::vertical().id_salt("media_video_details").max_height((ui.ctx().screen_rect().height()-80.0).max(40.0)).show(ui,|ui| {
+            ui.label(format!("{}: {}",tr("视频编码"),info.video_codec));
+            for (label,value) in &info.video_details {ui.label(format!("{}: {}",tr(label),tr(value)));}
+            ui.label(format!("{}: {}",tr("平均帧率"),info.reported_fps.map_or_else(||unknown.to_owned(),|fps|format!("{fps:.3} fps"))));
+            ui.label(format!("{}: {}",tr("视频码率"),bitrate(info.bit_rate)));
+            ui.label(format!("{}: {}",tr("像素格式"),info.pixel_format));
+            ui.label(format!("{}: {}",tr("位深"),info.video_bits.map_or_else(||unknown.to_owned(),|bits|format!("{bits} bit"))));
+            ui.label(format!("{}: {}",tr("像素宽高比"),tr(&info.sample_aspect)));
+            ui.label(format!("{}: {}",tr("动态范围"),tr(&info.dynamic_range)));
+            ui.label(format!("{}: {}",tr("传递特性"),if info.color_transfer=="unknown" {unknown}else{&info.color_transfer}));
+            color_information(ui,info);
+            });
+        });}
+        ui.menu_button(tr("音频信息"),|ui| {
+            if info.audio_tracks.is_empty() {ui.label(tr("没有音轨"));}
+            egui::ScrollArea::vertical().id_salt("media_audio_details").max_height((ui.ctx().screen_rect().height()-80.0).max(40.0)).show(ui,|ui| {
+                for track in &info.audio_tracks {
+                    ui.label(&track.label);
+                    ui.label(format!("{}: {}",tr("音频编码"),track.codec));
+                    ui.label(format!("{}: {}",tr("编码配置"),tr(&track.profile)));
+                    ui.label(format!("{}: {}",tr("采样率"),if track.rate>0 {format!("{} Hz",track.rate)}else{unknown.to_owned()}));
+                    ui.label(format!("{}: {}",tr("声道布局"),tr(&track.layout)));
+                    ui.label(format!("{}: {}",tr("采样格式"),tr(&track.sample_format)));
+                    ui.label(format!("{}: {}",tr("位深"),track.depth.map_or_else(||unknown.to_owned(),|bits|format!("{bits} bit"))));
+                    ui.label(format!("{}: {}",tr("默认音轨"),tr(if track.default {"是"}else{"否"})));
+                    ui.label(format!("{}: {}",tr("音频码率"),bitrate(track.bit_rate)));
+                    ui.separator();
+                }
+            });
+        });
+        ui.menu_button(tr("字幕"),|ui| {
+            if info.subtitles.is_empty() {ui.label(tr("没有内嵌字幕"));}
+            egui::ScrollArea::vertical().id_salt("media_subtitle_details").max_height((ui.ctx().screen_rect().height()-80.0).max(40.0)).show(ui,|ui| {
+                for source in &info.subtitles {
+                    ui.label(&source.label);
+                    ui.label(tr(if source.text {"文字字幕"}else{"当前不支持显示此字幕编码"}));
+                    ui.separator();
+                }
+            });
+        });
     });
+}
+fn audio_menu(ui:&mut egui::Ui,info:&Info,selected:&mut Option<u64>) {
+    details_menu(ui,info);
     if info.gif.is_some() { return; }
     ui.menu_button(crate::localization::tr("音轨 / 语言"),|ui| {
         for track in &info.audio_tracks {if ui.selectable_label(*selected==Some(track.index),track.display_label()).on_hover_text(&track.label).clicked(){*selected=Some(track.index);ui.close_menu();}}

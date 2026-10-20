@@ -35,6 +35,8 @@ pub(super) struct Editor {
     original_borders:Option<[u32;4]>,
     show_original_border:bool,
     mask_color:MaskColor,
+    background:super::ImageBackground,
+    background_color:Option<[u8;3]>,
     manual:bool,
     autodetected:bool,
     show_details:bool,
@@ -66,12 +68,21 @@ fn fitted(w: u32,h: u32,width: f32,height: f32) -> egui::Vec2 {
     egui::vec2(w as f32,h as f32)*(width.max(1.)/w as f32).min(height/h as f32).min(8.)
 }
 
-fn checker(ui: &egui::Ui,rect: egui::Rect) {
+fn preview_background(ui: &egui::Ui,rect: egui::Rect,background: &super::ImageBackground,custom:Option<[u8;3]>) {
+    use egui::emath::GuiRounding as _;
     let painter=ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    for y in 0..(rect.height()/12.).ceil() as i32 {for x in 0..(rect.width()/12.).ceil() as i32 {
-        let tile=egui::Rect::from_min_size(rect.min+egui::vec2(x as f32*12.,y as f32*12.),egui::vec2(12.,12.)).intersect(rect);
-        painter.rect_filled(tile,0.,Color32::from_gray(if (x+y)%2==0 {100}else{140}));
-    }}
+    let mut mesh=egui::Mesh::default();
+    if *background==super::ImageBackground::Checkerboard {
+        for y in 0..(rect.height()/12.).ceil() as i32 {for x in 0..(rect.width()/12.).ceil() as i32 {
+            let tile=egui::Rect::from_min_size(rect.min+egui::vec2(x as f32*12.,y as f32*12.),egui::vec2(12.,12.)).intersect(rect);
+            let tile=egui::Rect::from_min_max(tile.min.round_to_pixels(painter.pixels_per_point()),tile.max.round_to_pixels(painter.pixels_per_point()));
+            mesh.add_colored_rect(tile,Color32::from_gray(if (x+y)%2==0 {100}else{140}));
+        }}
+    }else{
+        let [r,g,b]=if *background==super::ImageBackground::Gray {[128,128,128]}else{custom.unwrap_or([0;3])};
+        mesh.add_colored_rect(rect,Color32::from_rgb(r,g,b));
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn badge(painter: &egui::Painter,point: egui::Pos2,anchor: egui::Align2,text: String,color: Color32) {
@@ -97,8 +108,8 @@ fn guides(ui: &egui::Ui,rect: egui::Rect,w: u32,h: u32,v: [u32;6],mode: Mode) {
     }
     if mode!=Mode::Horizontal {
         for (value,pos,label,anchor,x) in [
-            (t,t,"上边界",egui::Align2::LEFT_TOP,rect.left()),
-            (b,h-b,"下边界",egui::Align2::RIGHT_BOTTOM,rect.right()),
+            (t,t,"上边界",egui::Align2::RIGHT_CENTER,rect.left()-6.),
+            (b,h-b,"下边界",egui::Align2::LEFT_CENTER,rect.right()+6.),
         ] {
             let y=rect.top()+rect.height()*pos as f32/h as f32;
             painter.line_segment([egui::pos2(rect.left(),y),egui::pos2(rect.right(),y)],(1.5,Color32::LIGHT_BLUE));
@@ -292,6 +303,10 @@ impl Editor {
             });
             if old!=self.request {self.confirm=false;self.failed=None;if !auto_clicked {self.request.automatic=false;self.autodetected=false;}}
             if ui.checkbox(&mut automatic,tr("自动选择遮罩对比色")).changed() {self.mask_color=if automatic {MaskColor::Auto}else{MaskColor::Red};}
+            ui.horizontal_wrapped(|ui| {
+                ui.label(tr("背景色"));
+                self.background.controls(ui,&mut self.background_color);
+            });
                 if self.original_borders.is_some() {ui.checkbox(&mut self.show_original_border,tr("裁剪图叠加原有 Unity Border"));}
                 });
                 let information_height=columns[0].min_rect().height().max(1.);
@@ -374,7 +389,16 @@ impl Editor {
                 for (index,column) in columns.iter_mut().enumerate() {
                     let (area,_)=column.allocate_exact_size(egui::vec2(column.available_width().max(1.),preview_height),egui::Sense::hover());
                     let (pw,ph)=if index==0 {(w,h)}else{(nw,nh)};
-                    let rect=egui::Rect::from_center_size(area.center(),fitted(pw,ph,(area.width()-16.).max(1.),area.height()-76.));checker(column,rect);
+                    // Reserve space for the translated top/bottom badges outside the image.
+                    let side_margin=if let Some(preview)=&preview {
+                        if preview.request.direction!=Mode::Horizontal {
+                            let borders=if index==1 {preview.plan.borders()}else{preview.plan.source_borders()};
+                            [("上边界",borders[1]),("下边界",borders[3])].into_iter().map(|(label,value)| {
+                                column.painter().layout_no_wrap(format!("{} {value} px",tr(label)),egui::FontId::proportional(12.),Color32::LIGHT_BLUE).size().x+14.
+                            }).fold(8.0_f32,f32::max)
+                        }else{8.}
+                    }else{8.};
+                    let rect=egui::Rect::from_center_size(area.center(),fitted(pw,ph,(area.width()-2.*side_margin).max(1.),area.height()-76.));preview_background(column,rect,&self.background,self.background_color);
                     let texture=if index==0 {Some(original_texture)}else{preview.as_ref().map(|r|&r.texture)};
                     if let Some(texture)=texture {
                         column.painter().image(texture.id(),rect,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.,1.)),Color32::WHITE);

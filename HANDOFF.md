@@ -1,3 +1,88 @@
+# 当前交接：1.2.6 已构建，等待用户提交后通知发布（2026-10-21）
+
+## 本轮 1.2.6 构建与验证（2026-10-21）
+
+- 用户明确授权升级与编译，编译前检查程序未运行、目标 EXE 可独占访问，未自动关闭程序。
+- cargo check --tests --locked --offline 通过；23 项相关测试实际执行并通过：连续图 18、字幕逻辑 3、本地化 2；未执行其他 311 项，不代表完整应用回归。日志：target/v1.2.6-asset_viewer-seamless-tests.log、target/v1.2.6-subtitle_player-tests-tests.log、target/v1.2.6-localization-tests-tests.log。
+- cargo build --release --locked --offline 成功（23.07 秒，8 项应用警告）；日志：target/v1.2.6-release-build.log。Cargo.toml / Cargo.lock / EXE 版本均为 1.2.6；1126 条七语言字段与唯一键、关于版本顺序静态核对及 git diff --check 通过。
+- 产物：target/release/unity_yaml_viewer.exe；大小：24288768 字节；SHA-256：F8B69F36AF2F72F4B81C5DD74ED4506DEE36F2BC0901D2082E712840BC7F297B。
+- README 以 1c96245 精简版为模板，维持 101 行；不含版本日志或发布流程状态，细节移入功能参考。
+- 未运行最终 GUI；关于展开 / 收起和重开、字体、透明视频、布局及背景恢复仍待运行验证。源码由用户自行提交 Git，等待用户提交后通知再发布；未提交、未推送、未创建标签或 Release、未上传附件。
+
+- 版本记录：docs/versions/1.2.6.md；发布说明草稿：docs/releases/1.2.6.md。未来 Release 显示标题只能为 v1.2.6；发布前核对用户提交与本次构建源码一致。
+
+---
+# 当前交接：1.2.5 媒体详细信息与摘要本地构建（2026-10-21）
+
+### 媒体详细信息与摘要本地构建（2026-10-21）
+
+- 用户明确授权编译；编译前确认程序未运行、目标 EXE 可独占访问。cargo build --release --locked --offline 成功（23.68 秒，8 项应用警告）；日志：target/media-details-release-build.log。
+- 包含文件 / 视频 / 音频 / 字幕分组详情、逐轨音频参数与音乐标签；视频页基础摘要及两行直接详细信息入口；纯音频所选音轨摘要、详细入口与音轨切换逻辑同步。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本：1.2.5；大小：24285184 字节；SHA-256：96C1194759813FEE5453B606AAFB4BB43AAF59BB713660CB328A9C13584F9AF6。
+- git diff --check 通过；未启动 GUI、未重复执行测试；菜单布局、不同格式元数据、多音轨切换及七语言待运行验证。未上传或更新 GitHub Release。
+
+---
+# 当前交接：1.2.5 字幕与播放界面本地构建（2026-10-21）
+
+### 字幕与播放界面本地构建（2026-10-21）
+
+- 用户明确授权编译；编译前确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（21.54 秒，8 项应用警告）；日志：target/media-ui-release-build.log。
+- 包含连续图另存 120 × 40 / 字号 16 且紧随两行文字、最近打开限高滚动及底部固定清空、关于作者署名、字幕样式系统字体选择与底部居中按钮 / 默认宽度 320，以及透明 GIF / 视频棋盘底图。缓存统计已按用户决定恢复自动逻辑。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本：1.2.5；大小：24216064 字节；SHA-256：15907B22629FAC6214B70D8E51B2B03442429CD110188FC34203658DB91D4630。
+- git diff --check 通过；本轮未启动 GUI、未重复执行测试；系统字体实际应用、菜单滚动、透明 MOV / WebM 解码及界面布局待运行验证。未上传或更新 GitHub Release。
+
+---
+# 当前交接：1.2.5 统一背景设置与连续图布局本地构建（2026-10-21）
+
+### 统一背景设置与连续图布局本地构建（2026-10-21）
+
+- 用户明确授权编译；编译前确认程序未运行、目标 EXE 可独占访问。cargo build --release --locked --offline 成功（23.20 秒，8 项应用警告）；日志：target/shared-background-release-build.log。
+- 包含各类预览共用背景模式与自定义颜色、初始自定义色黑色及持久化；连续图背景色选项移至模式后方，另存按钮与两行标题整体对齐。显示标签统一为背景色。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本：1.2.5；大小：24195584 字节；SHA-256：ACC0A4D78FB84B228B9D6558D865619C2F827A80F2DFB400D477F52098AA77B4。
+- git diff --check 通过；未运行 GUI，跨窗口同步、重启恢复、记录写入失败及标题布局仍待运行验证。本轮未重复执行测试，未上传或更新 GitHub Release。
+
+---
+# 当前交接：1.2.5 主题 Tab 与工具栏布局本地构建（2026-10-20）
+
+### 主题 Tab 与工具栏布局本地构建（2026-10-20）
+
+- 用户明确授权，编译前确认程序未运行、目标 EXE 可独占访问。cargo build --release --locked --offline 成功（21.68 秒，8 项应用警告）；日志：target/preview-toolbar-release-build.log。
+- 包含图片通道及三处背景的主题 Tab、图片工具按钮移至文件名后、静态预览排序轴主题 Tab 与紧凑辅助线开关；保留此前预览像素和背景修复。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本：1.2.5；大小：24238080 字节；SHA-256：39D9168B82467EC8D34817CDCD0913CCD078C3269F4BB8CE6EE3CE84C0A798CE。
+- git diff --check 通过；未启动 GUI，布局、Tab 交互、辅助线开关、七语言及不同 DPI 待运行验证。本轮未重复执行已有测试，未上传或更新 GitHub Release。
+
+---
+# 当前交接：1.2.5 预览清晰度与背景选项本地构建（2026-10-20）
+
+### 预览清晰度与背景选项本地构建（2026-10-20）
+
+- 用户明确授权编译，编译前检查程序未运行且目标 EXE 可独占访问。cargo build --release --locked --offline 成功（23.95 秒，8 项应用警告）；日志：target/preview-background-release-build.log。
+- 包含连续图小图保留原始像素、超限等比最近邻缩小和三栏棋盘格对齐；普通图片移除固定倍率按钮，普通图片 / 九宫格 / 连续图新增背景选择；连续图使用绿色另存大按钮。
+- cargo test --locked --offline preview_pixel_tests 实际执行 2 项并全部通过（小图 RGBA 保真、超限等比且不插值）；其余 332 项未执行。日志：target/preview-pixel-tests.log。git diff --check 通过。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本：1.2.5；大小：24132608 字节；SHA-256：73A80E84EBCB96BFBEBBD00A9F0E6C5D0B55288F0D2A99BCBDF1BEE1590A777E。
+- 未启动 GUI；三栏清晰度、背景切换、按钮布局、七语言与不同 DPI 待运行验证。未上传或更新 GitHub Release。
+
+---
+# 当前交接：1.2.5 像素对齐棋盘格本地构建（2026-10-20）
+
+### 像素对齐棋盘格本地构建（2026-10-20）
+
+- 用户明确授权，编译前确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（21.51 秒，8 项应用警告）；日志：target/pixel-grid-release-build.log。
+- 包含普通图片最近邻采样、800% 起棋盘格每格对齐一个源像素、低倍固定格大小及每帧拖动位移修正；保留此前九宫格标签与覆盖保存修复。
+- 产物：target/release/unity_yaml_viewer.exe；文件版本：1.2.5；大小：24113152 字节；SHA-256：07787D3AEF306DEE60BB06D25F366D0623A35534C87F714DEFCE76C57BE40339。
+- git diff --check 通过；本轮未启动 GUI，阈值切换、缩放和平移对齐及不同 DPI 待运行验证。未上传或更新 GitHub Release。
+
+---
+# 当前交接：1.2.5 发布后预览与另存修复本地构建（2026-10-20）
+
+### 预览调整本地编译（2026-10-20）
+
+- 用户明确授权，编译前确认程序未运行且目标 EXE 可独占访问。cargo build --release --locked --offline 成功（21.30 秒，8 项应用警告）；日志：target/preview-release-build.log。
+- 包含普通图片最近邻采样、连续图与普通预览棋盘背景无边缘抗锯齿、九宫格上下标签移至左右，以及前述覆盖保存修复。
+- 产物：target/release/unity_yaml_viewer.exe；版本：1.2.5；大小：24118784 字节；SHA-256：E99B4749515F1F9D3460476B7138CFEA9B7C0A10EF5B260893DF12303717465A。
+- 未启动 GUI，黑白细线是否消除、标签布局、确认弹窗及七语言实际显示仍待运行验证；未上传 Release。
+
+---
 # 当前交接：1.2.4 已正式发布（2026-10-18）
 
 北京时间 2026-10-18 23:49:41，用户确认提交并明确授权发布后，GitHub v1.2.4 正式发布。标题仅 v1.2.4，非草稿 / 非预发布，latest API 已核对为 v1.2.4。

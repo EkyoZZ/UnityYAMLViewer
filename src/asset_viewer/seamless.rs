@@ -1,6 +1,7 @@
-//! Exact rectangular periods and wrapped motif composition. Never writes source assets.
+//! Exact rectangular periods and wrapped motif composition with PNG export.
 use crate::localization::tr;
 use eframe::egui;
+use egui::emath::GuiRounding as _;
 use image::{Pixel, Rgba, RgbaImage};
 use std::{
     path::{Path, PathBuf},
@@ -9,6 +10,44 @@ use std::{
 
 const MAX_PIXELS: u64 = 16 * 1024 * 1024;
 const MAX_SIDE: u32 = 8192;
+
+// A mesh has no feathered rectangle edges; shared pixel-aligned edges avoid grid seams.
+fn checker_background(painter: &egui::Painter, rect: egui::Rect, image_origin: egui::Pos2, pixel_size: egui::Vec2, background: &super::ImageBackground, custom: Option<[u8;3]>) {
+    if *background!=super::ImageBackground::Checkerboard {
+        let [r,g,b]=if *background==super::ImageBackground::Gray {[128,128,128]}else{custom.unwrap_or([0;3])};
+        let mut mesh=egui::Mesh::default();
+        mesh.add_colored_rect(rect,egui::Color32::from_rgb(r,g,b));
+        painter.add(egui::Shape::mesh(mesh));
+        return;
+    }
+    let aligned = pixel_size.x >= 8. && pixel_size.y >= 8.;
+    let cell = if aligned { pixel_size } else { egui::Vec2::splat(12.) };
+    let origin = if aligned { image_origin } else { rect.min };
+    let first = egui::vec2((rect.left()-origin.x)/cell.x, (rect.top()-origin.y)/cell.y).floor();
+    let last = egui::vec2((rect.right()-origin.x)/cell.x, (rect.bottom()-origin.y)/cell.y).ceil();
+    let mut mesh = egui::Mesh::default();
+    for y in first.y as i32..last.y as i32 {
+        for x in first.x as i32..last.x as i32 {
+            let min = origin + egui::vec2(x as f32 * cell.x, y as f32 * cell.y);
+            let tile = egui::Rect::from_min_size(min, cell).intersect(rect);
+            let tile = egui::Rect::from_min_max(
+                tile.min.round_to_pixels(painter.pixels_per_point()), tile.max.round_to_pixels(painter.pixels_per_point()));
+            mesh.add_colored_rect(tile, egui::Color32::from_gray(
+                if (x + y) % 2 == 0 { 110 } else { 160 }));
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+// Keep small assets exact; preview limits must never enlarge or stretch them.
+fn preview_pixels(image: &RgbaImage, limit: u32) -> RgbaImage {
+    let (w, h) = image.dimensions();
+    if w <= limit && h <= limit { return image.clone(); }
+    let longest = w.max(h) as u64;
+    let width = ((w as u64 * limit as u64) / longest).max(1) as u32;
+    let height = ((h as u64 * limit as u64) / longest).max(1) as u32;
+    image::imageops::resize(image, width, height, image::imageops::FilterType::Nearest)
+}
 
 fn checked_size(w: u32, h: u32) -> Result<(), String> {
     if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE || w as u64 * h as u64 > MAX_PIXELS {
@@ -402,7 +441,7 @@ fn compose_scene(images: &[RgbaImage], settings: &Settings) -> Result<Scene, Str
         edit_placements,
         motifs: images
             .iter()
-            .map(|image| image::imageops::thumbnail(image, 1024, 1024))
+            .map(|image| preview_pixels(image, 1024))
             .collect(),
         offsets: settings.offsets.clone(),
     })
@@ -437,7 +476,7 @@ fn generate_scene(
                 origin: [0, 0],
                 size: [source.width(), source.height()],
             }],
-            motifs: vec![image::imageops::thumbnail(source, 1024, 1024)],
+            motifs: vec![preview_pixels(source, 1024)],
             offsets: vec![[0, 0]],
         });
     }
@@ -550,6 +589,8 @@ type Generated = Result<Preview, String>;
 pub(super) struct Editor {
     pub open: bool,
     settings: Settings,
+    preview_background: super::ImageBackground,
+    preview_background_color: Option<[u8;3]>,
     paths: Vec<PathBuf>,
     pending: Option<(u64, mpsc::Receiver<Generated>)>,
     saving: Option<mpsc::Receiver<Result<PathBuf, String>>>,
@@ -587,7 +628,11 @@ impl Editor {
                     && self.displayed_revision == Some(self.revision)
                     && self.dirty_since.is_none()
                     && self.pending.is_none(),
-                egui::Button::new(tr("另存为 PNG")),
+                egui::Button::new(egui::RichText::new(tr("另存为")).size(16.0).color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(30,150,85))
+                    .stroke((1.0,egui::Color32::from_rgb(30,150,85)))
+                    .corner_radius(4.0)
+                    .min_size(egui::vec2(120.0,40.0)),
             )
             .clicked()
         {
@@ -600,27 +645,27 @@ impl Editor {
                 .add_filter("PNG", &["png"])
                 .save_file()
             {
-                // Create-new prevents source overwrite, including aliases and hard links.
+                // The native save dialog confirms replacement of existing files.
                 let image = self.repeat_output.as_ref().unwrap().clone();
                 let ctx = ctx.clone();
                 let (tx, rx) = mpsc::channel();
                 self.saving = Some(rx);
                 std::thread::spawn(move || {
                     let result = (|| {
+                        // Encode before opening the destination so encoding errors preserve it.
+                        let mut encoded = std::io::Cursor::new(Vec::new());
+                        image::DynamicImage::ImageRgba8((*image).clone())
+                            .write_to(&mut encoded, image::ImageFormat::Png)
+                            .map_err(|e| e.to_string())?;
                         let mut file = std::fs::OpenOptions::new()
                             .write(true)
-                            .create_new(true)
+                            .create(true)
+                            .truncate(true)
                             .open(&destination)
                             .map_err(|e| e.to_string())?;
-                        let saved = image::DynamicImage::ImageRgba8((*image).clone())
-                            .write_to(&mut file, image::ImageFormat::Png)
-                            .map_err(|e| e.to_string())
-                            .and_then(|_| file.sync_all().map_err(|e| e.to_string()));
-                        drop(file);
-                        if let Err(e) = saved {
-                            let _ = std::fs::remove_file(&destination);
-                            return Err(e);
-                        }
+                        std::io::Write::write_all(&mut file, encoded.get_ref())
+                            .and_then(|_| file.sync_all())
+                            .map_err(|e| e.to_string())?;
                         Ok(destination)
                     })();
                     let _ = tx.send(result);
@@ -654,7 +699,27 @@ impl Editor {
             })
             .collect()
     }
-    fn show_editor_canvas(&mut self, ui: &mut egui::Ui) {
+    fn preview_header(&mut self, ui: &mut egui::Ui, path: &Path, index: usize) {
+        let height=44.0_f32.max(ui.text_style_height(&egui::TextStyle::Body)*2.0+ui.spacing().item_spacing.y);
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(),height),egui::Layout::left_to_right(egui::Align::Center),|ui| {
+            if index==0 {
+                ui.vertical(|ui| {ui.label(tr("实时编辑"));self.editor_toolbar(ui);});
+            }else{
+                let title=tr(if index==1 {"最小循环单元预览"}else{"连续平铺预览"});
+                let dimensions=self.repeat_output.as_ref().map(|image|format!("{} × {} px",image.width(),image.height())).unwrap_or_default();
+                let font=egui::TextStyle::Body.resolve(ui.style());
+                let text_width=[title,dimensions.as_str()].into_iter().map(|text|
+                    ui.painter().layout_no_wrap(text.to_owned(),font.clone(),ui.visuals().text_color()).size().x
+                ).fold(0.0_f32,f32::max);
+                ui.allocate_ui_with_layout(egui::vec2(text_width,height),egui::Layout::top_down(egui::Align::Min),|ui| {
+                    ui.label(title);
+                    if !dimensions.is_empty() {ui.label(dimensions);}
+                });
+                if index==1 {self.save_button(ui,path);}
+            }
+        });
+    }
+    fn editor_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("{:.0}%", self.canvas_zoom.max(0.01) * 100.));
             if ui.small_button(tr("适应窗口")).clicked() {
@@ -662,6 +727,8 @@ impl Editor {
             }
             ui.checkbox(&mut self.borders, tr("显示单元边框"));
         });
+    }
+    fn show_editor_canvas(&mut self, ui: &mut egui::Ui) {
         let (rect, response) = ui.allocate_exact_size(
             ui.available_size().max(egui::vec2(1., 1.)),
             egui::Sense::click_and_drag(),
@@ -764,18 +831,7 @@ impl Editor {
             self.drag_pointer_origin = None;
         }
         let painter = ui.painter().with_clip_rect(rect);
-        for y in 0..(rect.height() / 12.).ceil() as u32 {
-            for x in 0..(rect.width() / 12.).ceil() as u32 {
-                painter.rect_filled(
-                    egui::Rect::from_min_size(
-                        rect.min + egui::vec2(x as f32 * 12., y as f32 * 12.),
-                        egui::vec2(12., 12.),
-                    ),
-                    0.,
-                    egui::Color32::from_gray(if (x + y) % 2 == 0 { 110 } else { 160 }),
-                );
-            }
-        }
+        checker_background(&painter, rect, rect.center() + self.canvas_pan, egui::Vec2::splat(self.canvas_zoom), &self.preview_background, self.preview_background_color);
         let origin = rect.center() + self.canvas_pan;
         let layout = if self.settings.compose {
             grid(&self.settings.layout, self.paths.len() + 1)
@@ -1002,7 +1058,7 @@ impl Editor {
                             )
                         })
                         .collect();
-                    let repeat_preview = image::imageops::thumbnail(&preview.repeat, 2048, 2048);
+                    let repeat_preview = preview_pixels(&preview.repeat, 2048);
                     self.repeat_texture = Some(
                         ctx.load_texture(
                             format!("seamless-repeat:{}", path.display()),
@@ -1027,7 +1083,7 @@ impl Editor {
                     self.placements = scene.placements;
                     self.effective_gap = scene.effective_gap;
                     self.displayed_revision = Some(revision);
-                    let preview = image::imageops::thumbnail(&image, 2048, 2048);
+                    let preview = preview_pixels(&image, 2048);
                     let display = egui::ColorImage {
                         size: [preview.width() as usize, preview.height() as usize],
                         pixels: preview
@@ -1106,6 +1162,9 @@ impl Editor {
                 ui.horizontal_wrapped(|ui| {
                     let mut mode=if self.settings.compose {"compose"} else {"extract"}.to_owned();
                     if crate::theme::compact_selector(ui,&mut mode,[("extract","提取最小循环"),("compose","制作连续图")]) {self.settings.compose=mode=="compose";changed=true;}
+                ui.label(tr("背景色"));
+                self.preview_background.controls(ui,&mut self.preview_background_color);
+
                 });
                 if self.settings.compose {
                     ui.horizontal_wrapped(|ui| {
@@ -1189,18 +1248,13 @@ impl Editor {
             ui.label(tr("左侧为固定编辑视口：滚轮缩放，拖动空白处或按住空格拖动可平移；仅显示编辑图案，不显示循环副本。"));
             ui.small(tr("间距显示相邻图案边界距离；该方向无相邻图案时显示循环留白，重叠显示 0。移动后自动更新。"));
             if !self.message.is_empty() {ui.label(&self.message);}
-            ui.small(tr("导出为新 PNG，不覆盖已有文件或修改 Unity meta。预览最多 2048 像素，导出保留实际尺寸。"));
+            ui.small(tr("导出 PNG，保存对话框确认后可覆盖已有文件，不修改 Unity meta。预览最多 2048 像素，导出保留实际尺寸。"));
             ui.separator();
             });
             if let (Some(image),Some(texture))=(self.output.clone(),self.texture.clone()) {
                     for (i,ui) in canvases.iter_mut().enumerate() {
-                        ui.label(tr(match i {0=>"实时编辑",1=>"最小循环单元预览",_=>"连续平铺预览"}));
+                        self.preview_header(ui,path,i);
                         if i==0 {self.show_editor_canvas(ui);continue;}
-                        ui.horizontal_wrapped(|ui| {
-                            ui.set_min_height(ui.spacing().interact_size.y);
-                            if let Some(image)=&self.repeat_output {ui.label(format!("{} × {} px",image.width(),image.height()));}
-                            if i==1 {self.save_button(ui,path);}
-                        });
                         let (image,texture)=if i==0 {(&image,&texture)} else {(self.repeat_output.as_ref().unwrap(),self.repeat_texture.as_ref().unwrap())};
                         let (w,h)=image.dimensions();
                         let size=egui::vec2(w as f32,h as f32);
@@ -1208,11 +1262,8 @@ impl Editor {
                         let size=size*(ui.available_width()/size.x).min(max_height/size.y);
                         let (rect,_)=ui.allocate_exact_size(size,egui::Sense::hover());
                         let painter=ui.painter().with_clip_rect(rect);
-                        for y in 0..(rect.height()/12.).ceil() as u32 {for x in 0..(rect.width()/12.).ceil() as u32 {
-                            let r=egui::Rect::from_min_size(rect.min+egui::vec2(x as f32*12.,y as f32*12.),egui::vec2(12.,12.));
-                            painter.rect_filled(r,0.,egui::Color32::from_gray(if (x+y)%2==0 {110} else {160}));
-                        }}
                         let repeat=if i==2 {3.} else {1.};
+                        checker_background(&painter,rect,rect.min,egui::vec2(rect.width()/(w as f32*repeat),rect.height()/(h as f32*repeat)),&self.preview_background,self.preview_background_color);
                         painter.image(texture.id(),rect,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(repeat,repeat)),egui::Color32::WHITE);
                         if self.borders {for n in 0..=repeat as u32 {
                             let t=n as f32/repeat;let stroke=egui::Stroke::new(1.0_f32,egui::Color32::from_rgb(80,180,255));
@@ -1220,7 +1271,7 @@ impl Editor {
                             painter.line_segment([rect.min+egui::vec2(0.,rect.height()*t),rect.min+egui::vec2(rect.width(),rect.height()*t)],stroke);
                         }}
                     }
-            } else {for (index,(canvas,label)) in canvases.iter_mut().zip(["实时编辑","最小循环单元预览","连续平铺预览"]).enumerate() {canvas.label(tr(label));if index==0 {self.show_editor_canvas(canvas);} else if index==1 {self.save_button(canvas,path);}}}
+            } else {for (index,canvas) in canvases.iter_mut().enumerate() {self.preview_header(canvas,path,index);if index==0 {self.show_editor_canvas(canvas);}}}
         });
         self.open = open;
         if self.open {
@@ -1609,5 +1660,22 @@ mod tests {
         assert_eq!(input, original);
         let transparent = RgbaImage::new(2, 2);
         assert!(motif(&transparent, &Settings::default()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod preview_pixel_tests {
+    use super::*;
+    #[test]
+    fn small_non_square_preview_preserves_all_pixels() {
+        let image = RgbaImage::from_fn(14, 20, |x,y| Rgba([x as u8,y as u8,255,(x*y) as u8]));
+        assert_eq!(preview_pixels(&image, 1024), image);
+    }
+    #[test]
+    fn oversized_preview_keeps_aspect_and_does_not_interpolate() {
+        let image = RgbaImage::from_fn(32, 16, |x,y| if (x+y)%2==0 {Rgba([255,255,255,255])} else {Rgba([0,0,0,0])});
+        let preview = preview_pixels(&image, 8);
+        assert_eq!(preview.dimensions(), (8,4));
+        assert!(preview.pixels().all(|p| *p==Rgba([255,255,255,255]) || *p==Rgba([0,0,0,0])));
     }
 }

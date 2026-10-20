@@ -95,11 +95,20 @@ impl Meta {
 
 pub(super) fn export(image: &image::RgbaImage, target: &Path) -> Result<(),String> {
     let meta=companion(target);
-    // Refuse even an orphan companion to avoid binding a new PNG to an unrelated asset GUID.
-    if target.exists() || meta.exists() { return Err(tr("目标文件已存在，请使用新文件名。").into()); }
+    // The save dialog confirms PNG replacement; companions need extra confirmation.
+    if meta.try_exists().map_err(|e|e.to_string())? {
+        let answer=rfd::MessageDialog::new()
+            .set_title(tr("另存为"))
+            .set_description(format!("{}\n\n{}\n{}",tr("目标存在同名 .meta。确认后覆盖 PNG，保留现有 .meta（包括 GUID 和 Border），不创建备份；现有 Border 可能不匹配新图片。是否继续？"),target.display(),meta.display()))
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        if answer!=rfd::MessageDialogResult::Ok {return Err(tr("取消").into());}
+    }
     let mut bytes=std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgba8(image.clone()).write_to(&mut bytes,image::ImageFormat::Png).map_err(|e|e.to_string())?;
-    write_new(target,bytes.get_ref())
+    let mut file=fs::OpenOptions::new().write(true).create(true).truncate(true).open(target).map_err(|e|e.to_string())?;
+    file.write_all(bytes.get_ref()).and_then(|_|file.sync_all()).map_err(|e|e.to_string())
 }
 
 struct Staging { root: PathBuf }
