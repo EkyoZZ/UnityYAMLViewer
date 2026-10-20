@@ -2487,3 +2487,13 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - cargo build --release --locked --offline 成功（42.58 秒，8 项既有应用警告）。日志：target/v1.2.5-release-build.log；测试日志：target/v1.2.5-seamless-tests.log、target/v1.2.5-asset_viewer-nine_slice-tests.log、target/v1.2.5-native_window-tests.log、target/v1.2.5-localization-tests-tests.log。
 - 产物：target/release/unity_yaml_viewer.exe；文件版本 1.2.5；大小 24090112 字节；SHA-256：8CE57ADF24DCE0A8C6F7D63C5E62FC6DADC2F1924A26919C30F4E032316ABD76。
 - 本次未启动 GUI，未创建 GitHub Release、上传附件或改动标签；正式发布的 1.2.4 保持不变。完整运行验证仍按上方待验证范围执行。
+
+## 1.2.5 已正式发布
+
+### GitHub 正式发布（2026-10-20）
+
+- [v1.2.5](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.5) 已于北京时间 2026-10-20 18:55:24 发布；显示标题仅为 v1.2.5，非草稿 / 非预发布，latest 接口核对为本版。Release ID：418294717。
+- 标签 v1.2.5 指向 c13784c68dd5b2d830ba784f626e1b3cbc31f192，与本次构建源码一致，发布时远程 master 为该提交。
+- 附件 UnityYAMLViewer-v1.2.5-windows-x64.exe，24,090,112 字节；GitHub asset.digest 与本地 SHA-256 一致：8CE57ADF24DCE0A8C6F7D63C5E62FC6DADC2F1924A26919C30F4E032316ABD76。
+- 上传在草稿阶段完成状态、大小和摘要核验后正式发布；发布过程未重新编译、未改变旧版标签或附件。证据：target/v1.2.5-published.json。
+- 45 项相关回归通过；完整 GUI、多屏 / DPI 和端到端输出仍未全部覆盖，发布成功不等同完整回归通过。发布后记录为本地文档更新，未自动提交或推送此状态记录。
