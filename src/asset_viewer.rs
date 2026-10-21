@@ -7,6 +7,8 @@ mod seamless;
 mod sequence;
 mod image_history;
 pub(crate) mod watermark;
+// Re-enable only when watermark improvements or testing are requested.
+const WATERMARK_ENTRY_ENABLED:bool=false;
 pub fn set_image_undo_limit(limit:usize){image_history::set_limit(limit);}
 mod sequence_tpsheet;
 mod svg_preview;
@@ -338,7 +340,7 @@ impl Assets {
                 tab.seamless.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("seamless",path)));
             }
-            if ui.add_enabled(tab.original.is_some(),egui::Button::new(crate::localization::tr("去水印"))).clicked(){
+            if WATERMARK_ENTRY_ENABLED&&ui.add_enabled(tab.original.is_some(),egui::Button::new(crate::localization::tr("去水印"))).clicked(){
                 tab.watermark.open=true;crate::native_window::wake(ui.ctx(),egui::Id::new(("watermark",path)));
             }
             if ui.add_enabled(tab.original.is_some(),egui::Button::new(crate::localization::tr("序列"))).clicked() {

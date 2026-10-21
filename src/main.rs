@@ -2498,16 +2498,15 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.6").strong());
+                        ui.label(localization::tr("• 去水印入口暂时关闭，保留实现供后续完善或测试；序列去底色继续可用"));
                         ui.label(localization::tr("• 拆分补边输入精简为“忽略补边：上、下、左、右”，短标签与输入成组排列"));
                         ui.label(localization::tr("• 音视频和 GIF 导出允许覆盖同名文件，编码成功后再替换，失败保留已有文件"));
                         ui.label(localization::tr("• GIF 导出默认使用 Bicubic 缩放与 Sierra2 4A 抖动，可手动切换其他算法"));
                         ui.label(localization::tr("• 视频选区预览终点按排除边界处理，播放与跳到终点停留在保留片段最后一帧"));
                         ui.label(localization::tr("• 拆分可跳过透明空帧，单帧播放、PNG 和 GIF／视频输出一致，编号连续"));
                         ui.label(localization::tr("• 四方连续图固定三列预览标题栏高度，最小循环单元与连续平铺图片顶部对齐"));
-                        ui.label(localization::tr("• 去水印背景 Tab 移至窗口左上角工具栏，支持棋盘格、灰色与自定义背景"));
-                        ui.label(localization::tr("• 去水印支持单样本本地查找相似位置或一键批量修补，相似度可调并支持整步撤销"));
                         ui.label(localization::tr("• 序列转 GIF／视频直接用缓存 PNG 显示首帧、逐帧定位和播放，透明预览显示棋盘背景"));
-                        ui.label(localization::tr("• 新增蒙版去水印、整图去底色与分步缓存；制作和拆分序列支持撤销／重做及 Ctrl+Z／Ctrl+Y"));
+                        ui.label(localization::tr("• 制作和拆分序列支持撤销／重做及 Ctrl+Z／Ctrl+Y"));
                         ui.label(localization::tr("• 吸底色显示操作指引、取色光标与候选色值，支持 Esc 取消，点击色块打开调色板"));
                         ui.label(localization::tr("• 制作与拆分均支持取色去底、容差遮罩、柔化与去色边，预览和 PNG／GIF／视频源一致"));
                         ui.label(localization::tr("• GIF 复用视频编辑转视频，GIF 与视频均可按选区、裁剪、缩放和帧率导出 PNG 序列"));

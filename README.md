@@ -18,7 +18,6 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **场景与动画**：场景、模型、动画、Spine 和部分粒子效果预览。
 - **Unity 图片工具**：像素清晰缩放、统一背景设置、R/G/B 单通道可选应用 Alpha、九宫格无损精简和 Sprite Border 同步，支持命令行批处理；序列工具支持按行列拆分图片及多图拖入、同组自动加入与自然排序合并为 PNG，支持优先按 Multiple meta 实际切片拆分、独立忽略拆分图上／下／左／右补边、拆分帧居中透明补齐至 4 的倍数、可选跳过去底后完全透明空帧（播放与 PNG／GIF／视频一致，连续编号，缩短动画时长）、自定义拆分命名与非法字符检查、按透明间隔识别拆分行列、可缩放平移的分格与单帧播放预览（帧率／循环可调）、矩形优先／无空格自动排列、共同最小尺寸裁剪、单图区域居中及可选图片边框、水平／垂直间隔、可选 Unity tpsheet 同步导出（需 TexturePacker Importer）、整图宽高 4 对齐；制作与拆分均支持吸取纯色背景、容差与遮罩预览、吸色光标与候选色值（单击选色、Esc 取消，色块可打开调色板）、边缘柔化和去底色污染，可能移除同色主体；拆分帧和制作列表可按预览帧率转入视频编辑（缓存 PNG 首帧即显、逐帧定位与播放，透明区域使用棋盘背景），导出 GIF／视频／PNG 序列，普通视频编码使用可选颜色的底色，GIF／PNG 可保留透明（GIF 不保留半透明）。
 
-- **图片去水印**：画笔／橡皮擦蒙版标记、周边像素局部修补、整图去底色、原图对比和撤销／重做；可分步处理，每次结果与蒙版保存至应用缓存的 `watermark_cache` 目录。支持不超过 16777216 像素的静态图片，单次修补最多 1048576 像素；复杂纹理可能模糊，不保证恢复原画，支持涂一个完整样本后本地查找同尺寸相似水印（相似度可调），可先检查蒙版再修补，也可一键查找并修补；不提供无样本自动识别、缩放／旋转匹配或生成式修复。
 - **序列操作历史**：制作／拆分支持图片拖入、自动加入、删除、排序及参数修改的撤销／重做（Ctrl+Z／Ctrl+Y）；不撤回已保存文件。
 
 **附加工具**
@@ -38,6 +37,8 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 [使用指南](docs/user-guide.md#中文) · [详细功能与限制](docs/feature-reference.md#中文) · [命令行参考](docs/command-line.md)
 
 ### ⚠️ 待支持与当前限制
+
+- 图片去水印入口未开放；序列工具的去底色仍可使用。
 
 - 不支持 Unity 二进制序列化；未知属性和原始 YAML 保持只读。
 - 场景、Spine、粒子和 Shader 兼容性有限，不能完整替代 Unity 渲染；不支持节点连线编辑或 Shader 生成。
@@ -66,7 +67,6 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Scenes and animation**: Preview scenes, models, animation, Spine and supported particle effects.
 - **Unity image tools**: Pixel-sharp scaling, shared preview backgrounds, optional Alpha application for individual R/G/B channels, lossless nine-slice compaction and Sprite Border updates, with batch CLI support; sequence tools split images into grids and accept dropped or automatically matched numbered images and combine naturally sorted images into PNG sheets, with exact Multiple-meta slicing by default, independent top/bottom/left/right padding exclusion and transparent centering of split frames to dimensions divisible by 4, optional skipping of fully transparent frames after background removal (matching playback and PNG/GIF/video export, consecutive numbering and shorter duration), custom split naming and filename validation, grid detection from transparent gaps, zoomable, pannable grid and animated frame previews with adjustable frame rate and looping, compact-rectangle or exact-grid automatic layouts, common minimum cropping, centered image areas with optional image bounds, horizontal/vertical spacing, optional Unity tpsheet export (requires TexturePacker Importer) and dimensions divisible by 4; composition and splitting support flat-background picking, tolerance/mask previews, a picking cursor and candidate color values (click to pick, Esc to cancel, swatch opens the palette), edge softness and color decontamination (matching subject colors may be removed). Split frames and composition lists enter video editing at the preview frame rate (cached PNG first-frame display, frame seeking and playback, with checkerboard transparency) for GIF/video/PNG sequence export. Current video codecs use a chosen background color; GIF/PNG may retain transparency (GIF has no partial alpha).
 
-- **Image watermark removal**: Brush/eraser masks, local repair from surrounding pixels, whole-image background removal, original comparison and undo/redo. Work in stages; each result and mask is saved under `watermark_cache` in the application cache. Static images up to 16,777,216 pixels, up to 1,048,576 repaired pixels per step. Complex textures may blur; original content recovery is not guaranteed. Paint one complete sample to find same-size similar watermarks locally with adjustable similarity, review the mask and repair or perform both in one click. Sample-free detection, scaled/rotated matching and generative repair are not provided.
 - **Sequence history**: Undo/redo image drops, automatic additions, removals, ordering and settings in composition/splitting (Ctrl+Z/Ctrl+Y); previously saved files remain.
 
 **Additional tools**
@@ -86,6 +86,8 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 [User guide](docs/user-guide.md#english) · [Detailed features and limitations](docs/feature-reference.md#english) · [CLI reference](docs/command-line.md)
 
 ### ⚠️ Pending support and limitations
+
+- The image watermark-removal entry is unavailable; background removal in sequence tools remains available.
 
 - Unity binary serialization is unsupported. Unknown properties and raw YAML remain read-only.
 - Scene, Spine, particle and shader compatibility is partial and does not fully reproduce Unity rendering. Node connection editing and shader generation are unsupported.
