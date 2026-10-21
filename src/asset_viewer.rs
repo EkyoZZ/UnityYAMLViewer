@@ -4,6 +4,11 @@ use eframe::egui::{self, Color32};
 use egui::emath::GuiRounding as _;
 pub(crate) mod nine_slice;
 mod seamless;
+mod sequence;
+mod image_history;
+pub(crate) mod watermark;
+pub fn set_image_undo_limit(limit:usize){image_history::set_limit(limit);}
+mod sequence_tpsheet;
 mod svg_preview;
 pub(crate) mod pdf_preview;
 pub fn is_pdf(path: &Path) -> bool { extension(path) == "pdf" }
@@ -48,6 +53,13 @@ mod tests {
         assert_eq!(Channel::A.pixel([1,2,3,255]), [255,255,255,255]);
     }
     #[test]
+    fn optional_alpha_only_affects_single_color_channels(){
+        assert_eq!(Channel::B.preview_pixel([20,40,200,128],true),[100,100,100,255]);
+        assert_eq!(Channel::B.preview_pixel([20,40,200,0],false),[200,200,200,255]);
+        assert_eq!(Channel::B.preview_pixel([20,40,200,0],true),[0,0,0,255]);
+        for channel in [Channel::A,Channel::Rgb,Channel::Rgba] {assert_eq!(channel.preview_pixel([20,40,200,128],true),channel.pixel([20,40,200,128]));}
+    }
+    #[test]
     fn reference_types_and_syntaxes_include_common_scripts() {
         for extension in ["cs", "lua", "py"] {
             assert!(is_text(Path::new(&format!("example.{extension}"))));
@@ -72,6 +84,14 @@ fn syntax_language(path: &Path) -> String {
 enum Channel { R, G, B, A, Rgb, #[default] Rgba }
 impl Channel {
     fn label(self) -> &'static str { match self { Self::R=>"R",Self::G=>"G",Self::B=>"B",Self::A=>"A",Self::Rgb=>"RGB",Self::Rgba=>"RGBA" } }
+    fn preview_pixel(self,pixel:[u8;4],apply_alpha:bool)->[u8;4] {
+        let mut output=self.pixel(pixel);
+        if apply_alpha&&matches!(self,Self::R|Self::G|Self::B) {
+            let value=((output[0] as u16*pixel[3] as u16+127)/255) as u8;
+            output=[value,value,value,255];
+        }
+        output
+    }
     fn pixel(self, pixel: [u8; 4]) -> [u8; 4] {
         let [r,g,b,a] = pixel;
         match self {
@@ -82,7 +102,7 @@ impl Channel {
     }
 }
 type Loaded = Result<(Arc<image::RgbaImage>, egui::ColorImage), String>;
-#[derive(Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 enum ImageBackground { #[default] Checkerboard, Gray, Custom }
 impl ImageBackground {
     fn controls(&mut self, ui: &mut egui::Ui, color:&mut Option<[u8;3]>) {
@@ -97,10 +117,13 @@ impl ImageBackground {
 struct ImageTab {
     editor: nine_slice::Editor,
     seamless: seamless::Editor,
+    sequence: sequence::Editor,
+    watermark:watermark::Editor,
     original: Option<Arc<image::RgbaImage>>,
     pending: Option<mpsc::Receiver<Loaded>>,
     texture: Option<egui::TextureHandle>,
     channel: Channel,
+    apply_alpha: bool,
     background: ImageBackground,
     background_color: Option<[u8;3]>,
     error: Option<String>,
@@ -111,6 +134,7 @@ impl ImageTab {
     fn load(&mut self, path: PathBuf, ctx: egui::Context) {
         let original = self.original.clone();
         let channel = self.channel;
+        let apply_alpha=self.apply_alpha;
         let (send, receive) = mpsc::channel();
         self.pending = Some(receive);
         self.error = None;
@@ -127,7 +151,7 @@ impl ImageTab {
                     Arc::new(image)
                 };
                 let pixels = original.pixels().map(|pixel| {
-                    let [r,g,b,a] = channel.pixel(pixel.0);
+                    let [r,g,b,a] = channel.preview_pixel(pixel.0,apply_alpha);
                     preview_color([r,g,b,a])
                 }).collect();
                 let display = egui::ColorImage { size: [original.width() as usize, original.height() as usize], pixels };
@@ -206,6 +230,8 @@ impl Assets {
     }
     pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
         for (path,tab) in &mut self.images {
+            if let Some(original)=&tab.original {tab.sequence.show(ctx,path,original);}
+            tab.watermark.show(ctx,path,tab.original.as_ref());
             if !tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active(){
                 if let Some(original)=&tab.original {tab.seamless.show(ctx,path,original);}
                 continue
@@ -226,7 +252,7 @@ impl Assets {
         self.svgs.retain(|other, _| other == path);
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
-            if other != path&&!tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
+            if other != path&&!tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active()&&!tab.sequence.active()&&!tab.watermark.active() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
         }
         if crate::playlist::is_playlist(path){self.playlists.show(ui,path,false);return;}
         if crate::media_preview::is_media(path) {
@@ -312,15 +338,26 @@ impl Assets {
                 tab.seamless.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("seamless",path)));
             }
+            if ui.add_enabled(tab.original.is_some(),egui::Button::new(crate::localization::tr("去水印"))).clicked(){
+                tab.watermark.open=true;crate::native_window::wake(ui.ctx(),egui::Id::new(("watermark",path)));
+            }
+            if ui.add_enabled(tab.original.is_some(),egui::Button::new(crate::localization::tr("序列"))).clicked() {
+                tab.sequence.open=true;
+                crate::native_window::wake(ui.ctx(),egui::Id::new(("sequence",path)));
+            }
         });
         ui.horizontal_wrapped(|ui| {
             let previous = tab.channel;
+            let previous_alpha=tab.apply_alpha;
             ui.add_enabled_ui(tab.pending.is_none() && !tab.editor.open && !tab.editor.busy(), |ui| {
                 let mut channel=tab.channel.label().to_owned();
                 crate::theme::compact_selector(ui,&mut channel,[("R","R"),("G","G"),("B","B"),("A","A"),("RGB","RGB"),("RGBA","RGBA")]);
                 tab.channel=match channel.as_str() {"R"=>Channel::R,"G"=>Channel::G,"B"=>Channel::B,"A"=>Channel::A,"RGB"=>Channel::Rgb,_=>Channel::Rgba};
+                if matches!(tab.channel,Channel::R|Channel::G|Channel::B) {
+                    crate::theme::compact_toggle_switch(ui,crate::localization::tr("应用 Alpha"),&mut tab.apply_alpha);
+                }
             });
-            if previous != tab.channel { tab.load(path.to_owned(), ui.ctx().clone()); }
+            if previous != tab.channel || previous_alpha!=tab.apply_alpha { tab.load(path.to_owned(), ui.ctx().clone()); }
             if ui.button(crate::localization::tr("适应窗口")).clicked() { tab.zoom = None; tab.pan = egui::Vec2::ZERO; }
             ui.label(crate::localization::tr("背景色"));
             tab.background.controls(ui,&mut tab.background_color);

@@ -2594,3 +2594,125 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 附件 UnityYAMLViewer-v1.2.5-windows-x64.exe，24,090,112 字节；GitHub asset.digest 与本地 SHA-256 一致：8CE57ADF24DCE0A8C6F7D63C5E62FC6DADC2F1924A26919C30F4E032316ABD76。
 - 上传在草稿阶段完成状态、大小和摘要核验后正式发布；发布过程未重新编译、未改变旧版标签或附件。证据：target/v1.2.5-published.json。
 - 45 项相关回归通过；完整 GUI、多屏 / DPI 和端到端输出仍未全部覆盖，发布成功不等同完整回归通过。发布后记录为本地文档更新，未自动提交或推送此状态记录。
+
+## 序列工具本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前检查 unity_yaml_viewer 进程未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功，耗时 33.23 秒，8 项既有应用警告。日志：`target/sequence-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6，大小 24482816 字节，SHA-256：`8BD8D276D7AEFFE7C9EFBA927457A443DEA451E6598883DF541E7806A429B5A9`。包含序列拆分 / 制作、排序移除、共同最小尺寸裁剪、双向 Padding、4 对齐与无空格自动排列。
+- 本轮未执行自动测试或启动 GUI；此前 `cargo check --tests --locked --offline` 通过，测试仅编译检查。实际导出、界面与七语言、关于历史折叠仍待运行验证。
+- 仅完成本地构建，未提交 / 推送、未发布新版或更改现有 Release / 标签 / 附件。
+
+## 序列左右布局与预览本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（45.27 秒，8 项既有应用警告）；日志 `target/sequence-preview-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24571392 字节；SHA-256：`F1AE57A3E1236002654C52A25B000075C346F3DDD3C90E176AB04903AA65FE99`。包含左右布局、主题 Tab、右上方导出、整图分格和点击单帧预览。
+- 本轮未启动 GUI 或执行自动测试；此前编译检查通过，界面布局、不同 DPI、分格点选与导出结果对照、七语言及关于历史折叠仍待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 序列最新功能本地构建（2026-10-21）
+
+- 用户明确授权编译；首次检查目标文件被占用（Windows 错误 32），未启动构建。用户再次确认后重新检查，程序未运行且目标 EXE 可独占访问，未自动关闭程序或绕过占用。
+- `cargo build --release --locked --offline` 成功（36.49 秒，8 项既有应用警告）；日志 `target/sequence-latest-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6，大小 24582656 字节，SHA-256：`EFFBF03D5F29F74C7D23ED7889607458BE60D0C23B3507409148909A7B1DC1BA`。
+- 包含左预览 / 右设置、智能识别行列、拆分命名和空白 / 非法字符红字检查、主题 Tab 等高绿色导出按钮、制作拖入图片、单格居中及可选图片边框、拆分可选居中透明补齐为 4 的倍数。补白整数分配：1 像素放右 / 下，2 像素两侧各 1，3 像素左 / 上 1、右 / 下 2，不产生插值。
+- 本轮未执行自动测试或启动 GUI；相关测试此前仅通过编译检查。实际识别、拖入、命名 / 导出、预览边框、七语言和关于历史折叠仍待运行验证。
+- 仅本地构建，未提交 / 推送，未更改现有 Release、标签或附件。
+
+## 序列预览与布局更新本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（32.41 秒，8 项既有应用警告）；日志 `target/sequence-ui-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24742400 字节；SHA-256：`205B129E57E76052DA065D01A74BB7CF5895BD921E496D4599BBF65980C10D37`。
+- 包含拆分参数顺序、单格与补齐尺寸摘要、智能识别改进、右侧等比单帧预览及前后切换、顶部共享背景设置和命名输入框自适应宽度。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查，用户原始 PNG 尚未取得，不能宣称实际识别为 5 × 3 已验证。界面、比例、识别、导出、七语言及关于历史折叠待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 序列 meta 与制作排列更新本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（37.47 秒，8 项既有应用警告）；日志 `target/sequence-meta-layout-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24746496 字节；SHA-256：`43F1B18FACAFE2DAE08E03C262D55EFECDE88E7FEB1AAD8FA05F9886C27C5311`。
+- 包含导出成功通知、拆分末端补边排除、Multiple meta 优先切片、当前图片默认参与制作且可移除、矩形优先 / 不留空格排列、列表与单帧双向选择、图片名显示和手动行列联动。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查。实际 meta、分格与导出结果、图片列表点选 / 滚动 / 移除、行列联动、七语言和关于历史折叠待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 序列缩放、间隔和 tpsheet 本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（33.61 秒，8 项既有应用警告）；日志 `target/sequence-tpsheet-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24706560 字节；SHA-256：`01CCEEA504A9EBA442E52CB3F0E138BD065BACE577B07C12929FF57C9C3BC73C`。
+- 包含拆分拖入自动切换制作、单图宽高与比例联动、裁剪后缩放、水平 / 垂直 Padding 与右下 4 对齐、自动排列同排 Tab 与下方候选、可选同步导出 Unity tpsheet。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查。Unity / TexturePacker Importer 实际导入未验证；界面、缩放 / 间隔、导出与覆盖、七语言和关于历史折叠待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 序列居中、播放与预览操作本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（35.30 秒，8 项既有应用警告）；日志 `target/sequence-centered-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24698368 字节；SHA-256：`EE90BCDC25635A836EA24E8CCB02B9BD9016C379F7F13571AC948D0A59E240F7`。
+- 包含同组图片自动加入与自然排序、拆分按钮同行、播放 / 帧率 / 循环开关、滚轮缩放与拖动平移、显式适应窗口按钮、制作图片在最终格子内居中及 tpsheet 坐标同步、单帧图片名 / 实际尺寸 / 缩放合并显示。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查。实际粒子序列效果、Unity tpsheet 导入、自动加入、播放与缩放交互、七语言及关于历史折叠待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 序列播放工具栏对齐本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（38.37 秒，8 项既有应用警告）；日志 `target/sequence-toolbar-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24749568 字节；SHA-256：`6E89BA5105DBF77A3EF0043E1440A8A132E20E348C42C7A2C20BD3D0624BD68D`。
+- 包含单帧播放工具栏垂直居中及按钮 / 帧率输入高度对齐。
+- 本轮未启动 GUI 或执行自动测试；实际对齐、DPI、七语言及关于历史折叠待运行验证，Unity tpsheet 导入也尚未验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 原图尺寸初始化与保存按钮本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（33.64 秒，8 项既有应用警告）；日志 `target/sequence-original-save32-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24701440 字节；SHA-256：`8E788887527483F6308267E214B0A590808CA1E7AF12CE806A11710A4BBDC41E`。
+- 包含制作首次按原图实际宽高 / 100% 初始化，以及四方连续图另存为按钮高度 32 逻辑像素。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查，实际原图初始化、按钮高度、DPI、七语言及关于历史折叠待运行验证；Unity tpsheet 导入仍未验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 序列多余留白修复本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（35.04 秒，8 项既有应用警告）；日志 `target/sequence-spacing-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24701952 字节；SHA-256：`C9B7602A795431504DEDAC9AA14BF8F389F8D09D4D95C076197251E3938BE25A`。
+- 包含单帧播放栏上下多余留白修复，以及识别 / 导出状态提示移入右侧设置区、避免顶部整行空白。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查，实际两模式布局、识别前后状态、窗口缩放 / DPI、七语言及关于历史折叠待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 通道 Alpha 与组件手动路径本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前确认程序未运行、目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（32.84 秒，8 项既有应用警告）；日志 `target/manual-component-paths-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24836096 字节；SHA-256：`6B95AE9EEA39E4F1D329A8EFBEEB2A721B8A94968819C139269DD682916C4720`。
+- 包含 R / G / B 应用 Alpha 开关，以及独立 FFmpeg、FFprobe 和 PDFium DLL 手动路径、保存 / 恢复自动功能，无需修改 PATH。
+- 本轮未启动 GUI 或执行自动测试；相关测试仅通过编译检查。实际通道预览、手动组件验证与调用、持久化 / 重试、七语言及关于历史折叠待运行验证。
+- 仅本地构建，未提交 / 推送，未修改现有 Release、标签或附件。
+
+## 四边补边、GIF／PNG 与序列去底本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前未发现程序进程，目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（35.28 秒，8 项既有警告）；日志 `target/sequence-gif-key-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 24872960 字节；SHA-256：`2998F7B2E845A5CF5847E983185935ECFC79C210B1DDF6B46FD8F77DB5A2E268`。
+- 包含拆分四方向补边、GIF 帧率/颜色压缩/滤波/循环设置、GIF 转视频、GIF 与视频导出 PNG 序列、制作/拆分转入视频编辑、视频导出底色，以及制作/拆分共用吸色去底、容差遮罩、边缘柔化与去色边。
+- FFmpeg 等价链路样例验证与编译检查已完成；本轮未启动 GUI 或执行 Rust 测试，实际取色/容差预览、窗口交互、导出、缓存生命周期、七语言及关于历史折叠仍待运行验证。
+- 仅本地构建，未提交/推送，未修改现有 Release、标签或附件。
+## 去水印、序列历史与缓存帧预览本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前未发现程序进程，目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（41.83 秒，8 项既有应用警告）；日志 `target/watermark-sequence-preview-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 25229824 字节；SHA-256：`D7260775B10A95D3C941B6835F5972323CFAAFA520512E97F44809BEA27FCCD6`。
+- 包含吸取底色操作指引/取色光标与候选色值、独立蒙版去水印/去底色及结果缓存、制作和拆分序列操作撤销/重做、序列转 GIF/视频直接读取缓存 PNG 的首帧/逐帧定位/播放及透明棋盘背景；转换默认取序列预览 FPS。
+- 本轮未启动 GUI 或执行 Rust 测试；新增测试仅通过此前编译检查。实际蒙版修补效果、历史手势归并、缓存保存、窗口交互、序列首帧和播放/定位/暂停、七语言及关于历史折叠仍待运行验证。
+- 仅本地构建，未提交/推送，未修改现有 Release、标签或附件。
+## 相似水印、空帧与预览边界更新本地构建（2026-10-21）
+
+- 用户明确授权编译；构建前未发现程序进程，目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（43.85 秒，8 项既有应用警告）；日志 `target/latest-media-watermark-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 25327616 字节；SHA-256：`CA0B71ADBBA1CBF2852F734AA7B5AE9010BB648D98A29380408C862BC20CB187`。
+- 包含单样本本地相似水印查找/一键修补、去水印背景 Tab 左上角布局、四方连续图预览顶部对齐、拆分跳过透明空帧、视频选区终点预览排除边界、GIF 默认 Bicubic＋Sierra2 4A，以及音视频/GIF 同名文件编码成功后替换。
+- 此前编译检查通过；本轮未执行 Rust 测试或启动 GUI。实际匹配/修补效果、空帧播放导出、选区末帧停留、文件覆盖与失败保护、窗口布局、七语言及关于历史折叠待运行验证。
+- 仅本地构建，未提交/推送，未修改现有 Release、标签或附件。

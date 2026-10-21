@@ -127,13 +127,13 @@ fn move_file(source: &Path, destination: &Path,overwrite:bool) -> Result<(),Stri
     if unsafe {MoveFileExW(source.as_ptr(),destination.as_ptr(),8|u32::from(overwrite))}==0 {Err(std::io::Error::last_os_error().to_string())}else{Ok(())}
 }
 #[cfg(windows)]
-fn replace(source:&Path,destination:&Path)->Result<(),String>{move_file(source,destination,true)}
+pub(crate) fn replace(source:&Path,destination:&Path)->Result<(),String>{move_file(source,destination,true)}
 #[cfg(windows)]
 fn move_new(source:&Path,destination:&Path)->Result<(),String>{move_file(source,destination,false)}
 #[cfg(not(windows))]
 fn move_new(source:&Path,destination:&Path)->Result<(),String>{std::fs::hard_link(source,destination).map_err(|e|e.to_string())}
 #[cfg(not(windows))]
-fn replace(source:&Path,destination:&Path)->Result<(),String>{std::fs::rename(source,destination).map_err(|e|e.to_string())}
+pub(crate) fn replace(source:&Path,destination:&Path)->Result<(),String>{std::fs::rename(source,destination).map_err(|e|e.to_string())}
 
 /// Numeric runs compare by magnitude, so episode 2 precedes episode 10.
 fn natural_key(value: &str) -> Vec<(bool,String)> {

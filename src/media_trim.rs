@@ -1,4 +1,4 @@
-//! Small, non-destructive FFmpeg trim exporter.
+//! FFmpeg trim exporter with staged destination replacement.
 use std::{path::{Path, PathBuf}, sync::mpsc};
 use eframe::egui;
 use crate::{localization::tr, media_tools::command};
@@ -6,6 +6,7 @@ use crate::{localization::tr, media_tools::command};
 #[derive(Default)]
 pub struct Trim {
     open: bool,
+    sequence_source:Option<std::sync::Arc<crate::media_preview::SequenceSource>>,
     start: f64,
     end: f64,
     pending: Option<mpsc::Receiver<Result<PathBuf, String>>>,
@@ -25,22 +26,22 @@ pub struct Trim {
 }
 
 #[derive(Clone)]
-struct VideoSettings { codec: usize, container: usize, quality: u32, bitrate_mode:bool, two_pass:bool, video_bitrate:u32, fps:String, audio_bitrate: u32, audio_codec:usize, audio_rate:u32, gif_colors:u32, gif_dither:usize, gif_bayer:u32, crop:crate::video_crop::Crop }
-impl Default for VideoSettings {fn default()->Self{Self{codec:0,container:0,quality:18,bitrate_mode:false,two_pass:false,video_bitrate:6000,fps:"source".into(),audio_bitrate:192,audio_codec:0,audio_rate:48000,gif_colors:256,gif_dither:4,gif_bayer:2,crop:Default::default()}}}
+struct VideoSettings { codec: usize, container: usize, quality: u32, bitrate_mode:bool, two_pass:bool, video_bitrate:u32, fps:String, audio_bitrate: u32, audio_codec:usize, audio_rate:u32, matte:[u8;3],flatten:bool,gif_compress:bool, gif_fps:u32, gif_loops:u32, gif_filter:usize, gif_colors:u32, gif_dither:usize, gif_bayer:u32, crop:crate::video_crop::Crop }
+impl Default for VideoSettings {fn default()->Self{Self{codec:0,container:0,quality:18,bitrate_mode:false,two_pass:false,video_bitrate:6000,fps:"source".into(),audio_bitrate:192,audio_codec:0,audio_rate:48000,matte:[0;3],flatten:false,gif_compress:false,gif_fps:15,gif_loops:0,gif_filter:2,gif_colors:256,gif_dither:4,gif_bayer:2,crop:Default::default()}}}
 impl VideoSettings {
-    const CONTAINERS:[(&'static str,&'static str,&'static str);10]=[
+    const CONTAINERS:[(&'static str,&'static str,&'static str);11]=[
         ("MP4","mp4","mp4"),("WebM","webm","webm"),("Matroska (MKV)","mkv","matroska"),
         ("QuickTime (MOV)","mov","mov"),("AVI","avi","avi"),("FLV","flv","flv"),
-        ("MPEG-TS","ts","mpegts"),("3GP","3gp","3gp"),("NUT","nut","nut"),("GIF","gif","gif")];
+        ("MPEG-TS","ts","mpegts"),("3GP","3gp","3gp"),("NUT","nut","nut"),("GIF","gif","gif"),("PNG 序列","png","image2")];
     fn extension(&self)->&'static str {Self::CONTAINERS[self.container].1}
     fn muxer(&self)->&'static str {Self::CONTAINERS[self.container].2}
-    const CODECS:[&'static str;11]=["H.264","VP8","VP9","H.265 (HEVC)","未压缩 RGB 24位","MJPEG","MPEG-4 Part 2","ProRes 422","AV1","MPEG-2","GIF"];
+    const CODECS:[&'static str;12]=["H.264","VP8","VP9","H.265 (HEVC)","未压缩 RGB 24位","MJPEG","MPEG-4 Part 2","ProRes 422","AV1","MPEG-2","GIF","PNG"];
     fn compatible(&self,codec:usize)->bool{match self.container{
         0=>matches!(codec,0|2|3|6|8|9),1=>matches!(codec,1|2|8),2=>codec<10&&codec!=4,
         3=>matches!(codec,0|3|4|5|6|7|9),4=>matches!(codec,0|1|2|3|4|5|6|9),
-        5=>matches!(codec,0|2|3),6=>matches!(codec,0|3|9),7=>matches!(codec,0|6),8=>codec<10,9=>codec==10,_=>false
+        5=>matches!(codec,0|2|3),6=>matches!(codec,0|3|9),7=>matches!(codec,0|6),8=>codec<10,9=>codec==10,10=>codec==11,_=>false
     }}
-    fn encoder(&self)->&'static str {["libx264","libvpx","libvpx-vp9","libx265","rawvideo","mjpeg","mpeg4","prores_ks","libsvtav1","mpeg2video","gif"][self.codec]}
+    fn encoder(&self)->&'static str {["libx264","libvpx","libvpx-vp9","libx265","rawvideo","mjpeg","mpeg4","prores_ks","libsvtav1","mpeg2video","gif","png"][self.codec]}
     fn h26x(&self)->bool{matches!(self.codec,0|3)}
     const AUDIO:[(&'static str,&'static str);8]=[("AAC","aac"),("Opus","libopus"),("PCM 16-bit","pcm_s16le"),("MP3","libmp3lame"),("AC-3","ac3"),("FLAC","flac"),("Vorbis","libvorbis"),("E-AC-3","eac3")];
     fn audio_compatible(&self,codec:usize)->bool{match self.container{
@@ -53,19 +54,32 @@ impl VideoSettings {
     }}
     fn default_quality(&self)->u32{match self.codec{0=>18,3=>24,5|6|9=>3,8=>30,_=>32}}
     const DITHER:[(&'static str,&'static str);5]=[("无抖动","none"),("Bayer","bayer"),("Floyd–Steinberg","floyd_steinberg"),("Sierra2","sierra2"),("Sierra2 4A","sierra2_4a")];
+    const GIF_FILTERS:[(&'static str,&'static str);4]=[("Nearest","neighbor"),("Bilinear","bilinear"),("Bicubic","bicubic"),("Lanczos","lanczos")];
+    fn flatten_alpha(&self)->bool {self.container<9||self.flatten}
+    fn spatial_filter(&self,scaler:&str)->String {
+        let filter=format!("format=rgba,{}",self.crop.filter_with_scaler(scaler));
+        if !self.flatten_alpha(){return filter}
+        let [r,g,b]=self.matte;
+        format!("{filter},format=rgba,split[matte_fg][matte_bg];[matte_bg]lut=r={r}:g={g}:b={b}:a=255[matte_base];[matte_base][matte_fg]overlay=shortest=1:format=auto")
+    }
+    fn gif_filter_chain(&self)->String {
+        let spatial=self.spatial_filter(Self::GIF_FILTERS[self.gif_filter].1);
+        let colors=if self.gif_compress{self.gif_colors}else{256};
+        format!("fps={},{spatial},split[a][b];[a]palettegen=max_colors={colors}:reserve_transparent=1[p];[b][p]paletteuse=dither={}:bayer_scale={}",self.gif_fps,Self::DITHER[self.gif_dither].1,self.gif_bayer)
+    }
     fn bitrate_available(&self)->bool{matches!(self.codec,0|1|2|3|6|8|9)}
     fn two_pass_available(&self)->bool{matches!(self.codec,0|1|2|6|9)}
     fn use_two_pass(&self)->bool{self.bitrate_mode&&self.two_pass&&self.two_pass_available()}
     const FPS:[(&'static str,&'static str);9]=[("source","跟随源视频"),("24000/1001","23.976 fps"),("24","24 fps"),("25","25 fps"),("30000/1001","29.97 fps"),("30","30 fps"),("50","50 fps"),("60000/1001","59.94 fps"),("60","60 fps")];
     fn configure(&self,cmd:&mut std::process::Command){
-        if self.fps!="source"{cmd.args(["-r",&self.fps,"-fps_mode","cfr"]);}
-        else if self.codec==9 {cmd.args(["-r","25","-fps_mode","cfr"]);}
         if self.codec==10 {
-            cmd.args(["-c:v","gif","-vf",&format!("{},split[a][b];[a]palettegen=max_colors={}:reserve_transparent=0[p];[b][p]paletteuse=dither={}:bayer_scale={}",self.crop.filter(),self.gif_colors,Self::DITHER[self.gif_dither].1,self.gif_bayer),"-loop","0","-f","gif"]);
+            cmd.args(["-c:v","gif","-vf",&self.gif_filter_chain(),"-loop",&self.gif_loops.to_string(),"-an","-sn","-f","gif"]);
             return;
         }
+        if self.fps!="source"{cmd.args(["-r",&self.fps,"-fps_mode","cfr"]);}
+        else if self.codec==9 {cmd.args(["-r","25","-fps_mode","cfr"]);}
         let pixel=match self.codec{4=>if self.container==4{"bgr24"}else{"rgb24"},5=>"yuvj422p",7=>"yuv422p10le",_=>"yuv420p"};
-        cmd.args(["-c:v",self.encoder(),"-vf",&self.crop.filter(),"-pix_fmt",pixel]);
+        cmd.args(["-c:v",self.encoder(),"-vf",&self.spatial_filter("lanczos"),"-pix_fmt",pixel]);
         if self.bitrate_mode&&self.bitrate_available(){
             cmd.args(["-b:v",&format!("{}k",self.video_bitrate)]);
             if self.h26x(){cmd.args(["-preset","medium"]);}
@@ -86,10 +100,10 @@ impl VideoSettings {
         ui.label(tr("视频封装格式 & 编码格式"));
         ui.horizontal(|ui|{
         let width=((ui.available_width()-ui.spacing().item_spacing.x)*0.5).max(1.0);
-        egui::ComboBox::from_id_salt("video_container").width(width).truncate().selected_text(Self::CONTAINERS[self.container].0).show_ui(ui,|ui|{
+        egui::ComboBox::from_id_salt("video_container").width(width).truncate().selected_text(tr(Self::CONTAINERS[self.container].0)).show_ui(ui,|ui|{
             for (index,(label,_,_)) in Self::CONTAINERS.into_iter().enumerate(){
-                if ui.selectable_value(&mut self.container,index,label).changed(){
-                    if !self.compatible(self.codec){self.codec=match index{1=>2,9=>10,_=>0};self.quality=self.default_quality();}
+                if ui.selectable_value(&mut self.container,index,tr(label)).changed(){
+                    if !self.compatible(self.codec){self.codec=match index{1=>2,9=>10,10=>11,_=>0};self.quality=self.default_quality();}
                     if !self.audio_compatible(self.audio_codec){self.audio_codec=if index==1{1}else{0};}
                 }
             }
@@ -101,6 +115,8 @@ impl VideoSettings {
             }
         }).response.on_hover_text(tr(Self::CODECS[self.codec]));
         });
+        if self.container<9 {ui.small(tr("当前视频编码不保留透明度，透明区域使用底色。"));}else{ui.checkbox(&mut self.flatten,tr("添加底色"));}
+        if self.flatten_alpha(){ui.horizontal(|ui|{ui.label(tr("导出底色"));ui.color_edit_button_srgb(&mut self.matte);});}
         if self.bitrate_available(){
             let mut mode=if self.bitrate_mode{"bitrate"}else{"quality"}.to_owned();
             crate::theme::compact_selector(ui,&mut mode,[("quality","质量模式"),("bitrate","目标码率")]);
@@ -113,26 +129,35 @@ impl VideoSettings {
                     ui.selectable_value(&mut self.two_pass,false,"1 pass");ui.selectable_value(&mut self.two_pass,true,"2 pass");
                 });
             }
-        }else if !matches!(self.codec,4|7|10){
+        }else if !matches!(self.codec,4|7|10|11){
             let quantizer=matches!(self.codec,5|6|9);
             let (min,max)=if quantizer{(2,31)}else if self.h26x(){(0,51)}else{(0,63)};
             ui.horizontal(|ui|{ui.label(if quantizer{"q:v"}else{"CRF"});ui.add(egui::DragValue::new(&mut self.quality).range(min..=max));});
         }
         if self.codec==9&&self.fps=="source"{self.fps="25".into();}
-        ui.horizontal(|ui|{
+        if self.container!=9 {ui.horizontal(|ui|{
             ui.label(tr("帧率"));
             let label=Self::FPS.iter().find(|(id,_)|*id==self.fps).map_or("跟随源视频",|(_,label)|*label);
             egui::ComboBox::from_id_salt("video_fps").selected_text(tr(label)).show_ui(ui,|ui|{
                 for (id,label) in Self::FPS{if self.codec==9&&id=="source"{continue;}ui.selectable_value(&mut self.fps,id.to_owned(),tr(label));}
             });
         });
+        }
+        if self.container==10 {ui.small(tr("PNG 序列导出到新文件夹，按帧编号；跟随源帧率保留每个解码帧，图片不记录播放时长。"));return;}
         if self.container==9 {
+            ui.horizontal(|ui|{ui.label(tr("GIF 帧率"));ui.add(egui::DragValue::new(&mut self.gif_fps).range(1..=100).suffix(" fps"));});
+            ui.horizontal(|ui|{ui.label(tr("循环次数（0 为永远）"));ui.add(egui::DragValue::new(&mut self.gif_loops).range(0..=65535));});
+            ui.label(tr("缩放滤波器"));
+            egui::ComboBox::from_id_salt("gif_scale_filter").selected_text(Self::GIF_FILTERS[self.gif_filter].0).show_ui(ui,|ui|{for(index,(label,_)) in Self::GIF_FILTERS.into_iter().enumerate(){ui.selectable_value(&mut self.gif_filter,index,label);}});
+            ui.checkbox(&mut self.gif_compress,tr("颜色压缩"));
+            ui.add_enabled_ui(self.gif_compress,|ui|{
             ui.label(tr("调色板颜色数"));
             egui::ComboBox::from_id_salt("gif_colors").selected_text(self.gif_colors.to_string()).show_ui(ui,|ui|{for colors in [256,128,64,32,16,8,4]{ui.selectable_value(&mut self.gif_colors,colors,colors.to_string());}});
+            });
             ui.label(tr("滤波 / 抖动"));
             egui::ComboBox::from_id_salt("gif_dither").selected_text(tr(Self::DITHER[self.gif_dither].0)).show_ui(ui,|ui|{for(index,(label,_))in Self::DITHER.into_iter().enumerate(){ui.selectable_value(&mut self.gif_dither,index,tr(label));}});
             if self.gif_dither==1{ui.horizontal(|ui|{ui.label(tr("Bayer 强度"));ui.add(egui::DragValue::new(&mut self.gif_bayer).range(0..=5));});}
-            ui.label(tr("GIF 不导出音频，最多 256 色；默认循环播放。"));return;
+            ui.label(tr("GIF 最多 256 色，不含音频和字幕；帧率不改变选区时长，循环次数写入文件。"));return;
         }
         ui.label(tr("音频编码"));
         egui::ComboBox::from_id_salt("video_audio_codec").selected_text(Self::AUDIO[self.audio_codec].0).show_ui(ui,|ui|{
@@ -226,6 +251,9 @@ pub struct AudioView<'a> {
 }
 
 impl Trim {
+    pub fn preview_range(&self)->(f64,f64){(self.start,self.end)}
+    pub fn sequence_source(&self)->Option<std::sync::Arc<crate::media_preview::SequenceSource>>{self.sequence_source.clone()}
+    pub fn keep_sequence_source(&mut self,source:std::sync::Arc<crate::media_preview::SequenceSource>){self.video_settings.gif_fps=source.fps();self.sequence_source=Some(source);}
     pub fn prepare_audio(&mut self,ffmpeg:&Path,path:&Path,duration:f64,audio:u64,channels:usize,ctx:&egui::Context){
         if self.session.is_none() && self.session_error.is_none(){
             match crate::audio_edit::Session::new(ffmpeg,path,duration,audio,channels,ctx){Ok(session)=>self.session=Some(session),Err(error)=>self.session_error=Some(error)}
@@ -370,7 +398,7 @@ impl Trim {
                             ui.allocate_ui_with_layout(egui::vec2(title_width,40.0),egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.heading(title);});
                             let width=(ui.painter().layout_no_wrap(tr("另存为").to_owned(),egui::FontId::proportional(20.0),egui::Color32::WHITE).size().x+24.0).max(100.0);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
-                                let button=ui.add_enabled(self.pending.is_none()&&self.video_tracks.valid(self.video_settings.container)&&valid_range(self.start,self.end,duration),egui::Button::new("").fill(egui::Color32::from_rgb(30,140,65)).min_size(egui::vec2(width,40.0)));
+                                let button=ui.add_enabled(self.pending.is_none()&&(self.video_settings.container==10||self.video_tracks.valid(self.video_settings.container))&&valid_range(self.start,self.end,duration),egui::Button::new("").fill(egui::Color32::from_rgb(30,140,65)).min_size(egui::vec2(width,40.0)));
                                 button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,button.enabled(),tr("另存为")));
                                 ui.painter().text(button.rect.center(),egui::Align2::CENTER_CENTER,tr("另存为"),egui::FontId::proportional(20.0),if button.enabled(){egui::Color32::WHITE}else{ui.visuals().weak_text_color()});
                                 export_requested=button.clicked();
@@ -380,12 +408,12 @@ impl Trim {
                         ui.style_mut().spacing.scroll.floating=false;
                         egui::ScrollArea::vertical().show(ui,|ui|{
                             ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_settings.controls(ui);});
-                            ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_tracks.controls(ui,self.video_settings.container,path,audio);});
+                            if self.video_settings.container!=10 {ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_tracks.controls(ui,self.video_settings.container,path,audio);});}
                             ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_settings.crop.controls(ui);});
                             ui.small(&view.description);
                             ui.add_space(8.0);
-                            ui.label(tr("按列表导出已勾选的音轨与字幕；语言写入轨道元数据。"));
-                            ui.small(tr("重新编码，边界受帧 / 采样精度限制；不覆盖原文件或已有文件。"));
+                            if self.video_settings.container<9 {ui.label(tr("按列表导出已勾选的音轨与字幕；语言写入轨道元数据。"));}
+                            ui.small(tr("重新编码，边界受帧 / 采样精度限制；保存确认后可覆盖同名文件，PNG 序列需新文件夹。"));
                         });
                     });
                 }
@@ -477,20 +505,21 @@ impl Trim {
                 }
                 ui.add_enabled_ui(self.pending.is_none() && !edit_busy && !settings_open, |ui| {
                     if !video {ui.label(tr("仅导出当前音轨；音量控件仅影响试听。"));
-                    ui.small(tr("重新编码，边界受帧 / 采样精度限制；不覆盖原文件或已有文件。"));
+                    ui.small(tr("重新编码，边界受帧 / 采样精度限制；保存确认后可覆盖同名文件，PNG 序列需新文件夹。"));
                     }
                     let valid = valid_range(self.start, self.end, duration);
                     if !valid && !self.session.as_ref().is_some_and(|session|session.state.interval()) { ui.colored_label(ui.visuals().warn_fg_color, tr("终点必须大于起点且不超过媒体时长")); }
                     if export_requested {
                         let extension = if video { self.video_settings.extension() } else { self.settings.format.extension() };
-                        let name = format!("{}_trim.{extension}", path.file_stem().unwrap_or_default().to_string_lossy());
+                        let name = if video&&self.video_settings.container==10 {format!("{}_frames",path.file_stem().unwrap_or_default().to_string_lossy())}else{format!("{}_trim.{extension}", path.file_stem().unwrap_or_default().to_string_lossy())};
                         let dialog = rfd::FileDialog::new().set_file_name(&name);
                         let dialog = if video {dialog}else{dialog.add_filter(extension,&[extension])};
-                        let dialog = if let Some(parent) = path.parent() { dialog.set_directory(parent) } else { dialog };
+                        let dialog = if let Some(parent) = self.sequence_source.as_ref().map(|source|source.export_directory()).or_else(||path.parent()) { dialog.set_directory(parent) } else { dialog };
                         if let Some(target) = dialog.save_file() {
-                            let target = if video && target.extension().is_some(){target}else{target.with_extension(extension)};
-                            if target.exists() {
-                                self.result = Some(Err(tr("目标已存在，请选择新的文件名").into()));
+                            let target = if video && (self.video_settings.container==10||target.extension().is_some()){target}else{target.with_extension(extension)};
+                            if self.sequence_source.as_ref().is_some_and(|source|source.contains_output(&target)){self.result=Some(Err(tr("请保存到原图片目录或其他输出目录。").into()));}
+                            else if target.exists()&&((video&&self.video_settings.container==10)||target.is_dir()) {
+                                self.result = Some(Err(tr("PNG 序列需要新文件夹，文件导出不能覆盖目录。").into()));
                             } else {
                                 self.result = None;
                                 let (tx, rx) = mpsc::channel(); self.pending = Some(rx);
@@ -500,9 +529,9 @@ impl Trim {
                                 let filter=self.session.as_ref().map(|session|session.filter_string());
                                 let settings=self.settings.clone();
                                 let video_settings=self.video_settings.clone();
-                                let tracks=self.video_tracks.entries.clone();
+                                let tracks=self.video_tracks.entries.clone();let sequence_source=self.sequence_source.clone();
                                 std::thread::spawn(move || {
-                                    let _cache=clip;
+                                    let _cache=clip;let _sequence_source=sequence_source;
                                     let result = export(&ffmpeg, &source, &target, start, end, duration, video, audio, &settings,&video_settings,&tracks,filter.as_deref());
                                     notify_export_result(&result);
                                     let _ = tx.send(result); ctx.request_repaint();
@@ -547,6 +576,11 @@ impl Trim {
                     if let Some(texture)=view.video_texture {
                         let size=self.video_settings.crop.preview_size(texture.size_vec2());let scale=(rect.width()/size.x).min(rect.height()/size.y);
                         let image=egui::Rect::from_center_size(rect.center(),size*scale);
+                        if self.video_settings.flatten_alpha(){ui.painter().rect_filled(image,0.0,egui::Color32::from_rgb(self.video_settings.matte[0],self.video_settings.matte[1],self.video_settings.matte[2]));}else{
+                            let painter=ui.painter().with_clip_rect(image.intersect(rect));let cell=16.;
+                            let columns=(image.width()/cell).ceil() as u32;let rows=(image.height()/cell).ceil() as u32;
+                            for y in 0..rows{for x in 0..columns{let square=egui::Rect::from_min_size(image.min+egui::vec2(x as f32*cell,y as f32*cell),egui::Vec2::splat(cell));painter.rect_filled(square,0.,egui::Color32::from_gray(if (x+y)%2==0{140}else{100}));}}
+                        }
                         ui.painter().image(texture.id(),image,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
                         self.video_settings.crop.overlay(ui,image,self.pending.is_none());
                     } else {ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,tr("播放"),egui::FontId::proportional(16.0),egui::Color32::WHITE);}
@@ -591,6 +625,40 @@ mod rate_control_tests {
         settings.codec=3;assert!(!settings.use_two_pass());settings.codec=10;assert!(!settings.use_two_pass());
     }
     #[test]
+    fn gif_rate_precedes_palette_and_ignores_video_rate_control(){
+        let settings=VideoSettings{container:9,codec:10,gif_fps:10,gif_loops:3,gif_compress:true,gif_colors:16,bitrate_mode:true,two_pass:true,fps:"60".into(),..Default::default()};
+        let filter=settings.gif_filter_chain();
+        assert!(filter.starts_with("fps=10,"));assert!(filter.contains("palettegen=max_colors=16:"));
+        let mut cmd=std::process::Command::new("ffmpeg");settings.configure(&mut cmd);
+        let args:Vec<_>=cmd.get_args().map(|arg|arg.to_string_lossy().to_string()).collect();
+        assert!(args.windows(2).any(|pair|pair==["-loop","3"]));
+        assert!(!args.iter().any(|arg|matches!(arg.as_str(),"-r"|"-b:v"|"-pass")));
+        assert!(!settings.use_two_pass());
+        let uncompressed=VideoSettings{gif_compress:false,..settings};
+        assert!(uncompressed.gif_filter_chain().contains("palettegen=max_colors=256:"));
+    }
+    #[test]
+    fn png_export_rejects_existing_folder_before_starting_ffmpeg(){
+        let folder=std::env::temp_dir().join(format!("unity-png-export-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&folder).unwrap();
+        let frame=folder.join("frame_000000.png");std::fs::write(&frame,b"existing frame").unwrap();
+        let settings=VideoSettings{container:10,codec:11,..Default::default()};
+        assert!(settings.compatible(11));assert!(!settings.compatible(0));assert!(!settings.use_two_pass());
+        assert!(export_png_sequence(Path::new("nonexistent-ffmpeg"),Path::new("source.gif"),&folder,0.0,1.0,&settings).is_err());
+        assert_eq!(std::fs::read(&frame).unwrap(),b"existing frame");
+        std::fs::remove_file(frame).unwrap();std::fs::remove_dir(folder).unwrap();
+        assert!(gif_source(Path::new("source.GIF")));assert!(!gif_source(Path::new("source.mp4")));
+    }
+    #[test]
+    fn completed_export_replaces_existing_file_and_failed_commit_preserves_it(){
+        let folder=std::env::temp_dir().join(format!("unity-export-replace-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&folder).unwrap();let target=folder.join("output.gif");let temp=folder.join("encoded.gif");
+        std::fs::write(&target,b"old result").unwrap();
+        assert!(commit_export(&temp,&target).is_err());assert_eq!(std::fs::read(&target).unwrap(),b"old result");
+        std::fs::write(&temp,b"new result").unwrap();commit_export(&temp,&target).unwrap();assert_eq!(std::fs::read(&target).unwrap(),b"new result");assert!(!temp.exists());
+        std::fs::remove_file(target).unwrap();std::fs::remove_dir(folder).unwrap();
+    }
+    #[test]
     fn target_bitrate_omits_quality_parameter(){
         let settings=VideoSettings{bitrate_mode:true,fps:"30000/1001".into(),..Default::default()};
         let mut cmd=std::process::Command::new("ffmpeg");settings.configure(&mut cmd);
@@ -607,11 +675,41 @@ impl Drop for PassLogs {
     }
 }
 
+fn gif_source(source:&Path)->bool {source.extension().is_some_and(|ext|ext.eq_ignore_ascii_case("gif"))}
+
+/// A new directory is reserved exclusively; errors leave any completed frames available.
+fn export_png_sequence(ffmpeg:&Path,source:&Path,target:&Path,start:f64,end:f64,settings:&VideoSettings)->Result<PathBuf,String>{
+    std::fs::create_dir(target).map_err(|e|format!("{}: {e}",target.display()))?;
+    let result=(||->Result<(),String>{
+        let mut cmd=command(ffmpeg);
+        cmd.args(["-nostdin","-v","error","-n","-ss",&start.to_string(),"-t",&(end-start).to_string()]);
+        if gif_source(source){cmd.args(["-ignore_loop","1"]);}
+        cmd.arg("-i").arg(source);
+        let filter=if settings.fps=="source"{settings.spatial_filter("lanczos")}else{format!("fps={},{}",settings.fps,settings.spatial_filter("lanczos"))};
+        cmd.args(["-map","0:V:0","-an","-sn","-dn","-vf",&filter,"-fps_mode","passthrough","-c:v","png","-pix_fmt","rgba","-start_number","0","-f","image2"]);
+        cmd.arg(target.join("frame_%06d.png"));
+        let output=cmd.output().map_err(|e|e.to_string())?;
+        if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());}
+        if !target.join("frame_000000.png").is_file(){return Err("No frames in selected range".into());}
+        Ok(())
+    })();
+    match result {Ok(())=>Ok(target.to_owned()),Err(error)=>{
+        // Remove only an empty directory. Keep completed frames after a failed export.
+        let _=std::fs::remove_dir(target);
+        Err(format!("{}: {error}",target.display()))
+    }}
+}
+
+fn commit_export(temporary:&Path,target:&Path)->Result<(),String>{
+    std::fs::OpenOptions::new().write(true).open(temporary).and_then(|file|file.sync_all()).map_err(|e|e.to_string())?;
+    crate::playlist::replace(temporary,target)
+}
+
 fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, duration: f64, video: bool, audio: Option<u64>, settings: &AudioSettings, video_settings:&VideoSettings, tracks:&[crate::export_tracks::Track], audio_filter:Option<&str>) -> Result<PathBuf, String> {
     let audio=if video && video_settings.container==9{None}else{audio};
     if !valid_range(start, end, duration) { return Err("Invalid trim range".into()); }
-    // Encode to a unique sibling, then exclusively create the destination. This
-    // works on filesystems without hard links and never replaces an existing file.
+    if video&&video_settings.container==10 {return export_png_sequence(ffmpeg,source,target,start,end,video_settings);}
+    // Encode to a unique sibling first; replace the destination only after success.
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let extension = if video { video_settings.extension() } else { settings.format.extension() };
     let temp = target.with_file_name(format!(".unity-trim-{}-{}.{extension}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
@@ -619,7 +717,9 @@ fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, dur
     drop(reservation);
     let result = (|| {
         let mut cmd = command(ffmpeg);
-        cmd.args(["-nostdin", "-v", "error", "-y", "-ss", &start.to_string(),"-t",&(end-start).to_string()]).arg("-i").arg(source);
+        cmd.args(["-nostdin", "-v", "error", "-y", "-ss", &start.to_string(),"-t",&(end-start).to_string()]);
+        if gif_source(source){cmd.args(["-ignore_loop","1"]);}
+        cmd.arg("-i").arg(source);
         let has_audio=video&&video_settings.container!=9&&tracks.iter().any(|t|t.enabled&&!t.subtitle);
         let _subtitle_inputs;
         if video {
@@ -659,14 +759,7 @@ fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, dur
         let output = cmd.arg(&temp).output().map_err(|e| e.to_string())?;
         if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).into_owned()); }
         if std::fs::metadata(&temp).map_err(|e| e.to_string())?.len() == 0 { return Err("FFmpeg produced an empty file".into()); }
-        let mut input = std::fs::File::open(&temp).map_err(|e| e.to_string())?;
-        let mut destination = std::fs::OpenOptions::new().write(true).create_new(true).open(target).map_err(|e| e.to_string())?;
-        let copied = std::io::copy(&mut input, &mut destination).and_then(|_| destination.sync_all());
-        drop(destination);
-        if let Err(error) = copied {
-            let _ = std::fs::remove_file(target);
-            return Err(error.to_string());
-        }
+        commit_export(&temp,target)?;
         Ok(target.to_owned())
     })();
     let _ = std::fs::remove_file(&temp);

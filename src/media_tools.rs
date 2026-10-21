@@ -12,6 +12,9 @@ pub(crate) fn command(program:impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 pub fn find_tool(name:&str) -> Option<PathBuf> {
+    if let Some(path)=crate::component_paths::selected(name){
+        return crate::component_paths::validate_tool(&path,name).ok().map(|_|path);
+    }
     let file=if cfg!(windows) {format!("{name}.exe")} else {name.to_owned()};
     let mut directories=Vec::new();
     if let Some(parent)=std::env::current_exe().ok().and_then(|p|p.parent().map(|p|p.to_owned())) {directories.push(parent);}
@@ -77,6 +80,8 @@ fn fresh_windows_paths()->Vec<std::ffi::OsString> {
 
 #[derive(Default)]
 pub struct DecoderSettings {
+    ffmpeg_picker:crate::component_paths::Picker,
+    ffprobe_picker:crate::component_paths::Picker,
     installed:Option<bool>,
     pending:Option<mpsc::Receiver<Result<(Option<PathBuf>,Option<PathBuf>),String>>>,
     paths:(Option<PathBuf>,Option<PathBuf>),
@@ -130,6 +135,13 @@ impl DecoderSettings {
                 if ui.button(tr("重新检测")).clicked() {self.start(ui.ctx(),false);}
             });
         }
+        let mut changed=false;
+        ui.add_enabled_ui(self.pending.is_none(),|ui|{
+            changed|=self.ffmpeg_picker.show(ui,"ffmpeg",tr("FFmpeg 程序路径"));
+            changed|=self.ffprobe_picker.show(ui,"ffprobe",tr("FFprobe 程序路径"));
+        });
+        ui.small(tr("手动路径优先，留空或恢复自动后使用自动检测；设置会保存。"));
+        if changed{self.start(ui.ctx(),false);}
         for (label,path) in [("FFmpeg",&self.paths.0),("FFprobe",&self.paths.1)] {
             if let Some(path)=path {ui.add(egui::Label::new(format!("{label}: {}",path.display())).wrap().selectable(true));}
         }

@@ -227,7 +227,7 @@ fn spawn_decoder(control:&Control,ffmpeg:&Path,path:&Path,position:f64,realtime:
     if control.stop.load(Ordering::Relaxed) {let _=child.kill();let _=child.wait();return Err("播放已停止".into());}
     children.push(child);Ok(stdout)
 }
-fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&str,audio_track:Option<u64>,info_frame_times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,subtitle:Option<crate::subtitle_player::Render>,ctx:&egui::Context)->Playback {
+fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&str,audio_track:Option<u64>,info_frame_times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,subtitle:Option<crate::subtitle_player::Render>,preview_end:Option<f64>,ctx:&egui::Context)->Playback {
     let control=Arc::new(Control {stop:AtomicBool::new(false),volume:AtomicU32::new(volume.to_bits()),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(info.video.is_none()),paused:AtomicBool::new(false),pause_at:Mutex::new(None)});
     let (frame_tx,frames)=mpsc::sync_channel(2);let (error_tx,errors)=mpsc::channel();
     let done=Arc::new(AtomicBool::new(false));
@@ -242,6 +242,8 @@ fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&s
                 let mut reader=spawn_decoder(&control,&ffmpeg,&path,position,false,Some(&mode),&["-map".into(),"0:V:0".into(),"-an".into(),"-vf".into(),filter,"-fps_mode".into(),"passthrough".into(),"-pix_fmt".into(),"rgba".into(),"-f".into(),"rawvideo".into()])?;
                 let mut bytes=vec![0u8;size[0]*size[1]*4];let mut any=false;let mut index=first_frame;
                 while !control.stop.load(Ordering::Relaxed) {
+                    let timestamp=frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(index as f64/fps);
+                    if preview_end.is_some_and(|end|timestamp>=end){break}
                     match reader.read_exact(&mut bytes) {Ok(())=>{},Err(e) if e.kind()==std::io::ErrorKind::UnexpectedEof=>break,Err(e)=>return Err(e.to_string())}
                     any=true;
                     control.video_ready.store(true,Ordering::Relaxed);
@@ -358,6 +360,47 @@ impl VideoGesture {
         self.last=point;delta
     }
 }
+/// Owns only a freshly created, private sequence cache.
+pub struct SequenceSource {root:PathBuf,pub path:PathBuf,export_dir:PathBuf,info:Option<Info>,frame_count:usize,first_frame:Option<egui::ColorImage>}
+impl SequenceSource {
+    pub fn new(export_dir:PathBuf)->Result<Self,String>{
+        static NEXT:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+        let root=std::env::temp_dir().join(format!("unity-sequence-video-{}-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos(),NEXT.fetch_add(1,Ordering::Relaxed)));
+        std::fs::create_dir(&root).map_err(|e|e.to_string())?;
+        Ok(Self{path:root.join("sequence.mkv"),root,export_dir,info:None,frame_count:0,first_frame:None})
+    }
+    pub fn fps(&self)->u32{self.info.as_ref().map_or(10,|i|i.fps.round().clamp(1.,100.) as u32)}
+    pub fn export_directory(&self)->&Path{&self.export_dir}
+    pub fn contains_output(&self,path:&Path)->bool {path.parent().and_then(|p|std::fs::canonicalize(p).ok()).zip(std::fs::canonicalize(&self.root).ok()).is_some_and(|(parent,root)|parent.starts_with(root))}
+    pub fn frame_path(&self,index:usize)->PathBuf{self.root.join(format!("frame_{index:06}.png"))}
+    fn read_frame(&self,index:usize)->Result<egui::ColorImage,String>{
+        let path=self.frame_path(index);let image=image::ImageReader::open(&path).map_err(|e|format!("{}: {e}",path.display()))?.decode().map_err(|e|e.to_string())?.to_rgba8();
+        if let Some(size)=self.info.as_ref().and_then(|i|i.video){if image.dimensions()!=(size[0] as u32,size[1] as u32){return Err("Sequence frame dimensions changed".into())}}
+        Ok(egui::ColorImage{size:[image.width() as usize,image.height() as usize],pixels:image.pixels().map(|p|crate::asset_viewer::preview_color(p.0)).collect()})
+    }
+    fn times(&self)->Vec<f64>{(0..self.frame_count).map(|i|i as f64/self.fps() as f64).collect()}
+    pub fn finish(mut self,fps:u32)->Result<Arc<Self>,String>{
+        if fps==0||fps>100{return Err("Invalid sequence frame rate".into())}
+        while self.frame_path(self.frame_count).is_file(){self.frame_count+=1;if self.frame_count>4096{return Err("Sequence exceeds 4096 frames".into())}}
+        if self.frame_count==0{return Err("No cached sequence frames".into())}
+        self.first_frame=Some(self.read_frame(0)?);
+
+        let ffmpeg=find_tool("ffmpeg").ok_or("FFmpeg unavailable")?;
+        let output=command(&ffmpeg).args(["-nostdin","-v","error","-n","-framerate",&fps.to_string(),"-start_number","0","-i"]).arg(self.root.join("frame_%06d.png")).args(["-an","-c:v","ffv1","-level","3","-pix_fmt","bgra"]).arg(&self.path).output().map_err(|e|e.to_string())?;
+        if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());}
+        let mut info=probe(&self.path)?;info.fps=fps as f64;info.duration=self.frame_count as f64/fps as f64;self.info=Some(info);Ok(Arc::new(self))
+    }
+}
+impl Drop for SequenceSource {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.root);}}
+pub fn open_sequence_editor(source:Arc<SequenceSource>,ctx:&egui::Context){
+    let Some(info)=source.info.clone()else{return};let path=source.path.clone();
+    let mut player=Preview::default();player.trim.open(info.duration);player.frame_times=Some(Arc::new(source.times()));player.position=0.;player.current_frame=Some(0);
+    if let Some(frame)=source.first_frame.clone(){player.poster=Some(preview_poster(&frame));player.cache.lock().unwrap().insert(0,frame.clone());player.texture=Some(ctx.load_texture("sequence_first_frame",frame,egui::TextureOptions::NEAREST));}
+    player.trim.keep_sequence_source(source);player.info=Some(info);
+    TRIM_EDITORS.with(|editors|{editors.borrow_mut().insert(path.clone(),player);});
+    crate::native_window::wake(ctx,egui::Id::new(("media_trim",path)));ctx.request_repaint();
+}
+
 thread_local! {
     static TRIM_EDITORS: std::cell::RefCell<std::collections::HashMap<PathBuf,Preview>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -470,7 +513,6 @@ impl Preview {
     }
     pub fn file_size(&self)->Option<u64> {self.info.as_ref().map(|info|info.file_size)}
     pub fn trim_entry_button(&mut self,ui:&mut egui::Ui,path:&Path) {
-        if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("gif")) { return; }
         let duration=self.info.as_ref().map_or(0.0,|info|info.duration);
         let label=if self.info.as_ref().is_some_and(|info|info.video.is_some()){"视频编辑"}else{"音频编辑"};
         if ui.add_enabled(duration>0.0,egui::Button::new(crate::localization::tr(label))).clicked() {
@@ -551,7 +593,7 @@ impl Preview {
         let mut failed=false;
         if let Some(job)=&self.playback {
             self.started=if job.control.paused.load(Ordering::Relaxed){None}else{*job.control.clock.lock().unwrap()};
-            while !job.control.paused.load(Ordering::Relaxed) {let Ok((index,frame))=job.frames.try_recv() else{break};self.current_frame=Some(index);if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ui.ctx().load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}}
+            while !job.control.paused.load(Ordering::Relaxed) {let Ok((index,frame))=job.frames.try_recv() else{break};if self.trim_preview_end.is_some_and(|end|self.frame_times.as_ref().and_then(|times|times.get(index)).is_some_and(|time|*time>=end)){continue}self.current_frame=Some(index);if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ui.ctx().load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}}
             if let Ok(error)=job.errors.try_recv(){self.error=Some(error);failed=true;}
             job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);
             if job.done.load(Ordering::Relaxed) && self.error.is_none() {
@@ -574,7 +616,7 @@ impl Preview {
             if self.position_now()>=end {
                 self.stop_playback();
                 if let Some((start,next_end))=self.trim_preview_next.take(){self.position=start;self.trim_preview_end=Some(next_end);self.play(ui.ctx(),&playback_path);}
-                else{self.position=end;self.trim_preview_end=None;}
+                else{self.trim_preview_end=None;self.seek_exclusive_end(ui.ctx(),&playback_path,end);}
             }
         }
         if let Some(info)=&self.info {
@@ -586,8 +628,21 @@ impl Preview {
                 self.volume=volume;if volume>0.0{self.remembered_volume=volume;}
 
             }
-            if let Some(position)=action.seek {self.trim_preview_next=None;self.trim_preview_end=None;self.playlist_seek(ui.ctx(),&playback_path,position);}
-            if action.toggle {self.trim_preview_next=None;self.trim_preview_end=None;if self.is_playing(){self.pause();}else{if self.info.as_ref().is_some_and(|info|self.position>=info.duration){self.position=0.0;}self.play(ui.ctx(),&playback_path);}}
+            if let Some(position)=action.seek {
+                self.trim_preview_next=None;self.trim_preview_end=None;
+                if self.info.as_ref().is_some_and(|info|info.video.is_some())&&(position-self.trim.preview_range().1).abs()<1e-9{self.seek_exclusive_end(ui.ctx(),&playback_path,position);}
+                else{self.playlist_seek(ui.ctx(),&playback_path,position);}
+            }
+            if action.toggle {
+                self.trim_preview_next=None;
+                if self.is_playing(){self.pause();}else{
+                    if self.info.as_ref().is_some_and(|info|info.video.is_some()){
+                        let (start,end)=self.trim.preview_range();self.stop_playback();if self.position<start||self.position>=end{self.position=start;}
+                        self.trim_preview_end=Some(end);
+                    }else{self.trim_preview_end=None;if self.info.as_ref().is_some_and(|info|self.position>=info.duration){self.position=0.;}}
+                    self.play(ui.ctx(),&playback_path);
+                }
+            }
             if action.stop {self.trim_preview_next=None;self.trim_preview_end=None;if action.rewind{self.stop_and_rewind();}else{self.stop_playback();}}
             if let Some((start,end))=action.audition {
                 self.stop_playback();self.position=start;self.trim_preview_next=action.audition_tail;self.trim_preview_end=Some(end);self.play(ui.ctx(),&playback_path);
@@ -919,7 +974,13 @@ impl Preview {
         if let Some(frame)=self.cache.lock().unwrap().get(target) {
             self.current_frame=Some(target);self.position=self.frame_times.as_ref().and_then(|times|times.get(target)).copied().unwrap_or(self.position);
             if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ctx.load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}
-        }else if let Some(info)=&self.info {self.frame_job=Some(decode_frame(info,path,target,self.frame_times.clone(),self.cache.clone(),&self.decoder,self.subtitles.render(),ctx));}
+        }else if let Some(source)=self.trim.sequence_source(){self.frame_job=Some(decode_sequence_frame(source,target,self.cache.clone(),ctx));}
+        else if let Some(info)=&self.info {self.frame_job=Some(decode_frame(info,path,target,self.frame_times.clone(),self.cache.clone(),&self.decoder,self.subtitles.render(),ctx));}
+    }
+    fn seek_exclusive_end(&mut self,ctx:&egui::Context,path:&Path,end:f64){
+        self.stop_playback();self.frame_job=None;self.initial_seek=Some(end);
+        let target=self.frame_times.as_ref().and_then(|times|frame_before_end(times,end)).unwrap_or_else(||self.info.as_ref().map_or(0,|info|(end*info.fps).ceil().max(1.) as usize-1));
+        self.display_frame(ctx,path,target);self.position=end;
     }
     fn seek_frame(&mut self,ctx:&egui::Context,path:&Path) {if let Some(times)=&self.frame_times {let target=times.partition_point(|t|*t<=self.position).saturating_sub(1).min(times.len()-1);self.display_frame(ctx,path,target);}}
     fn play(&mut self,ctx:&egui::Context,path:&Path) {
@@ -934,7 +995,7 @@ impl Preview {
         }
         self.stop_playback();
         // Keep the visible preview until the first decoded frame replaces it.
-        if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(start(info,path,self.position,first,self.volume,&self.decoder,self.selected_audio,self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),ctx));self.started=None;}
+        if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(if let Some(source)=self.trim.sequence_source(){start_sequence_playback(source,self.position,first,self.cache.clone(),self.trim_preview_end,ctx)}else{start(info,path,self.position,first,self.volume,&self.decoder,self.selected_audio,self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),self.trim_preview_end,ctx)});self.started=None;}
     }
 
 }
@@ -1119,6 +1180,39 @@ fn index_frames(info:&Info,path:&Path,ctx:&egui::Context)->IndexJob {
         })();let _=tx.send(result);ctx.request_repaint();
     });IndexJob {control,receiver}
 }
+fn frame_before_end(times:&[f64],end:f64)->Option<usize>{times.partition_point(|time|*time<end).checked_sub(1)}
+fn cached_sequence_frame(source:&SequenceSource,index:usize,cache:&Arc<Mutex<FrameCache>>)->Result<egui::ColorImage,String>{
+    if index>=source.frame_count{return Err("Sequence frame out of range".into())}
+    let cached={cache.lock().unwrap().get(index)};if let Some(frame)=cached{return Ok(frame)}
+    let frame=source.read_frame(index)?;cache.lock().unwrap().insert(index,frame.clone());Ok(frame)
+}
+fn decode_sequence_frame(source:Arc<SequenceSource>,index:usize,cache:Arc<Mutex<FrameCache>>,ctx:&egui::Context)->FrameJob{
+    let control=frame_control();let worker=control.clone();let ctx=ctx.clone();let (tx,receiver)=mpsc::channel();
+    std::thread::spawn(move||{if worker.stop.load(Ordering::Relaxed){return}let result=cached_sequence_frame(&source,index,&cache).map(|frame|(index,frame));if !worker.stop.load(Ordering::Relaxed){let _=tx.send(result);ctx.request_repaint();}});
+    FrameJob{control,receiver}
+}
+fn start_sequence_playback(source:Arc<SequenceSource>,position:f64,first:usize,cache:Arc<Mutex<FrameCache>>,preview_end:Option<f64>,ctx:&egui::Context)->Playback{
+    let control=frame_control();let worker=control.clone();let done=Arc::new(AtomicBool::new(false));let finished=done.clone();
+    let (tx,frames)=mpsc::sync_channel(2);let (error_tx,errors)=mpsc::channel();let ctx=ctx.clone();
+    std::thread::spawn(move||{
+        let result=(||->Result<(),String>{
+            for index in first.min(source.frame_count.saturating_sub(1))..source.frame_count{
+                if worker.stop.load(Ordering::Relaxed)||preview_end.is_some_and(|end|index as f64/source.fps() as f64>=end){break}
+                let image=cached_sequence_frame(&source,index,&cache)?;
+                worker.clock.lock().unwrap().get_or_insert_with(Instant::now);
+                let target=(index as f64/source.fps() as f64-position).max(0.);
+                loop{if worker.stop.load(Ordering::Relaxed){return Ok(())}if worker.paused.load(Ordering::Relaxed){std::thread::sleep(Duration::from_millis(5));continue}
+                    if worker.clock.lock().unwrap().is_some_and(|clock|clock.elapsed().as_secs_f64()>=target){break}std::thread::sleep(Duration::from_millis(2));}
+                if tx.send((index,image)).is_err(){return Ok(())}ctx.request_repaint();
+            }
+            // Keep the final frame visible for its full frame duration.
+            let end=(preview_end.unwrap_or(f64::INFINITY).min(source.frame_count as f64/source.fps() as f64)-position).max(0.);
+            loop{if worker.stop.load(Ordering::Relaxed)||worker.clock.lock().unwrap().is_none(){break}if !worker.paused.load(Ordering::Relaxed)&&worker.clock.lock().unwrap().is_some_and(|clock|clock.elapsed().as_secs_f64()>=end){break}std::thread::sleep(Duration::from_millis(2));}
+            Ok(())
+        })();if let Err(error)=result{let _=error_tx.send(error);}finished.store(true,Ordering::Relaxed);ctx.request_repaint();
+    });Playback{control,frames,errors,done}
+}
+
 fn decode_frame(info:&Info,path:&Path,index:usize,times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,mode:&str,subtitle:Option<crate::subtitle_player::Render>,ctx:&egui::Context)->FrameJob {
     let fps = info.fps;
     let control=frame_control();let worker=control.clone();let ffmpeg=info.ffmpeg.clone();let path=path.to_owned();let size=info.video.unwrap();let mode=mode.to_owned();let ctx=ctx.clone();let (tx,receiver)=mpsc::channel();
@@ -1623,6 +1717,45 @@ mod tests {
         assert!(view.offset>=0.0&&view.offset+view.span<=view.total);
         view.zoom(-100000.0,anchor,0.1);
         assert_eq!(view.span,80.0);assert_eq!(view.offset,0.0);
+    }
+    #[test]
+    fn trim_end_is_exclusive_for_constant_and_variable_frame_rates(){
+        let times:Vec<_>=(0..16).map(|i|i as f64/10.).collect();
+        assert_eq!(super::frame_before_end(&times,1.5),Some(14));
+        assert_eq!(super::frame_before_end(&times,1.6),Some(15));
+        assert_eq!(super::frame_before_end(&times,1.45),Some(14));
+        assert_eq!(super::frame_before_end(&times,0.),None);
+        assert_eq!(super::frame_before_end(&[0.,0.06,0.14,0.29],0.14),Some(1));
+    }
+    #[test]
+    fn sequence_playback_never_queues_a_frame_at_trim_end(){
+        use super::*;
+        let mut source=SequenceSource::new(std::env::temp_dir()).unwrap();source.frame_count=3;
+        for index in 0..3{image::RgbaImage::from_pixel(2,2,image::Rgba([index as u8,40,80,255])).save(source.frame_path(index)).unwrap();}
+        let ctx=egui::Context::default();let playback=start_sequence_playback(Arc::new(source),0.,0,Arc::new(Mutex::new(FrameCache::default())),Some(0.2),&ctx);
+        assert_eq!(playback.frames.recv_timeout(Duration::from_secs(3)).unwrap().0,0);
+        assert_eq!(playback.frames.recv_timeout(Duration::from_secs(3)).unwrap().0,1);
+        assert!(playback.frames.recv_timeout(Duration::from_secs(3)).is_err());
+    }
+    #[test]
+    fn sequence_png_cache_reads_alpha_and_plays_in_order_without_video_decoder(){
+        use super::*;
+        let mut source=SequenceSource::new(std::env::temp_dir()).unwrap();source.frame_count=3;
+        for index in 0..3{image::RgbaImage::from_pixel(2,2,image::Rgba([40+index as u8,80,120,128])).save(source.frame_path(index)).unwrap();}
+        assert_eq!(source.times(),vec![0.,0.1,0.2]);
+        let source=Arc::new(source);let cache=Arc::new(Mutex::new(FrameCache::default()));
+        let first=cached_sequence_frame(&source,0,&cache).unwrap();assert_eq!(first.pixels[0],crate::asset_viewer::preview_color([40,80,120,128]));
+        let ctx=egui::Context::default();let playback=start_sequence_playback(source,0.,0,cache,None,&ctx);
+        for expected in 0..3{let (index,frame)=playback.frames.recv_timeout(Duration::from_secs(3)).unwrap();assert_eq!(index,expected);assert_eq!(frame.pixels[0],crate::asset_viewer::preview_color([40+expected as u8,80,120,128]));}
+    }
+    #[test]
+    fn missing_sequence_frame_is_reported_instead_of_silent_black_output(){
+        use super::*;
+        let mut source=SequenceSource::new(std::env::temp_dir()).unwrap();source.frame_count=2;
+        image::RgbaImage::from_pixel(2,2,image::Rgba([255,0,0,255])).save(source.frame_path(0)).unwrap();
+        let ctx=egui::Context::default();let playback=start_sequence_playback(Arc::new(source),0.,0,Arc::new(Mutex::new(FrameCache::default())),None,&ctx);
+        assert_eq!(playback.frames.recv_timeout(Duration::from_secs(3)).unwrap().0,0);
+        assert!(playback.errors.recv_timeout(Duration::from_secs(3)).unwrap().contains("frame_000001.png"));
     }
     #[test]
     fn detached_trim_has_independent_transport_and_waveform() {

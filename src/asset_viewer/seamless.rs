@@ -12,7 +12,7 @@ const MAX_PIXELS: u64 = 16 * 1024 * 1024;
 const MAX_SIDE: u32 = 8192;
 
 // A mesh has no feathered rectangle edges; shared pixel-aligned edges avoid grid seams.
-fn checker_background(painter: &egui::Painter, rect: egui::Rect, image_origin: egui::Pos2, pixel_size: egui::Vec2, background: &super::ImageBackground, custom: Option<[u8;3]>) {
+pub(super) fn checker_background(painter: &egui::Painter, rect: egui::Rect, image_origin: egui::Pos2, pixel_size: egui::Vec2, background: &super::ImageBackground, custom: Option<[u8;3]>) {
     if *background!=super::ImageBackground::Checkerboard {
         let [r,g,b]=if *background==super::ImageBackground::Gray {[128,128,128]}else{custom.unwrap_or([0;3])};
         let mut mesh=egui::Mesh::default();
@@ -632,7 +632,7 @@ impl Editor {
                     .fill(egui::Color32::from_rgb(30,150,85))
                     .stroke((1.0,egui::Color32::from_rgb(30,150,85)))
                     .corner_radius(4.0)
-                    .min_size(egui::vec2(120.0,40.0)),
+                    .min_size(egui::vec2(120.0,32.0)),
             )
             .clicked()
         {
@@ -701,7 +701,12 @@ impl Editor {
     }
     fn preview_header(&mut self, ui: &mut egui::Ui, path: &Path, index: usize) {
         let height=44.0_f32.max(ui.text_style_height(&egui::TextStyle::Body)*2.0+ui.spacing().item_spacing.y);
-        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(),height),egui::Layout::left_to_right(egui::Align::Center),|ui| {
+        // Reserve the same header rectangle before laying out any labels/buttons.
+        // Child contents cannot push one preview canvas below its neighbours.
+        let (header_rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),height),egui::Sense::hover());
+        let mut header=ui.new_child(egui::UiBuilder::new().max_rect(header_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        header.set_clip_rect(header_rect.intersect(ui.clip_rect()));
+        let ui=&mut header;
             if index==0 {
                 ui.vertical(|ui| {ui.label(tr("实时编辑"));self.editor_toolbar(ui);});
             }else{
@@ -717,7 +722,6 @@ impl Editor {
                 });
                 if index==1 {self.save_button(ui,path);}
             }
-        });
     }
     fn editor_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {

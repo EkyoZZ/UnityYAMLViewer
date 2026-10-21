@@ -142,8 +142,8 @@ impl Crop {
         }}
         if response.drag_stopped(){self.drag=None;}
     }
-    pub fn filter(&self)->String {
-        let pad="pad=ceil(iw/2)*2:ceil(ih/2)*2";
+    pub fn filter_with_scaler(&self,scaler:&str)->String {
+        let pad="pad=ceil(iw/2)*2:ceil(ih/2)*2:color=black@0";
         let mut filters=Vec::new();
         if self.enabled && !self.source.contains(&0) {
             let [x,y,w,h]=self.rect;
@@ -151,7 +151,7 @@ impl Crop {
         }
         if self.scale_enabled && self.percent!=[100.0;2] {
             let [x,y]=self.percent.map(|value|value/100.0);
-            filters.push(format!("scale=w='max(1,round(iw*{x}))':h='max(1,round(ih*{y}))':flags=lanczos,setsar=1"));
+            filters.push(format!("scale=w='max(1,round(iw*{x}))':h='max(1,round(ih*{y}))':flags={scaler},setsar=1"));
         }
         filters.push(pad.to_owned());
         filters.join(",")

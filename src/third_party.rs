@@ -35,10 +35,11 @@ fn read_installed()->Result<Option<Installed>,String>{
     validate_library(&path)?;Ok(Some(installed))
 }
 pub(crate) fn verified_pdfium_path()->Result<PathBuf,String>{
+    if let Some(path)=crate::component_paths::selected("pdfium") {validate_library(&path)?;return Ok(path)}
     read_installed()?.ok_or_else(||tr("请先在第三方支持中下载 PDFium。" ).to_owned())?.path()
 }
-fn validate_library(path:&Path)->Result<(),String>{
-    // Only called after validating our managed file hash or the downloaded release archive.
+pub(crate) fn validate_library(path:&Path)->Result<(),String>{
+    // Managed files are hash-checked; manual files are explicitly selected by the user.
     let library=unsafe{libloading::Library::new(path)}.map_err(|error|error.to_string())?;
     for name in [b"FPDF_InitLibrary\0".as_slice(),b"FPDF_DestroyLibrary\0",b"FPDF_LoadDocument\0",b"FPDF_RenderPageBitmap\0",b"FPDF_SaveAsCopy\0"] {
         unsafe{library.get::<unsafe extern "C" fn()>(name)}.map_err(|error|error.to_string())?;
@@ -115,6 +116,7 @@ fn download(cancel:&AtomicBool,done:&AtomicU64,total:&AtomicU64)->Result<Install
 }
 #[derive(Default)]
 struct PdfiumSettings {
+    picker:crate::component_paths::Picker,
     checked:bool,installed:Option<Installed>,pending:Option<mpsc::Receiver<Result<Option<Installed>,String>>>,
     ready_event:bool,installing:bool,error:Option<String>,cancel:Arc<AtomicBool>,done:Arc<AtomicU64>,total:Arc<AtomicU64>,
 }
@@ -122,7 +124,7 @@ impl PdfiumSettings {
     fn start(&mut self,ctx:&egui::Context,install:bool){
         if self.pending.is_some(){return;}self.error=None;self.installing=install;self.cancel.store(false,Ordering::Relaxed);self.done.store(0,Ordering::Relaxed);self.total.store(0,Ordering::Relaxed);
         let cancel=self.cancel.clone();let done=self.done.clone();let total=self.total.clone();let ctx=ctx.clone();let (send,receive)=mpsc::channel();self.pending=Some(receive);
-        std::thread::spawn(move||{let result=if install{download(&cancel,&done,&total).and_then(|_|read_installed())}else{read_installed()};let _=send.send(result);ctx.request_repaint();});
+        std::thread::spawn(move||{let result=if install{download(&cancel,&done,&total).and_then(|_|read_installed())}else if let Some(path)=crate::component_paths::selected("pdfium"){validate_library(&path).map(|_|None)}else{read_installed()};let _=send.send(result);ctx.request_repaint();});
     }
     fn poll(&mut self){if let Some(receiver)=&self.pending{match receiver.try_recv(){
         Ok(result)=>{self.pending=None;self.checked=true;self.ready_event=true;match result{Ok(installed)=>{self.installed=installed;},Err(error)=>self.error=Some(error)}},
@@ -134,7 +136,7 @@ impl PdfiumSettings {
         ui.hyperlink_to(tr("组件来源与许可"),"https://github.com/bblanchon/pdfium-binaries");
         ui.small(tr("组件保存在独立目录，不会被缓存清理删除。"));
         if let Some(installed)=&self.installed {ui.label(format!("PDFium · {}",installed.version));if let Ok(path)=installed.path(){ui.add(egui::Label::new(path.display().to_string()).wrap().selectable(true));}}
-        else{ui.label(tr("未安装"));}
+        else if crate::component_paths::selected("pdfium").is_none(){ui.label(tr("未安装"));}
         if self.pending.is_some(){
             ui.horizontal(|ui|{ui.spinner();ui.label(tr(if self.installing{"正在下载组件…"}else{"正在检测…"}));});
             if self.installing {let total=self.total.load(Ordering::Relaxed);if total>0{ui.add(egui::ProgressBar::new(self.done.load(Ordering::Relaxed) as f32/total as f32).show_percentage());}if ui.button(tr("取消下载")).clicked(){self.cancel.store(true,Ordering::Relaxed);}}
@@ -147,6 +149,11 @@ impl PdfiumSettings {
                 match result{Ok(())=>{self.installed=None;self.error=None;},Err(error)=>self.error=Some(error)}
             }
         });}
+        let mut changed=false;
+        ui.add_enabled_ui(self.pending.is_none(),|ui|{changed=self.picker.show(ui,"pdfium",tr("PDFium DLL 路径"));});
+        ui.small(tr("手动路径优先，留空或恢复自动后使用自动检测；设置会保存。"));
+        if let Some(path)=crate::component_paths::selected("pdfium"){ui.label(format!("PDFium: {}",path.display()));}
+        if changed {self.error=None;self.start(ui.ctx(),false);request_pdf_retry(ui.ctx());}
         if let Some(error)=&self.error{ui.colored_label(ui.visuals().warn_fg_color,error);}
     }
 }
