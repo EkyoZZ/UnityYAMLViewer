@@ -300,3 +300,34 @@ pub fn shared_preview_background(ui:&mut egui::Ui,mode:&mut String,rgb:&mut [u8;
     if let Some(error)=&state.1 {ui.colored_label(ui.visuals().warn_fg_color,crate::localization::tr("预览背景设置保存失败")).on_hover_text(error);}
     changed
 }
+
+/// Shared upward zoom menu, matching the translucent preview badges.
+pub(crate) fn zoom_preset_menu(ui:&mut egui::Ui,badge:egui::Rect,zoom:f32,text_right:f32)->Option<f32> {
+    let id=ui.id().with("preview_zoom_presets");
+    let response=ui.interact(badge,id.with("button"),egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.clicked(){ui.memory_mut(|memory|memory.toggle_popup(id));}
+    let ratio_width=ui.painter().layout_no_wrap(format!("{:.0}%",zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE).size().x;
+    let option_width=ui.painter().layout_no_wrap("300%".into(),egui::TextStyle::Button.resolve(ui.style()),Color32::WHITE).size().x;
+    let menu_width=(option_width+24.0).ceil();
+    let mut anchor=response.clone();
+    anchor.rect=egui::Rect::from_center_size(egui::pos2(text_right-ratio_width*0.5,badge.center().y),egui::vec2(menu_width,badge.height()));
+    let mut selected=None;
+    ui.scope(|ui|{
+        let visuals=&mut ui.style_mut().visuals;
+        visuals.window_fill=Color32::from_black_alpha(128);
+        visuals.window_stroke=egui::Stroke::NONE;
+        visuals.window_shadow=egui::epaint::Shadow::NONE;
+        egui::popup::popup_above_or_below_widget(ui,id,&anchor,egui::AboveOrBelow::Above,egui::popup::PopupCloseBehavior::CloseOnClickOutside,|ui|{
+            egui::ScrollArea::vertical().max_height(280.0).show(ui,|ui|{
+                for percent in [300,200,150,125,100,75,50,25,10] {
+                    let value=percent as f32/100.0;
+                    if ui.selectable_label((zoom-value).abs()<0.0001,egui::RichText::new(format!("{percent}%")).color(Color32::WHITE)).clicked(){
+                        selected=Some(value);ui.memory_mut(|memory|memory.close_popup());
+                    }
+                }
+            });
+        });
+    });
+    if selected.is_some(){ui.ctx().request_repaint();}
+    selected
+}

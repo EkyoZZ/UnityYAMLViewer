@@ -2742,3 +2742,39 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 北京时间 2026-10-22 14:58:04 正式发布 https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.7；Release ID 420396003，标题 v1.2.7，非草稿／非预发布，latest 已核验。
 - 附件 UnityYAMLViewer-v1.2.7-windows-x64.exe，25,283,584 字节；GitHub digest 与本地 SHA-256 一致：B5C1C2F5157BE23553BCAA1AFCB17FFF8F988D926CE6DB02A881415349A16D48。先上传验证，再转正式发布，未重新构建、未修改旧版标签或附件。
 - 发布证据 target/v1.2.7-published.json；发布后已更新本地版本记录、索引和发布状态，未自动提交或推送这些文档。
+
+## 目录图片浏览本地构建（2026-10-22，未发布）
+
+- 用户明确授权编译；检查程序未运行、目标 EXE 可独占访问后，cargo build --release --locked --offline 成功（36.44 秒，8 项工程警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25388544 字节；SHA-256：7FE1B1F310CA93EA20CB607F4FFEA4B7FE002EF944511FD11E20A3B4B1E93B47。
+- 构建日志：target/image-browser-release-build.log。实际界面仍待运行验证，未上传或更新 GitHub Release。
+
+## 固定底部缩略图布局本地构建（2026-10-22，未发布）
+
+- 用户再次明确授权编译；检查程序未运行、目标 EXE 可独占访问后，cargo build --release --locked --offline 成功（33.37 秒，8 项工程警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25392128 字节；SHA-256：6F85699826A7DEA15D7DBEB3790D4752269E1B62A6358E0901142832E21980DF。
+- 构建日志：target/image-browser-layout-release-build.log。固定底栏布局待实际界面验证，未更新 GitHub Release。
+
+## 缩略图选中与路径提示本地构建（2026-10-22，未发布）
+
+- 用户明确授权编译；检查程序未运行、目标 EXE 可独占访问后，cargo build --release --locked --offline 成功（35.42 秒，8 项工程警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25355264 字节；SHA-256：CAE58B8C3AB7B8CA5853F763AE4645162374C7FE20EAB64F9CC007222D2CC64A。
+- 日志：target/image-browser-selection-release-build.log。含缩略图下移、圆形导航、蓝色选中线框和路径悬停提示；实际界面待确认，未更新 GitHub Release。
+
+## 图片浏览细调与缩放菜单本地构建（2026-10-22，未发布）
+
+- 用户授权并确认程序未运行、目标 EXE 可独占访问后，cargo build --release --locked --offline 成功（35.19 秒，8 项工程警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25338368 字节；SHA-256：17D990FB3930B16F3CC5636D9101407DA9B08728563660FFC3C6D22C25F57B7C。
+- 日志：target/image-browser-refinements-release-build.log。含比例快捷菜单、多图位置、四方向键、图片边界修复与 2 像素选中框；实际运行待验证，未更新 GitHub Release。
+
+## 设置与菜单对齐本地构建（2026-10-22，未发布）
+
+- 用户授权并确认程序未运行、目标 EXE 可独占访问后，cargo build --release --locked --offline 成功（35.03 秒，8 项工程警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25345536 字节；SHA-256：D504F4FF0E0C2C9AD3C42A6584BD36D6D7310EE38FCBDDE235802C44DFD292A5。
+- 日志：target/image-preview-settings-release-build.log；包含浅色底栏、预览设置更名、默认多图模式开关与菜单宽度对齐，实际运行待验证，未更新 GitHub Release。
+
+## 透明缩略图最终样式本地构建（2026-10-22，未发布）
+
+- 用户明确授权；编译前确认程序未运行且目标 EXE 可独占访问，cargo build --release --locked --offline 成功（39.46 秒，8 项工程警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25442816 字节；SHA-256：657B03776EE1DFF3523C3926880DC4CC85B5D580776BF41462BBDC5E028C2C83。
+- 日志：target/image-browser-checkerboard-release-build.log。包含透明棋盘缩略图、去遮罩和 3 像素蓝色框；实际界面待确认，未更新 GitHub Release。

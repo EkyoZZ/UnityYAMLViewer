@@ -6,6 +6,7 @@ pub(crate) mod nine_slice;
 mod seamless;
 mod sequence;
 mod image_history;
+mod image_browser;
 pub(crate) mod watermark;
 // Re-enable only when watermark improvements or testing are requested.
 const WATERMARK_ENTRY_ENABLED:bool=false;
@@ -166,6 +167,7 @@ impl ImageTab {
 }
 #[derive(Default)]
 pub struct Assets {
+    browser: image_browser::Browser,
     table: crate::delimited_table::Preview,
     playlists: crate::playlist::Lists,
     material_graphs: HashMap<PathBuf, crate::material_graph::Preview>,
@@ -178,6 +180,7 @@ pub struct Assets {
 
 }
 impl Assets {
+    pub fn set_default_image_browse(&mut self,enabled:bool){self.browser.set_default_multiple(enabled);}
     pub fn show_pdf_fullscreen(&mut self,ui:&mut egui::Ui,path:&Path){self.pdfs.entry(path.to_owned()).or_default().show(ui,path);}
     pub fn retry_pdf_components(&mut self){for preview in self.pdfs.values_mut(){preview.retry_component();}}
     pub fn request_media_playback(&mut self, path: &Path) {
@@ -212,7 +215,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path); }
+    pub fn forget(&mut self, path: &Path) { self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -251,6 +254,8 @@ impl Assets {
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
+        let browsed = if is_bitmap(path) { Some(self.browser.show(ui,path)) } else { None };
+        let path = browsed.as_deref().unwrap_or(path);
         self.svgs.retain(|other, _| other == path);
         // Keep decoded pixels and GPU textures only for the active image tab.
         for (other, tab) in &mut self.images {
@@ -363,13 +368,24 @@ impl Assets {
             if ui.button(crate::localization::tr("适应窗口")).clicked() { tab.zoom = None; tab.pan = egui::Vec2::ZERO; }
             ui.label(crate::localization::tr("背景色"));
             tab.background.controls(ui,&mut tab.background_color);
+            self.browser.controls(ui);
         });
+        let browsing=self.browser.is_multiple();
+        let available=ui.available_rect_before_wrap();
+        let strip_height=if browsing {56.0_f32.min(available.height().max(0.0))} else {0.0};
+        if browsing {
+            let strip=egui::Rect::from_min_max(egui::pos2(available.left(),available.bottom()-strip_height),available.max);
+            let mut strip_ui=ui.new_child(egui::UiBuilder::new().id_salt("image_strip").max_rect(strip).layout(egui::Layout::top_down(egui::Align::Min)));
+            strip_ui.set_clip_rect(strip.intersect(ui.clip_rect()));
+            if !ui.visuals().dark_mode {strip_ui.painter().rect_filled(strip,0.0,ui.visuals().panel_fill);}
+            self.browser.strip(&mut strip_ui);
+        }
         let reload=false;
         if reload {tab.original=None;tab.pan=egui::Vec2::ZERO;tab.zoom=None;tab.load(path.to_owned(),ui.ctx().clone());}
         if let Some(error) = &tab.error { ui.label(error); return; }
         let Some(texture) = &tab.texture else { ui.spinner(); return; };
         let size = texture.size_vec2();
-        let (canvas, response) = ui.allocate_exact_size(ui.available_size().max(egui::vec2(1.0,1.0)), egui::Sense::drag());
+        let (canvas, response) = ui.allocate_exact_size(egui::vec2(available.width(),available.height()-strip_height).max(egui::vec2(1.0,1.0)), egui::Sense::drag());
         let mut zoom = tab.zoom.unwrap_or_else(|| {
             ((canvas.width() - 16.0).max(1.0) / size.x).min((canvas.height() - 16.0).max(1.0) / size.y).clamp(0.01,64.0)
         });
@@ -389,6 +405,8 @@ impl Assets {
         }
         let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
         let rect = egui::Rect::from_center_size(canvas.center() + tab.pan, size * zoom);
+        // Align the origin without changing the requested scale or aspect ratio.
+        let rect = rect.translate(rect.min.round_to_pixels(painter.pixels_per_point()) - rect.min);
         let visible = rect.intersect(canvas).intersect(ui.clip_rect());
         if visible.is_positive() {
             if tab.background==ImageBackground::Checkerboard {
@@ -404,7 +422,9 @@ impl Assets {
                         let tile = egui::Rect::from_min_size(origin + egui::vec2(x as f32 * cell, y as f32 * cell), egui::vec2(cell,cell)).intersect(visible);
                         let tile = egui::Rect::from_min_max(
                             tile.min.round_to_pixels(painter.pixels_per_point()),
-                            tile.max.round_to_pixels(painter.pixels_per_point()));
+                            tile.max.round_to_pixels(painter.pixels_per_point())).intersect(visible);
+                        // Rounding a clipped tile must never expose background outside the image.
+                        if !tile.is_positive() {continue;}
                         background.add_colored_rect(tile, Color32::from_gray(if (x+y)%2==0 { 190 } else { 230 }));
                     }
                 }
@@ -418,11 +438,20 @@ impl Assets {
             painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0,1.0)), Color32::WHITE);
         }
         let info = format!("{} × {} · {} {:.0}%", size.x as usize, size.y as usize, tab.channel.label(), zoom * 100.0);
+        let info = if browsing {
+            self.browser.position(path).map_or_else(||info.clone(),|(index,total)|format!("{index}/{total} · {info}"))
+        } else {info};
         let galley = painter.layout_no_wrap(info, egui::FontId::proportional(13.0), Color32::WHITE);
         let badge_size = galley.size() + egui::vec2(24.0,12.0);
         let badge = egui::Rect::from_center_size(egui::pos2(canvas.center().x, canvas.bottom() - 8.0 - badge_size.y * 0.5), badge_size);
         painter.rect_filled(badge, 6.0, Color32::from_black_alpha(128));
         painter.galley(badge.min + egui::vec2(12.0,6.0), galley, Color32::WHITE);
+        if let Some(value)=crate::theme::zoom_preset_menu(ui,badge,zoom,badge.right()-12.0){tab.zoom=Some(value);tab.pan=egui::Vec2::ZERO;}
+        if browsing {
+            let left=egui::Rect::from_center_size(egui::pos2(badge.left()-12.0-badge.height()*0.5,badge.center().y),egui::Vec2::splat(badge.height()));
+            let right=egui::Rect::from_center_size(egui::pos2(badge.right()+12.0+badge.height()*0.5,badge.center().y),egui::Vec2::splat(badge.height()));
+            self.browser.navigate(ui,left,right);
+        }
     }
 }
 

@@ -60,9 +60,9 @@ use script_properties::ScriptProperties;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool, auto_open_preview: bool, hierarchy_depth: String }
+struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool, auto_open_preview: bool, default_image_browse: bool, hierarchy_depth: String }
 impl Default for AppSettings {
-    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true, auto_open_preview: true, hierarchy_depth: "3".into() } }
+    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true, auto_open_preview: true, default_image_browse: true, hierarchy_depth: "3".into() } }
 }
 impl AppSettings {
     fn load() -> Self {
@@ -70,6 +70,9 @@ impl AppSettings {
         if let Some(path) = last_open_dir_config_path() {
             if let Ok(value) = fs::read_to_string(path.with_file_name("hierarchy_depth.txt")) {
                 if matches!(value.trim(), "1" | "2" | "3" | "all") {settings.hierarchy_depth = value.trim().into();}
+            }
+            if let Ok(value) = fs::read_to_string(path.with_file_name("default_image_browse.txt")) {
+                settings.default_image_browse = value.trim() != "false";
             }
             if let Ok(value) = fs::read_to_string(path.with_file_name("auto_open_preview.txt")) {
                 settings.auto_open_preview = value.trim() != "false";
@@ -92,6 +95,10 @@ impl AppSettings {
         settings
     }
     fn persist(&self) {
+        if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("default_image_browse.txt")) {
+            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            let _ = fs::write(path, self.default_image_browse.to_string());
+        }
         if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("hierarchy_depth.txt")) {
             if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
             let _ = fs::write(path, self.hierarchy_depth.as_bytes());
@@ -1364,6 +1371,7 @@ impl eframe::App for ViewerApp {
         native_window::track_file_drop(ctx, _frame);
         audio_edit::set_undo_limit(self.settings.undo_steps);
         asset_viewer::set_image_undo_limit(self.settings.undo_steps);
+        self.assets.set_default_image_browse(self.settings.default_image_browse);
         media_preview::show_trim_windows(ctx);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
@@ -2383,11 +2391,20 @@ impl eframe::App for ViewerApp {
                     settings_control(ui, |ui| theme::hierarchy_depth_selector(ui, &mut self.settings.hierarchy_depth));
                     if previous_depth != self.settings.hierarchy_depth {self.settings.persist();}
                     ui.end_row();
-                    settings_label(ui, localization::tr("预览"));
+                    settings_label(ui, localization::tr("Unity 资产预览"));
                     settings_group(ui, "preview_toggle_settings_group", |ui| {
                         ui.set_width(208.0);
                         if theme::toggle_switch(ui, localization::tr("可预览默认展开"), &mut self.settings.auto_open_preview).changed() {
                             self.settings.persist();
+                        }
+                    });
+                    ui.end_row();
+                    settings_label(ui, localization::tr("图片预览"));
+                    settings_group(ui, "image_preview_settings_group", |ui| {
+                        ui.set_width(208.0);
+                        if theme::toggle_switch(ui, localization::tr("默认多图浏览模式"), &mut self.settings.default_image_browse).changed() {
+                            self.settings.persist();
+                            self.assets.set_default_image_browse(self.settings.default_image_browse);
                         }
                     });
                     ui.end_row();
@@ -2498,6 +2515,11 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.7").strong());
+                        ui.label(localization::tr("• 多图浏览透明缩略图显示棋盘背景，所有图片正常亮度，当前项使用 3 像素蓝色线框"));
+                        ui.label(localization::tr("• 设置新增图片默认多图浏览开关，原预览设置更名为 Unity 资产预览"));
+                        ui.label(localization::tr("• 修复图片背景像素取整越界，减少窗口缩放时不透明图片边缘露出的细线"));
+                        ui.label(localization::tr("• 悬浮缩放比例可点击，向上展开半透明常用比例菜单（10%～300%）"));
+                        ui.label(localization::tr("• 图片支持单图／多图切换，固定底部缩略图栏，悬浮信息显示当前位置／总数，同目录浏览不递归子目录"));
                         ui.label(localization::tr("• 新增序列工具：按行列拆分图片，多图排序合并并导出 PNG"));
                         ui.label(localization::tr("• 拆分可独立忽略上、下、左、右补边，预览与导出一致，智能识别仅建议右下透明余数"));
                         ui.label(localization::tr("• 拆分可跳过透明空帧，单帧播放、PNG 和 GIF／视频输出一致，编号连续"));

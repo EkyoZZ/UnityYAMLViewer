@@ -441,6 +441,8 @@ impl Preview {
         });
         painter.rect_filled(badge,6.0,Color32::from_black_alpha(128));
         painter.galley(badge.min+egui::vec2(12.0,6.0),zoom_galley,Color32::WHITE);
+        let zoom_button=egui::Rect::from_min_max(badge.min,egui::pos2(badge.right()-34.0,badge.bottom()));
+        if let Some(value)=crate::theme::zoom_preset_menu(ui,zoom_button,self.zoom,badge.right()-38.0){self.zoom=value;self.pan=egui::Vec2::ZERO;}
         let enabled=self.dynamic && !self.animations.is_empty();
         let play_rect=egui::Rect::from_center_size(egui::pos2(badge.right()-20.0,badge.center().y),egui::vec2(24.0,badge.height()));
         let button=ui.interact(play_rect,ui.make_persistent_id("spine_playback_button"),if enabled {egui::Sense::click()} else {egui::Sense::hover()}).on_hover_text(if self.playing {"暂停"} else {"播放"});

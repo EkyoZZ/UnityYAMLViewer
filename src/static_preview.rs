@@ -502,12 +502,13 @@ fn preview_actions_ready(ui:&egui::Ui,complete:bool,paused:bool)->bool {
     });
     !complete && (paused || now-started>=5.0)
 }
-fn paint_zoom_badge(painter:&egui::Painter,rect:egui::Rect,zoom:f64) {
+fn paint_zoom_badge(ui:&mut egui::Ui,painter:&egui::Painter,rect:egui::Rect,zoom:f64)->Option<f32> {
     let galley=painter.layout_no_wrap(format!("{} {:.0}%",tr("缩放"),zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE);
     let size=galley.size()+egui::vec2(24.0,12.0);
     let badge=egui::Rect::from_center_size(egui::pos2(rect.center().x,rect.bottom()-8.0-size.y*0.5),size);
     painter.rect_filled(badge,6.0,Color32::from_black_alpha(128));
     painter.galley(badge.min+egui::vec2(12.0,6.0),galley,Color32::WHITE);
+    crate::theme::zoom_preset_menu(ui,badge,zoom as f32,badge.right()-12.0)
 }
 fn paint_background(painter:&egui::Painter,rect:egui::Rect,background:&str,rgb:[u8;3]) {
     painter.add(background_shape(rect,background,rgb));
@@ -1056,7 +1057,7 @@ impl Preview {
         for text in texts.iter().filter(|text|highlighted(&text.component)) {
             painter.add(egui::Shape::closed_line(ui_rect_points(text.layout).map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));
         }
-        paint_zoom_badge(&painter,rect,self.zoom as f64);
+        if let Some(value)=paint_zoom_badge(ui,&painter,rect,self.zoom as f64){self.zoom=value;}
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
         picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())))
     }

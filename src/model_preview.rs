@@ -243,6 +243,7 @@ impl Preview {
         let badge=egui::Rect::from_center_size(egui::pos2(rect.center().x,rect.bottom()-8.0-badge_size.y*0.5),badge_size);
         painter.rect_filled(badge,6.0,Color32::from_black_alpha(128));
         painter.galley(badge.min+egui::vec2(12.0,6.0),galley,Color32::WHITE);
+        if let Some(value)=crate::theme::zoom_preset_menu(ui,badge,self.zoom,badge.right()-12.0){self.zoom=value;self.pan=egui::Vec2::ZERO;self.dirty=true;}
         reload
     }
 }

@@ -245,7 +245,7 @@ impl World {
                 painter.rect_stroke(egui::Rect::from_two_pos(screen(area[0],area[1]),screen(area[2],area[3])),0.0,egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235)),egui::StrokeKind::Inside);
             }
         }
-        super::paint_zoom_badge(&painter,rect,self.view.zoom);
+        if let Some(value)=super::paint_zoom_badge(ui,&painter,rect,self.view.zoom){self.view.zoom=value as f64;}
         if self.frame.is_some() {
             if live_frame {self.fps.sample(ui.input(|i|i.time));}else{self.fps.start=None;self.fps.frames=0;}
             let text=if live_frame {format!("FPS: {:.0}",self.fps.value)}else{"FPS: —".into()};

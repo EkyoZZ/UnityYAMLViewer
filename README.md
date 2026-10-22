@@ -16,6 +16,8 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **属性编辑**：编辑已识别的属性，支持校验、保存和撤销。
 - **材质与 Shader**：节点、2D / 3D 及部分 Shader 单步预览。
 - **场景与动画**：场景、模型、动画、Spine 和部分粒子效果预览。
+- **缩放快捷菜单**：点击图片、SVG、PDF、模型、Spine 及静态预览的悬浮比例，向上展开常用比例（10%～300%），菜单与信息条使用相同半透明背景。
+- **目录图片浏览**：单图查看／多图浏览 Tab 切换，设置中可选择默认模式（默认开启多图浏览），底部固定缩略图栏（与预览分区、透明缩略图棋盘背景、当前项线框、悬停显示完整路径、主图信息显示当前序号／总数）、前后按钮和四个方向键（左／上切上一张，右／下切下一张）；仅扫描当前目录的 PNG／JPEG／TGA／BMP／WebP，不递归子目录，不包含 GIF／SVG。
 - **Unity 图片工具**：清晰缩放与通道预览、统一背景、九宫格精简和 Sprite Border 同步；支持序列拆分与合成、去底色、跳过空帧及 GIF／视频／PNG 序列导出。
 
 **附加工具**
@@ -63,6 +65,8 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Property editing**: Edit recognized properties with validation, saving and undo.
 - **Materials and shaders**: Node views, 2D / 3D previews and step previews for supported shaders.
 - **Scenes and animation**: Preview scenes, models, animation, Spine and supported particle effects.
+- **Zoom presets**: Click floating zoom indicators in image, SVG, PDF, model, Spine and static previews to open an upward preset menu (10%–300%) with the same translucent background as the indicator.
+- **Folder image browsing**: Single-image / browse tabs with a saved default mode (folder browsing enabled by default), fixed bottom thumbnails separate from the preview, checkerboards behind transparent thumbnails, an outline on the current image, full paths on hover, current position / total in the preview badge, previous / next buttons and arrow keys (Left / Up for previous, Right / Down for next); scans PNG / JPEG / TGA / BMP / WebP in the current folder only, without subfolders or GIF / SVG.
 - **Unity image tools**: Sharp scaling, channel previews, shared backgrounds, nine-slice compaction and Sprite Border updates; split and combine image sequences, remove flat backgrounds, skip empty frames and export GIF, video or PNG sequences.
 
 **Additional tools**
