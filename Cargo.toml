@@ -1,6 +1,6 @@
 [package]
 name = "unity_yaml_viewer"
-version = "1.2.6"
+version = "1.2.7"
 edition = "2024"
 
 [dependencies]

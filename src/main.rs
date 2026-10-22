@@ -2497,55 +2497,23 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
-                        ui.label(RichText::new("1.2.6").strong());
-                        ui.label(localization::tr("• 去水印入口暂时关闭，保留实现供后续完善或测试；序列去底色继续可用"));
-                        ui.label(localization::tr("• 拆分补边输入精简为“忽略补边：上、下、左、右”，短标签与输入成组排列"));
-                        ui.label(localization::tr("• 音视频和 GIF 导出允许覆盖同名文件，编码成功后再替换，失败保留已有文件"));
+                        ui.label(RichText::new("1.2.7").strong());
+                        ui.label(localization::tr("• 新增序列工具：按行列拆分图片，多图排序合并并导出 PNG"));
+                        ui.label(localization::tr("• 拆分可独立忽略上、下、左、右补边，预览与导出一致，智能识别仅建议右下透明余数"));
+                        ui.label(localization::tr("• 拆分可跳过透明空帧，单帧播放、PNG 和 GIF／视频输出一致，编号连续"));
+                        ui.label(localization::tr("• 制作与拆分均支持取色去底、容差遮罩、柔化与去色边，预览和 PNG／GIF／视频源一致"));
+                        ui.label(localization::tr("• 制作和拆分序列支持撤销／重做及 Ctrl+Z／Ctrl+Y"));
+                        ui.label(localization::tr("• 序列转 GIF／视频直接用缓存 PNG 显示首帧、逐帧定位和播放，透明预览显示棋盘背景"));
+                        ui.label(localization::tr("• GIF 复用视频编辑转视频，GIF 与视频均可按选区、裁剪、缩放和帧率导出 PNG 序列"));
                         ui.label(localization::tr("• GIF 导出默认使用 Bicubic 缩放与 Sierra2 4A 抖动，可手动切换其他算法"));
                         ui.label(localization::tr("• 视频选区预览终点按排除边界处理，播放与跳到终点停留在保留片段最后一帧"));
-                        ui.label(localization::tr("• 拆分可跳过透明空帧，单帧播放、PNG 和 GIF／视频输出一致，编号连续"));
-                        ui.label(localization::tr("• 四方连续图固定三列预览标题栏高度，最小循环单元与连续平铺图片顶部对齐"));
-                        ui.label(localization::tr("• 序列转 GIF／视频直接用缓存 PNG 显示首帧、逐帧定位和播放，透明预览显示棋盘背景"));
-                        ui.label(localization::tr("• 制作和拆分序列支持撤销／重做及 Ctrl+Z／Ctrl+Y"));
-                        ui.label(localization::tr("• 吸底色显示操作指引、取色光标与候选色值，支持 Esc 取消，点击色块打开调色板"));
-                        ui.label(localization::tr("• 制作与拆分均支持取色去底、容差遮罩、柔化与去色边，预览和 PNG／GIF／视频源一致"));
-                        ui.label(localization::tr("• GIF 复用视频编辑转视频，GIF 与视频均可按选区、裁剪、缩放和帧率导出 PNG 序列"));
-                        ui.label(localization::tr("• 视频可导出 GIF，支持缩放滤波器、抖动、可选减色、自定义帧率与循环次数（0 为永远）"));
+                        ui.label(localization::tr("• 音视频和 GIF 导出允许覆盖同名文件，编码成功后再替换，失败保留已有文件"));
                         ui.label(localization::tr("• 第三方支持可分别指定 FFmpeg、FFprobe 和 PDFium 路径，优先使用并保存，无需修改 PATH"));
                         ui.label(localization::tr("• R/G/B 通道后新增默认关闭的应用 Alpha 开关，可查看通道值乘透明度的灰度"));
-                        ui.label(localization::tr("• 连续图另存为按钮高度调整为 32 像素"));
-                        ui.label(localization::tr("• 新增序列工具：按行列拆分图片，多图排序合并并导出 PNG"));
-                        ui.label(localization::tr("• 序列采用左右布局、主题 Tab 与顶部导出，支持分格和单帧预览"));
-                        ui.label(localization::tr("• 格子预览标题旁新增适应窗口按钮，替代双击恢复操作"));
-                        ui.label(localization::tr("• 序列整图与单帧共用顶部背景设置，支持棋盘格、灰色和自定义颜色"));
-                        ui.label(localization::tr("• 单帧预览移至设置下方，按实际帧比例显示并支持上一帧 / 下一帧"));
-                        ui.label(localization::tr("• 单帧预览新增播放与循环开关、可调帧率，并同步列表与格子选择"));
-                        ui.label(localization::tr("• 修复单帧播放栏占满剩余高度产生的上下留白，保持控件居中与紧凑排列"));
-                        ui.label(localization::tr("• 序列窗口改为左侧预览、右侧设置，保留右上方导出"));
-                        ui.label(localization::tr("• 序列拆分与合成导出统一为与主题 Tab 等高的绿色按钮"));
-                        ui.label(localization::tr("• 序列拆分和合成导出完成后弹窗通知并显示保存位置"));
-                        ui.label(localization::tr("• 序列拆分新增透明间隔智能行列识别，可预览后手动调整"));
-                        ui.label(localization::tr("• 有有效 Multiple meta 时默认按实际切片拆分，无信息时隐藏入口，可切换智能网格识别"));
-                        ui.label(localization::tr("• meta 拆分与智能识别按钮同一行显示，切片数量保留在下方"));
-                        ui.label(localization::tr("• 识别和导出状态移入右侧设置区，避免点击后顶部出现整行空白"));
-                        ui.label(localization::tr("• 改进行列识别：容忍边界光晕和间隔偏移，按局部强度识别渐隐动画行"));
-                        ui.label(localization::tr("• 拆分行列与尺寸摘要移到智能识别下方，先分格再设置补齐与命名"));
-                        ui.label(localization::tr("• 拆分摘要显示单格尺寸，非均分显示范围，可查看补齐后的尺寸"));
-                        ui.label(localization::tr("• 拆分可独立忽略上、下、左、右补边，预览与导出一致，智能识别仅建议右下透明余数"));
-                        ui.label(localization::tr("• 拆分可选将每帧居中透明补齐至宽高 4 的倍数，保留原像素"));
-                        ui.label(localization::tr("• 拆分支持前缀、分隔符、编号位数和起始值，非法文件名实时红字提示"));
-                        ui.label(localization::tr("• 拆分前缀与分隔符输入框随设置区宽度伸展至右边缘"));
-                        ui.label(localization::tr("• 制作默认加入当前图片，矩形优先与无空格排列可切换，列表与单帧双向选中并显示文件名"));
-                        ui.label(localization::tr("• 制作手动行列联动，修改任一项时自动补足另一项以容纳全部图片"));
-                        ui.label(localization::tr("• 排列候选移至自动排列下方，模式 Tab 保持复选框后同一行"));
-                        ui.label(localization::tr("• 制作尺寸改称单图宽高，单帧文件名旁显示相对原图的缩放比例"));
-                        ui.label(localization::tr("• 制作首次载入使用当前图片原始宽高与 100% 比例，后续保留手动尺寸"));
-                        ui.label(localization::tr("• 制作可同时导出 Unity tpsheet，记录实际图片矩形、名称与中心 Pivot"));
-                        ui.label(localization::tr("• 共同最小尺寸裁剪后支持缩放，单图宽高与比例双向联动"));
-                        ui.label(localization::tr("• 制作序列支持拖入多张本地图片追加列表，自动更新排列和预览"));
-                        ui.label(localization::tr("• 制作支持自动加入同目录同命名序列图片，跳过已有文件并按自然升序排列"));
-                        ui.label(localization::tr("• 序列窗口拖入有效图片时自动切换制作模式并追加列表"));
-                        ui.label(localization::tr("• 制作图片统一居中于最终格子，tpsheet 同步实际坐标，单帧信息合并显示"));
+                        ui.label(localization::tr("• 四方连续图固定三列预览标题栏高度，最小循环单元与连续平铺图片顶部对齐"));
+                        ui.label(localization::tr("• 去水印入口暂时关闭，保留实现供后续完善或测试；序列去底色继续可用"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.2.6").strong());
                         ui.label(localization::tr("• 修复图片与连续图放大模糊、预览比例，高倍棋盘格对齐像素"));
                         ui.label(localization::tr("• 各类预览共用并记住背景设置，自定义颜色默认为黑色"));
                         ui.label(localization::tr("• 连续图和九宫格另存支持覆盖；同名 meta 额外确认并保留"));
@@ -2553,16 +2521,16 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 字幕样式可搜索系统字体；透明 GIF 与视频显示棋盘底图"));
                         ui.label(localization::tr("• 统一主题 Tab 与工具栏布局，最近记录滚动且清空固定底部"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.5").strong());
                         ui.label(localization::tr("• 新增四方连续图：最小循环提取、多图案错位制作与 PNG 导出"));
                         ui.label(localization::tr("• 图案支持实时拖动、缩放预览、间距与循环尺寸调整"));
                         ui.label(localization::tr("• 优化九宫格 4 对齐、完整周期与 Border，修复材质预览控件缩放"));
                         ui.label(localization::tr("• 弹窗先居中再修正屏幕越界；启动自动检查更新每 24 小时最多一次"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.2.4").strong());
                         ui.label(localization::tr("• 播放列表菜单可退出编辑，保存成功后自动退出编辑"));
                         ui.label(localization::tr("• CSV / TSV / PSV 支持单元格编辑栏、撤销、检查与查找"));

@@ -2716,3 +2716,21 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 包含单样本本地相似水印查找/一键修补、去水印背景 Tab 左上角布局、四方连续图预览顶部对齐、拆分跳过透明空帧、视频选区终点预览排除边界、GIF 默认 Bicubic＋Sierra2 4A，以及音视频/GIF 同名文件编码成功后替换。
 - 此前编译检查通过；本轮未执行 Rust 测试或启动 GUI。实际匹配/修补效果、空帧播放导出、选区末帧停留、文件覆盖与失败保护、窗口布局、七语言及关于历史折叠待运行验证。
 - 仅本地构建，未提交/推送，未修改现有 Release、标签或附件。
+## 紧凑补边标签与隐藏去水印入口本地构建（2026-10-22）
+
+- 用户明确授权编译；构建前未发现程序进程，目标 EXE 可独占访问。
+- `cargo build --release --locked --offline` 成功（37.49 秒，8 项既有应用警告）；日志 `target/compact-padding-hidden-watermark-release-build.log`。
+- 产物：`target/release/unity_yaml_viewer.exe`，版本仍为 1.2.6；大小 25338880 字节；SHA-256：`AAE68E92E45B789E7CD5E6532AA547A6181227DF7A43610B5130C1543343FB2B`。
+- 包含拆分“忽略补边：上/下/左/右”紧凑分组输入，以及按用户要求隐藏图片去水印入口；去水印实现保留，序列去底色继续可用。
+- 本轮未启动 GUI 或执行 Rust 测试；实际标签布局、入口隐藏、序列去底色、七语言和关于历史折叠待运行验证。
+- 仅本地构建，未提交/推送，未修改现有 Release、标签或附件。
+
+## 1.2.7 发布准备（2026-10-22）
+
+- 用户明确授权升级为 1.2.7 并重新编译，确认本版增量新增与优化已经验证无问题；去水印入口继续隐藏。
+- 已将 v1.2.6 发布之后的开发内容迁入 docs/versions/1.2.7.md 和 archive/1.2.7-development-history.md；恢复 1.2.6 已发布范围并保留发布证据，准备 docs/releases/1.2.7.md，更新版本索引及 CHANGELOG。
+- Cargo.toml／Cargo.lock／EXE 均为 1.2.7；关于默认 1.2.7 与 1.2.6，其他版本折叠，保留旧摘要及七语言。1345 条七语言、版本顺序、重开重置与 diff 静态检查通过；本轮未启动 GUI 或重新执行自动测试。
+- 编译前确认程序未运行且原目标 EXE 可独占访问；cargo build --release --locked --offline 成功，37.54 秒，8 项既有应用警告。日志 target/v1.2.7-release-build.log。
+- 原始产物 target/release/unity_yaml_viewer.exe；发布候选 target/releases/v1.2.7/UnityYAMLViewer-v1.2.7-windows-x64.exe；25283584 字节；SHA-256：B5C1C2F5157BE23553BCAA1AFCB17FFF8F988D926CE6DB02A881415349A16D48。校验文件同目录 SHA256SUMS.txt。
+- 构建来源：HEAD 95355a69352a66c9671515689ec6821f90bfccc8 加本轮未提交版本／关于改动；完整构建输入摘要 target/v1.2.7-build-manifest.json。用户提交后、发布前核对输入摘要，若源码改变则重新编译。
+- 用户自行提交 Git，等待其提交后另行明确通知才发布 GitHub；本轮未提交、推送、打标签、创建 Release 或上传附件。发布标题仅 v1.2.7。
