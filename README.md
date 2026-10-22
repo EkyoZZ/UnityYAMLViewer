@@ -16,14 +16,12 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **属性编辑**：编辑已识别的属性，支持校验、保存和撤销。
 - **材质与 Shader**：节点、2D / 3D 及部分 Shader 单步预览。
 - **场景与动画**：场景、模型、动画、Spine 和部分粒子效果预览。
-- **Unity 图片工具**：像素清晰缩放、统一背景设置、R/G/B 单通道可选应用 Alpha、九宫格无损精简和 Sprite Border 同步，支持命令行批处理；序列工具支持按行列拆分图片及多图拖入、同组自动加入与自然排序合并为 PNG，支持优先按 Multiple meta 实际切片拆分、独立忽略拆分图上／下／左／右补边、拆分帧居中透明补齐至 4 的倍数、可选跳过去底后完全透明空帧（播放与 PNG／GIF／视频一致，连续编号，缩短动画时长）、自定义拆分命名与非法字符检查、按透明间隔识别拆分行列、可缩放平移的分格与单帧播放预览（帧率／循环可调）、矩形优先／无空格自动排列、共同最小尺寸裁剪、单图区域居中及可选图片边框、水平／垂直间隔、可选 Unity tpsheet 同步导出（需 TexturePacker Importer）、整图宽高 4 对齐；制作与拆分均支持吸取纯色背景、容差与遮罩预览、吸色光标与候选色值（单击选色、Esc 取消，色块可打开调色板）、边缘柔化和去底色污染，可能移除同色主体；拆分帧和制作列表可按预览帧率转入视频编辑（缓存 PNG 首帧即显、逐帧定位与播放，透明区域使用棋盘背景），导出 GIF／视频／PNG 序列，普通视频编码使用可选颜色的底色，GIF／PNG 可保留透明（GIF 不保留半透明）。
-
-- **序列操作历史**：制作／拆分支持图片拖入、自动加入、删除、排序及参数修改的撤销／重做（Ctrl+Z／Ctrl+Y）；不撤回已保存文件。
+- **Unity 图片工具**：清晰缩放与通道预览、统一背景、九宫格精简和 Sprite Border 同步；支持序列拆分与合成、去底色、跳过空帧及 GIF／视频／PNG 序列导出。
 
 **附加工具**
 
 - **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
-- **音视频工具**：播放、剪切、裁剪、转码、多音轨与字幕，支持媒体详情查看和字幕字体选择；视频预览按选区播放，终点显示保留片段最后一帧；音视频／GIF 导出在保存确认后支持覆盖同名文件，先编码成功再替换；GIF 导出沿用时长裁剪、画面裁剪与缩放，可选缩放滤波器、抖动（默认 Bicubic＋Sierra2 4A）、颜色压缩、1–100 FPS 和循环次数（0 为永远），不含音频与字幕；GIF 可沿用视频编辑转视频，GIF 与视频均可按选区、裁剪、缩放和帧率导出连续编号 PNG 到新文件夹（图片不记录播放时长）。
+- **音视频工具**：播放、剪切、裁剪、缩放与转码，支持多音轨、字幕、媒体详情及 GIF／视频／PNG 序列导出。
 - **文本表格**：CSV / TSV / PSV 查看、单元格编辑、类型检查与查找。
 - **文件预览**：PDF 只读预览，以及 SVG、GIF 和常见文本文件查看。
 - **日常操作**：多文件页签、最近记录、文件定位、深浅主题、七种语言、在线更新与第三方组件管理。
@@ -65,14 +63,12 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Property editing**: Edit recognized properties with validation, saving and undo.
 - **Materials and shaders**: Node views, 2D / 3D previews and step previews for supported shaders.
 - **Scenes and animation**: Preview scenes, models, animation, Spine and supported particle effects.
-- **Unity image tools**: Pixel-sharp scaling, shared preview backgrounds, optional Alpha application for individual R/G/B channels, lossless nine-slice compaction and Sprite Border updates, with batch CLI support; sequence tools split images into grids and accept dropped or automatically matched numbered images and combine naturally sorted images into PNG sheets, with exact Multiple-meta slicing by default, independent top/bottom/left/right padding exclusion and transparent centering of split frames to dimensions divisible by 4, optional skipping of fully transparent frames after background removal (matching playback and PNG/GIF/video export, consecutive numbering and shorter duration), custom split naming and filename validation, grid detection from transparent gaps, zoomable, pannable grid and animated frame previews with adjustable frame rate and looping, compact-rectangle or exact-grid automatic layouts, common minimum cropping, centered image areas with optional image bounds, horizontal/vertical spacing, optional Unity tpsheet export (requires TexturePacker Importer) and dimensions divisible by 4; composition and splitting support flat-background picking, tolerance/mask previews, a picking cursor and candidate color values (click to pick, Esc to cancel, swatch opens the palette), edge softness and color decontamination (matching subject colors may be removed). Split frames and composition lists enter video editing at the preview frame rate (cached PNG first-frame display, frame seeking and playback, with checkerboard transparency) for GIF/video/PNG sequence export. Current video codecs use a chosen background color; GIF/PNG may retain transparency (GIF has no partial alpha).
-
-- **Sequence history**: Undo/redo image drops, automatic additions, removals, ordering and settings in composition/splitting (Ctrl+Z/Ctrl+Y); previously saved files remain.
+- **Unity image tools**: Sharp scaling, channel previews, shared backgrounds, nine-slice compaction and Sprite Border updates; split and combine image sequences, remove flat backgrounds, skip empty frames and export GIF, video or PNG sequences.
 
 **Additional tools**
 
 - **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
-- **Audio and video**: Playback, trimming, cropping, transcoding, multiple tracks and subtitles, with media details and subtitle font selection; video previews play the selected range and hold its last retained frame at the end; audio/video and GIF exports can replace existing files after save confirmation, encoding successfully before replacement; GIF export reuses time trimming, cropping and scaling, with scaling filters and dithering (default Bicubic + Sierra2 4A), optional color reduction, 1–100 FPS and loop count (0 = forever), without audio or subtitles; GIF can be converted to video in the same editor, and both GIF and video export numbered PNG frames to a new folder using the selected time range, crop, scale and frame rate (images contain no playback timing).
+- **Audio and video**: Playback, trimming, cropping, scaling and transcoding, with multiple audio tracks, subtitles, media details and GIF, video or PNG sequence export.
 - **Text tables**: View and edit CSV / TSV / PSV cells, check types and search.
 - **File previews**: Read-only PDFs, SVGs, GIFs and common text files.
 - **Everyday tools**: File tabs, recent files, file locations, light / dark themes, seven languages, updates and third-party component management.

@@ -2734,3 +2734,11 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 原始产物 target/release/unity_yaml_viewer.exe；发布候选 target/releases/v1.2.7/UnityYAMLViewer-v1.2.7-windows-x64.exe；25283584 字节；SHA-256：B5C1C2F5157BE23553BCAA1AFCB17FFF8F988D926CE6DB02A881415349A16D48。校验文件同目录 SHA256SUMS.txt。
 - 构建来源：HEAD 95355a69352a66c9671515689ec6821f90bfccc8 加本轮未提交版本／关于改动；完整构建输入摘要 target/v1.2.7-build-manifest.json。用户提交后、发布前核对输入摘要，若源码改变则重新编译。
 - 用户自行提交 Git，等待其提交后另行明确通知才发布 GitHub；本轮未提交、推送、打标签、创建 Release 或上传附件。发布标题仅 v1.2.7。
+
+
+## 1.2.7 GitHub 正式发布（2026-10-22）
+
+- 用户在提交后明确授权发布；目标提交 `17a51c6c9e249780361e649c8cc73b0dcbd27cff`，与远端 master 一致，构建输入及发布附件校验全部匹配。
+- 北京时间 2026-10-22 14:58:04 正式发布 https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.7；Release ID 420396003，标题 v1.2.7，非草稿／非预发布，latest 已核验。
+- 附件 UnityYAMLViewer-v1.2.7-windows-x64.exe，25,283,584 字节；GitHub digest 与本地 SHA-256 一致：B5C1C2F5157BE23553BCAA1AFCB17FFF8F988D926CE6DB02A881415349A16D48。先上传验证，再转正式发布，未重新构建、未修改旧版标签或附件。
+- 发布证据 target/v1.2.7-published.json；发布后已更新本地版本记录、索引和发布状态，未自动提交或推送这些文档。
