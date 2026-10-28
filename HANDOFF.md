@@ -2860,3 +2860,11 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 当前产物：target/release/unity_yaml_viewer.exe；文件／产品版本 1.2.8；大小 25616896 字节（24.43 MiB）；SHA-256：7EC561EA90D5B8818FE0AF1EAC49684963F8C72C286CAE694B85193CEE0EE88D。
 - 日志 target/v1.2.8-settings-version-release-build.log；已更新 target/v1.2.8-build-manifest.json 的 165 项输入摘要及产物哈希，后续发布以此最新产物核对，取代此前哈希。
 - 按用户要求，本次显示细节不纳入功能、优化、关于摘要或升级说明。未启动 GUI；等待用户自行提交 Git 后另行通知发布，未创建标签／Release、未上传附件、未自动提交或推送。
+
+## GitHub 正式发布（2026-10-28）
+
+- 用户确认 Git 已提交并明确授权发布。发布前工作区干净，HEAD 与远端 master 一致：08dab4f64802efb75bbad390f7e50c8718e7dd6d；165 项构建输入及文件集合与该提交工作区完全一致，未重新编译。
+- 北京时间 2026-10-28 18:45:39 正式发布；Release ID：426542862，标题仅 v1.2.8，非草稿／非预发布，latest API 核对为本版。地址：https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.8。
+- 附件 UnityYAMLViewer-v1.2.8-windows-x64.exe，25,616,896 字节；GitHub asset.digest 与本地 SHA-256 一致：7EC561EA90D5B8818FE0AF1EAC49684963F8C72C286CAE694B85193CEE0EE88D。
+- 使用已核验的 target/releases/v1.2.8/UnityYAMLViewer-v1.2.8-windows-x64.exe；先创建草稿上传并验证附件，再正式发布为最新版本。发布证据 target/v1.2.8-published.json，构建摘要 target/v1.2.8-build-manifest.json。
+- 未修改历史 Release／标签／附件；发布后仅更新本地版本索引、发布说明与交接状态，未自动提交或推送。这一正式发布状态取代前述构建阶段的未发布／等待提交说明。设置版本号显示小改动仍未纳入新增、优化或升级说明。
