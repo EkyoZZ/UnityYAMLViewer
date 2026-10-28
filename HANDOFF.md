@@ -2778,3 +2778,85 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 用户明确授权；编译前确认程序未运行且目标 EXE 可独占访问，cargo build --release --locked --offline 成功（39.46 秒，8 项工程警告）。
 - 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25442816 字节；SHA-256：657B03776EE1DFF3523C3926880DC4CC85B5D580776BF41462BBDC5E028C2C83。
 - 日志：target/image-browser-checkerboard-release-build.log。包含透明棋盘缩略图、去遮罩和 3 像素蓝色框；实际界面待确认，未更新 GitHub Release。
+
+## 目录树与独立忽略规则本地构建（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表检查未发现程序运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（50.15 秒，8 项应用警告）。
+- 已包含目录拖入、左侧目录树、多根目录、刷新与右键移除、每个根目录独立忽略文件规则，以及移除最后一个根目录后隐藏侧栏。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25532928 字节；SHA-256：9CD6155243F10487FC834A78EAB2010FC950908522F82FE9BD555AB73692C87C。
+- 日志：target/folder-browser-release-build.log。git diff --check 与 1362 条翻译七列完整性、键唯一性检查通过。实际界面与交互仍待运行验证；未发布或上传附件。本条构建状态取代上述本轮未生成可执行程序的阶段性描述。
+
+## 目录浏览交互完善本地构建（2026-10-28，未发布）
+
+- 用户再次明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（40.97 秒，8 项应用警告）。
+- 已包含目录侧栏占用原页签左侧区域、文件名单行与按需加宽、忽略规则灰色示例和白色实际输入、菜单标题与说明消歧义、根目录等文字高度齿轮入口及保留右键菜单、目录树打开不写入或重排最近打开记录。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25508864 字节；SHA-256：49657016477D79EA4FD7BD262BAB31A44E562941E0647A4C5EB520299EB2A43B。
+- 日志：target/folder-browser-final-release-build.log。git diff --check、1371 条七语言列数与键唯一性静态检查通过。实际界面与交互仍待运行验证，本条构建状态取代上述尚未生成 EXE 的阶段性描述；未发布或上传附件。
+
+## 目录浏览性能与布局修正本地构建（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（41.59 秒，8 项应用警告）。
+- 已包含目录标题与页签对齐、滚动区域贴底与纵向滑条靠近分割线、小号齿轮、目录列表及忽略规则跨重启保存、默认宽度与手动调整及超长名称截断、目录预览页签复用和同目录缩略图缓存保留、层级线可见区裁剪与物理像素对齐。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25598464 字节；SHA-256：63748B5FCD70200741D5D5A2A790A54AA2F872DBF8AA3D35239D5B99F8998D90。
+- 日志：target/folder-browser-latest-release-build.log。git diff --check、1376 条七语言列数与键唯一性检查通过。此前回归测试只完成编译检查，未执行；本轮未启动 GUI，不宣称性能与视觉问题已运行验证。本条构建状态取代上述未生成可执行程序的阶段性描述；未发布或上传附件。
+
+## 目录预览固定首位与滚动条修正本地构建（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（52.57 秒，8 项应用警告）。
+- 已包含修改后的目录预览保留普通页签与同类合并、目录预览独立分组且固定首位、页签标题使用实际点击所属根目录名称，以及固定宽度滚动条与分割线命中区域分离。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25598464 字节；SHA-256：6E7980BF2E8DF9D8CA0D8041E9C65C8C43F5D30BF735A477EDECC1F6C40B2D88。
+- 日志：target/folder-preview-pinned-release-build.log。git diff --check、1380 条七语言列数与键唯一性检查通过。回归测试此前仅编译检查，未执行；本轮未启动 GUI，实际修改保护、页签顺序与标题、滚动条边缘闪烁待运行验证。本条构建状态取代上述未生成可执行程序的阶段性描述；未发布或上传附件。
+
+## PSD 只读预览本地构建与体积比较（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（46.42 秒，8 项应用警告）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25574912 字节（24.39 MiB）；SHA-256：311C68B8688D11AA3336C892FD3531260194EABA71EB5ACF771AA81A234AF227。
+- 上一个本地构建为 25,598,464 字节；本次净减少 23,552 字节（23 KiB，约 0.092%）。该数值是前后 EXE 的净体积差，包含 PSD 解码、入口、文案及构建布局影响，不等同于解码模块单独体积。
+- 日志：target/psd-preview-release-build.log。git diff --check、1383 条七语言列数与键唯一性检查通过。真实 PSD 样本及界面仍待运行验证；测试此前仅编译检查未执行。本条取代此前尚未生成可执行程序的阶段性状态，未发布或上传附件。
+
+## ICO 与 PSD 多图浏览本地构建（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（44.42 秒，8 项应用警告）。
+- 已包含 ICO 只读预览、ICO／PSD 加入底部多图列表、统一主图与缩略图解码、缩略图错误提示，以及保留普通位图工具的格式限制。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25545728 字节（24.36 MiB）；SHA-256：E3E8CF203225BEA7773E368A5D5056ECEEBA1BE50EAE450EF8C1FF8CCF2EB8C3。
+- 日志：target/ico-psd-browser-release-build.log。git diff --check、1384 条七语言列数与键唯一性检查通过。回归测试此前仅编译检查未执行；本轮未启动 GUI，实际 ICO 透明度、PSD／ICO 混合目录切图与性能待运行验证。本条取代尚未生成可执行程序的阶段性状态；未发布或上传附件。
+
+## 根目录底色与 Spine 路径修正本地构建（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（35.01 秒，8 项应用警告）。
+- 已包含根目录标题行深浅主题淡底色，以及 Spine 贴图路径分隔符统一，保留 Windows 扩展路径、网络 UNC 与 Unicode 路径支持。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25626112 字节（24.44 MiB）；SHA-256：81E380C95D411646D7C7C7913209561282B3C69114331FFA6709458329892D00。
+- 日志：target/spine-folder-path-release-build.log。git diff --check、1386 条七语言列数与键唯一性检查通过。回归测试此前仅编译检查未执行；原网络目录 Spine 资源、动画及根目录底色实际显示仍待运行验证。本条取代上述尚未生成可执行程序的阶段性状态；未发布或上传附件。
+
+## Spine 预乘 Alpha 与预览默认设置本地构建（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（42.26 秒，8 项应用警告）。
+- 已包含 Spine 默认动态播放、辅助线紧凑排列、普通预览预乘 Alpha 开关（默认开启，位于辅助线后）、材质状态提示移到设置／重载下方并使用普通文本颜色，以及图片默认适应窗口开关（默认开启并持久化，关闭时新图 100%）。
+- 产物：target/release/unity_yaml_viewer.exe；版本 1.2.7；大小：25665024 字节（24.48 MiB）；SHA-256：097BBAE69E3B83030E2AED1BA416A3C998BDD63E43030482C1D164BA5C792E02。
+- 日志：target/spine-pma-settings-release-build.log。git diff --check、1396 条七语言列数与键唯一性检查通过。回归测试此前仅编译检查未执行；本轮未启动 GUI，PMA 边缘效果、材质回退、默认播放、设置持久化及布局仍待运行验证。本条取代上述未生成可执行程序的阶段性状态；未发布或上传附件。
+
+## 1.2.8 版本升级与功能归属整理（2026-10-28）
+
+- 用户确认本轮已有功能与优化均验证通过，并授权升级源码版本至 1.2.8。主要新增为目录浏览模式、多图浏览模式，ICO／PSD 为查看能力补充，Spine、比例菜单、边界与布局等归为优化。
+- Cargo.toml 与 Cargo.lock 同步 1.2.8；本轮未生成 EXE，当前 target/release/unity_yaml_viewer.exe 仍为前一轮 1.2.7 本地产物（25,665,024 字节，SHA-256 097BBAE69E3B83030E2AED1BA416A3C998BDD63E43030482C1D164BA5C792E02）。未发布、未创建标签或上传附件。
+- 已将 docs/versions/1.2.7.md 中正式 Release 之后的开发增量迁入 docs/versions/archive/1.2.8-development-history.md；新建 docs/versions/1.2.8.md 汇总最终能力、限制及用户验证状态，1.2.7 保留正式发布事实及归属更正。
+- 新建 docs/releases/1.2.8.md 发布说明草稿；版本索引与 CHANGELOG 链接同步。README 保持当前能力说明，不新增版本日志或发布流程信息。
+- 关于窗口默认展示 1.2.8 与 1.2.7；1.2.6 及更早移入原有“查看更多历史”，重新打开恢复折叠。1.2.8 六条摘要同步七语言，1.2.7 摘要依据已发布内容保留序列等能力，既有更早历史与翻译保留。
+- 用户验证结论覆盖升级前功能；1.2.8 关于新摘要与版本标识的实际界面仍待后续构建核对，不以源码检查代替运行验证。
+- 本轮 cargo check --tests --locked --offline 通过（14.42 秒，8 项应用警告），日志 target/v1.2.8-version-check.log；1402 条翻译与关于默认两版的 13 条摘要、历史折叠和重开重置静态核对通过，审计 target/v1.2.8-static-audit.json。现有 EXE 的 1.2.7 版本与哈希未变化；未编译 1.2.8、未发布。
+
+## 1.2.8 本地 Release 构建与 README 精简（2026-10-28，未发布）
+
+- 用户明确授权编译；编译前通过进程列表确认程序未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（45.94 秒，8 项应用警告）。
+- 产物：target/release/unity_yaml_viewer.exe；文件／产品版本均为 1.2.8；大小：25616384 字节（24.43 MiB）；SHA-256：11B273899A35B636F57584B472F0CBB432E12A72BB2DE510B289CA3938C121B3。
+- 日志：target/v1.2.8-release-build.log；构建输入摘要：target/v1.2.8-build-manifest.json，覆盖 165 个源码、依赖配置与资源文件，供提交后核对。此前 1.2.7 产物说明为历史记录，本次不沿用旧版本 EXE。
+- README 对照既有按能力条目介绍的结构，将目录浏览、多图浏览各压缩为一句，合并 ICO／PSD 到文件预览；保留简短格式限制、使用及构建说明，中文英文同步，不加入版本日志或内部发布流程。
+- git diff --check、1402 条翻译列数／键唯一性检查通过。用户已确认已有功能验证通过；本轮未启动 GUI 复核新版关于窗口，未宣称执行全部自动测试。
+- 用户自行提交 Git；必须等提交后另行通知发布，再核对提交源码与构建清单。未创建标签、Release 或上传附件，未自动提交或推送。
+
+## 1.2.8 最新本地产物（2026-10-28，未发布）
+
+- 用户授权重新编译；编译前确认程序未运行且目标 EXE 可独占访问。cargo build --release --locked --offline 成功（48.26 秒，8 项应用警告），git diff --check 通过。
+- 当前产物：target/release/unity_yaml_viewer.exe；文件／产品版本 1.2.8；大小 25616896 字节（24.43 MiB）；SHA-256：7EC561EA90D5B8818FE0AF1EAC49684963F8C72C286CAE694B85193CEE0EE88D。
+- 日志 target/v1.2.8-settings-version-release-build.log；已更新 target/v1.2.8-build-manifest.json 的 165 项输入摘要及产物哈希，后续发布以此最新产物核对，取代此前哈希。
+- 按用户要求，本次显示细节不纳入功能、优化、关于摘要或升级说明。未启动 GUI；等待用户自行提交 Git 后另行通知发布，未创建标签／Release、未上传附件、未自动提交或推送。

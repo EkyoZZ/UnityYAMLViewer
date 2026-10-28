@@ -7,6 +7,7 @@ mod seamless;
 mod sequence;
 mod image_history;
 mod image_browser;
+mod psd;
 pub(crate) mod watermark;
 // Re-enable only when watermark improvements or testing are requested.
 const WATERMARK_ENTRY_ENABLED:bool=false;
@@ -39,7 +40,23 @@ pub(crate) fn preview_color([r,g,b,a]: [u8;4]) -> Color32 {
 pub fn is_bitmap(path: &Path) -> bool {
     matches!(extension(path).as_str(), "png" | "jpg" | "jpeg" | "tga" | "bmp" | "webp")
 }
-pub fn is_image(path: &Path) -> bool { is_bitmap(path) || extension(path) == "svg" }
+pub fn is_psd(path: &Path) -> bool { extension(path) == "psd" }
+pub fn is_browsable_image(path: &Path) -> bool { is_bitmap(path) || is_psd(path) || extension(path) == "ico" }
+pub fn is_image(path: &Path) -> bool { is_browsable_image(path) || extension(path) == "svg" }
+
+fn load_preview_pixels(path: &Path) -> Result<image::RgbaImage, String> {
+    if is_psd(path) {
+        return psd::load(path).map_err(|error| format!("{}: {error}", crate::localization::tr("PSD 预览失败")));
+    }
+    let mut reader = image::ImageReader::open(path).map_err(|error| error.to_string())?
+        .with_guessed_format().map_err(|error| error.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(256 * 1024 * 1024);
+    reader.limits(limits);
+    Ok(reader.decode().map_err(|error| error.to_string())?.to_rgba8())
+}
 
 #[cfg(test)]
 mod tests {
@@ -70,6 +87,17 @@ mod tests {
         assert!(is_image(Path::new("texture.JPG")));
         assert!(is_image(Path::new("vector.SVG")));
         assert!(!is_text(Path::new("program.exe")));
+    }
+    #[test]
+    fn psd_and_ico_are_browsable_but_not_editable_bitmaps() {
+        for extension in ["PSD", "ico"] {
+            let path = PathBuf::from(format!("example.{extension}"));
+            assert!(is_image(&path));
+            assert!(is_browsable_image(&path));
+            assert!(!is_bitmap(&path));
+        }
+        assert!(!is_browsable_image(Path::new("example.svg")));
+        assert!(!is_browsable_image(Path::new("example.gif")));
     }
 }
 pub fn is_text(path: &Path) -> bool {
@@ -145,13 +173,7 @@ impl ImageTab {
         std::thread::spawn(move || {
             let result = (|| {
                 let original = if let Some(original) = original { original } else {
-                    let mut reader = image::ImageReader::open(&path).map_err(|e| e.to_string())?
-                        .with_guessed_format().map_err(|e| e.to_string())?;
-                    let mut limits = image::Limits::default();
-                    limits.max_image_width = Some(8192); limits.max_image_height = Some(8192);
-                    limits.max_alloc = Some(256 * 1024 * 1024); reader.limits(limits);
-                    let image = reader.decode().map_err(|e| e.to_string())?.to_rgba8();
-                    Arc::new(image)
+                    Arc::new(load_preview_pixels(&path)?)
                 };
                 let pixels = original.pixels().map(|pixel| {
                     let [r,g,b,a] = channel.preview_pixel(pixel.0,apply_alpha);
@@ -167,6 +189,7 @@ impl ImageTab {
 }
 #[derive(Default)]
 pub struct Assets {
+    default_image_fit: bool,
     browser: image_browser::Browser,
     table: crate::delimited_table::Preview,
     playlists: crate::playlist::Lists,
@@ -180,6 +203,10 @@ pub struct Assets {
 
 }
 impl Assets {
+    pub fn set_default_image_fit(&mut self, enabled: bool) { self.default_image_fit = enabled; }
+    pub fn select_folder_image(&mut self, path: &Path) {
+        if is_browsable_image(path) { self.browser.select_from_folder(path); }
+    }
     pub fn set_default_image_browse(&mut self,enabled:bool){self.browser.set_default_multiple(enabled);}
     pub fn show_pdf_fullscreen(&mut self,ui:&mut egui::Ui,path:&Path){self.pdfs.entry(path.to_owned()).or_default().show(ui,path);}
     pub fn retry_pdf_components(&mut self){for preview in self.pdfs.values_mut(){preview.retry_component();}}
@@ -254,7 +281,7 @@ impl Assets {
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
-        let browsed = if is_bitmap(path) { Some(self.browser.show(ui,path)) } else { None };
+        let browsed = if is_browsable_image(path) { Some(self.browser.show(ui,path)) } else { None };
         let path = browsed.as_deref().unwrap_or(path);
         self.svgs.retain(|other, _| other == path);
         // Keep decoded pixels and GPU textures only for the active image tab.
@@ -267,7 +294,7 @@ impl Assets {
             self.playlists.show_creator(ui,path,preview);
             return;
         }
-        if !is_bitmap(path) && !is_pdf(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
+        if !is_browsable_image(path) && !is_pdf(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
         self.models.retain(|other,_|other==path);
         if crate::model_preview::is_model(path) {
             let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
@@ -317,7 +344,8 @@ impl Assets {
             return;
         }
         let can_open_preview=self.images.values().filter(|t|t.editor.open||t.editor.busy()).count()<10;
-        let tab = self.images.entry(path.to_owned()).or_insert_with(|| ImageTab { zoom: Some(1.0), ..Default::default() });
+        let initial_zoom = if self.default_image_fit { None } else { Some(1.0) };
+        let tab = self.images.entry(path.to_owned()).or_insert_with(|| ImageTab { zoom: initial_zoom, ..Default::default() });
         if let Some(message)=nine_slice::Editor::refresh_message(ui.ctx(),path) {
             tab.original=None;tab.pending=None;tab.texture=None;tab.error=None;
             tab.editor.replaced(message);tab.pan=egui::Vec2::ZERO;tab.zoom=None;
@@ -336,6 +364,7 @@ impl Assets {
         ui.horizontal_wrapped(|ui| {
             file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
             if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
+            if is_bitmap(path) {
             if ui.add_enabled(tab.original.is_some()&&(tab.editor.open||can_open_preview), egui::Button::new(crate::localization::tr("九宫格精简"))).clicked() {
                 tab.editor.open = true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("nine_slice",path)));
@@ -352,7 +381,11 @@ impl Assets {
                 tab.sequence.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("sequence",path)));
             }
+            }
         });
+        if is_psd(path) {
+            ui.small(crate::localization::tr("PSD 合成图只读预览：仅支持 8 位 RGB／灰度、Raw／RLE；不解析图层、不应用 ICC 色彩管理，不提供图片扩展工具。"));
+        }
         ui.horizontal_wrapped(|ui| {
             let previous = tab.channel;
             let previous_alpha=tab.apply_alpha;
@@ -368,9 +401,9 @@ impl Assets {
             if ui.button(crate::localization::tr("适应窗口")).clicked() { tab.zoom = None; tab.pan = egui::Vec2::ZERO; }
             ui.label(crate::localization::tr("背景色"));
             tab.background.controls(ui,&mut tab.background_color);
-            self.browser.controls(ui);
+            if is_browsable_image(path) { self.browser.controls(ui); }
         });
-        let browsing=self.browser.is_multiple();
+        let browsing=is_browsable_image(path) && self.browser.is_multiple();
         let available=ui.available_rect_before_wrap();
         let strip_height=if browsing {56.0_f32.min(available.height().max(0.0))} else {0.0};
         if browsing {

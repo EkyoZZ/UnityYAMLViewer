@@ -56,13 +56,14 @@ mod media_history;
 mod playlist;
 mod app_cache;
 mod release_notes;
+mod folder_browser;
 use script_properties::ScriptProperties;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool, auto_open_preview: bool, default_image_browse: bool, hierarchy_depth: String }
+struct AppSettings { theme: String, language: String, undo_steps: usize, auto_check_updates: bool, auto_open_preview: bool, default_image_browse: bool, default_image_fit: bool, hierarchy_depth: String }
 impl Default for AppSettings {
-    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true, auto_open_preview: true, default_image_browse: true, hierarchy_depth: "3".into() } }
+    fn default() -> Self { Self { theme: "system".into(), language: "zh-CN".into(), undo_steps: editing::DEFAULT_UNDO_LIMIT, auto_check_updates: true, auto_open_preview: true, default_image_browse: true, default_image_fit: true, hierarchy_depth: "3".into() } }
 }
 impl AppSettings {
     fn load() -> Self {
@@ -73,6 +74,9 @@ impl AppSettings {
             }
             if let Ok(value) = fs::read_to_string(path.with_file_name("default_image_browse.txt")) {
                 settings.default_image_browse = value.trim() != "false";
+            }
+            if let Ok(value) = fs::read_to_string(path.with_file_name("default_image_fit.txt")) {
+                settings.default_image_fit = value.trim() != "false";
             }
             if let Ok(value) = fs::read_to_string(path.with_file_name("auto_open_preview.txt")) {
                 settings.auto_open_preview = value.trim() != "false";
@@ -95,6 +99,10 @@ impl AppSettings {
         settings
     }
     fn persist(&self) {
+        if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("default_image_fit.txt")) {
+            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            let _ = fs::write(path, self.default_image_fit.to_string());
+        }
         if let Some(path) = last_open_dir_config_path().map(|p| p.with_file_name("default_image_browse.txt")) {
             if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
             let _ = fs::write(path, self.default_image_browse.to_string());
@@ -177,6 +185,9 @@ struct YamlTable {
 
 #[derive(Default)]
 struct ViewerApp {
+    folder_preview_path: Option<PathBuf>,
+    folder_preview_root: Option<PathBuf>,
+    folder_browser: folder_browser::FolderBrowser,
     command_inbox: Option<command_line::Inbox>,
     path: Option<PathBuf>,
     last_open_dir: Option<PathBuf>,
@@ -240,6 +251,7 @@ struct ViewerApp {
     assets: asset_viewer::Assets,
     recent_files: recent_files::RecentFiles,
     load_queue: std::collections::VecDeque<PathBuf>,
+    load_record_recent: std::collections::HashSet<PathBuf>,
     loading: Option<FileLoad>,
     restore_active: Option<PathBuf>,
     load_selection: HashMap<PathBuf,String>,
@@ -266,6 +278,26 @@ struct ViewerTab {
 }
 
 impl ViewerApp {
+    fn displayed_tab_title(&self, path: &std::path::Path) -> String {
+        let title_path = if self.folder_preview_path.as_deref() == Some(path) {
+            self.folder_preview_root.as_deref().unwrap_or(path)
+        } else { path };
+        title_path.file_name().unwrap_or(title_path.as_os_str()).to_string_lossy().into_owned()
+    }
+    fn displayed_tab_group_key(&self, path: &std::path::Path) -> String {
+        if self.folder_preview_path.as_deref() == Some(path) {
+            "directory-preview".to_owned()
+        } else {
+            tab_group_key(path)
+        }
+    }
+
+    fn preserve_modified_folder_preview(&mut self) {
+        if self.folder_preview_path.as_ref().is_some_and(|path|
+            self.assets.playlist_dirty(path) || self.edits.get(path).is_some_and(|edit| edit.lock().unwrap().has_changes())) {
+            self.folder_preview_path = None;
+        }
+    }
     fn poll_file_load(&mut self, ctx: &egui::Context) {
         if let Some(job)=&self.loading {
             let result=match job.receiver.try_recv() {
@@ -275,6 +307,7 @@ impl ViewerApp {
             };
             if let Some(result)=result {
                 let job=self.loading.take().unwrap();
+                let record_recent = self.load_record_recent.remove(&job.path);
                 if !job.cancelled.load(Ordering::Relaxed) {
                     match result {
                         Ok((text,documents,gbk))=> {
@@ -287,7 +320,8 @@ impl ViewerApp {
                                 self.tabs[index]=tab;index
                             } else {self.tabs.push(tab);self.tabs.len()-1};
                             self.activate_tab(index);
-                            self.show_custom_table=true;self.remember_recent_file();
+                            self.show_custom_table=true;
+                            if record_recent { self.remember_recent_file(); }
                         },
                         Err(error)=>{self.load_selection.remove(&job.path);self.load_reload.remove(&job.path);self.status=crate::lf!("无法读取文件：{0}",error);},
                     }
@@ -619,7 +653,7 @@ impl ViewerApp {
             ],
         ).add_filter("Spine 3.8", &["skel", "bytes", "json", "txt"])
         .add_filter("PDF", &["pdf"])
-        .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp", "svg", "gif"])
+        .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp", "svg", "gif", "psd", "ico"])
         .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
         .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
         .add_filter(crate::localization::tr("播放列表"), &["m3u8", "m3u"])
@@ -650,7 +684,52 @@ impl ViewerApp {
         self.open_file_with_directory_tracking(path, true);
     }
 
+    fn open_folder_file(&mut self, path: PathBuf, root: PathBuf, ctx: &egui::Context) {
+        self.preserve_modified_folder_preview();
+        self.folder_preview_root = Some(root);
+        self.assets.select_folder_image(&path);
+        if self.folder_preview_path.as_ref() == Some(&path)
+            && (self.load_queue.contains(&path) || self.loading.as_ref().is_some_and(|job|
+                job.path == path && !job.cancelled.load(Ordering::Relaxed))) {
+            return;
+        }
+        if self.folder_preview_path.as_ref() == Some(&path) && self.tabs.iter().any(|tab| tab.path == path) {
+            self.open_file_with_options(path, true, false);
+            return;
+        }
+        if let Some(previous) = self.folder_preview_path.take() {
+            // Drop obsolete directory clicks while keeping explicit open requests.
+            if !self.load_record_recent.contains(&previous) {
+                self.load_queue.retain(|queued| queued != &previous);
+                if let Some(job) = &self.loading {
+                    if job.path == previous { job.cancelled.store(true, Ordering::Relaxed); }
+                }
+            }
+            if let Some(index) = self.tabs.iter().position(|tab| tab.path == previous) {
+                // An editing session or dirty playlist promotes the preview to a regular tab.
+                if !self.edits.contains_key(&previous) && !self.assets.playlist_dirty(&previous) {
+                    self.close_tab(index, ctx);
+                }
+            }
+        }
+        if !self.tabs.iter().any(|tab| tab.path == path) {
+            self.folder_preview_path = Some(path.clone());
+        }
+        self.open_file_with_options(path, true, false);
+    }
+
     fn open_file_with_directory_tracking(&mut self, path: PathBuf, remember_directory: bool) {
+        self.open_file_with_options(path, remember_directory, true);
+    }
+
+    fn open_file_with_options(&mut self, path: PathBuf, remember_directory: bool, record_recent: bool) {
+        if record_recent && self.folder_preview_path.as_ref() == Some(&path) {
+            self.folder_preview_path = None;
+        }
+        if path.is_dir() {
+            self.folder_browser.add(path);
+            return;
+        }
         if remote_file::is_cached(&path) { /* Cached network files do not change the local open directory. */ }
         else if remember_directory && !self.restoring_session {
             self.last_open_dir = path.parent().map(PathBuf::from);
@@ -660,17 +739,18 @@ impl ViewerApp {
             self.save_active_tab();
             self.activate_tab(index);
             self.assets.request_media_playback(&path);
-            self.remember_recent_file();
+            if record_recent { self.remember_recent_file(); }
             return;
         }
         if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
-            self.remember_recent_file();
+            if record_recent { self.remember_recent_file(); }
             return;
         }
-        if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
+        if record_recent { self.load_record_recent.insert(path.clone()); }
+        if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path && !job.cancelled.load(Ordering::Relaxed)) {
             self.load_queue.push_back(path);
         }
     }
@@ -738,7 +818,7 @@ impl ViewerApp {
         self.assets.pause_media();
         self.locate_target = None;
         let tab = self.tabs[index].clone();
-        self.tab_group_active.insert(tab_group_key(&tab.path), tab.path.clone());
+        self.tab_group_active.insert(self.displayed_tab_group_key(&tab.path), tab.path.clone());
         self.active_tab = index;
         self.path = Some(tab.path);
         self.raw = tab.raw;
@@ -763,8 +843,8 @@ impl ViewerApp {
         // Pack members at their visible group position before the 4 -> 3 transition.
         // This also keeps batch-close confirmations anchored while the group shrinks.
         let closing_path = self.tabs[index].path.clone();
-        let key = tab_group_key(&closing_path);
-        let members: Vec<_> = self.tabs.iter().enumerate().filter(|(_, tab)| tab_group_key(&tab.path) == key).map(|(i, _)| i).collect();
+        let key = self.displayed_tab_group_key(&closing_path);
+        let members: Vec<_> = self.tabs.iter().enumerate().filter(|(_, tab)| self.displayed_tab_group_key(&tab.path) == key).map(|(i, _)| i).collect();
         if members.len() == 4 {
             let order = packed_tab_group_indices(self.tabs.len(), &members);
             self.save_active_tab();
@@ -782,6 +862,7 @@ impl ViewerApp {
         let closing_path=&self.tabs[index].path;
         if let Some(job)=&self.loading {if &job.path==closing_path {job.cancelled.store(true,Ordering::Relaxed);}}
         self.load_queue.retain(|path|path!=closing_path);
+        self.load_record_recent.remove(closing_path);
         self.load_reload.remove(closing_path);self.load_selection.remove(closing_path);
         for doc in &self.tabs[index].documents {tilemap::forget(ctx,&doc.file_id,&doc.text);}
         self.tabs.remove(index);
@@ -1372,6 +1453,7 @@ impl eframe::App for ViewerApp {
         audio_edit::set_undo_limit(self.settings.undo_steps);
         asset_viewer::set_image_undo_limit(self.settings.undo_steps);
         self.assets.set_default_image_browse(self.settings.default_image_browse);
+        self.assets.set_default_image_fit(self.settings.default_image_fit);
         media_preview::show_trim_windows(ctx);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
@@ -1518,6 +1600,12 @@ impl eframe::App for ViewerApp {
                             open_dialog = true;
                             ui.close_menu();
                         }
+                        if ui.button(localization::tr("打开目录")).clicked() {
+                            let mut dialog = rfd::FileDialog::new();
+                            if let Some(path) = &self.last_open_dir { dialog = dialog.set_directory(path); }
+                            if let Some(path) = dialog.pick_folder() { self.folder_browser.add(path); }
+                            ui.close_menu();
+                        }
                         if ui.button(localization::tr("打开 URL")).clicked() {
                             self.show_url = true;
                             self.url_error = None;
@@ -1618,17 +1706,24 @@ impl eframe::App for ViewerApp {
             if self.show_search && !search_inline {
                 ui.horizontal(|ui| self.search_field(ui));
             }
+        });
+        if let Some((path, root)) = self.folder_browser.show(ctx, self.path.as_deref()) { self.open_folder_file(path, root, ctx); }
+        self.preserve_modified_folder_preview();
+        if let Some(error) = self.folder_browser.take_save_error() {
+            self.status = format!("{}: {error}", localization::tr("目录浏览设置保存失败"));
+        }
+        if !self.tabs.is_empty() {
+        egui::TopBottomPanel::top("file_tabs").show(ctx, |ui| {
             if !self.tabs.is_empty() {
-                ui.separator();
                 let mut activate = None;
                 let mut close = None;
                 let mut tab_rects=Vec::new();
-                let tab_width=(ctx.screen_rect().right()-ui.min_rect().left()-8.0).max(1.0);
+                let tab_width=ui.available_width().max(1.0);
                 let spacing=ui.spacing().item_spacing;
                 let mut slots=Vec::new();let mut x=0.0;let mut y=0.0;
                 let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
                 for (index, tab) in self.tabs.iter().enumerate() {
-                    let key = tab_group_key(&tab.path);
+                    let key = self.displayed_tab_group_key(&tab.path);
                     if let Some((_, members)) = groups.iter_mut().find(|(kind, _)| *kind == key) { members.push(index); }
                     else { groups.push((key, vec![index])); }
                 }
@@ -1640,12 +1735,15 @@ impl eframe::App for ViewerApp {
                         visible.push(TabGroup { selected: index, members: members.clone() });
                     } else { for &index in members { visible.push(TabGroup { selected: index, members: vec![index] }); } }
                 }
-                visible.sort_by_key(|group| group.members[0]);
+                visible.sort_by_key(|group| (
+                    self.folder_preview_path.as_ref() != Some(&self.tabs[group.selected].path),
+                    group.members[0],
+                ));
                 let mut close_group = None;
                 for group in &visible {
                     let tab = &self.tabs[group.selected];
 
-                    let title=tab.path.file_name().and_then(|name|name.to_str()).unwrap_or(crate::localization::tr("未命名"));
+                    let title=self.displayed_tab_title(&tab.path);
                     let dirty=self.assets.playlist_dirty(&tab.path) || self.edits.get(&tab.path).is_some_and(|session|session.lock().unwrap().has_changes());
                     let title=if dirty{format!("{title} *")}else{title.to_owned()};
                     let width=(ui.painter().layout_no_wrap(title,egui::FontId::proportional(14.0),ui.visuals().text_color()).size().x + 14.0 + tab_action_width(ui, group.members.len())).min(350.0).min(tab_width);
@@ -1658,11 +1756,7 @@ impl eframe::App for ViewerApp {
                         let members = &group.members;
                         let tab = &self.tabs[index];
                         let grouped = group.is_collapsed();
-                        let title = tab
-                            .path
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .unwrap_or(crate::localization::tr("未命名"));
+                        let title = self.displayed_tab_title(&tab.path);
                         let is_active = self.active_tab == index;
                         let dirty = self.assets.playlist_dirty(&tab.path) || self.edits.get(&tab.path).is_some_and(|session| session.lock().unwrap().has_changes());
                         let title = if dirty { format!("{title} *") } else { title.to_string() };
@@ -1671,7 +1765,7 @@ impl eframe::App for ViewerApp {
                         asset_viewer::file_context_menu(&response,&tab.path);
                         tab_rects.push(slot);
                         if grouped {
-                            let popup_id = ui.id().with(("tab_group", tab_group_key(&tab.path)));
+                            let popup_id = ui.id().with(("tab_group", self.displayed_tab_group_key(&tab.path)));
                             if close_clicked { ui.memory_mut(|memory| memory.toggle_popup(popup_id)); }
                             egui::popup::popup_below_widget(ui, popup_id, &response, egui::popup::PopupCloseBehavior::CloseOnClickOutside, |ui| {
                                 let row_height = ui.text_style_height(&egui::TextStyle::Button) + 4.0;
@@ -1721,7 +1815,8 @@ impl eframe::App for ViewerApp {
                                 }
                             });
                         }
-                        if response.drag_started_by(egui::PointerButton::Primary) {
+                        if response.drag_started_by(egui::PointerButton::Primary)
+                            && self.folder_preview_path.as_ref() != Some(&tab.path) {
                             let origin=ui.input(|i|i.pointer.press_origin()).unwrap_or(slot.center());
                             if origin.x<slot.right()-tab_action_width(ui, members.len()) {
                                 ctx.data_mut(|d|{d.insert_temp(egui::Id::new("tab_drag_path"),tab.path.clone());d.insert_temp(egui::Id::new("tab_drag_offset"),origin-slot.min);});
@@ -1735,7 +1830,7 @@ impl eframe::App for ViewerApp {
                         }
                     }
                 if let Some(paths) = close_group {
-                    self.closing_tab_group = paths.first().map(|path| tab_group_key(path));
+                    self.closing_tab_group = paths.first().map(|path| self.displayed_tab_group_key(path));
                     self.close_group_queue = paths.into();
                     ctx.request_repaint();
                 }
@@ -1743,7 +1838,9 @@ impl eframe::App for ViewerApp {
                 let dragged=ctx.data_mut(|d|d.get_temp::<PathBuf>(egui::Id::new("tab_drag_path")));
                 if let Some(path)=dragged {
                     if let Some(pointer)=ctx.input(|i|i.pointer.hover_pos()).filter(|p|strip.rect.contains(*p)) {
-                        let slot=tab_drop_slot(&tab_rects,pointer);
+                        let pinned_first = visible.first().is_some_and(|group|
+                            self.folder_preview_path.as_ref() == Some(&self.tabs[group.selected].path));
+                        let slot=tab_drop_slot(&tab_rects,pointer).max(usize::from(pinned_first));
                         if let Some(rect)=tab_rects.get(slot).or_else(||tab_rects.last()) {
                             let x=if slot<tab_rects.len(){rect.left()-2.0}else{rect.right()+2.0};
                             ui.painter().line_segment([egui::pos2(x,rect.top()),egui::pos2(x,rect.bottom())],egui::Stroke::new(2.0_f32,egui::Color32::from_rgb(0,122,255)));
@@ -1776,6 +1873,7 @@ impl eframe::App for ViewerApp {
             }
         });
 
+        }
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
@@ -2406,6 +2504,10 @@ impl eframe::App for ViewerApp {
                             self.settings.persist();
                             self.assets.set_default_image_browse(self.settings.default_image_browse);
                         }
+                        if theme::toggle_switch(ui, localization::tr("默认适应窗口显示"), &mut self.settings.default_image_fit).changed() {
+                            self.settings.persist();
+                            self.assets.set_default_image_fit(self.settings.default_image_fit);
+                        }
                     });
                     ui.end_row();
                     settings_label(ui, localization::tr("第三方支持"));
@@ -2472,7 +2574,7 @@ impl eframe::App for ViewerApp {
                         for session in self.edits.values().chain(self.saved_histories.values()) { session.lock().unwrap().set_undo_limit(self.settings.undo_steps); }
                     }
                     ui.end_row();
-                    settings_label(ui, localization::tr("检查更新"));
+                    settings_label(ui, &format!("{}\nv{}", localization::tr("检查更新"), APP_VERSION));
                     settings_group(ui, "update_settings_group", |ui| {
                         ui.set_width(208.0);
                         ui.spacing_mut().item_spacing.y = 6.0;
@@ -2514,27 +2616,27 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.2.8").strong());
+                        ui.label(localization::tr("• 新增目录浏览：多个根目录、按需展开、独立忽略规则，目录与规则自动保存"));
+                        ui.label(localization::tr("• 目录预览固定首位并显示根目录名，修改后保留普通页签，同目录切图复用缓存"));
+                        ui.label(localization::tr("• 新增多图浏览：固定底部缩略图、方向键切图、位置计数与透明棋盘背景"));
+                        ui.label(localization::tr("• 图片默认多图与适应窗口可设置，补充 ICO 与受限 PSD 只读预览"));
+                        ui.label(localization::tr("• 优化缩放比例菜单、图片边界与目录滚动布局"));
+                        ui.label(localization::tr("• Spine 默认动态播放，普通预览默认预乘 Alpha，修复路径并优化工具栏与提示"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.7").strong());
-                        ui.label(localization::tr("• 多图浏览透明缩略图显示棋盘背景，所有图片正常亮度，当前项使用 3 像素蓝色线框"));
-                        ui.label(localization::tr("• 设置新增图片默认多图浏览开关，原预览设置更名为 Unity 资产预览"));
-                        ui.label(localization::tr("• 修复图片背景像素取整越界，减少窗口缩放时不透明图片边缘露出的细线"));
-                        ui.label(localization::tr("• 悬浮缩放比例可点击，向上展开半透明常用比例菜单（10%～300%）"));
-                        ui.label(localization::tr("• 图片支持单图／多图切换，固定底部缩略图栏，悬浮信息显示当前位置／总数，同目录浏览不递归子目录"));
                         ui.label(localization::tr("• 新增序列工具：按行列拆分图片，多图排序合并并导出 PNG"));
-                        ui.label(localization::tr("• 拆分可独立忽略上、下、左、右补边，预览与导出一致，智能识别仅建议右下透明余数"));
-                        ui.label(localization::tr("• 拆分可跳过透明空帧，单帧播放、PNG 和 GIF／视频输出一致，编号连续"));
                         ui.label(localization::tr("• 制作与拆分均支持取色去底、容差遮罩、柔化与去色边，预览和 PNG／GIF／视频源一致"));
                         ui.label(localization::tr("• 制作和拆分序列支持撤销／重做及 Ctrl+Z／Ctrl+Y"));
-                        ui.label(localization::tr("• 序列转 GIF／视频直接用缓存 PNG 显示首帧、逐帧定位和播放，透明预览显示棋盘背景"));
                         ui.label(localization::tr("• GIF 复用视频编辑转视频，GIF 与视频均可按选区、裁剪、缩放和帧率导出 PNG 序列"));
-                        ui.label(localization::tr("• GIF 导出默认使用 Bicubic 缩放与 Sierra2 4A 抖动，可手动切换其他算法"));
-                        ui.label(localization::tr("• 视频选区预览终点按排除边界处理，播放与跳到终点停留在保留片段最后一帧"));
                         ui.label(localization::tr("• 音视频和 GIF 导出允许覆盖同名文件，编码成功后再替换，失败保留已有文件"));
                         ui.label(localization::tr("• 第三方支持可分别指定 FFmpeg、FFprobe 和 PDFium 路径，优先使用并保存，无需修改 PATH"));
-                        ui.label(localization::tr("• R/G/B 通道后新增默认关闭的应用 Alpha 开关，可查看通道值乘透明度的灰度"));
-                        ui.label(localization::tr("• 四方连续图固定三列预览标题栏高度，最小循环单元与连续平铺图片顶部对齐"));
                         ui.label(localization::tr("• 去水印入口暂时关闭，保留实现供后续完善或测试；序列去底色继续可用"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.6").strong());
                         ui.label(localization::tr("• 修复图片与连续图放大模糊、预览比例，高倍棋盘格对齐像素"));
                         ui.label(localization::tr("• 各类预览共用并记住背景设置，自定义颜色默认为黑色"));
@@ -2543,10 +2645,7 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 字幕样式可搜索系统字体；透明 GIF 与视频显示棋盘底图"));
                         ui.label(localization::tr("• 统一主题 Tab 与工具栏布局，最近记录滚动且清空固定底部"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
+
                         ui.label(RichText::new("1.2.5").strong());
                         ui.label(localization::tr("• 新增四方连续图：最小循环提取、多图案错位制作与 PNG 导出"));
                         ui.label(localization::tr("• 图案支持实时拖动、缩放预览、间距与循环尺寸调整"));
@@ -4531,6 +4630,7 @@ fn main() -> eframe::Result {
             configure_system_fonts(&creation_context.egui_ctx);
             restore_theme(&creation_context.egui_ctx);
             let mut app = ViewerApp {
+                folder_browser: folder_browser::FolderBrowser::load(),
                 command_inbox,
                 last_open_dir: load_last_open_dir(),
                 settings: AppSettings::load(),
@@ -4681,4 +4781,37 @@ fn configure_system_fonts(ctx: &egui::Context) {
     }
     ctx.data_mut(|data| data.insert_temp(egui::Id::new("viewer_font_definitions"), fonts.clone()));
     ctx.set_fonts(fonts);
+}
+
+#[cfg(test)]
+mod folder_preview_group_tests {
+    use super::*;
+
+    #[test]
+    fn preview_title_uses_selected_root_and_regular_tab_uses_filename() {
+        let first = PathBuf::from("Assets/Icons/a.png");
+        let second = PathBuf::from("Assets/Icons/sub/b.png");
+        let mut app = ViewerApp::default();
+        app.folder_preview_root = Some(PathBuf::from("Assets"));
+        app.folder_preview_path = Some(first.clone());
+        assert_eq!(app.displayed_tab_title(&first), "Assets");
+        app.folder_preview_path = Some(second.clone());
+        assert_eq!(app.displayed_tab_title(&second), "Assets");
+        assert_eq!(app.displayed_tab_title(&first), "a.png");
+        app.folder_preview_path = None;
+        assert_eq!(app.displayed_tab_title(&second), "b.png");
+    }
+
+    #[test]
+    fn preview_is_separate_and_preserved_tab_uses_regular_group() {
+        let path = PathBuf::from("folder/example.prefab");
+        let other = PathBuf::from("folder/other.prefab");
+        let mut app = ViewerApp::default();
+        app.folder_preview_path = Some(path.clone());
+        assert_ne!(app.displayed_tab_group_key(&path), app.displayed_tab_group_key(&other));
+        assert_eq!(app.displayed_tab_group_key(&other), tab_group_key(&other));
+        app.folder_preview_path = None;
+        assert_eq!(app.displayed_tab_group_key(&path), tab_group_key(&path));
+        assert_eq!(app.displayed_tab_group_key(&path), app.displayed_tab_group_key(&other));
+    }
 }

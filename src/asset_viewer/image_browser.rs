@@ -1,5 +1,42 @@
 //! Docked non-recursive directory filmstrip with on-demand thumbnail decoding.
 use super::*;
+
+#[cfg(test)]
+mod folder_selection_tests {
+    use super::*;
+
+    #[test]
+    fn same_folder_selection_keeps_scan_and_thumbnail_cache() {
+        let first = PathBuf::from("images/a.png");
+        let next = PathBuf::from("images/b.png");
+        let (_sender, receiver) = mpsc::channel();
+        let mut browser = Browser::default();
+        browser.owner = first.clone();
+        browser.selected = first.clone();
+        browser.multiple = true;
+        browser.files = vec![first.clone(), next.clone()];
+        browser.scan = Some(receiver);
+        browser.thumbs.insert(first.clone(), Err("cached thumbnail error".into()));
+        browser.select_from_folder(&next);
+        browser.forget(&first);
+        assert_eq!(browser.owner, next);
+        assert_eq!(browser.selected, next);
+        assert_eq!(browser.files.len(), 2);
+        assert!(browser.multiple && browser.reveal);
+        assert!(browser.scan.is_some());
+        assert!(browser.thumbs.contains_key(&first));
+    }
+
+    #[test]
+    fn another_folder_does_not_reuse_the_old_selection() {
+        let mut browser = Browser::default();
+        browser.owner = PathBuf::from("first/a.png");
+        browser.selected = browser.owner.clone();
+        browser.select_from_folder(Path::new("second/b.png"));
+        assert_eq!(browser.owner, PathBuf::from("first/a.png"));
+        assert_eq!(browser.selected, browser.owner);
+    }
+}
 #[derive(Default)]
 pub(super) struct Browser {
     owner: PathBuf,
@@ -14,6 +51,13 @@ pub(super) struct Browser {
     reveal: bool,
 }
 impl Browser {
+    pub fn select_from_folder(&mut self, path: &Path) {
+        if !self.owner.as_os_str().is_empty() && self.owner.parent() == path.parent() {
+            self.owner = path.to_owned();
+            self.selected = path.to_owned();
+            self.reveal = true;
+        }
+    }
     pub fn set_default_multiple(&mut self, enabled: bool) {
         self.default_multiple = enabled;
     }
@@ -46,7 +90,7 @@ impl Browser {
                 for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
                     let entry = entry.map_err(|e| e.to_string())?;
                     if entry.file_type().map_err(|e| e.to_string())?.is_file()
-                        && is_bitmap(&entry.path())
+                        && is_browsable_image(&entry.path())
                     {
                         files.push(entry.path());
                     }
@@ -91,7 +135,10 @@ impl Browser {
         if let Some((path, result)) = self.pending.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.pending = None;
             if self.thumbs.len() >= 192 {
-                self.thumbs.clear();
+                if let Some(evicted) = self.thumbs.keys()
+                    .find(|cached| *cached != &self.selected && *cached != &path).cloned() {
+                    self.thumbs.remove(&evicted);
+                }
             }
             self.thumbs.insert(
                 path.clone(),
@@ -263,6 +310,9 @@ impl Browser {
                                     ),
                                     Color32::WHITE,
                                 );
+                            } else if let Some(Err(_)) = self.thumbs.get(file) {
+                                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "!",
+                                    egui::FontId::proportional(20.0), ui.visuals().error_fg_color);
                             } else if !self.thumbs.contains_key(file) && request.is_none() {
                                 request = Some(file.clone());
                             }
@@ -276,7 +326,11 @@ impl Browser {
                             );
                         }
                         let full_path = std::path::absolute(file).unwrap_or_else(|_| file.clone());
-                        let response = response.on_hover_text(full_path.display().to_string());
+                        let tooltip = match self.thumbs.get(file) {
+                            Some(Err(error)) => format!("{}\n{error}", full_path.display()),
+                            _ => full_path.display().to_string(),
+                        };
+                        let response = response.on_hover_text(tooltip);
                         if response.clicked() {
                             self.selected = file.clone();
                             self.reveal = true;
@@ -296,20 +350,8 @@ impl Browser {
                 let ctx = ui.ctx().clone();
                 std::thread::spawn(move || {
                     let result = (|| {
-                        let mut reader = image::ImageReader::open(&path)
-                            .map_err(|e| e.to_string())?
-                            .with_guessed_format()
-                            .map_err(|e| e.to_string())?;
-                        let mut limits = image::Limits::default();
-                        limits.max_image_width = Some(8192);
-                        limits.max_image_height = Some(8192);
-                        limits.max_alloc = Some(256 * 1024 * 1024);
-                        reader.limits(limits);
-                        let image = reader
-                            .decode()
-                            .map_err(|e| e.to_string())?
-                            .thumbnail(44, 44)
-                            .to_rgba8();
+                        let original = load_preview_pixels(&path)?;
+                        let image = image::imageops::thumbnail(&original, 44, 44);
                         Ok(egui::ColorImage {
                             size: [image.width() as usize, image.height() as usize],
                             pixels: image.pixels().map(|p| preview_color(p.0)).collect(),

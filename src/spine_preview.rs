@@ -7,10 +7,25 @@ pub(crate) fn is_data_asset(text:&str) -> bool {
     crate::static_preview::field(text,"skeletonJSON").is_some() && text.lines().any(|line|line=="  atlasAssets:")
 }
 
+fn texture_file_path(path: &str) -> PathBuf {
+    // Spine joins atlas page names with '/', which verbatim Windows paths reject.
+    // Keep the verbatim/UNC prefix, Unicode names and long-path support intact.
+    #[cfg(windows)]
+    { PathBuf::from(path.replace('/', "\\")) }
+    #[cfg(not(windows))]
+    { PathBuf::from(path) }
+}
+
+fn texture_preview_color(pixel: [u8; 4], premultiplied: bool) -> Color32 {
+    if premultiplied {
+        Color32::from_rgba_premultiplied(pixel[0], pixel[1], pixel[2], pixel[3])
+    } else { crate::asset_viewer::preview_color(pixel) }
+}
+
 fn callbacks() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
-        spine38::extension::set_create_texture_cb(|page,path|page.renderer_object().set(PathBuf::from(path)));
+        spine38::extension::set_create_texture_cb(|page,path|page.renderer_object().set(texture_file_path(path)));
         spine38::extension::set_dispose_texture_cb(|page|unsafe {page.renderer_object().dispose::<PathBuf>()});
     });
 }
@@ -210,8 +225,11 @@ pub struct Preview {
     gpu_resources:HashMap<PathBuf,(Arc<crate::render_system::scene::Material>,Arc<crate::render_system::scene::Texture>)>,
     gpu_error:Arc<std::sync::Mutex<Option<String>>>,
     gpu_status:Option<String>,
+    pose_fallback: bool,
     controller: SkeletonController,
     textures: HashMap<PathBuf, egui::TextureHandle>,
+    texture_pixels: HashMap<PathBuf, image::RgbaImage>,
+    premultiplied_alpha: bool,
     animations: Vec<(String,f32)>,
     skins: Vec<String>,
     animation: usize,
@@ -291,6 +309,7 @@ impl Preview {
         let atlas_file = match atlas_file {Some(path)=>path,None=>atlas_path(path)?};
         let atlas = Arc::new(Atlas::new_from_file(&atlas_file).map_err(|e|e.to_string())?);
         let mut textures = HashMap::new();
+        let mut texture_pixels = HashMap::new();
         let mut total = 0usize;
         for page in atlas.pages() {
             // All page objects are allocated by the callbacks above and owned by this atlas.
@@ -301,8 +320,9 @@ impl Preview {
             total += w as usize*h as usize*4;
             if total > 256*1024*1024 { return Err("Spine 贴图超过 256 MiB 缓存限制".into()); }
             let image = image::open(&texture_path).map_err(|e|e.to_string())?.into_rgba8();
-            let pixels = image.pixels().map(|p|crate::asset_viewer::preview_color(p.0)).collect();
+            let pixels = image.pixels().map(|p|texture_preview_color(p.0, true)).collect();
             textures.insert(texture_path.clone(),ctx.load_texture(texture_path.display().to_string(),egui::ColorImage{size:[w as usize,h as usize],pixels},egui::TextureOptions::LINEAR));
+            texture_pixels.insert(texture_path, image);
         }
         let data = Arc::new(if json { SkeletonJson::new(atlas).read_skeleton_data(&bytes) } else { SkeletonBinary::new(atlas).read_skeleton_data(&bytes) }.map_err(|e|e.to_string())?);
         let animations = data.animations().map(|a|(a.name().to_owned(),a.duration())).collect();
@@ -314,7 +334,9 @@ impl Preview {
             controller.skeleton.set_to_setup_pose();
             controller.update(0.0);
         }
-        let mut preview = Self {gpu_resources:HashMap::new(),gpu_error:Arc::new(std::sync::Mutex::new(None)),gpu_status:Some("Spine material context unavailable; ordinary preview".into()),controller,textures,animations,skins,animation:0,base_track:0,tracks:Vec::new(),skin:0,dynamic:false,playing:false,looping:true,speed:1.0,time:0.0,last:Instant::now(),bounds:egui::Rect::NOTHING,zoom:1.0,pan:egui::Vec2::ZERO,background:String::new(),background_rgb:[0;3],show_guides:false,error:None };
+        let mut preview = Self {pose_fallback:false,gpu_resources:HashMap::new(),gpu_error:Arc::new(std::sync::Mutex::new(None)),gpu_status:Some("Spine material context unavailable; ordinary preview".into()),controller,textures,texture_pixels,premultiplied_alpha:true,animations,skins,animation:0,base_track:0,tracks:Vec::new(),skin:0,dynamic:true,playing:false,looping:true,speed:1.0,time:0.0,last:Instant::now(),bounds:egui::Rect::NOTHING,zoom:1.0,pan:egui::Vec2::ZERO,background:String::new(),background_rgb:[0;3],show_guides:false,error:None };
+        preview.playing = !preview.animations.is_empty();
+        preview.pose();
         preview.fit_bounds();
         Ok(preview)
     }
@@ -365,7 +387,21 @@ impl Preview {
             }
             ui.label("背景色");
             changed|=crate::theme::shared_preview_background(ui,&mut self.background,&mut self.background_rgb);
-            crate::theme::toggle_switch(ui,crate::localization::tr("辅助线"),&mut self.show_guides);
+            crate::theme::compact_toggle_switch(ui,crate::localization::tr("辅助线"),&mut self.show_guides);
+            let ordinary_preview = self.gpu_resources.is_empty() || self.pose_fallback
+                || self.gpu_error.lock().unwrap().is_some();
+            ui.add_enabled_ui(ordinary_preview, |ui| {
+                if crate::theme::compact_toggle_switch(ui,crate::localization::tr("预乘 Alpha"),&mut self.premultiplied_alpha).changed() {
+                    for (path, image) in &self.texture_pixels {
+                        if let Some(texture) = self.textures.get_mut(path) {
+                            texture.set(egui::ColorImage {
+                                size: [image.width() as usize, image.height() as usize],
+                                pixels: image.pixels().map(|pixel| texture_preview_color(pixel.0, self.premultiplied_alpha)).collect(),
+                            }, egui::TextureOptions::LINEAR);
+                        }
+                    }
+                }
+            }).response.on_hover_text(crate::localization::tr("普通预览按已预乘 Alpha 的贴图读取；关闭后按未预乘读取。Unity 材质预览由材质自身控制。"));
             ui.menu_button("设置",|ui| {
                 changed|=ui.checkbox(&mut self.looping,"循环").changed();
                 ui.add(egui::Slider::new(&mut self.speed,0.1..=3.0).text("速度"));
@@ -385,6 +421,16 @@ impl Preview {
             });
             reload=ui.button(crate::localization::tr("重载")).clicked();
         });
+        let gpu_error=self.gpu_error.lock().unwrap().clone();
+        if let Some(message)=gpu_error.as_ref().or(self.gpu_status.as_ref()) {
+            let message = if message == "Spine material context unavailable; ordinary preview" {
+                "未取得 Unity 材质信息，使用普通 Spine 预览。"
+            } else { message.as_str() };
+            ui.add(egui::Label::new(crate::localization::tr(message)).wrap());
+        }
+        if self.pose_fallback && gpu_error.is_none() && self.gpu_status.is_none() {
+            ui.add(egui::Label::new(crate::localization::tr("当前姿态使用普通 Spine 预览（混合、染色、图集或几何兼容限制）。")).wrap());
+        }
         let (canvas,response)=ui.allocate_exact_size(ui.available_size().max(egui::vec2(1.0,1.0)),egui::Sense::drag());
         let painter=ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
         let scene_shape=painter.add(egui::Shape::Noop);
@@ -490,8 +536,6 @@ impl Preview {
             shapes.push(egui::Shape::mesh(mesh));
         }
         painter.set(scene_shape,egui::Shape::Vec(shapes));
-        let gpu_error=self.gpu_error.lock().unwrap().clone();
-        if let Some(error)=gpu_error.as_ref().or(self.gpu_status.as_ref()){painter.text(canvas.left_top()+egui::vec2(8.0,46.0),egui::Align2::LEFT_TOP,error,egui::FontId::proportional(13.0),Color32::YELLOW);}
         if !self.gpu_resources.is_empty() && crate::render_system::available() && gpu_error.is_none() {
             let renderables=self.controller.renderables();let mut draws=Vec::new();let mut supported=true;let mut count=0usize;
             for mesh in renderables {
@@ -504,7 +548,12 @@ impl Preview {
                 let vertices=mesh.vertices.iter().zip(&mesh.uvs).map(|(p,uv)|crate::render_system::scene::Vertex{position:[p[0],p[1],0.0],uv:*uv,color,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]}).collect::<Vec<_>>();
                 draws.push(crate::render_system::scene::Draw{strict_shader:false,component:Arc::from("spine-preview"),vertices:Arc::from(vertices),indices:Arc::from(mesh.indices.iter().map(|i|*i as u32).collect::<Vec<_>>()),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:material.clone(),main_texture:texture.clone()});
             }
-            if supported && !draws.is_empty() {
+            let fallback = !supported || draws.is_empty();
+            if self.pose_fallback != fallback {
+                self.pose_fallback = fallback;
+                ui.ctx().request_repaint();
+            }
+            if !fallback {
                 let projection=[[2.0*scale/canvas.width(),0.0,0.0,2.0*(self.pan.x-self.bounds.center().x*scale)/canvas.width()],
                     [0.0,2.0*scale/canvas.height(),0.0,2.0*(-self.pan.y+self.bounds.center().y*scale)/canvas.height()],
                     [0.0,0.0,0.0,0.0],[0.0,0.0,0.0,1.0]];
@@ -512,7 +561,7 @@ impl Preview {
                 let mut shapes=gpu_background;
                 shapes.push(egui::Shape::Callback(crate::render_system::callback(canvas,Arc::new(crate::render_system::scene::Scene{draws:Arc::from(draws),revision:1}),projection,self.gpu_error.clone(),true,0)));
                 painter.set(scene_shape,egui::Shape::Vec(shapes));
-            }else{painter.text(canvas.left_top()+egui::vec2(8.0,46.0),egui::Align2::LEFT_TOP,"Spine pose uses ordinary fallback (blend, tint, atlas page or geometry)",egui::FontId::proportional(13.0),Color32::YELLOW);}
+            }
         }
         reload
     }
@@ -521,6 +570,16 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn premultiplied_texture_preserves_rgb_instead_of_multiplying_twice() {
+        let pixel = [64, 32, 16, 128];
+        let pma = texture_preview_color(pixel, true);
+        let straight = texture_preview_color(pixel, false);
+        assert_eq!([pma.r(), pma.g(), pma.b(), pma.a()], pixel);
+        assert_eq!([straight.r(), straight.g(), straight.b(), straight.a()], [32, 16, 8, 128]);
+        assert_eq!(texture_preview_color([64,32,16,255], true), texture_preview_color([64,32,16,255], false));
+    }
 
     #[test]
     fn reads_binary_header_with_long_hash_and_rejects_truncation() {
@@ -538,5 +597,21 @@ mod tests {
         assert_eq!(version(br#"{"skeleton":{"spine":"3.8.95"}}"#,true).unwrap(),"3.8.95");
         assert!(version(br#"{"skeleton":{}}"#,true).is_err());
         assert!(version(br#"{"settings":true}"#,true).is_err());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod texture_path_tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_unc_texture_joins_keep_windows_separators() {
+        assert_eq!(texture_file_path(r"\\?\UNC\nas\共享\Andy/andy1.png"),
+            PathBuf::from(r"\\?\UNC\nas\共享\Andy\andy1.png"));
+        assert_eq!(texture_file_path(r"\\?\C:\Assets\Andy/andy1.png"),
+            PathBuf::from(r"\\?\C:\Assets\Andy\andy1.png"));
+        assert_eq!(texture_file_path(r"\\nas\share\Andy/andy1.png"),
+            PathBuf::from(r"\\nas\share\Andy\andy1.png"));
+        assert_eq!(texture_file_path(r"C:\Assets\andy1.png"), PathBuf::from(r"C:\Assets\andy1.png"));
     }
 }
