@@ -387,4 +387,13 @@ macro_rules! localized_format {
         6 => format!("Impossible d’ouvrir les paramètres ou de lire les associations : {0}" $(, $arg)*),
         _ => format!("无法打开系统设置或读取关联：{0}" $(, $arg)*),
     }};
+    ("无法更新文件关联登记：{0}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("無法更新檔案關聯登記：{0}" $(, $arg)*),
+        2 => format!("Unable to update file association registration: {0}" $(, $arg)*),
+        3 => format!("ファイル関連付けの登録を更新できません：{0}" $(, $arg)*),
+        4 => format!("파일 연결 등록을 업데이트할 수 없습니다: {0}" $(, $arg)*),
+        5 => format!("Dateizuordnung konnte nicht aktualisiert werden: {0}" $(, $arg)*),
+        6 => format!("Impossible de mettre à jour l’inscription des associations de fichiers : {0}" $(, $arg)*),
+        _ => format!("无法更新文件关联登记：{0}" $(, $arg)*),
+    }};
 }

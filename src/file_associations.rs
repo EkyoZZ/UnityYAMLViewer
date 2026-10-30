@@ -1,4 +1,4 @@
-//! Read-only Windows association status and a guided handoff to system settings.
+//! Windows association status, app-owned registration, and guided default selection.
 use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::mpsc};
 use eframe::egui;
 use crate::{localization::tr, native_window};
@@ -43,9 +43,27 @@ pub struct Dialog {
     selected_extension: Option<String>,
     settings_error: Option<String>,
     path_copied: bool,
+    registration_pending: Option<mpsc::Receiver<Result<(), String>>>,
+    registration_error: Option<String>,
 }
 
 impl Dialog {
+    /// Primary GUI startup only; CLI jobs and forwarded launches do not register.
+    pub fn register_on_startup(&mut self, ctx: &egui::Context) {
+        #[cfg(windows)]
+        {
+            let (send, receive) = mpsc::channel();
+            self.registration_pending = Some(receive);
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let _ = send.send(register_file_types());
+                ctx.request_repaint();
+            });
+        }
+        #[cfg(not(windows))]
+        let _ = ctx;
+    }
+
     pub fn open(&mut self, ctx: &egui::Context) {
         if !self.open {
             self.open = true;
@@ -75,6 +93,19 @@ impl Dialog {
     }
 
     pub fn show(&mut self, ctx: &egui::Context) {
+        if let Some(pending) = &self.registration_pending {
+            match pending.try_recv() {
+                Ok(result) => {
+                    self.registration_error = result.err();
+                    self.registration_pending = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.registration_error = Some("Registration worker disconnected".into());
+                    self.registration_pending = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if !self.open { return; }
         if let Some(pending) = &self.pending {
             match pending.try_recv() {
@@ -110,7 +141,7 @@ impl Dialog {
                     if self.pending.is_some() { ui.spinner(); ui.label(tr("正在查询默认程序…")); }
                 });
                 ui.add_space(8.0);
-                ui.label(tr("点击去设置会复制后缀并打开 Windows 默认应用页面，请粘贴后缀搜索并选择本程序。此处不会直接修改文件关联。"));
+                ui.label(tr("启动时自动更新程序名称与文件图标登记，不会自动更改默认程序。点击去设置会重试登记、复制后缀并打开 Windows 默认应用页面，请粘贴搜索并选择本程序。"));
                 if !cfg!(windows) { ui.label(tr("文件关联设置仅支持 Windows。")); }
                 if matches!(self.group, 3 | 5 | 6) {
                     ui.small(tr("关联按最后一个后缀生效：.skel.bytes 使用 .bytes，.json.txt 使用 .txt；.json 和 .ts 等后缀可能包含不同类型的内容。"));
@@ -147,6 +178,7 @@ impl Dialog {
                             self.selected_extension = Some(ext);
                             self.path_copied = false;
                             self.settings_error = open_settings().err();
+                            if self.settings_error.is_none() { self.registration_error = None; }
                         }
                         ui.end_row();
                     }
@@ -163,6 +195,7 @@ impl Dialog {
                 ui.horizontal_wrapped(|ui| {
                     if ui.add_enabled(cfg!(windows), egui::Button::new(tr("打开 Windows 默认应用设置"))).clicked() {
                         self.settings_error = open_settings().err();
+                        if self.settings_error.is_none() { self.registration_error = None; }
                     }
                     if ui.button(tr("关闭")).clicked() { close = true; }
                 });
@@ -170,6 +203,9 @@ impl Dialog {
                     ui.label(crate::lf!("已复制后缀 {0}，请在系统默认应用页面搜索；返回此窗口会刷新状态。", ext));
                 }
                 if self.path_copied { ui.label(tr("已复制程序路径；使用此按钮会替换剪贴板中的后缀。")); }
+                if let Some(error) = &self.registration_error {
+                    ui.colored_label(ui.visuals().error_fg_color, crate::lf!("无法更新文件关联登记：{0}", error));
+                }
                 if let Some(error) = &self.settings_error {
                     ui.colored_label(ui.visuals().error_fg_color, crate::lf!("无法打开系统设置或读取关联：{0}", tr(error)));
                 }
@@ -238,6 +274,83 @@ fn query(extension: &str, current_exe: Option<&std::path::Path>) -> Association 
 #[cfg(not(windows))]
 fn query(_: &str, _: Option<&std::path::Path>) -> Association { Association::Unsupported }
 
+
+// Register only our own classes and Open With candidates. Never overwrite extension
+// defaults or Explorer UserChoice; default selection remains in Windows Settings.
+#[cfg(windows)]
+fn register_file_types() -> Result<(), String> {
+    use std::{ffi::c_void, os::windows::ffi::OsStrExt};
+    type Key = *mut c_void;
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegCreateKeyExW(key: Key, subkey: *const u16, reserved: u32, class: *mut u16,
+            options: u32, access: u32, security: *const c_void, result: *mut Key, disposition: *mut u32) -> i32;
+        fn RegQueryValueExW(key: Key, name: *const u16, reserved: *mut u32,
+            kind: *mut u32, data: *mut u8, size: *mut u32) -> i32;
+        fn RegSetValueExW(key: Key, name: *const u16, reserved: u32, kind: u32, data: *const u8, size: u32) -> i32;
+        fn RegCloseKey(key: Key) -> i32;
+    }
+    struct OwnedKey(Key);
+    impl Drop for OwnedKey { fn drop(&mut self) { unsafe { RegCloseKey(self.0); } } }
+    fn write_value(path: &str, name: &str, value: &std::ffi::OsStr) -> Result<bool, String> {
+        let path: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+        let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+        let value: Vec<u16> = value.encode_wide().chain(Some(0)).collect();
+        let mut key = std::ptr::null_mut();
+        // HKEY_CURRENT_USER is a sign-extended predefined handle on Win64.
+        let result = unsafe { RegCreateKeyExW(0x80000001u32 as i32 as isize as Key,
+            path.as_ptr(), 0, std::ptr::null_mut(), 0, 3, std::ptr::null(), &mut key, std::ptr::null_mut()) };
+        if result != 0 { return Err(format!("RegCreateKeyExW: {result}")); }
+        let key = OwnedKey(key);
+        let mut kind = 0;
+        let mut size = (value.len() * 2) as u32;
+        let mut current = vec![0u16; value.len()];
+        let result = unsafe { RegQueryValueExW(key.0, name.as_ptr(), std::ptr::null_mut(),
+            &mut kind, current.as_mut_ptr().cast(), &mut size) };
+        if result == 0 && kind == 1 && size as usize == value.len() * 2 && current == value {
+            return Ok(false);
+        }
+        let result = unsafe { RegSetValueExW(key.0, name.as_ptr(), 0, 1,
+            value.as_ptr().cast(), (value.len() * 2) as u32) };
+        if result != 0 { return Err(format!("RegSetValueExW: {result}")); }
+        Ok(true)
+    }
+    let mut changed = false;
+    let mut set = |path: &str, name: &str, value: &std::ffi::OsStr| -> Result<(), String> {
+        changed |= write_value(path, name, value)?;
+        Ok(())
+    };
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let filename = exe.file_name().ok_or("Missing executable filename")?.to_string_lossy();
+    let mut icon = std::ffi::OsString::from("\"");
+    icon.push(&exe);
+    icon.push("\",-2"); // Explicit resource ID, independent of icon order.
+    let mut command = std::ffi::OsString::from("\"");
+    command.push(&exe);
+    command.push("\" \"%1\"");
+    let class = "Software\\Classes\\UnityYAMLViewer.File";
+    set(class, "", "Unity YAML Viewer File".as_ref())?;
+    set(&format!("{class}\\Application"), "ApplicationName", "Unity YAML Viewer".as_ref())?;
+    set(&format!("{class}\\DefaultIcon"), "", &icon)?;
+    set(&format!("{class}\\shell\\open\\command"), "", &command)?;
+    // Browsing to the EXE in Open With may select Applications\\<filename>.
+    let app = format!("Software\\Classes\\Applications\\{filename}");
+    set(&app, "FriendlyAppName", "Unity YAML Viewer".as_ref())?;
+    set(&format!("{app}\\DefaultIcon"), "", &icon)?;
+    set(&format!("{app}\\shell\\open\\command"), "", &command)?;
+    let all: BTreeSet<_> = (0..FORMAT_GROUPS.len()).flat_map(extensions).collect();
+    for ext in all {
+        set(&format!("Software\\Classes\\{ext}\\OpenWithProgids"), "UnityYAMLViewer.File", "".as_ref())?;
+        set(&format!("{app}\\SupportedTypes"), &ext, "".as_ref())?;
+    }
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn SHChangeNotify(event: i32, flags: u32, item1: *const c_void, item2: *const c_void);
+    }
+    if changed { unsafe { SHChangeNotify(0x08000000, 0, std::ptr::null(), std::ptr::null()); } }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn open_settings() -> Result<(), String> {
     use std::ffi::c_void;
@@ -246,6 +359,7 @@ fn open_settings() -> Result<(), String> {
         fn ShellExecuteW(parent: *mut c_void, verb: *const u16, file: *const u16,
             parameters: *const u16, directory: *const u16, show: i32) -> *mut c_void;
     }
+    register_file_types()?;
     let uri: Vec<u16> = "ms-settings:defaultapps".encode_utf16().chain(Some(0)).collect();
     let result = unsafe { ShellExecuteW(std::ptr::null_mut(), std::ptr::null(), uri.as_ptr(),
         std::ptr::null(), std::ptr::null(), 1) } as isize;

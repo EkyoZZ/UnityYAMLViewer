@@ -2617,6 +2617,7 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.8").strong());
+                        ui.label(localization::tr("• 启动自动更新关联名称与独立文件图标，默认打开程序仍由用户选择"));
                         ui.label(localization::tr("• 新增目录浏览：多个根目录、按需展开、独立忽略规则，目录与规则自动保存"));
                         ui.label(localization::tr("• 目录预览固定首位并显示根目录名，修改后保留普通页签，同目录切图复用缓存"));
                         ui.label(localization::tr("• 新增多图浏览：固定底部缩略图、方向键切图、位置计数与透明棋盘背景"));
@@ -4638,6 +4639,7 @@ fn main() -> eframe::Result {
                 recent_files: recent_files::RecentFiles::load(),
                 ..Default::default()
             };
+            app.file_associations.register_on_startup(&creation_context.egui_ctx);
             localization::set_language(&app.settings.language);
             app.restore_open_tabs();
             app.accept_open_request(startup_paths,&creation_context.egui_ctx);

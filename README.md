@@ -26,6 +26,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **音视频工具**：播放、剪切、裁剪、缩放与转码，支持多音轨、字幕、媒体详情及 GIF／视频／PNG 序列导出。
 - **文本表格**：CSV / TSV / PSV 查看、单元格编辑、类型检查与查找。
 - **文件预览**：PDF、SVG、GIF、ICO、受限 PSD 合成图及常见文本文件查看。
+- **文件关联**：启动时自动更新 Windows 关联名称与独立文件图标登记，由用户选择默认程序；内容缩略图仍由系统处理。
 - **日常操作**：多文件页签、最近记录、文件定位、深浅主题、七种语言、在线更新与第三方组件管理。
 
 ### 🚀 快速开始
@@ -77,6 +78,7 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Audio and video**: Playback, trimming, cropping, scaling and transcoding, with multiple audio tracks, subtitles, media details and GIF, video or PNG sequence export.
 - **Text tables**: View and edit CSV / TSV / PSV cells, check types and search.
 - **File previews**: PDFs, SVGs, GIFs, ICOs, limited PSD composites and common text files.
+- **File associations**: Startup automatically updates the Windows app name and separate file icon registration; users choose the default app. Content thumbnails remain managed by Windows.
 - **Everyday tools**: File tabs, recent files, file locations, light / dark themes, seven languages, updates and third-party component management.
 
 ### 🚀 Quick start

@@ -2868,3 +2868,26 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 附件 UnityYAMLViewer-v1.2.8-windows-x64.exe，25,616,896 字节；GitHub asset.digest 与本地 SHA-256 一致：7EC561EA90D5B8818FE0AF1EAC49684963F8C72C286CAE694B85193CEE0EE88D。
 - 使用已核验的 target/releases/v1.2.8/UnityYAMLViewer-v1.2.8-windows-x64.exe；先创建草稿上传并验证附件，再正式发布为最新版本。发布证据 target/v1.2.8-published.json，构建摘要 target/v1.2.8-build-manifest.json。
 - 未修改历史 Release／标签／附件；发布后仅更新本地版本索引、发布说明与交接状态，未自动提交或推送。这一正式发布状态取代前述构建阶段的未发布／等待提交说明。设置版本号显示小改动仍未纳入新增、优化或升级说明。
+
+## 独立文件图标本地构建（2026-10-29，未发布）
+
+- 用户明确授权编译。CIM 查询不可用，改用 Get-Process 完成进程核对，并确认目标 EXE 可独占访问后开始构建。
+- `cargo build --release --locked --offline` 成功（44.97 秒，8 项应用警告）；日志 `target/file-icons-release-build.log`。
+- 产物 `target/release/unity_yaml_viewer.exe`，版本 1.2.8，25,552,384 字节；SHA-256 `2BE95963F8D14C27F438693B58FD087F676B1BF68E1FFD366AC0593A794046BC`。
+- 以数据资源方式读取 EXE，确认主图标资源 1 与文件图标资源 2 均包含 13 个尺寸；核验记录 `target/file-icons-release-verification.json`。未启动程序、未写入当前系统文件关联，资源管理器实际图标及关于窗口仍待运行验证；未发布或上传附件。
+
+## Windows 打开方式名称本地构建（2026-10-29，未发布）
+
+- 用户确认显示名称为 Unity YAML Viewer，并明确授权编译；Get-Process 与目标 EXE 独占访问检查通过。
+- cargo build --release --locked --offline 成功（37.73 秒，8 项应用警告），日志 target/file-association-name-release-build.log。
+- 产物 target/release/unity_yaml_viewer.exe，大小 25552384 字节，文件版本 1.2.8；SHA-256：4580558E7E07F700A5425F52402535C54DBC8E248F96D3A470F5CF8F67CDBA5A。
+- 已读取成品版本资源，FileDescription 与 ProductName 均确认为 Unity YAML Viewer；核验记录 target/file-association-name-release-verification.json。
+- 未启动程序或更改当前系统文件关联；Windows 属性和打开方式界面的名称／缓存刷新仍待运行验证。未发布或上传附件。
+
+## 启动更新关联登记本地构建（2026-10-29，未发布）
+
+- 用户明确授权编译，Get-Process 及目标 EXE 独占访问检查通过。
+- cargo build --release --locked --offline 成功（38.79 秒，8 项应用警告），日志 target/startup-file-association-release-build.log。
+- 产物 target/release/unity_yaml_viewer.exe，25666560 字节，版本 1.2.8；SHA-256：5F8DF76248322D86B56B40FB515A4989F294339AE5594B0C6FB11DB9A3C93DAB。
+- 成品 FileDescription 与 ProductName 均为 Unity YAML Viewer；核验记录 target/startup-file-association-release-verification.json。包含启动后台更新关联名称、路径及独立文件图标登记，未修改图标缩小算法。
+- 未启动 GUI 或执行此 EXE 的登记逻辑，实际启动登记、权限错误提示、默认程序保持、名称及图标刷新和七语言界面待用户运行验证；未发布或上传附件。
