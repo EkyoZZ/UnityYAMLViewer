@@ -39,6 +39,7 @@ pub fn find_tool(name:&str) -> Option<PathBuf> {
             }
         }
     }
+    directories.extend(crate::third_party::installer::tool_directories(name));
     directories.into_iter().map(|dir|dir.join(&file)).find(|path| {
         path.is_file() && command(path).arg("-version").output().is_ok_and(|output|output.status.success())
     })
@@ -57,7 +58,7 @@ fn collect_package_directories(root:&std::path::Path,depth:usize,budget:&mut usi
 }
 
 #[cfg(windows)]
-fn fresh_windows_paths()->Vec<std::ffi::OsString> {
+pub(crate) fn fresh_windows_paths()->Vec<std::ffi::OsString> {
     use std::{ffi::c_void,os::windows::ffi::OsStringExt};
     #[link(name="advapi32")]
     unsafe extern "system" {
@@ -80,6 +81,7 @@ fn fresh_windows_paths()->Vec<std::ffi::OsString> {
 
 #[derive(Default)]
 pub struct DecoderSettings {
+    backend:crate::third_party::installer::Backend,progress:crate::third_party::install_progress::Shared,
     ffmpeg_picker:crate::component_paths::Picker,
     ffprobe_picker:crate::component_paths::Picker,
     installed:Option<bool>,
@@ -92,24 +94,24 @@ impl DecoderSettings {
     fn start(&mut self,ctx:&egui::Context,install:bool) {
         if self.pending.is_some() {return;}
         self.error=None;
-        self.installing=install;
+        self.installing=install;self.backend=crate::third_party::installer::selected();self.progress=Default::default();
+        let backend=self.backend;let progress=self.progress.clone();
 
         let (sender,receiver)=mpsc::channel();self.pending=Some(receiver);
         let ctx=ctx.clone();
         std::thread::spawn(move|| {
             let result=(|| {
-                if install {
-                    let output=command("winget").args(["install","--id","Gyan.FFmpeg","--exact","--source","winget","--scope","user","--silent","--disable-interactivity","--accept-package-agreements","--accept-source-agreements"])
-                        .output().map_err(|e|format!("WinGet: {e}"))?;
-                    if !output.status.success() {
-                        return Err(format!("WinGet ({})\n{}\n{}",output.status,String::from_utf8_lossy(&output.stdout),String::from_utf8_lossy(&output.stderr)));
-                    }
+                if install && backend==crate::third_party::installer::Backend::Scoop{
+                    crate::third_party::installer::install("ffmpeg",&progress)?;
+                }else if install {
+                    crate::third_party::installer::install_ffmpeg_winget()?;
                 }
                 Ok((find_tool("ffmpeg"),find_tool("ffprobe")))
             })();
             let _=sender.send(result);ctx.request_repaint();
         });
     }
+    pub fn busy(&self)->bool{self.installing&&self.pending.is_some()}
     pub fn refresh(&mut self,ctx:&egui::Context){self.start(ctx,false);}
     pub fn poll(&mut self,ctx:&egui::Context) {
         use crate::localization::tr;
@@ -126,12 +128,12 @@ impl DecoderSettings {
         if self.installed.is_none() && self.pending.is_none() && self.error.is_none(){self.start(ui.ctx(),false);}
         self.poll(ui.ctx());
         if self.pending.is_some() {
-            ui.horizontal(|ui| {ui.spinner();ui.label(tr(if self.installing {"正在安装…"}else{"正在检测…"}));});
+            if self.installing&&self.backend==crate::third_party::installer::Backend::Scoop{self.progress.show_for(ui,"Scoop");}else{ui.horizontal(|ui| {ui.spinner();ui.label(tr(if self.installing {"正在安装…"}else{"正在检测…"}));});}
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             ui.horizontal(|ui| {
                 ui.label(tr(if self.installed==Some(true) {"FFmpeg 已安装"}else{"未安装"}));
-                if self.installed!=Some(true) && ui.button(tr("安装 FFmpeg")).clicked() {self.start(ui.ctx(),true);}
+                if self.installed!=Some(true) && ui.add_enabled(crate::third_party::installer::ready(),egui::Button::new(tr("安装 FFmpeg"))).clicked() {self.start(ui.ctx(),true);}
                 if ui.button(tr("重新检测")).clicked() {self.start(ui.ctx(),false);}
             });
         }
@@ -145,7 +147,7 @@ impl DecoderSettings {
         for (label,path) in [("FFmpeg",&self.paths.0),("FFprobe",&self.paths.1)] {
             if let Some(path)=path {ui.add(egui::Label::new(format!("{label}: {}",path.display())).wrap().selectable(true));}
         }
-        if self.installed!=Some(true) {ui.small(tr("通过 Windows 包管理器安装 FFmpeg，需要联网；点击安装即同意第三方软件许可。"));}
+        if self.installed!=Some(true) {ui.small(tr(if crate::third_party::installer::selected()==crate::third_party::installer::Backend::Scoop{"通过 Scoop 安装 FFmpeg，需要联网；组件由 Scoop 管理。"}else{"通过 Windows 包管理器安装 FFmpeg，需要联网；点击安装即同意第三方软件许可。"}));}
         if let Some(error)=&self.error {
             ui.colored_label(ui.visuals().warn_fg_color,tr("解码组件检测或安装失败"));
             ui.collapsing(tr("详情"),|ui| {egui::ScrollArea::vertical().max_height(100.0).show(ui,|ui| {ui.add(egui::Label::new(error).wrap().selectable(true));});});

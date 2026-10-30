@@ -4,6 +4,10 @@ use eframe::egui;
 use serde::{Serialize,Deserialize};
 use sha2::{Digest,Sha256};
 use crate::localization::tr;
+pub(crate) mod install_progress;
+pub(crate) mod installer;
+mod install_task;
+const OFFICE_RETRY:&str="__office_download_cancelled_retry__";
 /// One entry point for missing-component prompts, including detached preview windows.
 pub fn request_open(ctx:&egui::Context) {
     ctx.data_mut(|data|data.insert_temp(egui::Id::new("third_party_manager_request"),true));
@@ -159,11 +163,12 @@ impl PdfiumSettings {
 }
 #[derive(Default)]
 struct LibreOfficeSettings {
+    progress:install_progress::Shared,confirm_retry:bool,ready_event:bool,backend:installer::Backend,
     checked:bool,path:Option<PathBuf>,version:Option<String>,error:Option<String>,installing:bool,
     pending:Option<mpsc::Receiver<Result<Option<(PathBuf,String)>,String>>>,
 }
 fn libreoffice_config()->Result<PathBuf,String>{Ok(component_root()?.join("libreoffice_path.txt"))}
-fn find_libreoffice(selected:Option<PathBuf>)->Result<Option<(PathBuf,String)>,String>{
+pub(crate) fn find_libreoffice(selected:Option<PathBuf>)->Result<Option<(PathBuf,String)>,String>{
     let selected_only=selected.is_some();
     let mut paths=Vec::new();
     if let Some(selected)=selected {
@@ -172,6 +177,7 @@ fn find_libreoffice(selected:Option<PathBuf>)->Result<Option<(PathBuf,String)>,S
         paths.push(selected);
     }
     if let Ok(path)=libreoffice_config(){if let Ok(saved)=fs::read_to_string(path){paths.push(PathBuf::from(saved.trim()));}}
+    for directory in installer::tool_directories("libreoffice"){paths.push(directory.join("soffice.com"));paths.push(directory.join("soffice.exe"));}
     for variable in ["ProgramFiles","ProgramFiles(x86)"] {if let Some(root)=std::env::var_os(variable){for name in ["soffice.com","soffice.exe"]{paths.push(PathBuf::from(&root).join("LibreOffice/program").join(name));}}}
     if let Some(search)=std::env::var_os("PATH") {for directory in std::env::split_paths(&search){for name in if cfg!(windows){["soffice.com","soffice.exe"]}else{["libreoffice","soffice"]}{paths.push(directory.join(name));}}}
     paths.dedup();
@@ -188,33 +194,97 @@ fn find_libreoffice(selected:Option<PathBuf>)->Result<Option<(PathBuf,String)>,S
         }}
     }Ok(None)
 }
+// WinGet completion and component readiness are separate: its wrapper may linger.
+fn install_libreoffice(progress:&install_progress::Shared)->Result<Option<(PathBuf,String)>,String>{
+    if let Some(found)=find_libreoffice(None)?{return Ok(Some(found));}
+    let _guard=install_task::Guard::acquire()?;
+    install_task::ensure_no_other_installer(None)?;install_task::ensure_download_released()?;
+    progress.phase(1);
+    let mut child=crate::media_tools::command("winget")
+        .args(["install","--id","TheDocumentFoundation.LibreOffice","--exact","--source","winget","--silent","--disable-interactivity","--accept-package-agreements","--accept-source-agreements"])
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
+        .spawn().map_err(|error|format!("WinGet: {error}"))?;
+    if let Some(stdout)=child.stdout.take(){install_progress::capture(stdout,progress.clone());}
+    if let Some(stderr)=child.stderr.take(){install_progress::capture(stderr,progress.clone());}
+    let started=std::time::Instant::now();let mut last_check=started;
+    loop {
+        match child.try_wait(){
+            Ok(Some(status))=>{
+                progress.phase(5);
+                let found=find_libreoffice(None)?;
+                // Already-installed/no-upgrade exit codes need not mean the component is unusable.
+                if found.is_some()||status.success(){return Ok(found);}
+                return Err(format!("WinGet ({status})\n{}\n{}",progress.details(),tr("LibreOffice 安装未完成，请检查系统安装提示，或手动安装后重新检测。")));
+            },
+            Err(error)=>{
+                let _=error;progress.slow();std::thread::sleep(Duration::from_millis(500));continue;
+            },
+            Ok(None)=>{}
+        }
+        if progress.cancel_requested(){
+            // Check for an MSI/dependency installer before touching our own CLI process.
+            if let Err(error)=install_task::ensure_no_other_installer(Some(child.id())){
+                progress.refuse_cancel();
+                // Keep monitoring and retain the process guard; never abandon a running install.
+                let _=error;
+            }else if progress.cancel_download(&mut child).unwrap_or(false){
+                child.wait().map_err(|e|e.to_string())?;progress.phase(5);
+                let released=std::time::Instant::now();
+                loop {
+                    if install_task::ensure_no_other_installer(None).is_ok()&&install_task::ensure_download_released().is_ok(){return Err(OFFICE_RETRY.into());}
+                    if released.elapsed()>Duration::from_secs(10){return Err(tr("上一次下载文件仍被占用，已停止重试。请等待占用解除后再安装。").into());}
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
+        if last_check.elapsed()>=Duration::from_secs(3){
+            last_check=std::time::Instant::now();
+            if let Ok(Some(found))=find_libreoffice(None){
+                // Leave the installer alone; only detach its completion from the UI state.
+                std::thread::spawn(move||{let _=child.wait();});return Ok(Some(found));
+            }
+        }
+        if started.elapsed()>=Duration::from_secs(15*60){
+            progress.slow();
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
 impl LibreOfficeSettings {
     fn start(&mut self,ctx:&egui::Context,install:bool,selected:Option<PathBuf>){
-        if self.pending.is_some(){return;}self.error=None;self.installing=install;
+        if self.pending.is_some(){return;}self.error=None;self.installing=install;self.confirm_retry=false;self.backend=installer::selected();
+        self.progress=install_progress::Shared::default();let progress=self.progress.clone();let backend=self.backend;
         let ctx=ctx.clone();let (send,receive)=mpsc::channel();self.pending=Some(receive);
         std::thread::spawn(move||{let result=(||{
-            if install {
-                let output=crate::media_tools::command("winget").args(["install","--id","TheDocumentFoundation.LibreOffice","--exact","--source","winget","--silent","--disable-interactivity","--accept-package-agreements","--accept-source-agreements"]).output().map_err(|error|format!("WinGet: {error}"))?;
-                if !output.status.success(){return Err(format!("WinGet ({})\n{}\n{}",output.status,String::from_utf8_lossy(&output.stdout),String::from_utf8_lossy(&output.stderr)));}
-            }
-            let custom=selected.is_some();let found=find_libreoffice(selected)?;
+            let custom=selected.is_some();let found=if install{if backend==installer::Backend::Scoop{installer::install("libreoffice",&progress)?;find_libreoffice(None)?}else{install_libreoffice(&progress)?}}else{find_libreoffice(selected)?};
             if custom {let (path,_)=found.as_ref().ok_or_else(||tr("未检测到有效的 LibreOffice 程序").to_owned())?;let config=libreoffice_config()?;fs::create_dir_all(config.parent().unwrap()).map_err(|error|error.to_string())?;fs::write(config,path.to_string_lossy().as_bytes()).map_err(|error|error.to_string())?;}
             Ok(found)
         })();let _=send.send(result);ctx.request_repaint();});
     }
-    fn poll(&mut self){if let Some(receiver)=&self.pending{match receiver.try_recv(){
-        Ok(result)=>{self.pending=None;self.checked=true;match result{Ok(found)=>{self.path=found.as_ref().map(|(path,_)|path.clone());self.version=found.map(|(_,version)|version);if self.installing&&self.path.is_none(){self.error=Some(tr("安装后尚未检测到 LibreOffice，请重新检测或选择程序。").into());}},Err(error)=>self.error=Some(error)}},
-        Err(mpsc::TryRecvError::Disconnected)=>{self.pending=None;self.checked=true;self.error=Some(tr("组件任务中断").into());},Err(mpsc::TryRecvError::Empty)=>{}
-    }}}
+    fn poll(&mut self,ctx:&egui::Context){let mut retry=false;if let Some(receiver)=&self.pending{match receiver.try_recv(){
+        Ok(result)=>{self.pending=None;self.checked=true;self.ready_event=true;let was_installing=std::mem::replace(&mut self.installing,false);match result{Ok(found)=>{self.path=found.as_ref().map(|(path,_)|path.clone());self.version=found.map(|(_,version)|version);if was_installing&&self.path.is_none(){self.error=Some(tr("安装后尚未检测到 LibreOffice，请重新检测或选择程序。").into());}},Err(error) if error==OFFICE_RETRY=>{retry=true;},Err(error)=>self.error=Some(error)}},
+        Err(mpsc::TryRecvError::Disconnected)=>{self.pending=None;self.checked=true;self.installing=false;self.error=Some(tr("组件任务中断").into());},Err(mpsc::TryRecvError::Empty)=>{}
+    }}if retry{self.start(ctx,true,None);}}
     fn show(&mut self,ui:&mut egui::Ui){
         if !self.checked&&self.pending.is_none(){self.start(ui.ctx(),false,None);}
-        ui.small(tr("办公文档转换引擎；当前仅提供组件管理，Office 文档预览与编辑尚未接入。"));
-        ui.small(tr("通过 WinGet 安装，可能需要管理员确认；由系统管理，不会被软件缓存清理删除。"));
-        if let Some(version)=&self.version{ui.label(version);}else{ui.label(tr("未安装"));}
+        ui.small(tr("办公文档只读预览需要 LibreOffice 和 PDFium；暂不支持编辑。"));
+        ui.small(tr(if installer::selected()==installer::Backend::Scoop{"通过 Scoop 安装；可能安装 Git 并启用 extras 软件源，组件不参与软件缓存清理。"}else{"通过 WinGet 安装，可能需要管理员确认；由系统管理，不会被软件缓存清理删除。"}));
+        if let Some(version)=&self.version{ui.label(version);}else{ui.label(tr(if self.pending.is_some(){"尚未检测到可用的 LibreOffice"}else{"未安装"}));}
         if let Some(path)=&self.path{ui.add(egui::Label::new(path.display().to_string()).wrap().selectable(true));}
-        if self.pending.is_some(){ui.horizontal(|ui|{ui.spinner();ui.label(tr(if self.installing{"正在安装…"}else{"正在检测…"}));});ui.ctx().request_repaint_after(Duration::from_millis(100));}
+        if self.pending.is_some(){if self.installing{
+            self.progress.show_for(ui,self.backend.name());
+            if self.backend==installer::Backend::WinGet&&self.progress.can_cancel(){
+                if self.confirm_retry{
+                    ui.small(tr("将结束本次下载，确认旧任务退出并释放文件后重新安装。"));
+                    ui.horizontal(|ui|{
+                        if ui.button(tr("确认取消下载并重试")).clicked(){self.progress.request_cancel();self.confirm_retry=false;}
+                        if ui.button(tr("继续等待")).clicked(){self.confirm_retry=false;}
+                    });
+                }else if ui.button(tr("取消并重试")).clicked(){self.confirm_retry=true;}
+            }else{self.confirm_retry=false;ui.small(tr("已有任务正在进行；当前阶段不允许取消或重复安装。"));}
+        }else{ui.horizontal(|ui|{ui.spinner();ui.label(tr("正在检测…"));});}ui.ctx().request_repaint_after(Duration::from_millis(100));}
         else {ui.horizontal_wrapped(|ui|{
-            if self.path.is_none()&&ui.add_enabled(cfg!(windows),egui::Button::new(tr("安装 LibreOffice"))).clicked(){self.start(ui.ctx(),true,None);}
+            if self.path.is_none()&&ui.add_enabled(cfg!(windows)&&installer::ready(),egui::Button::new(tr("安装 LibreOffice"))).clicked(){self.start(ui.ctx(),true,None);}
             if ui.button(tr("重新检测")).clicked(){self.start(ui.ctx(),false,None);}
             if ui.button(tr("选择程序…")).clicked(){if let Some(path)=rfd::FileDialog::new().add_filter("LibreOffice",&["exe","com"]).pick_file(){self.start(ui.ctx(),false,Some(path));}}
         });}
@@ -223,15 +293,17 @@ impl LibreOfficeSettings {
     }
 }
 #[derive(Default)]
-pub struct Manager {open:bool,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings}
+pub struct Manager {open:bool,installer:installer::Settings,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings}
 impl Manager {
     pub fn is_open(&self)->bool{self.open}
     pub fn open(&mut self,ctx:&egui::Context){if !self.is_open(){self.ffmpeg.refresh(ctx);}self.open=true;crate::native_window::wake(ctx,egui::Id::new("third_party_window"));}
     pub fn show(&mut self,ctx:&egui::Context){
-        self.ffmpeg.poll(ctx);self.pdfium.poll();self.libreoffice.poll();
+        self.ffmpeg.poll(ctx);self.pdfium.poll();self.libreoffice.poll(ctx);
+        if std::mem::take(&mut self.libreoffice.ready_event){request_pdf_retry(ctx);}
         if std::mem::take(&mut self.pdfium.ready_event){request_pdf_retry(ctx);}
         if !self.open{return;}
         crate::native_window::Window::new(tr("第三方支持")).id(egui::Id::new("third_party_window")).open(&mut self.open).default_width(560.0).default_height(500.0).show(ctx,|ui|{
+            self.installer.show(ui,self.ffmpeg.busy()||(self.libreoffice.installing&&self.libreoffice.pending.is_some()));
             let title_color=if ui.visuals().dark_mode {egui::Color32::from_rgb(105,175,255)} else {egui::Color32::from_rgb(25,85,165)};
             ui.heading(egui::RichText::new("FFmpeg / FFprobe").color(title_color));self.ffmpeg.show(ui);
             ui.separator();ui.heading(egui::RichText::new("PDFium").color(title_color));self.pdfium.show(ui);

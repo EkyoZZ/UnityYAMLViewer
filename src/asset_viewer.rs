@@ -1,5 +1,5 @@
 //! Text and image reference tabs, with nine-slice editing and in-place replacement.
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, mpsc}};
+use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, sync::{Arc, mpsc}};
 use eframe::egui::{self, Color32};
 use egui::emath::GuiRounding as _;
 pub(crate) mod nine_slice;
@@ -15,6 +15,12 @@ pub fn set_image_undo_limit(limit:usize){image_history::set_limit(limit);}
 mod sequence_tpsheet;
 mod svg_preview;
 pub(crate) mod pdf_preview;
+mod office_preview;
+mod spreadsheet_preview;
+pub fn is_spreadsheet(path:&Path)->bool{spreadsheet_preview::supports(path)}
+pub fn is_office_document(path:&Path)->bool{is_paged_document(path)||is_spreadsheet(path)}
+pub fn is_office(path: &Path) -> bool { office_preview::supports(path) }
+pub fn is_paged_document(path: &Path) -> bool { is_pdf(path) || (is_office(path)&&!is_spreadsheet(path)) }
 pub fn is_pdf(path: &Path) -> bool { extension(path) == "pdf" }
 
 /// Shared by tabs, grouped file rows, and preview file headings.
@@ -190,6 +196,9 @@ impl ImageTab {
 #[derive(Default)]
 pub struct Assets {
     default_image_fit: bool,
+    displayed_image: Option<PathBuf>,
+    image_prefetch: Option<(PathBuf, mpsc::Receiver<Loaded>)>,
+    prefetch_skipped: HashSet<PathBuf>,
     browser: image_browser::Browser,
     table: crate::delimited_table::Preview,
     playlists: crate::playlist::Lists,
@@ -198,11 +207,89 @@ pub struct Assets {
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
     pdfs: HashMap<PathBuf, pdf_preview::Preview>,
+    spreadsheets:HashMap<PathBuf,spreadsheet_preview::Preview>,
     svgs: HashMap<PathBuf, svg_preview::Preview>,
     spine: HashMap<PathBuf, Result<crate::spine_preview::Preview,String>>,
 
 }
 impl Assets {
+    /// Additional browsing frames have a 64 MiB estimated CPU/GPU budget.
+    /// The active frame, fallback frame and independent editors are not cache entries.
+    fn update_image_cache(&mut self,ctx:&egui::Context,path:&Path) {
+        const BUDGET:usize=64*1024*1024;
+        let nearby=if is_browsable_image(path){self.browser.nearby(path)}else{Vec::new()};
+        self.prefetch_skipped.retain(|cached|nearby.contains(cached));
+        if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path) {
+            let (_,receiver)=self.image_prefetch.take().unwrap();
+            let tab=self.images.entry(path.to_owned()).or_insert_with(||ImageTab{
+                zoom:if self.default_image_fit{None}else{Some(1.0)},..Default::default()
+            });
+            if tab.pending.is_none()&&tab.texture.is_none() {tab.pending=Some(receiver);}
+        }
+        let completed=self.image_prefetch.as_ref().and_then(|(_,receiver)|match receiver.try_recv(){
+            Ok(result)=>Some(result),
+            Err(mpsc::TryRecvError::Disconnected)=>Some(Err(String::new())),
+            Err(mpsc::TryRecvError::Empty)=>None,
+        });
+        if let Some(result)=completed {
+            let (loaded,_)=self.image_prefetch.take().unwrap();
+            if nearby.contains(&loaded) {
+                match result {
+                    Ok((original,display))=>{
+                        let tab=self.images.entry(loaded.clone()).or_insert_with(||ImageTab{
+                            zoom:if self.default_image_fit{None}else{Some(1.0)},..Default::default()
+                        });
+                        // A foreground reload/editor owns its own result.
+                        if tab.original.is_none()&&tab.pending.is_none()&&tab.texture.is_none(){
+                            tab.original=Some(original);
+                            tab.texture=Some(ctx.load_texture(loaded.display().to_string(),display,egui::TextureOptions::NEAREST));
+                        }
+                    },
+                    Err(_)=>{self.prefetch_skipped.insert(loaded);},
+                }
+            }
+        }
+        let mut remaining=BUDGET;
+        let mut keep=HashSet::new();
+        for cached in &nearby {
+            if Some(cached)==self.displayed_image.as_ref(){continue;}
+            if let Some(tab)=self.images.get(cached) {
+                let bytes=tab.original.as_ref().map_or(0,|image|image.as_raw().len().saturating_mul(3));
+                if bytes>0&&bytes<=remaining {remaining-=bytes;keep.insert(cached.clone());}
+            }
+        }
+        for (other,tab) in &mut self.images {
+            if other!=path&&Some(other)!=self.displayed_image.as_ref()&&!keep.contains(other)
+                &&!tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active()&&!tab.sequence.active()&&!tab.watermark.active() {
+                tab.original=None;tab.texture=None;tab.pending=None;tab.editor.release();
+            }
+        }
+        // Keep one speculative decoder alive even when navigation outruns it.
+        // Do not spawn a fresh worker for every skipped frame.
+        if self.image_prefetch.is_some()||remaining<12||!self.images.get(path).is_some_and(|tab|tab.texture.is_some()&&tab.pending.is_none()) {return;}
+        let next=nearby.into_iter().find(|candidate|is_bitmap(candidate)&&!self.prefetch_skipped.contains(candidate)
+            &&!self.images.get(candidate).is_some_and(|tab|tab.texture.is_some()||tab.pending.is_some()||tab.error.is_some()));
+        let Some(next)=next else{return;};
+        let tab=self.images.get(&next);
+        let channel=tab.map_or(Channel::Rgba,|tab|tab.channel);
+        let apply_alpha=tab.is_some_and(|tab|tab.apply_alpha);
+        let (send,receive)=mpsc::channel();
+        self.image_prefetch=Some((next.clone(),receive));
+        let ctx=ctx.clone();
+        std::thread::spawn(move||{
+            let result=(||{
+                // Read dimensions on this worker before allocating full pixels.
+                let (width,height)=image::ImageReader::open(&next).map_err(|e|e.to_string())?
+                    .with_guessed_format().map_err(|e|e.to_string())?.into_dimensions().map_err(|e|e.to_string())?;
+                if u64::from(width)*u64::from(height)*12>remaining as u64{return Err(String::new());}
+                let original=Arc::new(load_preview_pixels(&next)?);
+                let pixels=original.pixels().map(|pixel|preview_color(channel.preview_pixel(pixel.0,apply_alpha))).collect();
+                let display=egui::ColorImage{size:[original.width() as usize,original.height() as usize],pixels};
+                Ok((original,display))
+            })();
+            let _=send.send(result);ctx.request_repaint();
+        });
+    }
     pub fn set_default_image_fit(&mut self, enabled: bool) { self.default_image_fit = enabled; }
     pub fn select_folder_image(&mut self, path: &Path) {
         if is_browsable_image(path) { self.browser.select_from_folder(path); }
@@ -242,7 +329,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path); self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path); }
+    pub fn forget(&mut self, path: &Path) { self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path);if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -284,17 +371,19 @@ impl Assets {
         let browsed = if is_browsable_image(path) { Some(self.browser.show(ui,path)) } else { None };
         let path = browsed.as_deref().unwrap_or(path);
         self.svgs.retain(|other, _| other == path);
-        // Keep decoded pixels and GPU textures only for the active image tab.
-        for (other, tab) in &mut self.images {
-            if other != path&&!tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active()&&!tab.sequence.active()&&!tab.watermark.active() { tab.original = None; tab.texture = None; tab.pending = None; tab.editor.release(); }
+        // Retain the last displayed image until the requested image has a texture.
+        if !is_browsable_image(path) || !self.browser.is_multiple()
+            || self.displayed_image.as_ref().is_some_and(|previous| previous.parent()!=path.parent()) {
+            self.displayed_image=None;
         }
+        self.update_image_cache(ui.ctx(),path);
         if crate::playlist::is_playlist(path){self.playlists.show(ui,path,false);return;}
         if crate::media_preview::is_media(path) {
             let preview=self.media.entry(path.to_owned()).or_insert_with(|| crate::media_preview::Preview::new(path));
             self.playlists.show_creator(ui,path,preview);
             return;
         }
-        if !is_browsable_image(path) && !is_pdf(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
+        if !is_browsable_image(path) && !is_office_document(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
         self.models.retain(|other,_|other==path);
         if crate::model_preview::is_model(path) {
             let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
@@ -320,8 +409,10 @@ impl Assets {
             return;
         }
         self.spine.clear();
+        self.spreadsheets.retain(|other,_|other==path);
+        if is_spreadsheet(path){self.spreadsheets.entry(path.to_owned()).or_default().show(ui,path);return;}
         self.pdfs.retain(|other, _| other == path);
-        if is_pdf(path) { self.pdfs.entry(path.to_owned()).or_default().show(ui,path); return; }
+        if is_paged_document(path) { self.pdfs.entry(path.to_owned()).or_default().show(ui,path); return; }
         self.svgs.retain(|other, _| other == path);
         if extension(path) == "svg" {
             self.svgs.entry(path.to_owned()).or_default().show(ui, path);
@@ -357,7 +448,10 @@ impl Assets {
                 Ok((original, display)) => {
                     tab.original = Some(original);
                     tab.texture = Some(ui.ctx().load_texture(path.display().to_string(), display, egui::TextureOptions::NEAREST));
+                    ui.ctx().request_repaint();
                 }
+                // A speculative size limit must never become a foreground error.
+                Err(error) if error.is_empty() => tab.load(path.to_owned(),ui.ctx().clone()),
                 Err(error) => tab.error = Some(error),
             }
         }
@@ -415,7 +509,10 @@ impl Assets {
         }
         let reload=false;
         if reload {tab.original=None;tab.pan=egui::Vec2::ZERO;tab.zoom=None;tab.load(path.to_owned(),ui.ctx().clone());}
-        if let Some(error) = &tab.error { ui.label(error); return; }
+        if let Some(error) = &tab.error { ui.label(error); }
+        if tab.texture.is_some() { self.displayed_image=Some(path.to_owned()); }
+        let display_path=if browsing {self.displayed_image.as_deref().unwrap_or(path)} else {path};
+        let tab=self.images.get_mut(display_path).expect("displayed image tab");
         let Some(texture) = &tab.texture else { ui.spinner(); return; };
         let size = texture.size_vec2();
         let (canvas, response) = ui.allocate_exact_size(egui::vec2(available.width(),available.height()-strip_height).max(egui::vec2(1.0,1.0)), egui::Sense::drag());
@@ -472,7 +569,7 @@ impl Assets {
         }
         let info = format!("{} × {} · {} {:.0}%", size.x as usize, size.y as usize, tab.channel.label(), zoom * 100.0);
         let info = if browsing {
-            self.browser.position(path).map_or_else(||info.clone(),|(index,total)|format!("{index}/{total} · {info}"))
+            self.browser.position(display_path).map_or_else(||info.clone(),|(index,total)|format!("{index}/{total} · {info}"))
         } else {info};
         let galley = painter.layout_no_wrap(info, egui::FontId::proportional(13.0), Color32::WHITE);
         let badge_size = galley.size() + egui::vec2(24.0,12.0);

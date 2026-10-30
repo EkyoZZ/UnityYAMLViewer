@@ -28,6 +28,20 @@ mod folder_selection_tests {
     }
 
     #[test]
+    fn prefetch_neighbours_are_bounded_and_do_not_wrap() {
+        let mut browser=Browser::default();
+        browser.multiple=true;
+        browser.files=(0..12).map(|i|PathBuf::from(format!("frames/{i}.png"))).collect();
+        let expected=[6,4,7,3,8,2,9,1].map(|i|browser.files[i].clone());
+        assert_eq!(browser.nearby(&browser.files[5]),expected);
+        assert_eq!(browser.nearby(&browser.files[0]),browser.files[1..5]);
+        assert_eq!(browser.nearby(&browser.files[11]),[10,9,8,7].map(|i|browser.files[i].clone()));
+        assert!(browser.nearby(Path::new("elsewhere.png")).is_empty());
+        browser.multiple=false;
+        assert!(browser.nearby(&browser.files[5]).is_empty());
+    }
+
+    #[test]
     fn another_folder_does_not_reuse_the_old_selection() {
         let mut browser = Browser::default();
         browser.owner = PathBuf::from("first/a.png");
@@ -69,6 +83,14 @@ impl Browser {
 
     pub fn is_multiple(&self) -> bool {
         self.multiple
+    }
+    /// Nearest frames first, favour forward browsing without assuming numeric names.
+    pub fn nearby(&self, path: &Path) -> Vec<PathBuf> {
+        if !self.multiple { return Vec::new(); }
+        let Some(index)=self.files.iter().position(|file|file==path) else {return Vec::new();};
+        [1isize,-1,2,-2,3,-3,4,-4].into_iter()
+            .filter_map(|offset| index.checked_add_signed(offset).and_then(|i|self.files.get(i)).cloned())
+            .collect()
     }
     pub fn position(&self, path: &Path) -> Option<(usize, usize)> {
         self.files

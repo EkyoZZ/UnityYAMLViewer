@@ -66,7 +66,7 @@ fn download(input: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 fn supported(path: &Path) -> bool {
-    crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_pdf(path) || crate::asset_viewer::is_text(path)
+    crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_office_document(path) || crate::asset_viewer::is_text(path)
         || crate::model_preview::is_model(path)
         || matches!(path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str(), "unity" | "prefab" | "asset" | "controller" | "anim" | "mat")
 }

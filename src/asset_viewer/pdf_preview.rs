@@ -17,7 +17,7 @@ fn set_fullscreen(ctx:&egui::Context,path:Option<&Path>){
 }
 pub(crate) fn update_fullscreen(ctx:&egui::Context,path:Option<&Path>)->bool{
     let owner=ctx.data(|data|data.get_temp::<std::path::PathBuf>(egui::Id::new("pdf_fullscreen_path")));
-    let pdf=path.filter(|path|super::is_pdf(path));
+    let pdf=path.filter(|path|super::is_paged_document(path));
     if owner.is_some()&&owner.as_deref()!=pdf{set_fullscreen(ctx,None);return false;}
     let toggle=pdf.is_some()&&ctx.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::F11));
     let escape=owner.is_some()&&ctx.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
@@ -82,6 +82,8 @@ fn render(source:Arc<Vec<u8>>,page:usize,scale:f32)->Result<Rendered,String>{
 }
 #[derive(Default)]
 pub(super) struct Preview {
+    editor:super::office_preview::Editor,
+    cancel:Arc<std::sync::atomic::AtomicBool>,
     source:Option<Arc<Vec<u8>>>, pending:Option<mpsc::Receiver<Result<Rendered,String>>>,
     texture:Option<egui::TextureHandle>,size:Option<egui::Vec2>,page:usize,count:usize,
     zoom:Option<f32>,fit_width:bool,pan:egui::Vec2,error:Option<String>,retry_requested:bool,
@@ -89,18 +91,20 @@ pub(super) struct Preview {
     displayed_page:Option<usize>,pending_since:Option<std::time::Instant>,
     transition:usize,fade:Option<(egui::TextureHandle,f64,f32)>,
 }
+impl Drop for Preview {fn drop(&mut self){self.cancel.store(true,std::sync::atomic::Ordering::Relaxed);}}
 impl Preview {
     pub(super) fn retry_component(&mut self){
         if self.error.is_some() || self.pending.is_some(){self.retry_requested=true;}
     }
     fn request(&mut self,path:&Path,scale:f32,ctx:&egui::Context){
-        let path=path.to_owned();let source=self.source.clone();let page=self.page;let ctx=ctx.clone();
+        let path=path.to_owned();let cancel=self.cancel.clone();let source=self.source.clone();let page=self.page;let ctx=ctx.clone();
         let (send,receive)=mpsc::channel();self.pending=Some(receive);self.pending_since=Some(std::time::Instant::now());
         std::thread::spawn(move||{
             let result=(||{
                 let source=match source{Some(s)=>s,None=>{
-                    let mut bytes=Vec::new();std::fs::File::open(path).map_err(|e|e.to_string())?.take(SOURCE_LIMIT+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
-                    if bytes.len() as u64>SOURCE_LIMIT{return Err(tr("PDF 文件超过 128 MiB，无法预览").into());}Arc::new(bytes)
+                    if super::is_office(&path){Arc::new(super::office_preview::convert(&path,&cancel)?)}else{
+                    let mut bytes=Vec::new();std::fs::File::open(&path).map_err(|e|e.to_string())?.take(SOURCE_LIMIT+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+                    if bytes.len() as u64>SOURCE_LIMIT{return Err(tr("PDF 文件超过 128 MiB，无法预览").into());}Arc::new(bytes)}
                 }};render(source,page,scale)
             })();let _=send.send(result);ctx.request_repaint();
         });
@@ -133,6 +137,7 @@ impl Preview {
         let fullscreen=is_fullscreen(ui.ctx());
         if !fullscreen {ui.horizontal_wrapped(|ui|{
             super::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
+            if super::is_office(path){self.editor.button(ui,path);}
             if self.count>1{
             let label=tr("自动翻页");
             let width=ui.painter().layout_no_wrap(label.into(),egui::TextStyle::Button.resolve(ui.style()),ui.visuals().text_color()).size().x+48.0;
@@ -156,6 +161,7 @@ impl Preview {
             if self.transition!=old_transition{self.fade=None;}
             }
         });}
+        if !fullscreen&&super::is_office(path){self.editor.status(ui,path);}
         if self.auto_page&&self.pending.is_none()&&self.error.is_none()&&self.texture.is_some(){
             self.elapsed+=delta;
             if self.elapsed>=self.interval.unwrap_or(5.0){
@@ -185,7 +191,7 @@ impl Preview {
             }
             if ui.button(tr("全屏")).on_hover_text("F11").clicked(){set_fullscreen(ui.ctx(),Some(path));}
         });
-        ui.small(tr("PDF 仅支持只读预览，暂不支持编辑、文字选择或搜索。"));
+        ui.small(tr(if super::is_office(path){"办公文档只读预览；表格按打印布局分页，字体和排版可能与原应用不同。不支持编辑、文字选择或搜索。"}else{"PDF 仅支持只读预览，暂不支持编辑、文字选择或搜索。"}));
         }
         if let Some(error)=&self.error{
             self.auto_page=false;self.elapsed=0.0;
@@ -197,7 +203,7 @@ impl Preview {
         if self.pending.is_none()&&self.texture.is_none(){self.request(path,1.0,ui.ctx());}
         let show_spinner=self.pending.is_some()&&self.pending_since.is_some_and(|start|start.elapsed()>=std::time::Duration::from_secs(1));
         let Some(size)=self.size else{
-            if show_spinner{ui.spinner();}
+            if show_spinner{ui.spinner();if super::is_office(path){ui.label(tr("正在转换办公文档…"));}}
             if self.pending.is_some(){ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));}
             return;
         };

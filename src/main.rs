@@ -653,6 +653,7 @@ impl ViewerApp {
             ],
         ).add_filter("Spine 3.8", &["skel", "bytes", "json", "txt"])
         .add_filter("PDF", &["pdf"])
+        .add_filter("Office / OpenDocument", &["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf"])
         .add_filter(crate::localization::tr("图片"), &["png", "jpg", "jpeg", "tga", "bmp", "webp", "svg", "gif", "psd", "ico"])
         .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
         .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
@@ -742,7 +743,7 @@ impl ViewerApp {
             if record_recent { self.remember_recent_file(); }
             return;
         }
-        if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
+        if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -762,7 +763,7 @@ impl ViewerApp {
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
@@ -1878,7 +1879,7 @@ impl eframe::App for ViewerApp {
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
         let delimited_tab = self.path.as_ref().is_some_and(|path| path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
-        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_pdf(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -2413,7 +2414,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_pdf(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
+                    if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();
@@ -2617,12 +2618,17 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new("1.2.8").strong());
+                        ui.label(localization::tr("• XLS／XLSX／ODS 固定行列编号；冻结表头开启时优先沿用可读的 XLSX 设置，否则固定首行；修复冻结区域分割线与滚动内容遮挡"));
+                        ui.label(localization::tr("• 办公文档新增“在LibreOffice编辑”，直接打开原文件；保存后可重载预览"));
+                        ui.label(localization::tr("• 第三方支持新增 WinGet／Scoop 主题 Tab，Scoop 独立按需安装并显示同行状态"));
+                        ui.label(localization::tr("• LibreOffice 防止重复安装，已确认的下载阶段可取消并重试，安装中或状态不明时保留任务"));
+                        ui.label(localization::tr("• Word／演示文档支持只读分页预览，依赖 LibreOffice 与 PDFium；电子表格使用独立数据视图"));
                         ui.label(localization::tr("• 启动自动更新关联名称与独立文件图标，默认打开程序仍由用户选择"));
                         ui.label(localization::tr("• 新增目录浏览：多个根目录、按需展开、独立忽略规则，目录与规则自动保存"));
                         ui.label(localization::tr("• 目录预览固定首位并显示根目录名，修改后保留普通页签，同目录切图复用缓存"));
                         ui.label(localization::tr("• 新增多图浏览：固定底部缩略图、方向键切图、位置计数与透明棋盘背景"));
                         ui.label(localization::tr("• 图片默认多图与适应窗口可设置，补充 ICO 与受限 PSD 只读预览"));
-                        ui.label(localization::tr("• 优化缩放比例菜单、图片边界与目录滚动布局"));
+                        ui.label(localization::tr("• 优化缩放比例菜单、图片边界与目录滚动布局，切图保留旧图并预加载相邻位图"));
                         ui.label(localization::tr("• Spine 默认动态播放，普通预览默认预乘 Alpha，修复路径并优化工具栏与提示"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.2.7").strong());
