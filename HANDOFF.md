@@ -1,4 +1,14 @@
-# 当前版本：1.2.9（源码已升级，未编译／未发布）
+# 当前版本：1.2.9（已构建，发布候选已准备，未发布）
+
+## 1.2.9 发布准备与本地构建（2026-11-02，未发布）
+
+- 按用户要求精简 README 中英文能力条目与限制；不加入逐版本更新分节或内部发布流程。新增简要发布说明准备稿 docs/releases/1.2.9.md。
+- 用户明确授权编译；构建前检查查看器进程和目标 EXE 独占访问，无占用。cargo build --release --locked --offline 成功（43.00 秒，8 条警告）；日志 target/v1.2.9-release-build.log。
+- 产物 target/release/unity_yaml_viewer.exe，文件／产品版本均为 1.2.9，26760704 字节；SHA256：558C831630253DE09F7BF9DCF1D7D6B4C19ADD26D9F686B1478A397F1D745CA1。
+- 发布候选副本 target/releases/v1.2.9/UnityYAMLViewer-v1.2.9-windows-x64.exe 与原产物哈希一致；核验 target/v1.2.9-release-verification.json，190 项构建输入记录 target/v1.2.9-build-manifest.json。
+- 1517 条翻译七列完整且键唯一，关于默认 1.2.9／1.2.8、1.2.7 起折叠及重开折叠静态核对通过；git diff --check 通过。此前代码检查通过，自动测试未实际执行，本轮未运行 GUI，不声明全面验证。
+- 实际新版 PDF 保存、表格边线／冻结交互及七语言关于窗口布局仍待验证。仅准备产物，未提交／推送源码，未创建标签、Release 或上传附件；正式发布标题须仅为 v1.2.9。
+
 
 ## 1.2.9 版本整理（2026-11-02）
 
