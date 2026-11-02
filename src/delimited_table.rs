@@ -369,8 +369,6 @@ impl Preview {
             });
         }
         ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
         // One viewport owns both bars, so vertical scrolling cannot move the
         // bottom bar away, and wide columns cannot move the right bar offscreen.
         // Each solid bar remains visible only while its own axis overflows.
@@ -463,6 +461,13 @@ impl Preview {
             // Redraw them at the same half-spacing boundaries as the body.
             let stroke=ui.visuals().widgets.noninteractive.bg_stroke;
             let header_painter=ui.painter().with_clip_rect(header_clip);
+            // Paint the top border in the same viewport as the column guides,
+            // rather than a separate separator with layout spacing below it.
+            header_painter.hline(header_rect.x_range(),header_rect.top()+0.5,stroke);
+            if frozen_rows>0{
+                // Separate the coordinate labels from the frozen data header.
+                header_painter.hline(header_rect.x_range(),header_rect.top()+24.0+spacing.y*0.5,stroke);
+            }
             for (index,source) in columns.iter().enumerate(){
                 let fixed=index<=frozen_columns;
                 let x=if index==0{number_right}else{source.right()+spacing.x*0.5+if fixed{viewport.min.x}else{0.0}};
@@ -475,6 +480,8 @@ impl Preview {
             for source in columns.iter().skip(1).take(frozen_columns){
                 fixed_painter.vline(source.right()+viewport.min.x+spacing.x*0.5,fixed_body.y_range(),stroke);
             }
+            // Close the visible grid above the horizontal scrollbar / sheet strip.
+            ui.painter().with_clip_rect(content_clip).hline(viewport_rect.x_range(),viewport_rect.bottom()-0.5,stroke);
         });
     }
 

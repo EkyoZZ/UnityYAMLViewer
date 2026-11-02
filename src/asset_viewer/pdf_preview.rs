@@ -90,6 +90,8 @@ pub(super) struct Preview {
     auto_page:bool,loop_pages:bool,interval:Option<f64>,elapsed:f64,last_tick:Option<f64>,reload_requested:bool,
     displayed_page:Option<usize>,pending_since:Option<std::time::Instant>,
     transition:usize,fade:Option<(egui::TextureHandle,f64,f32)>,
+    save_pending:Option<mpsc::Receiver<Result<Option<std::path::PathBuf>,String>>>,
+    save_status:Option<Result<std::path::PathBuf,String>>,
 }
 impl Drop for Preview {fn drop(&mut self){self.cancel.store(true,std::sync::atomic::Ordering::Relaxed);}}
 impl Preview {
@@ -110,6 +112,11 @@ impl Preview {
         });
     }
     pub(super) fn show(&mut self,ui:&mut egui::Ui,path:&Path){
+        if let Some(receiver)=&self.save_pending{match receiver.try_recv(){
+            Ok(result)=>{self.save_pending=None;self.save_status=match result{Ok(Some(path))=>Some(Ok(path)),Ok(None)=>None,Err(error)=>Some(Err(error))};},
+            Err(mpsc::TryRecvError::Disconnected)=>{self.save_pending=None;self.save_status=Some(Err(tr("PDF 保存任务中断").into()));},_=>{}
+        }}
+        if self.save_pending.is_some(){ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));}
         let now=ui.input(|input|input.time);
         let delta=self.last_tick.replace(now).map(|last|now-last).filter(|delta|*delta>=0.0&&*delta<1.0).unwrap_or(0.0);
         if let Some(receiver)=&self.pending {match receiver.try_recv(){
@@ -138,6 +145,28 @@ impl Preview {
         if !fullscreen {ui.horizontal_wrapped(|ui|{
             super::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
             if super::is_office(path){self.editor.button(ui,path);}
+            if super::is_office(path){
+                if ui.add_enabled(self.source.is_some()&&self.save_pending.is_none(),egui::Button::new(tr("另存为 PDF")))
+                    .on_hover_text(tr("保存当前预览的完整 PDF，无需再次转换；原文档保持不变。")).clicked(){
+                    if let Some(source)=self.source.clone(){
+                        self.save_status=None;
+                        let name=format!("{}.pdf",path.file_stem().unwrap_or_default().to_string_lossy());
+                        let original=path.to_owned();
+                        let ctx=ui.ctx().clone();let (send,receive)=mpsc::channel();self.save_pending=Some(receive);
+                        std::thread::spawn(move||{
+                            let result=(||{
+                                let Some(destination)=rfd::FileDialog::new().set_title(tr("另存为 PDF")).add_filter("PDF",&["pdf"]).set_file_name(name).save_file()else{return Ok(None);};
+                                // Keep exactly the path whose overwrite was confirmed by the dialog.
+                                if !destination.extension().is_some_and(|ext|ext.eq_ignore_ascii_case("pdf")){return Err(tr("请选择 .pdf 文件名").into());}
+                                if destination.exists()&&std::fs::canonicalize(&destination).ok()==std::fs::canonicalize(&original).ok(){return Err(tr("不能覆盖原文档").into());}
+                                std::fs::write(&destination,source.as_slice()).map_err(|error|format!("{}: {error}",tr("PDF 保存失败")))?;
+                                Ok(Some(destination))
+                            })();let _=send.send(result);ctx.request_repaint();
+                        });
+                    }
+                }
+                if self.save_pending.is_some(){ui.spinner();}
+            }
             if self.count>1{
             let label=tr("自动翻页");
             let width=ui.painter().layout_no_wrap(label.into(),egui::TextStyle::Button.resolve(ui.style()),ui.visuals().text_color()).size().x+48.0;
@@ -162,6 +191,10 @@ impl Preview {
             }
         });}
         if !fullscreen&&super::is_office(path){self.editor.status(ui,path);}
+        if !fullscreen{if let Some(status)=&self.save_status{match status{
+            Ok(path)=>{ui.label(format!("{}: {}",tr("PDF 已保存"),path.display()));},
+            Err(error)=>{ui.colored_label(ui.visuals().error_fg_color,error);}
+        }}}
         if self.auto_page&&self.pending.is_none()&&self.error.is_none()&&self.texture.is_some(){
             self.elapsed+=delta;
             if self.elapsed>=self.interval.unwrap_or(5.0){

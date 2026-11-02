@@ -2617,20 +2617,29 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
-                        ui.label(RichText::new("1.2.8").strong());
+                        ui.label(RichText::new("1.2.9").strong());
                         ui.label(localization::tr("• XLS／XLSX／ODS 固定行列编号；冻结表头开启时优先沿用可读的 XLSX 设置，否则固定首行；修复冻结区域分割线与滚动内容遮挡"));
                         ui.label(localization::tr("• 办公文档新增“在LibreOffice编辑”，直接打开原文件；保存后可重载预览"));
                         ui.label(localization::tr("• 第三方支持新增 WinGet／Scoop 主题 Tab，Scoop 独立按需安装并显示同行状态"));
                         ui.label(localization::tr("• LibreOffice 防止重复安装，已确认的下载阶段可取消并重试，安装中或状态不明时保留任务"));
                         ui.label(localization::tr("• Word／演示文档支持只读分页预览，依赖 LibreOffice 与 PDFium；电子表格使用独立数据视图"));
+                        ui.label(localization::tr("• 转换为 PDF 预览的办公文档支持另存完整 PDF，复用预览结果"));
                         ui.label(localization::tr("• 启动自动更新关联名称与独立文件图标，默认打开程序仍由用户选择"));
+                        ui.label(localization::tr("• 多图切换保留旧画面，预加载相邻图片并限制额外缓存预算"));
+                        ui.label(localization::tr("• 电子表格支持多工作表底栏、查找复制、公式／缓存结果及可选必填检查，不重算公式"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.2.8").strong());
                         ui.label(localization::tr("• 新增目录浏览：多个根目录、按需展开、独立忽略规则，目录与规则自动保存"));
                         ui.label(localization::tr("• 目录预览固定首位并显示根目录名，修改后保留普通页签，同目录切图复用缓存"));
                         ui.label(localization::tr("• 新增多图浏览：固定底部缩略图、方向键切图、位置计数与透明棋盘背景"));
                         ui.label(localization::tr("• 图片默认多图与适应窗口可设置，补充 ICO 与受限 PSD 只读预览"));
-                        ui.label(localization::tr("• 优化缩放比例菜单、图片边界与目录滚动布局，切图保留旧图并预加载相邻位图"));
+                        ui.label(localization::tr("• 优化缩放比例菜单、图片边界与目录滚动布局"));
                         ui.label(localization::tr("• Spine 默认动态播放，普通预览默认预乘 Alpha，修复路径并优化工具栏与提示"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.7").strong());
                         ui.label(localization::tr("• 新增序列工具：按行列拆分图片，多图排序合并并导出 PNG"));
                         ui.label(localization::tr("• 制作与拆分均支持取色去底、容差遮罩、柔化与去色边，预览和 PNG／GIF／视频源一致"));
@@ -2640,10 +2649,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 第三方支持可分别指定 FFmpeg、FFprobe 和 PDFium 路径，优先使用并保存，无需修改 PATH"));
                         ui.label(localization::tr("• 去水印入口暂时关闭，保留实现供后续完善或测试；序列去底色继续可用"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.2.6").strong());
                         ui.label(localization::tr("• 修复图片与连续图放大模糊、预览比例，高倍棋盘格对齐像素"));
                         ui.label(localization::tr("• 各类预览共用并记住背景设置，自定义颜色默认为黑色"));
