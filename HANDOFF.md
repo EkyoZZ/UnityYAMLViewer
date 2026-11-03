@@ -3288,3 +3288,11 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 当前产物target/release/unity_yaml_viewer.exe及候选target/releases/v1.3.0/UnityYAMLViewer-v1.3.0-windows-x64.exe，文件／产品版本均1.3.0，28,507,136字节，SHA256均为DB46D382054BB80BB2EEA3AE5577D815DCD0ECFC991940EC96C4D185E09CBDA0。
 - 更新target/v1.3.0-build-manifest.json（204项主要构建输入）及target/v1.3.0-release-verification.json，构建后输入哈希核对一致。日志target/v1.3.0-dpi-release-build.log。本候选替代此前本地候选，不改写此前构建史实。
 - 未启动GUI或执行测试程序，实际DPI界面及其他端到端验证边界不变。未stage、提交／推送、创建标签、Release或上传附件；等待用户提交Git后告知再核对发布。
+
+## GitHub 正式发布（2026-11-03）
+
+- 用户提交Git后明确授权发布。发布前工作区干净，提交fdeb939f546e36844738bb5ed028ff048dc18bcb与GitHub master一致。204项主要构建输入与构建时工作文件哈希完全一致；其中51项与提交字节完全一致、153项仅Git CRLF/LF规范化差异，源码内容无差异。审计target/v1.3.0-publish-audit.json，未重新编译。
+- 北京时间2026-11-03 22:20:43正式发布[v1.3.0](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.0)，Release ID 432793952，标题仅v1.3.0，非草稿／非预发布，latest API确认最新正式版。标签指向上述提交。
+- 先建草稿，再上传核验附件，随后正式发布。附件UnityYAMLViewer-v1.3.0-windows-x64.exe，28,507,136字节，GitHub上传状态uploaded，SHA256与本地一致：DB46D382054BB80BB2EEA3AE5577D815DCD0ECFC991940EC96C4D185E09CBDA0。
+- 发布证据target/v1.3.0-published.json；附件证据target/v1.3.0-uploaded-asset.json。更新发布说明、版本索引与CHANGELOG的发布状态，不修改其他Release或附件。
+- 保留已确认的验证边界，未补做完整GUI回归或执行测试程序。发布后文档更新未自动stage、提交或推送，等待用户自行纳入后续提交。
