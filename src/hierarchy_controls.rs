@@ -6,6 +6,7 @@ use crate::Document;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Flags {
     pub visible: bool,
+    /// Controls preview picking only; Hierarchy selection stays available.
     pub selectable: bool,
 }
 impl Default for Flags {
@@ -65,10 +66,10 @@ pub fn icon(ui: &mut egui::Ui, eye: bool, enabled: bool, inherited: bool) -> egu
         egui::Rect::from_center_size(rect.center(), egui::vec2(15.0, 15.0)), color);
     if !enabled { painter.line_segment([p(2.0,17.0),p(17.0,3.0)],egui::Stroke::new(1.6_f32,if inherited {color} else {Color32::from_rgb(220,100,100)})); }
     let label = if inherited {
-        if eye { "父节点已关闭渲染；本节点开关在父节点恢复后生效。" } else { "父节点已禁止选中；本节点开关在父节点恢复后生效。" }
+        if eye { "父节点已关闭渲染；本节点开关在父节点恢复后生效。" } else { "父节点已禁止预览选中；本节点开关在父节点恢复后生效。" }
     } else if eye {
         if enabled { "关闭此节点及子节点的预览渲染" } else { "开启此节点及子节点的预览渲染" }
-    } else if enabled { "禁止选中此节点及子节点" } else { "允许选中此节点及子节点" };
+    } else if enabled { "禁止在预览中选中此节点及子节点" } else { "允许在预览中选中此节点及子节点" };
     response.on_hover_text(crate::localization::tr(label))
 }
 

@@ -167,7 +167,7 @@ impl Tools {
         }
         for target in &self.selected {
             if matches!(target,Target::Group(_)) {if let Some(rect)=self.nodes.get(target){
-                ui.painter().with_clip_rect(canvas).rect_stroke(rect.expand(2.),4.,Stroke::new(1.6,Color32::from_rgb(95,175,245)),egui::StrokeKind::Outside);
+                ui.painter().with_clip_rect(canvas).rect_stroke(rect.expand(2.),4.,Stroke::new(1.6_f32,Color32::from_rgb(95,175,245)),egui::StrokeKind::Outside);
             }}
         }
     }

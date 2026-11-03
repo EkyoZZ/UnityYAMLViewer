@@ -129,7 +129,7 @@ fn difference(source:&image::RgbaImage,ids:&[u32],start:usize,end:usize,axis:usi
 
 fn retained(span:u32,border:u32,period:u32,requested:u32,align:bool) -> (u32,u32) {
     let count=(span/period).max(1);let copies=requested.max(1).min(count);
-    let mut center=copies*period;
+    let center=copies*period;
     if !align {return (center,0);}
     // Stretch has period 1: add exactly the missing 0/1/2/3 center pixels.
     if period==1 {return (center+(4-(border+center)%4)%4,0);}

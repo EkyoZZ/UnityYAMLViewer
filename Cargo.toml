@@ -1,6 +1,6 @@
 [package]
 name = "unity_yaml_viewer"
-version = "1.2.9"
+version = "1.3.0"
 edition = "2024"
 
 [dependencies]
@@ -11,9 +11,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 eframe = "0.31"
 raw-window-handle = "0.6"
 libloading = "0.8"
-resvg = { version = "0.37", default-features = false }
+resvg = { version = "0.37", default-features = false, features = ["text", "system-fonts"] }
 ab_glyph = "0.2"
-egui_extras = { version = "0.31", default-features = false, features = ["svg", "syntect"] }
+egui_extras = { version = "0.31", default-features = false, features = ["svg", "syntect", "image"] }
 rfd = "0.15"
 regex = "1.11"
 encoding_rs = "0.8"
@@ -25,6 +25,13 @@ sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 calamine = { version = "0.37", default-features = false }
 quick-xml = "0.42"
+
+egui_commonmark = { path = "vendor/egui_commonmark", version = "=0.20.0", default-features = false, features = ["pulldown_cmark", "svg", "better_syntax_highlighting"] }
+pulldown-cmark = { version = "0.12", default-features = false }
+
+tokio = { version = "1", features = ["rt", "time"] }
+
+png = "0.18"
 
 [build-dependencies]
 ico = "0.4"

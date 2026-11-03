@@ -1,7 +1,7 @@
 //! Static SVG viewer. This intentionally has no access to the bitmap editor.
 use std::{io::Read, path::Path, sync::{Arc, mpsc}};
 use eframe::egui::{self, Color32};
-use resvg::{tiny_skia, usvg::{self, TreeParsing}};
+use resvg::{tiny_skia, usvg::{self, TreeParsing, TreeTextToPath, TreeWriting}};
 use crate::localization::tr;
 
 const SOURCE_LIMIT: u64 = 16 * 1024 * 1024;
@@ -15,11 +15,20 @@ fn raster_size(size: egui::Vec2, scale: f32) -> [u32; 2] {
     let scale = scale.max(0.001).min(RASTER_SIDE / size.x.max(size.y));
     [(size.x * scale).round().max(1.0) as u32, (size.y * scale).round().max(1.0) as u32]
 }
+fn tree_with_text(source:&[u8])->Result<usvg::Tree,String>{
+    static FONTS:std::sync::LazyLock<usvg::fontdb::Database>=std::sync::LazyLock::new(||{
+        let mut fonts=usvg::fontdb::Database::new();fonts.load_system_fonts();fonts.set_sans_serif_family("Arial");fonts.set_serif_family("Times New Roman");fonts.set_monospace_family("Courier New");fonts
+    });
+    let mut options=usvg::Options::default();options.font_family="Arial".into();
+    options.image_href_resolver.resolve_string=Box::new(|_,_|None);
+    let mut tree=usvg::Tree::from_data(source,&options).map_err(|e|e.to_string())?;
+    tree.convert_text(&FONTS);Ok(tree)
+}
+pub(super) fn svg_with_text(source:&[u8])->Result<Vec<u8>,String>{
+    Ok(tree_with_text(source)?.to_string(&usvg::XmlOptions::default()).into_bytes())
+}
 fn render(source: Arc<Vec<u8>>, scale: f32) -> Result<Rendered, String> {
-    let mut options = usvg::Options::default();
-    // Static, self-contained documents only: never resolve arbitrary file or URL references.
-    options.image_href_resolver.resolve_string = Box::new(|_, _| None);
-    let mut tree = usvg::Tree::from_data(&source, &options).map_err(|error| error.to_string())?;
+    let mut tree=tree_with_text(&source)?;
     let size = egui::vec2(tree.size.width(), tree.size.height());
     let [width, height] = raster_size(size, scale);
     let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| tr("SVG 预览分配失败").to_owned())?;

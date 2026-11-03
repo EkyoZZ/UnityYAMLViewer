@@ -1,4 +1,13 @@
-# 当前版本：1.2.9（已构建，发布候选已准备，未发布）
+# 当前版本：1.2.9（已正式发布）
+
+## GitHub 正式发布（2026-11-02）
+
+- 用户明确授权发布；发布前工作区干净，提交 1d9e0b3c4ea21ebf598f70e1428708cf24079de8 与 GitHub master 一致。189 项实际构建输入与该提交一致；原清单 190 项中的一个 Python 字节码缓存不参与构建，单独排除并记录，未重新编译。
+- 北京时间 2026-11-02 20:00:00 正式发布 [v1.2.9](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.9)，Release ID：431409448；标题仅 v1.2.9，非草稿／非预发布，发布后 latest API 确认为最新正式版。
+- 附件 UnityYAMLViewer-v1.2.9-windows-x64.exe，26,760,704 字节；GitHub 附件 SHA256 与本地产物一致：558C831630253DE09F7BF9DCF1D7D6B4C19ADD26D9F686B1478A397F1D745CA1。
+- 先建草稿，上传并核验附件状态、大小和哈希后正式发布。发布证据 target/v1.2.9-published.json，源码核对 target/v1.2.9-publish-audit.json。未修改其他历史 Release 或附件，未自动提交／推送发布后的文档更新。
+- 正式发布状态取代此前准备阶段的未发布说明；保留实际验证范围，未宣称执行全部测试或补做 GUI 验证。
+
 
 ## 1.2.9 发布准备与本地构建（2026-11-02，未发布）
 
@@ -3196,3 +3205,86 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 本轮未运行界面验证，实际主题、滚动和边线显示效果待验证；未发布。
 
 - 版本整理验证：cargo check --tests --locked --offline 通过；1517 条非空翻译记录均为七列且键唯一，默认两版顺序、1.2.7 起折叠、重开折叠状态静态核对通过；1.2.8 摘要与发布标签一致，发布说明未修改。实际界面待验证，未编译 1.2.9。
+
+## 发布后本地编译：内置组件安装器与预览修复（2026-11-03）
+
+- 用户明确授权编译，构建前检查查看器进程与目标 EXE 独占访问，无占用；cargo build --release --locked --offline 成功，耗时 50.15 秒，8 条警告。
+- 包含手型仅限制预览选中、文本字号及间距、Markdown 排版与图片缓存、固定行号分割线及从 1 编号，以及移除 Scoop／WinGet 后的内置组件下载器。FFmpeg 按需下载 Shared 版，不随本程序打包；LibreOffice 直接下载安装包。
+- 产物：target/release/unity_yaml_viewer.exe，27,332,608 字节，文件／产品版本均为 1.2.9；SHA256：DA1AB7FE5D4CA34AA9669E448A12F91A6E4D796F2B3DA959807F949128693E48。
+- 日志：target/v1.2.9-internal-installer-release-build.log。本轮未启动 GUI、未执行测试程序、未下载或安装第三方组件；相关端到端与界面效果仍待验证。
+- 仅本地编译；未提交、推送、创建标签或发布，不替换 GitHub 已发布附件。此前源码阶段的“未生成可执行程序”是当时状态，本节为最新构建记录。
+
+## 本地编译：Shared 完整解压与用户 PATH（2026-11-03）
+
+- 用户明确授权编译；首次检查发现目标 EXE 被占用，未开始编译。用户再次确认后重新检查，目标独占访问通过且未发现查看器进程，才执行 cargo build --release --locked --offline。
+- release 编译成功，耗时 48.79 秒，8 条警告。包含 FFmpeg GPL Shared 完整解压、PATH 优先自动检测、加入用户 PATH 按钮，以及移除两处冗余提示。
+- 产物 target/release/unity_yaml_viewer.exe，27,441,664 字节，文件／产品版本均为 1.2.9；SHA256：51DBF135076D443D9ABD724F7E567C67FF07BFA39D12FC618E41C92502EF5F86。
+- 构建日志 target/v1.2.9-user-path-release-build.log；未启动界面、未执行测试程序、未下载或安装组件、未修改实际 PATH。完整解压、PATH 按钮及七语言界面仍待运行验证。
+- 仅本地编译，未发布、未提交／推送或替换 GitHub 附件。本节产物为当前本地产物，取代此前本地构建哈希记录的当前状态。
+
+## 本地编译：第三方组件标题行布局（2026-11-03）
+
+- 用户明确授权，构建前未发现查看器进程且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功，耗时 40.24 秒，8 条警告。
+- 包含组件名称后的绿色／红色安装状态框、同排重新检测、PDFium“移除”与 LibreOffice“选择程序…”；保留任务期间禁用、PDFium 使用中保护及原路径验证行为。
+- 产物 target/release/unity_yaml_viewer.exe，27,373,568 字节，文件／产品版本均为 1.2.9；SHA256：9247ED715CABA0631DCD4A03B28DC9BEFC530FA18ED2A38ECD2BD6A488CE0C94。
+- 构建日志 target/v1.2.9-component-header-release-build.log；本轮未启动 GUI、未执行测试程序、未下载安装组件，布局与七语言显示仍待运行验证。
+- 仅本地编译，未发布、未提交／推送、未替换 GitHub 附件；本节为当前本地产物信息。
+
+## 本地编译：Markdown 居中、SVG 徽章与安装入口（2026-11-03）
+
+- 用户明确授权，构建前未发现查看器进程且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功，耗时 45.80 秒；主程序未报告编译警告，第三方 Spine 依赖仍有既有警告。
+- 包含 8 条主程序警告清理、Markdown 居中块与 SVG 徽章文字／图片链接修复，以及未安装组件后同排绿色描边安装入口。
+- 产物 target/release/unity_yaml_viewer.exe，28,384,256 字节，文件／产品版本均为 1.2.9；SHA256：D699A7EA5CA7CE2B777BAED6733B1A742998413793A3D67F8D176D2F34C62AAC。
+- 日志 target/v1.2.9-markdown-badges-release-build.log；本轮未启动 GUI、未执行测试程序或下载安装组件，实际排版、徽章与按钮布局仍待运行验证。
+- 仅本地编译，未发布、未提交／推送、未替换 GitHub 附件；本节为当前本地产物信息。
+
+## 本地编译：RTF 直读与 Markdown 样式（2026-11-03）
+
+- 用户明确授权，构建前未发现查看器进程，目标 EXE 独占访问通过；cargo build --release --locked --offline 成功，耗时 35.97 秒。主程序无编译警告，第三方 Spine 依赖仍有既有警告。
+- 包含 Windows RichEdit RTF 直读、缩放与复制全文，以及 Markdown 蓝色下划线链接、多徽章绘制、标题分割线和代码块配色。
+- 产物 target/release/unity_yaml_viewer.exe，28,423,680 字节，文件／产品版本均为 1.2.9；SHA256：D72DC69AA1DF97C910AB03D5FB0C4B629A6496D6047734AB0218534B5043AC9A。
+- 日志 target/v1.2.9-rtf-direct-release-build.log；本轮未启动 GUI、未执行测试程序，RTF 分页与格式、Markdown 样式及七语言实际布局待运行验证。RTF 示例 target/samples/sample-1.rtf 可供人工检查。
+- 仅本地编译，未发布、未提交／推送、未替换 GitHub 附件；本节为当前本地产物信息。
+
+## 本地编译：行内链接、原复制图标与 PowerShell 着色（2026-11-03）
+
+- 用户明确授权，构建前未发现查看器进程且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功，耗时 40.32 秒。主程序无编译警告，第三方 Spine 依赖仍有既有警告。
+- 包含 Markdown 列表／段落行内链接回调修复、代码块原复制图标与选区复制恢复、PowerShell 命令／参数等专用着色。标题规则本轮仅检查与说明，未改为真实粗体字体，不宣称已调整标题字重。
+- 产物 target/release/unity_yaml_viewer.exe，28,475,904 字节，文件／产品版本均为 1.2.9；SHA256：41CE112AAA609E86FC924481AB53F6DC10FB05AC1A5242A9384746BD3101B43F。
+- 日志 target/v1.2.9-markdown-inline-release-build.log；未启动 GUI、未执行测试程序。链接／复制／代码配色实际显示待验证；用户此前截图已确认 RTF 格式样例的常用字符格式、对齐与中文显示，不能扩展为复杂 RTF 全面验证。
+- 仅本地编译，未发布、未提交／推送、未替换 GitHub 附件；本节为当前本地产物信息。
+
+## 本地编译：下载匹配诊断与代码框内距（2026-11-03）
+
+- 用户明确授权，构建前未发现查看器进程且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功，耗时 40.30 秒。主程序无编译警告，第三方 Spine 依赖仍有既有警告。
+- 包含 FFmpeg Windows x64 GPL Shared 主线快照的新旧包名匹配、失败详情中的请求／下载地址，以及 Markdown 单层代码边框与至少 4 像素内距、复制图标右侧预留。
+- 产物 target/release/unity_yaml_viewer.exe，28,494,336 字节，文件／产品版本均为 1.2.9；SHA256：06C53F406395853A36F1DF40908CEDC46B42A9CBF39FB64021DFD1203D6FE377。
+- 日志 target/v1.2.9-download-match-code-frame-release-build.log；本轮未启动 GUI、未下载或安装组件、未执行测试程序，实际下载与代码框效果仍待运行验证。
+- 仅本地编译，未发布、未提交／推送、未替换 GitHub 附件；本节为当前本地产物信息。
+
+## 本地编译：图片信息与可撤销 PNG 清理（2026-11-03）
+
+- 用户明确授权，构建前未发现查看器进程且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功，耗时 43.78 秒。主程序无编译警告，第三方 Spine 依赖仍有既有警告。
+- 包含图片源信息、PPI／iTXt大小、完全不透明 PNG 才显示去 Alpha、超过10 KiB的iTXt清理、自动刷新及会话撤销／重做，以及代码框内距位置纠正。
+- 产物 target/release/unity_yaml_viewer.exe，28,510,208 字节，文件／产品版本均为 1.2.9；SHA256：EFDED75965B656B9B28CD210D9C7CA9E08BBB6E1AE965ACE14F6FABE0BBF3150。
+- 日志 target/v1.2.9-image-info-release-build.log；本轮未启动 GUI、未实际写入图片或执行测试程序，信息显示、按钮显隐、原位替换／自动刷新／撤销和代码框效果待运行验证。
+- 仅本地编译，未发布、未提交／推送、未替换 GitHub 附件；本节为当前本地产物信息。
+
+## 1.3.0 版本整理与发布准备构建（2026-11-03）
+
+- 以 v1.2.9 正式发布章节末尾为边界，将其后开发与本地构建记录原样迁入本版本；1.2.9 正式发布记录、历史 Release 文档及附件信息未改写。历史1.2.9哈希仍对应当时真实产物。
+- Cargo.toml／Cargo.lock 升为1.3.0；更新版本索引与CHANGELOG、新增docs/releases/1.3.0.md准备稿。README保持用户能力说明，不添加版本流程内容。
+- 关于摘要重新归纳为6条并补齐七语言，默认显示1.3.0／1.2.9；1.2.9摘要与v1.2.9标签一致，1.2.8及更早移入原历史折叠区，保留旧翻译和重开折叠逻辑。静态核对通过，实际界面待验证。
+- cargo check --tests --locked --offline、git diff --check、翻译七列与键唯一性、版本顺序及迁移边界核对通过；测试程序未生成或执行。本轮未启动GUI或操作图片／安装组件／用户PATH。
+- 用户明确授权构建，构建前未发现查看器进程，目标EXE独占访问通过。cargo build --release --locked --offline成功，耗时42.10秒，主程序无编译警告；第三方Spine仍有既有警告。日志target/v1.3.0-release-build.log。
+- 产物target/release/unity_yaml_viewer.exe，文件／产品版本均1.3.0，28,509,184字节；SHA256：BC6033DAABF8D2A8480DD9063A6921E196D02F6E96120C8C1000CD07E5B5603A。
+- 发布候选副本target/releases/v1.3.0/UnityYAMLViewer-v1.3.0-windows-x64.exe与原产物哈希一致。核验target/v1.3.0-release-verification.json；203项主要构建输入清单target/v1.3.0-build-manifest.json，构建后哈希再次核对一致。
+- 等待用户提交Git；本轮未stage、提交、推送、创建标签、Release或上传附件，尚未发布。用户告知提交后，应重新核对提交内容与构建输入，不能仅因版本升级／构建成功宣称已发布。正式Release标题仅为v1.3.0。
+
+## 发布候选更新：DPI 简约显示与 Windows 补充读取（2026-11-03）
+
+- 用户明确授权编译并纳入发布候选；构建前未发现查看器进程，默认目标EXE与发布候选副本独占访问均通过。cargo build --release --locked --offline成功，耗时40.31秒，主程序无编译警告，Spine依赖仍有既有警告。
+- 纳入Windows WIC补充读取DPI、来源悬停说明和“dpi: 72”简约显示；两轴不同时保留两个数值，不将Windows默认值写回图片。
+- 当前产物target/release/unity_yaml_viewer.exe及候选target/releases/v1.3.0/UnityYAMLViewer-v1.3.0-windows-x64.exe，文件／产品版本均1.3.0，28,507,136字节，SHA256均为DB46D382054BB80BB2EEA3AE5577D815DCD0ECFC991940EC96C4D185E09CBDA0。
+- 更新target/v1.3.0-build-manifest.json（204项主要构建输入）及target/v1.3.0-release-verification.json，构建后输入哈希核对一致。日志target/v1.3.0-dpi-release-build.log。本候选替代此前本地候选，不改写此前构建史实。
+- 未启动GUI或执行测试程序，实际DPI界面及其他端到端验证边界不变。未stage、提交／推送、创建标签、Release或上传附件；等待用户提交Git后告知再核对发布。

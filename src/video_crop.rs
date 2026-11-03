@@ -118,7 +118,7 @@ impl Crop {
             egui::Rect::from_min_max(egui::pos2(image.left(),crop.top()),crop.left_bottom()),
             egui::Rect::from_min_max(crop.right_top(),egui::pos2(image.right(),crop.bottom())),
         ] {painter.rect_filled(mask,0.0,egui::Color32::from_black_alpha(150));}
-        painter.rect_stroke(crop,0.0,egui::Stroke::new(2.0,egui::Color32::LIGHT_GREEN),egui::StrokeKind::Inside);
+        painter.rect_stroke(crop,0.0,egui::Stroke::new(2.0_f32,egui::Color32::LIGHT_GREEN),egui::StrokeKind::Inside);
         let handle=egui::Rect::from_center_size(crop.max,egui::vec2(14.0,14.0)).intersect(image);
         painter.rect_filled(handle,2.0,egui::Color32::LIGHT_GREEN);
         if !editable{return;}

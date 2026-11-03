@@ -841,11 +841,11 @@ fn edit_fade_curve(ui:&mut egui::Ui,kind:&mut String,points:&mut Vec<(f64,f64)>,
     let color=ui.visuals().selection.bg_fill;
     for (index,h) in handles.iter().enumerate(){for side in 0..2{
         let anchor=points[index+side];let p=screen(h[side].0,h[side].1);
-        painter.line_segment([screen(anchor.0,anchor.1),p],egui::Stroke::new(1.0,ui.visuals().weak_text_color()));
+        painter.line_segment([screen(anchor.0,anchor.1),p],egui::Stroke::new(1.0_f32,ui.visuals().weak_text_color()));
         painter.rect_filled(egui::Rect::from_center_size(p,egui::vec2(6.0,6.0)),0.0,color);
     }}
     let line:Vec<_>=(0..=160).map(|i|{let x=i as f64/160.0;screen(x,crate::audio_edit::fade_value(x,kind,points,handles))}).collect();
-    painter.add(egui::Shape::line(line,egui::Stroke::new(2.0,color)));
+    painter.add(egui::Shape::line(line,egui::Stroke::new(2.0_f32,color)));
     for &(x,y) in points.iter(){painter.circle_filled(screen(x,y),3.5,ui.visuals().text_color());}
     painter.text(egui::pos2(plot.left(),rect.bottom()),egui::Align2::LEFT_BOTTOM,"0 s",egui::FontId::proportional(10.0),ui.visuals().weak_text_color());
     painter.text(egui::pos2(plot.right(),rect.bottom()),egui::Align2::RIGHT_BOTTOM,format!("{seconds:.3} s"),egui::FontId::proportional(10.0),ui.visuals().weak_text_color());

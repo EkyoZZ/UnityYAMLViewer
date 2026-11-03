@@ -2,7 +2,9 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
-- [1.2.9：办公文档与表格视图、安装器及预览体验（已构建，未发布）](docs/versions/1.2.9.md)
+- [1.3.0：富文本与图片信息、内置组件下载及交互优化（开发中，未发布）](docs/versions/1.3.0.md) · [发布说明准备稿](docs/releases/1.3.0.md)
+
+- [1.2.9：办公文档与表格视图、安装器及预览体验（已正式发布）](docs/versions/1.2.9.md) · [发布说明](docs/releases/1.2.9.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.9)
 
 - [1.2.8：目录浏览与多图浏览模式、预览优化（已正式发布）](docs/versions/1.2.8.md) · [发布说明](docs/releases/1.2.8.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.2.8)
 

@@ -190,7 +190,7 @@ pub(crate) fn parse(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, &'s
 
 impl Preview {
     pub(crate) fn set_source_freeze(&mut self,freeze:Option<FreezeSettings>){if self.source_freeze!=freeze{self.source_freeze=freeze;if freeze.is_some(){self.freeze_header=true;}}}
-    pub fn show(&mut self, ui: &mut egui::Ui, text: &str, delimiter: char) {self.show_impl(ui,text,delimiter,false,0,0);}
+    pub fn show(&mut self, ui: &mut egui::Ui, text: &str, delimiter: char) {self.show_impl(ui,text,delimiter,false,1,0);}
     pub(crate) fn show_readonly(&mut self,ui:&mut egui::Ui,text:&str,row_offset:usize,column_offset:usize){self.show_impl(ui,text,'\t',true,row_offset,column_offset);}
     fn show_impl(&mut self, ui: &mut egui::Ui, text: &str, delimiter: char,readonly:bool,row_offset:usize,column_offset:usize) {
         use crate::localization::tr;
@@ -475,10 +475,13 @@ impl Preview {
                     header_painter.vline(x,header_clip.y_range(),stroke);
                 }
             }
-            let fixed_painter=ui.painter().with_clip_rect(fixed_body);
-            fixed_painter.vline(number_right,fixed_body.y_range(),stroke);
+            // A separator centered on fixed_body.right() would be clipped away.
+            // Paint fixed boundaries last with the full viewport clip, so both
+            // halves of the stroke survive and horizontal scrolling cannot move it.
+            let fixed_painter=ui.painter().with_clip_rect(content_clip);
+            fixed_painter.vline(number_right,viewport_rect.y_range(),stroke);
             for source in columns.iter().skip(1).take(frozen_columns){
-                fixed_painter.vline(source.right()+viewport.min.x+spacing.x*0.5,fixed_body.y_range(),stroke);
+                fixed_painter.vline(source.right()+viewport.min.x+spacing.x*0.5,viewport_rect.y_range(),stroke);
             }
             // Close the visible grid above the horizontal scrollbar / sheet strip.
             ui.painter().with_clip_rect(content_clip).hline(viewport_rect.x_range(),viewport_rect.bottom()-0.5,stroke);

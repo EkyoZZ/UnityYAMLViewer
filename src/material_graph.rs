@@ -702,7 +702,7 @@ fn commit_preview_change(pending: &mut bool, changed: bool, down: bool, released
 }
 
 fn property_input_ui(ui: &egui::Ui, name: &str, body: Rect) -> egui::Ui {
-    let mut child=egui::Ui::new(ui.ctx().clone(), ui.id().with(("property_input", name)),
+    let child=egui::Ui::new(ui.ctx().clone(), ui.id().with(("property_input", name)),
         egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(body).style(ui.style().clone()));
     child
 }
@@ -1364,7 +1364,7 @@ impl Preview {
                 2.,
                 color,
             );
-            painter.rect_stroke(*r,4.,Stroke::new(1.,Color32::from_gray(72)),egui::StrokeKind::Inside);
+            painter.rect_stroke(*r,4.,Stroke::new(1.0_f32,Color32::from_gray(72)),egui::StrokeKind::Inside);
             painter.text(
                 title.left_center() + egui::vec2(12. * self.zoom, 0.),
                 egui::Align2::LEFT_CENTER,

@@ -6,6 +6,8 @@ pub(crate) mod nine_slice;
 mod seamless;
 mod sequence;
 mod image_history;
+mod image_info;
+mod image_dpi;
 mod image_browser;
 mod psd;
 pub(crate) mod watermark;
@@ -17,11 +19,43 @@ mod svg_preview;
 pub(crate) mod pdf_preview;
 mod office_preview;
 mod spreadsheet_preview;
+mod markdown;
+mod rtf_preview;
 pub fn is_spreadsheet(path:&Path)->bool{spreadsheet_preview::supports(path)}
-pub fn is_office_document(path:&Path)->bool{is_paged_document(path)||is_spreadsheet(path)}
+pub fn is_office_document(path:&Path)->bool{is_paged_document(path)||is_spreadsheet(path)||extension(path)=="rtf"}
 pub fn is_office(path: &Path) -> bool { office_preview::supports(path) }
-pub fn is_paged_document(path: &Path) -> bool { is_pdf(path) || (is_office(path)&&!is_spreadsheet(path)) }
+pub fn is_paged_document(path: &Path) -> bool { is_pdf(path) || (is_office(path)&&!is_spreadsheet(path)&&extension(path)!="rtf") }
 pub fn is_pdf(path: &Path) -> bool { extension(path) == "pdf" }
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct TextReading { size:f32, line:f32, paragraph:f32 }
+impl Default for TextReading { fn default()->Self {Self{size:16.0,line:1.3,paragraph:0.0}} }
+impl TextReading {
+    fn load()->Self {
+        let mut value=crate::last_open_dir_config_path().and_then(|p|std::fs::read(p.with_file_name("text_reading.json")).ok())
+            .and_then(|bytes|serde_json::from_slice::<Self>(&bytes).ok()).unwrap_or_default();
+        if !value.size.is_finite(){value.size=16.0;} if !value.line.is_finite(){value.line=1.3;} if !value.paragraph.is_finite(){value.paragraph=0.0;}
+        value.size=value.size.clamp(10.0,48.0);value.line=value.line.clamp(1.0,2.5);value.paragraph=value.paragraph.clamp(0.0,32.0);value
+    }
+    fn save(&self){if let Some(path)=crate::last_open_dir_config_path().map(|p|p.with_file_name("text_reading.json")){
+        if let Some(parent)=path.parent(){let _=std::fs::create_dir_all(parent);}
+        if let Ok(bytes)=serde_json::to_vec(self){let _=std::fs::write(path,bytes);}
+    }}
+    fn apply(&self,job:&mut egui::text::LayoutJob){
+        let mut sections=Vec::new();
+        for section in &job.sections {
+            let mut start=section.byte_range.start;
+            for part in job.text[section.byte_range.clone()].split_inclusive('\n') {
+                let end=start+part.len();let mut section=section.clone();section.byte_range=start..end;
+                section.format.font_id.size=self.size;
+                section.format.line_height=Some(self.size*self.line+if part.ends_with('\n'){self.paragraph}else{0.0});
+                sections.push(section);start=end;
+            }
+        }
+        job.sections=sections;
+    }
+}
 
 /// Shared by tabs, grouped file rows, and preview file headings.
 pub(crate) fn file_context_menu(response:&egui::Response,path:&Path){
@@ -152,6 +186,7 @@ impl ImageBackground {
 }
 #[derive(Default)]
 struct ImageTab {
+    info:image_info::State,
     editor: nine_slice::Editor,
     seamless: seamless::Editor,
     sequence: sequence::Editor,
@@ -195,6 +230,8 @@ impl ImageTab {
 }
 #[derive(Default)]
 pub struct Assets {
+    rtf:rtf_preview::Preview,
+    markdown: markdown::Preview,
     default_image_fit: bool,
     displayed_image: Option<PathBuf>,
     image_prefetch: Option<(PathBuf, mpsc::Receiver<Loaded>)>,
@@ -329,7 +366,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path);if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
+    pub fn forget(&mut self, path: &Path) { if extension(path)=="rtf"{self.rtf=Default::default();} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path);if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -383,7 +420,7 @@ impl Assets {
             self.playlists.show_creator(ui,path,preview);
             return;
         }
-        if !is_browsable_image(path) && !is_office_document(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
+        if !is_text(path) && !is_browsable_image(path) && !is_office_document(path) && !matches!(extension(path).as_str(), "csv" | "tsv" | "psv"){file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);}
         self.models.retain(|other,_|other==path);
         if crate::model_preview::is_model(path) {
             let refresh=ui.ctx().data_mut(|d|d.remove_temp::<PathBuf>(egui::Id::new("model_refresh")));
@@ -410,6 +447,7 @@ impl Assets {
         }
         self.spine.clear();
         self.spreadsheets.retain(|other,_|other==path);
+        if extension(path)=="rtf"{self.rtf.show(ui,path);return;}
         if is_spreadsheet(path){self.spreadsheets.entry(path.to_owned()).or_default().show(ui,path);return;}
         self.pdfs.retain(|other, _| other == path);
         if is_paged_document(path) { self.pdfs.entry(path.to_owned()).or_default().show(ui,path); return; }
@@ -423,14 +461,36 @@ impl Assets {
             return;
         }
         if !is_image(path) {
+            let id=egui::Id::new("text_reading_settings");
+            let mut reading=ui.ctx().data_mut(|d|d.get_temp::<TextReading>(id)).unwrap_or_else(TextReading::load);
+            let mut changed=false;
+            ui.horizontal_wrapped(|ui|{
+                file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
+                if ui.button(crate::localization::tr("重载")).clicked(){ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("text_reload_request"),true));}
+                if extension(path)=="md" {
+                    ui.selectable_value(&mut self.markdown.source,false,crate::localization::tr("排版预览"));
+                    ui.selectable_value(&mut self.markdown.source,true,crate::localization::tr("源码"));
+                }
+                ui.label(crate::localization::tr("字号"));
+                changed|=ui.add(egui::DragValue::new(&mut reading.size).range(10.0..=48.0).speed(0.5)).changed();
+                ui.label(crate::localization::tr("行间距"));
+                changed|=ui.add(egui::DragValue::new(&mut reading.line).range(1.0..=2.5).speed(0.05).suffix("×")).changed();
+                ui.label(crate::localization::tr("段落间距"));
+                changed|=ui.add(egui::DragValue::new(&mut reading.paragraph).range(0.0..=32.0).speed(0.5)).changed();
+            });
+            if changed{reading.save();}
+            ui.ctx().data_mut(|d|d.insert_temp(id,reading.clone()));
             egui::ScrollArea::both().id_salt(("reference_text", path)).auto_shrink([false, false]).show(ui, |ui| {
+                if extension(path)=="md" && !self.markdown.source {self.markdown.show(ui,path,text,&reading);return;}
                 let language = syntax_language(path);
-                if matches!(language.as_str(), "shader" | "hlsl" | "cginc" | "compute" | "glsl") {
-                    ui.add(egui::Label::new(shader_layout(ui, text)).selectable(true));
+                let mut job=if matches!(language.as_str(), "shader" | "hlsl" | "cginc" | "compute" | "glsl") {
+                    shader_layout(ui,text)
                 } else {
                     let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
-                    egui_extras::syntax_highlighting::code_view_ui(ui, &theme, text, &language);
-                }
+                    egui_extras::syntax_highlighting::highlight(ui.ctx(),ui.style(),&theme,text,&language)
+                };
+                reading.apply(&mut job);
+                ui.add(egui::Label::new(job).selectable(true));
             });
             return;
         }
@@ -457,7 +517,7 @@ impl Assets {
         }
         ui.horizontal_wrapped(|ui| {
             file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
-            if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
+            if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.info=Default::default();tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
             if is_bitmap(path) {
             if ui.add_enabled(tab.original.is_some()&&(tab.editor.open||can_open_preview), egui::Button::new(crate::localization::tr("九宫格精简"))).clicked() {
                 tab.editor.open = true;
@@ -497,6 +557,9 @@ impl Assets {
             tab.background.controls(ui,&mut tab.background_color);
             if is_browsable_image(path) { self.browser.controls(ui); }
         });
+        if tab.info.show(ui,path,is_bitmap(path)&&!tab.editor.open&&!tab.editor.busy()){
+            tab.original=None;tab.texture=None;tab.pending=None;tab.load(path.to_owned(),ui.ctx().clone());self.browser.forget(path);
+        }
         let browsing=is_browsable_image(path) && self.browser.is_multiple();
         let available=ui.available_rect_before_wrap();
         let strip_height=if browsing {56.0_f32.min(available.height().max(0.0))} else {0.0};

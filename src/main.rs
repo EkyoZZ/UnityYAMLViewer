@@ -397,10 +397,6 @@ impl ViewerApp {
         let expanded=self.preview.hierarchy_documents(&self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default());
         self.node_flags = self.path.as_ref().and_then(|path| self.node_controls.get(path))
             .map(|controls| controls.effective(expanded.as_ref().map_or(self.documents.as_slice(),|data|data.documents.as_slice()))).unwrap_or_default();
-        if self.selected.is_some_and(|index| !self.document_flags(index).selectable) {
-            self.selected = None;
-            self.last_selected = None;
-        }
     }
 
     fn document_flags(&self, index: usize) -> hierarchy_controls::Flags {
@@ -966,9 +962,9 @@ impl ViewerApp {
             let local = self.path.as_ref().and_then(|path| self.node_controls.get(path)).map(|controls| controls.local(&id)).unwrap_or_default();
             let flags = self.document_flags(game_object);
             let label = self.node_label(ui, game_object, title).strong();
-            let label = if !flags.visible || !flags.selectable { label.weak() } else { label };
+            let label = if !flags.visible { label.weak() } else { label };
             let selected = self.selected.is_some_and(|index| index == game_object || self.documents[index].game_object.as_deref() == Some(&id));
-            let response = ui.add_enabled(flags.selectable, egui::SelectableLabel::new(selected, label));
+            let response = ui.add(egui::SelectableLabel::new(selected, label));
             let mut toggle = None;
             let controls_x = ui.ctx().data_mut(|data| data.get_temp::<f32>(egui::Id::new("hierarchy_controls_x"))).unwrap_or(ui.cursor().min.x);
             let controls_rect = egui::Rect::from_min_size(egui::pos2(controls_x, response.rect.center().y - 10.0), egui::vec2(30.0, 20.0));
@@ -1033,8 +1029,8 @@ impl ViewerApp {
         let row=ui.horizontal(|ui| {
             if children.get(id).is_some_and(|items|!items.is_empty()) {state.show_toggle_button(ui,egui::collapsing_header::paint_default_icon);}
             else {ui.allocate_exact_size(egui::vec2(ui.spacing().indent,20.0),egui::Sense::hover());}
-            let label=if own.visible && own.selectable {RichText::new(title).strong()} else {RichText::new(title).weak()};
-            let response=ui.add_enabled(own.selectable,egui::SelectableLabel::new(selected,label));
+            let label=if own.visible {RichText::new(title).strong()} else {RichText::new(title).weak()};
+            let response=ui.add(egui::SelectableLabel::new(selected,label));
             if locate.as_deref()==Some(id.as_str()) {
                 response.scroll_to_me(Some(egui::Align::Center));
                 ui.ctx().data_mut(|d|d.remove::<String>(egui::Id::new("preview_hierarchy_locate")));
@@ -1210,8 +1206,7 @@ impl ViewerApp {
         } else {
             self.node_label(ui, index, self.display_name(&self.documents[index]))
         };
-        let selectable = self.document_flags(index).selectable;
-        let response = ui.add_enabled_ui(selectable, |ui| if is_match {
+        let response = if is_match {
             let highlight_color = if ui.visuals().dark_mode {
                 Color32::YELLOW
             } else {
@@ -1226,7 +1221,7 @@ impl ViewerApp {
                 .inner
         } else {
             ui.selectable_label(self.selected == Some(index), label)
-        }).inner;
+        };
         if response.clicked() {
             self.selected = Some(index);
         }
@@ -2073,11 +2068,11 @@ impl eframe::App for ViewerApp {
             if reference_tab && !delimited_tab {
                 editing::publish(ctx, None, 0..0);
                 if material_preview && theme::preview_toggle(ui,self.preview.open).clicked(){self.preview.open=!self.preview.open;ctx.request_repaint();}
-                if !spine_preview::is_data_asset(&self.raw) && self.path.as_ref().is_some_and(|path| asset_viewer::is_text(path) && !spine_preview::is_spine(path)) && ui.button(crate::localization::tr("重载")).clicked() {
-                    if let Some(path)=&self.path {self.assets.forget(path);}
+                if let Some(path) = self.path.clone() { self.assets.show(ui, &path, &self.raw); }
+                if ctx.data_mut(|d|d.remove_temp::<bool>(egui::Id::new("text_reload_request"))).unwrap_or(false){
+                    if let Some(path)=&self.path{self.assets.forget(path);}
                     self.reload_current_file(ctx);
                 }
-                if let Some(path) = self.path.clone() { self.assets.show(ui, &path, &self.raw); }
                 return;
             }
             let current_edit = self.path.as_ref().and_then(|path| self.edits.get(path)).cloned();
@@ -2617,6 +2612,14 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new("1.3.0").strong());
+                        ui.label(localization::tr("• 文本与代码可保存字号及间距；Markdown 支持常见 HTML 排版、图片缓存、链接与代码着色"));
+                        ui.label(localization::tr("• Windows RTF 直接只读渲染，支持缩放和复制全文；复杂排版仍有限制"));
+                        ui.label(localization::tr("• 图片显示源位深、大小与 DPI；完全不透明 PNG 可去 Alpha，iTXt 可清理并支持会话撤销"));
+                        ui.label(localization::tr("• 内置下载器替代 Scoop／WinGet，按需安装 FFmpeg GPL Shared、LibreOffice，保留 PDFium 直接下载"));
+                        ui.label(localization::tr("• 组件安装状态与操作同排，提供下载进度、校验与错误地址；托管 FFmpeg 可加入用户 PATH"));
+                        ui.label(localization::tr("• 手型仅限制预览选中；修复固定行号分割线，CSV／TSV／PSV 行号从 1 开始"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.2.9").strong());
                         ui.label(localization::tr("• XLS／XLSX／ODS 固定行列编号；冻结表头开启时优先沿用可读的 XLSX 设置，否则固定首行；修复冻结区域分割线与滚动内容遮挡"));
                         ui.label(localization::tr("• 办公文档新增“在LibreOffice编辑”，直接打开原文件；保存后可重载预览"));
@@ -2628,6 +2631,10 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 多图切换保留旧画面，预加载相邻图片并限制额外缓存预算"));
                         ui.label(localization::tr("• 电子表格支持多工作表底栏、查找复制、公式／缓存结果及可选必填检查，不重算公式"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.8").strong());
                         ui.label(localization::tr("• 新增目录浏览：多个根目录、按需展开、独立忽略规则，目录与规则自动保存"));
                         ui.label(localization::tr("• 目录预览固定首位并显示根目录名，修改后保留普通页签，同目录切图复用缓存"));
@@ -2636,10 +2643,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 优化缩放比例菜单、图片边界与目录滚动布局"));
                         ui.label(localization::tr("• Spine 默认动态播放，普通预览默认预乘 Alpha，修复路径并优化工具栏与提示"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.2.7").strong());
                         ui.label(localization::tr("• 新增序列工具：按行列拆分图片，多图排序合并并导出 PNG"));
                         ui.label(localization::tr("• 制作与拆分均支持取色去底、容差遮罩、柔化与去色边，预览和 PNG／GIF／视频源一致"));
