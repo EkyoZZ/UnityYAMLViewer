@@ -7,6 +7,7 @@ use crate::localization::tr;
 pub(crate) mod install_progress;
 pub(crate) mod installer;
 mod install_task;
+mod yt_dlp;
 /// One entry point for missing-component prompts, including detached preview windows.
 pub fn request_open(ctx:&egui::Context) {
     ctx.data_mut(|data|data.insert_temp(egui::Id::new("third_party_manager_request"),true));
@@ -17,8 +18,7 @@ pub fn take_open_request(ctx:&egui::Context)->bool {
 }
 pub(crate) fn component_header_actions(ui:&mut egui::Ui,name:&str,installed:Option<bool>,busy:bool,install:Option<(&str,bool)>,extra:impl FnOnce(&mut egui::Ui))->(bool,bool){
     ui.horizontal_wrapped(|ui|{
-        let title_color=if ui.visuals().dark_mode{egui::Color32::from_rgb(105,175,255)}else{egui::Color32::from_rgb(25,85,165)};
-        ui.heading(egui::RichText::new(name).color(title_color));
+        crate::theme::section_heading(ui, name);
         if let Some(installed)=installed{
             let color=if installed{if ui.visuals().dark_mode{egui::Color32::from_rgb(80,210,120)}else{egui::Color32::from_rgb(20,125,55)}}else{if ui.visuals().dark_mode{egui::Color32::from_rgb(245,100,100)}else{egui::Color32::from_rgb(185,35,35)}};
             egui::Frame::new().stroke(egui::Stroke::new(1.0_f32,color)).corner_radius(3).inner_margin(egui::Margin::symmetric(6,2)).show(ui,|ui|{
@@ -27,8 +27,7 @@ pub(crate) fn component_header_actions(ui:&mut egui::Ui,name:&str,installed:Opti
         }
         let mut install_clicked=false;
         if let Some((label,enabled))=install{
-            let green=if ui.visuals().dark_mode{egui::Color32::from_rgb(80,210,120)}else{egui::Color32::from_rgb(20,125,55)};
-            install_clicked=ui.add_enabled(!busy&&enabled,egui::Button::new(egui::RichText::new(tr(label)).color(green)).fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::new(1.0_f32,green))).clicked();
+            install_clicked=ui.add_enabled(!busy&&enabled,crate::theme::green_outline_button(ui,tr(label))).clicked();
         }
         let recheck=ui.add_enabled(!busy,egui::Button::new(tr("重新检测"))).clicked();
         extra(ui);(recheck,install_clicked)
@@ -259,17 +258,18 @@ impl LibreOfficeSettings {
     }
 }
 #[derive(Default)]
-pub struct Manager {open:bool,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings}
+pub struct Manager {open:bool,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings,yt_dlp:yt_dlp::Settings}
 impl Manager {
     pub fn is_open(&self)->bool{self.open}
     pub fn open(&mut self,ctx:&egui::Context){if !self.is_open(){self.ffmpeg.refresh(ctx);}self.open=true;crate::native_window::wake(ctx,egui::Id::new("third_party_window"));}
     pub fn show(&mut self,ctx:&egui::Context){
-        self.ffmpeg.poll(ctx);self.pdfium.poll();self.libreoffice.poll(ctx);
+        self.ffmpeg.poll(ctx);self.pdfium.poll();self.libreoffice.poll(ctx);self.yt_dlp.poll();
         if std::mem::take(&mut self.libreoffice.ready_event){request_pdf_retry(ctx);}
         if std::mem::take(&mut self.pdfium.ready_event){request_pdf_retry(ctx);}
         if !self.open{return;}
         crate::native_window::Window::new(tr("第三方支持")).id(egui::Id::new("third_party_window")).open(&mut self.open).default_width(560.0).default_height(500.0).show(ctx,|ui|{
             self.ffmpeg.show(ui);
+            ui.separator();self.yt_dlp.show(ui);
             ui.separator();self.pdfium.show(ui);
             ui.separator();self.libreoffice.show(ui);
         });

@@ -514,6 +514,7 @@ impl Preview {
             // Truncated labels already provide a full-text tooltip.
             let response=ui.add(egui::Label::new(value).truncate().selectable(true));
             if view.readonly{response.context_menu(|ui|{
+                crate::theme::menu_no_wrap(ui);
                 if ui.button(tr("复制单元格内容")).clicked(){ui.ctx().copy_text(value.to_owned());ui.close_menu();}
             });}
             if invalid { ui.painter().set(background,egui::Shape::rect_filled(cell_rect,0.0,egui::Color32::from_rgba_unmultiplied(230,45,55,90))); }

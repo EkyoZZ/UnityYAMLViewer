@@ -1,12 +1,12 @@
 //! Source image facts and reversible PNG-only cleanup. Never infer source depth from RGBA preview pixels.
-use std::{path::{Path,PathBuf},sync::{Arc,mpsc},io::{Cursor,Write},time::SystemTime};
+use std::{path::{Path,PathBuf},sync::{Arc,mpsc},io::{Cursor,Read,Write},time::SystemTime};
 use eframe::egui;
 use image::ImageDecoder;
 use crate::localization::tr;
 const LIMIT:usize=128*1024*1024;
 const SIGNATURE:&[u8]=b"\x89PNG\r\n\x1a\n";
-#[derive(Clone)]struct Info{bytes:Arc<Vec<u8>>,format:String,width:u32,height:u32,bits:u16,alpha:bool,opaque:bool,dpi:Option<(f64,f64)>,system_dpi:bool,itxt:usize,indexed:bool,animated:bool}
-#[derive(Clone,Copy)]enum Action{Load,Alpha,Text,Undo,Redo}
+#[derive(Clone)]struct Info{bytes:Arc<Vec<u8>>,format:String,width:u32,height:u32,bits:u16,alpha:bool,opaque:bool,dpi:Option<(f64,f64)>,system_dpi:bool,itxt:usize,has_itxt:bool,indexed:bool,animated:bool}
+#[derive(Clone,Copy)]enum Action{Load,Alpha,Text,Optimize,Undo,Redo}
 struct ResultData{info:Info,before:Option<Arc<Vec<u8>>>,action:Action}
 #[derive(Default)]pub(super) struct State{path:PathBuf,stamp:Option<(u64,SystemTime)>,info:Option<Info>,pending:Option<mpsc::Receiver<Result<ResultData,String>>>,history:super::image_history::History<Arc<Vec<u8>>>,error:Option<String>}
 fn crc(bytes:&[u8])->u32{let mut value=0xffffffffu32;for byte in bytes{value^=*byte as u32;for _ in 0..8{value=(value>>1)^if value&1!=0{0xedb88320}else{0};}}!value}
@@ -23,18 +23,18 @@ fn chunks(bytes:&[u8])->Result<Vec<(usize,usize,[u8;4])>,String>{
 fn inspect(bytes:Arc<Vec<u8>>)->Result<Info,String>{
     if bytes.len()>=26&&bytes.starts_with(b"8BPS"){
         let channels=u16::from_be_bytes(bytes[12..14].try_into().unwrap());let depth=u16::from_be_bytes(bytes[22..24].try_into().unwrap());
-        return Ok(Info{bytes:bytes.clone(),format:"PSD".into(),width:u32::from_be_bytes(bytes[18..22].try_into().unwrap()),height:u32::from_be_bytes(bytes[14..18].try_into().unwrap()),bits:channels.saturating_mul(depth),alpha:false,opaque:false,dpi:None,system_dpi:false,itxt:0,indexed:false,animated:false});
+        return Ok(Info{bytes:bytes.clone(),format:"PSD".into(),width:u32::from_be_bytes(bytes[18..22].try_into().unwrap()),height:u32::from_be_bytes(bytes[14..18].try_into().unwrap()),bits:channels.saturating_mul(depth),alpha:false,opaque:false,dpi:None,system_dpi:false,itxt:0,has_itxt:false,indexed:false,animated:false});
     }
     let reader=image::ImageReader::new(Cursor::new(bytes.as_slice())).with_guessed_format().map_err(|e|e.to_string())?;
     let format=reader.format().map(|f|format!("{f:?}")).unwrap_or_default();let decoder=reader.into_decoder().map_err(|e|e.to_string())?;
     let (width,height)=decoder.dimensions();let color=decoder.original_color_type();
-    let mut info=Info{bytes:bytes.clone(),format,width,height,bits:color.bits_per_pixel(),alpha:decoder.color_type().has_alpha(),opaque:false,dpi:None,system_dpi:false,itxt:0,indexed:false,animated:false};
+    let mut info=Info{bytes:bytes.clone(),format,width,height,bits:color.bits_per_pixel(),alpha:decoder.color_type().has_alpha(),opaque:false,dpi:None,system_dpi:false,itxt:0,has_itxt:false,indexed:false,animated:false};
     if bytes.starts_with(SIGNATURE){
         for (start,end,kind) in chunks(&bytes)?{let data=&bytes[start+8..end-4];match &kind{
             b"IHDR" if data.len()==13=>{let channels=match data[9]{0|3=>1,2=>3,4=>2,6=>4,_=>return Err("Invalid PNG color type".into())};info.bits=data[8] as u16*channels;info.indexed=data[9]==3;info.alpha=matches!(data[9],4|6);},
             b"tRNS"=>info.alpha=true,
             b"pHYs" if data.len()==9&&data[8]==1=>{info.dpi=Some((u32::from_be_bytes(data[..4].try_into().unwrap()) as f64*0.0254,u32::from_be_bytes(data[4..8].try_into().unwrap()) as f64*0.0254));},
-            b"iTXt"=>info.itxt+=data.len(),b"acTL"=>info.animated=true,_=>{}
+            b"iTXt"=>{info.itxt+=data.len();info.has_itxt=true;},b"acTL"=>info.animated=true,_=>{}
         }}
     }else if bytes.starts_with(&[0xff,0xd8]){
         let mut position=2;
@@ -61,7 +61,19 @@ fn opaque_pixels(color:image::ColorType,pixels:&[u8])->bool{
 }
 fn transform(info:&Info,action:Action)->Result<Vec<u8>,String>{
     let original=&info.bytes;let source=chunks(original)?;
-    if matches!(action,Action::Text){let mut output=SIGNATURE.to_vec();for (start,end,kind) in source{if &kind!=b"iTXt"{output.extend_from_slice(&original[start..end]);}}return Ok(output);}
+    let remove_text = matches!(action, Action::Text | Action::Optimize);
+    let remove_alpha = matches!(action, Action::Alpha)
+        || (matches!(action, Action::Optimize) && info.bits == 32 && info.opaque
+            && !info.animated && original.get(25) == Some(&6));
+    if !remove_alpha {
+        let mut output = SIGNATURE.to_vec();
+        for (start, end, kind) in source {
+            if !remove_text || &kind != b"iTXt" {
+                output.extend_from_slice(&original[start..end]);
+            }
+        }
+        return Ok(output);
+    }
     if !info.opaque{return Err(tr("图片存在透明像素或未能确认完全不透明，不能去除 Alpha。").into());}
     if info.animated{return Err(tr("动画 PNG 暂不支持去除 Alpha。").into());}
     let header=source.iter().find(|(_,_,kind)|kind==b"IHDR").ok_or("Missing IHDR")?;let color=original[header.0+17];
@@ -75,7 +87,7 @@ fn transform(info:&Info,action:Action)->Result<Vec<u8>,String>{
         if &kind==b"IDAT"&&!ancillary_written{
             ancillary_written=true;
             // Preserve ancillary chunks whose semantics remain valid after alpha removal.
-            for (old_start,old_end,old_kind) in &source{if matches!(old_kind,b"pHYs"|b"iCCP"|b"sRGB"|b"gAMA"|b"cHRM"|b"tEXt"|b"zTXt"|b"iTXt"|b"eXIf"|b"bKGD"){output.extend_from_slice(&original[*old_start..*old_end]);}}
+            for (old_start,old_end,old_kind) in &source{if !(remove_text && old_kind == b"iTXt") && matches!(old_kind,b"pHYs"|b"iCCP"|b"sRGB"|b"gAMA"|b"cHRM"|b"tEXt"|b"zTXt"|b"iTXt"|b"eXIf"|b"bKGD"){output.extend_from_slice(&original[*old_start..*old_end]);}}
         }output.extend_from_slice(&encoded[start..end]);
     }Ok(output)
 }
@@ -86,7 +98,48 @@ fn replace(path:&Path,before:&[u8],after:&[u8])->Result<(),String>{
         if std::fs::read(path).map_err(|e|e.to_string())?!=before{return Err(tr("图片已被其他程序修改，请重载后重试。").into());}
         std::fs::rename(&temporary,path).map_err(|e|e.to_string())})();if result.is_err(){let _=std::fs::remove_file(temporary);}result
 }
+pub(crate) enum Optimization {
+    Unchanged,
+    Alpha,
+    Text,
+    Both,
+}
+
+pub(crate) fn optimize_png(path: &Path) -> Result<Optimization, String> {
+    if !std::fs::symlink_metadata(path).map_err(|error| error.to_string())?.is_file() {
+        return Err("Not a regular file".into());
+    }
+    let mut bytes = Vec::new();
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    file.take(LIMIT as u64 + 1)
+        .read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.len() > LIMIT {
+        return Err(tr("图片信息读取超过 128 MiB 限制。").into());
+    }
+    if !bytes.starts_with(SIGNATURE) {
+        return Err("Not PNG".into());
+    }
+    let info = inspect(Arc::new(bytes))?;
+    let after = transform(&info, Action::Optimize)?;
+    if after == *info.bytes {
+        return Ok(Optimization::Unchanged);
+    }
+    if after.len() > LIMIT {
+        return Err(tr("图片信息读取超过 128 MiB 限制。").into());
+    }
+    replace(path, &info.bytes, &after)?;
+    Ok(match (info.bytes[25] != after[25], info.has_itxt) {
+        (true, true) => Optimization::Both,
+        (true, false) => Optimization::Alpha,
+        (false, _) => Optimization::Text,
+    })
+}
+
 impl State{
+    pub(super) fn writing(&self) -> bool {
+        self.pending.is_some() && self.info.is_some()
+    }
+
     fn start(&mut self,ctx:&egui::Context,path:&Path,action:Action){
         if self.pending.is_some(){return;}self.error=None;let previous=self.info.clone();let restore=match action{Action::Undo=>self.history.undo.back().cloned(),Action::Redo=>self.history.redo.last().cloned(),_=>None};
         let path=path.to_owned();let ctx=ctx.clone();let (tx,rx)=mpsc::channel();self.pending=Some(rx);
@@ -131,7 +184,11 @@ impl State{
     use super::*;
     fn chunk(kind:&[u8;4],data:&[u8])->Vec<u8>{let mut out=(data.len() as u32).to_be_bytes().to_vec();out.extend_from_slice(kind);out.extend_from_slice(data);out.extend_from_slice(&crc(&out[4..]).to_be_bytes());out}
     fn sample(depth:png::BitDepth)->Info{
-        let mut out=Vec::new();{let mut encoder=png::Encoder::new(&mut out,1,1);encoder.set_color(png::ColorType::Rgba);encoder.set_depth(depth);let mut writer=encoder.write_header().unwrap();writer.write_image_data(if depth==png::BitDepth::Sixteen{&[1,2,3,4,5,6,255,255]}else{&[12,34,56,255]}).unwrap();}
+        sample_with_alpha(depth, 255)
+    }
+    fn sample_with_alpha(depth: png::BitDepth, alpha: u8) -> Info {
+        let rgba8 = [12, 34, 56, alpha];
+        let mut out=Vec::new();{let mut encoder=png::Encoder::new(&mut out,1,1);encoder.set_color(png::ColorType::Rgba);encoder.set_depth(depth);let mut writer=encoder.write_header().unwrap();writer.write_image_data(if depth==png::BitDepth::Sixteen{&[1,2,3,4,5,6,255,255]}else{&rgba8}).unwrap();}
         let mut tagged=SIGNATURE.to_vec();for(start,end,kind)in chunks(&out).unwrap(){if &kind==b"IDAT"{let mut text=b"Comment\0\0\0\0\0".to_vec();text.extend(vec![b'x';11000]);tagged.extend(chunk(b"iTXt",&text));tagged.extend(chunk(b"pHYs",&[0,0,11,19,0,0,11,19,1]));}tagged.extend_from_slice(&out[start..end]);}inspect(Arc::new(tagged)).unwrap()
     }
     #[test]fn png_info_uses_source_depth_density_and_stored_text_size(){let info=sample(png::BitDepth::Eight);assert_eq!(info.bits,32);assert!(info.alpha);assert!(info.itxt>10*1024);assert!((info.dpi.unwrap().0-72.0).abs()<0.1);}
@@ -143,6 +200,22 @@ impl State{
         assert!(opaque_pixels(image::ColorType::Rgba16,&[1,2,3,4,5,6,255,255]));
         assert!(!opaque_pixels(image::ColorType::Rgba16,&[1,2,3,4,5,6,255,254]));
         assert!(!opaque_pixels(image::ColorType::Rgb8,&[1,2,3]));
+    }
+    #[test]
+    fn batch_strips_text_and_only_drops_alpha_from_opaque_rgba8() {
+        for (input, expected_bits, expected_alpha) in [
+            (sample(png::BitDepth::Eight), 24, false),
+            (sample_with_alpha(png::BitDepth::Eight, 254), 32, true),
+            (sample(png::BitDepth::Sixteen), 64, true),
+        ] {
+            let optimized = transform(&input, Action::Optimize).unwrap();
+            let output = inspect(Arc::new(optimized)).unwrap();
+            assert_eq!(output.bits, expected_bits);
+            assert_eq!(output.alpha, expected_alpha);
+            assert_eq!(output.itxt, 0);
+            assert_eq!(output.dpi, input.dpi);
+            assert_eq!(transform(&output, Action::Optimize).unwrap(), *output.bytes);
+        }
     }
     #[test]fn corrupted_png_is_rejected(){let info=sample(png::BitDepth::Eight);let mut bad=info.bytes.as_ref().clone();bad[16]^=1;assert!(chunks(&bad).is_err());}
 }

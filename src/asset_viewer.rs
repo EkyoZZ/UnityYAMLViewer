@@ -6,7 +6,7 @@ pub(crate) mod nine_slice;
 mod seamless;
 mod sequence;
 mod image_history;
-mod image_info;
+pub(crate) mod image_info;
 mod image_dpi;
 mod image_browser;
 mod psd;
@@ -57,11 +57,17 @@ impl TextReading {
     }
 }
 
+pub(crate) fn reveal_file(path: &Path) -> std::io::Result<()> {
+    crate::media_tools::command("explorer.exe").arg("/select,").arg(path).spawn().map(|_| ())
+}
+
 /// Shared by tabs, grouped file rows, and preview file headings.
 pub(crate) fn file_context_menu(response:&egui::Response,path:&Path){
+    if crate::remote_file::is_hls(path) { return; }
     response.context_menu(|ui|{
+        crate::theme::menu_no_wrap(ui);
         if ui.add_enabled(path.is_file(),egui::Button::new(crate::localization::tr("打开文件所在目录"))).clicked(){
-            let result=crate::media_tools::command("explorer.exe").arg("/select,").arg(path).spawn();
+            let result=reveal_file(path);
             if let Err(error)=result{ui.ctx().data_mut(|data|data.insert_temp(response.id.with("file_location_error"),error.to_string()));}
             else{ui.close_menu();}
         }
@@ -186,6 +192,7 @@ impl ImageBackground {
 }
 #[derive(Default)]
 struct ImageTab {
+    zoom_initialized: bool,
     info:image_info::State,
     editor: nine_slice::Editor,
     seamless: seamless::Editor,
@@ -232,7 +239,8 @@ impl ImageTab {
 pub struct Assets {
     rtf:rtf_preview::Preview,
     markdown: markdown::Preview,
-    default_image_fit: bool,
+    command_markdown: markdown::Preview,
+    session_image_fit: bool,
     displayed_image: Option<PathBuf>,
     image_prefetch: Option<(PathBuf, mpsc::Receiver<Loaded>)>,
     prefetch_skipped: HashSet<PathBuf>,
@@ -241,6 +249,7 @@ pub struct Assets {
     playlists: crate::playlist::Lists,
     material_graphs: HashMap<PathBuf, crate::material_graph::Preview>,
     media: HashMap<PathBuf, crate::media_preview::Preview>,
+    hls_downloads: HashMap<PathBuf, crate::remote_file::Download>,
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
     pdfs: HashMap<PathBuf, pdf_preview::Preview>,
@@ -258,9 +267,7 @@ impl Assets {
         self.prefetch_skipped.retain(|cached|nearby.contains(cached));
         if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path) {
             let (_,receiver)=self.image_prefetch.take().unwrap();
-            let tab=self.images.entry(path.to_owned()).or_insert_with(||ImageTab{
-                zoom:if self.default_image_fit{None}else{Some(1.0)},..Default::default()
-            });
+            let tab=self.images.entry(path.to_owned()).or_default();
             if tab.pending.is_none()&&tab.texture.is_none() {tab.pending=Some(receiver);}
         }
         let completed=self.image_prefetch.as_ref().and_then(|(_,receiver)|match receiver.try_recv(){
@@ -273,9 +280,7 @@ impl Assets {
             if nearby.contains(&loaded) {
                 match result {
                     Ok((original,display))=>{
-                        let tab=self.images.entry(loaded.clone()).or_insert_with(||ImageTab{
-                            zoom:if self.default_image_fit{None}else{Some(1.0)},..Default::default()
-                        });
+                        let tab=self.images.entry(loaded.clone()).or_default();
                         // A foreground reload/editor owns its own result.
                         if tab.original.is_none()&&tab.pending.is_none()&&tab.texture.is_none(){
                             tab.original=Some(original);
@@ -327,7 +332,24 @@ impl Assets {
             let _=send.send(result);ctx.request_repaint();
         });
     }
-    pub fn set_default_image_fit(&mut self, enabled: bool) { self.default_image_fit = enabled; }
+    pub(crate) fn show_command_reference(&mut self, ui: &mut egui::Ui) {
+        const REFERENCES: [&str; 7] = [
+            include_str!("../docs/command-help/zh-CN.md"),
+            include_str!("../docs/command-help/zh-TW.md"),
+            include_str!("../docs/command-help/en.md"),
+            include_str!("../docs/command-help/ja.md"),
+            include_str!("../docs/command-help/ko.md"),
+            include_str!("../docs/command-help/de.md"),
+            include_str!("../docs/command-help/fr.md"),
+        ];
+        let language = crate::localization::language_index();
+        let document = Path::new(crate::localization::LANGUAGES[language].0);
+        ui.push_id(("command_reference", language), |ui| {
+            self.command_markdown.show(ui, document, REFERENCES[language], &TextReading::default());
+        });
+    }
+
+    pub fn set_default_image_fit(&mut self, enabled: bool) { self.session_image_fit = enabled; }
     pub fn select_folder_image(&mut self, path: &Path) {
         if is_browsable_image(path) { self.browser.select_from_folder(path); }
     }
@@ -337,6 +359,9 @@ impl Assets {
     pub fn request_media_playback(&mut self, path: &Path) {
         self.playlists.request(path);
         if let Some(preview) = self.media.get_mut(path) { preview.request_playback(); }
+    }
+    pub fn stream_title(&self, path: &Path) -> Option<&str> {
+        self.media.get(path)?.stream_title()
     }
     pub fn retry_media_decoder(&mut self,path:&Path) {
         self.playlists.retry(path);
@@ -363,10 +388,12 @@ impl Assets {
     pub fn playlist_error(&self,path:&Path)->Option<&str>{self.playlists.error(path)}
     pub fn playlist_dirty(&self,path:&Path)->bool{self.playlists.dirty(path)}
     pub fn playlist_dirty_paths(&self)->Vec<PathBuf>{self.playlists.dirty_paths()}
+    pub fn request_rtf_editor_close(&self) -> bool { self.rtf.request_editor_close() }
+    pub fn update_rtf_editor_theme(&self, ctx: &egui::Context) { self.rtf.update_editor_theme(ctx); }
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { if extension(path)=="rtf"{self.rtf=Default::default();} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path);if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
+    pub fn forget(&mut self, path: &Path) { if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path);if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -385,6 +412,12 @@ impl Assets {
         crate::native_window::wake(ctx,egui::Id::new(("nine_slice",path)));true
     }
     pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
+        for changed in self.browser.poll_optimization() {
+            if let Some(tab) = self.images.get_mut(&changed) {
+                tab.info = Default::default();
+            }
+        }
+        self.browser.show_optimization_report(ctx);
         for (path,tab) in &mut self.images {
             if let Some(original)=&tab.original {tab.sequence.show(ctx,path,original);}
             tab.watermark.show(ctx,path,tab.original.as_ref());
@@ -404,6 +437,27 @@ impl Assets {
             }
         }
     }
+    pub fn show_hls(&mut self, ui: &mut egui::Ui, path: &Path, title: &str) {
+        let preview = self.media.entry(path.to_owned()).or_insert_with(|| crate::media_preview::Preview::new(path));
+        let download = self.hls_downloads.entry(path.to_owned()).or_default();
+        ui.horizontal_wrapped(|ui| {
+            preview.header_controls(ui, path);
+            download.button(ui, path, title, preview.stream_download_source(), preview.hls_cache());
+        });
+        download.status(ui);
+        preview.show(ui, path);
+    }
+    pub fn forget_hls_download(&mut self, path: &Path) {
+        self.hls_downloads.remove(path);
+    }
+    pub fn poll_hls_downloads(&mut self, ctx: &egui::Context) {
+        for download in self.hls_downloads.values_mut() { download.poll(); }
+        if self.hls_downloads_active() { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
+    }
+    pub fn hls_downloads_active(&self) -> bool {
+        self.hls_downloads.values().any(crate::remote_file::Download::active)
+    }
+    pub fn cancel_hls_downloads(&mut self) { self.hls_downloads.clear(); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
         let browsed = if is_browsable_image(path) { Some(self.browser.show(ui,path)) } else { None };
         let path = browsed.as_deref().unwrap_or(path);
@@ -495,8 +549,16 @@ impl Assets {
             return;
         }
         let can_open_preview=self.images.values().filter(|t|t.editor.open||t.editor.busy()).count()<10;
-        let initial_zoom = if self.default_image_fit { None } else { Some(1.0) };
-        let tab = self.images.entry(path.to_owned()).or_insert_with(|| ImageTab { zoom: initial_zoom, ..Default::default() });
+        let initial_zoom = if self.session_image_fit { None } else { Some(1.0) };
+        let can_optimize = !self.images.iter().any(|(image, tab)| {
+            image.parent() == path.parent() && extension(image) == "png"
+                && (tab.editor.open || tab.editor.busy() || tab.info.writing())
+        });
+        let tab = self.images.entry(path.to_owned()).or_default();
+        if !tab.zoom_initialized {
+            tab.zoom = initial_zoom;
+            tab.zoom_initialized = true;
+        }
         if let Some(message)=nine_slice::Editor::refresh_message(ui.ctx(),path) {
             tab.original=None;tab.pending=None;tab.texture=None;tab.error=None;
             tab.editor.replaced(message);tab.pan=egui::Vec2::ZERO;tab.zoom=None;
@@ -518,8 +580,22 @@ impl Assets {
         ui.horizontal_wrapped(|ui| {
             file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
             if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.info=Default::default();tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
+            let read_only_notice = match extension(path).as_str() {
+                "psd" => Some(("PSD合成图只读预览", "PSD 合成图只读预览：仅支持 8 位 RGB／灰度、Raw／RLE；不解析图层、不应用 ICC 色彩管理，不提供图片扩展工具。")),
+                "ico" => Some(("ICO图标只读预览", "ICO 仅支持查看图标，不提供图片扩展工具。")),
+                _ => None,
+            };
+            if let Some((label, detail)) = read_only_notice {
+                egui::Frame::new()
+                    .stroke(ui.visuals().widgets.inactive.bg_stroke)
+                    .corner_radius(3)
+                    .inner_margin(egui::Margin::symmetric(5, 1))
+                    .show(ui, |ui| ui.small(crate::localization::tr(label)))
+                    .response
+                    .on_hover_text(crate::localization::tr(detail));
+            }
             if is_bitmap(path) {
-            if ui.add_enabled(tab.original.is_some()&&(tab.editor.open||can_open_preview), egui::Button::new(crate::localization::tr("九宫格精简"))).clicked() {
+            if ui.add_enabled(tab.original.is_some()&&(tab.editor.open||can_open_preview)&&!self.browser.optimizing(), egui::Button::new(crate::localization::tr("九宫格精简"))).clicked() {
                 tab.editor.open = true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("nine_slice",path)));
                 if tab.channel != Channel::Rgba {tab.channel=Channel::Rgba;tab.load(path.to_owned(),ui.ctx().clone());}
@@ -537,9 +613,6 @@ impl Assets {
             }
             }
         });
-        if is_psd(path) {
-            ui.small(crate::localization::tr("PSD 合成图只读预览：仅支持 8 位 RGB／灰度、Raw／RLE；不解析图层、不应用 ICC 色彩管理，不提供图片扩展工具。"));
-        }
         ui.horizontal_wrapped(|ui| {
             let previous = tab.channel;
             let previous_alpha=tab.apply_alpha;
@@ -552,12 +625,17 @@ impl Assets {
                 }
             });
             if previous != tab.channel || previous_alpha!=tab.apply_alpha { tab.load(path.to_owned(), ui.ctx().clone()); }
-            if ui.button(crate::localization::tr("适应窗口")).clicked() { tab.zoom = None; tab.pan = egui::Vec2::ZERO; }
-            ui.label(crate::localization::tr("背景色"));
+            if crate::theme::image_scale_selector(ui, &mut self.session_image_fit) {
+                tab.zoom = (!self.session_image_fit).then_some(1.0);
+                tab.pan = egui::Vec2::ZERO;
+            }
             tab.background.controls(ui,&mut tab.background_color);
-            if is_browsable_image(path) { self.browser.controls(ui); }
+            if is_browsable_image(path) {
+                self.browser.controls(ui);
+                self.browser.optimization_button(ui, can_optimize);
+            }
         });
-        if tab.info.show(ui,path,is_bitmap(path)&&!tab.editor.open&&!tab.editor.busy()){
+        if tab.info.show(ui,path,is_bitmap(path)&&!tab.editor.open&&!tab.editor.busy()&&!self.browser.optimizing()){
             tab.original=None;tab.texture=None;tab.pending=None;tab.load(path.to_owned(),ui.ctx().clone());self.browser.forget(path);
         }
         let browsing=is_browsable_image(path) && self.browser.is_multiple();
@@ -639,7 +717,12 @@ impl Assets {
         let badge = egui::Rect::from_center_size(egui::pos2(canvas.center().x, canvas.bottom() - 8.0 - badge_size.y * 0.5), badge_size);
         painter.rect_filled(badge, 6.0, Color32::from_black_alpha(128));
         painter.galley(badge.min + egui::vec2(12.0,6.0), galley, Color32::WHITE);
-        if let Some(value)=crate::theme::zoom_preset_menu(ui,badge,zoom,badge.right()-12.0){tab.zoom=Some(value);tab.pan=egui::Vec2::ZERO;}
+        if let Some(value) = crate::theme::zoom_preset_menu_with_fit(
+            ui, badge, zoom, badge.right() - 12.0, Some(tab.zoom.is_none()),
+        ) {
+            tab.zoom = value;
+            tab.pan = egui::Vec2::ZERO;
+        }
         if browsing {
             let left=egui::Rect::from_center_size(egui::pos2(badge.left()-12.0-badge.height()*0.5,badge.center().y),egui::Vec2::splat(badge.height()));
             let right=egui::Rect::from_center_size(egui::pos2(badge.right()+12.0+badge.height()*0.5,badge.center().y),egui::Vec2::splat(badge.height()));

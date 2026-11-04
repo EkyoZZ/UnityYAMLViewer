@@ -1,12 +1,71 @@
 //! Direct HTTP(S) files are downloaded off-thread, then opened by existing viewers.
 use std::{io::{Read, Write}, path::{Path, PathBuf}, sync::mpsc, time::Duration};
 
+mod hls_download;
+mod hls_cache;
+pub(crate) use hls_cache::Cache as HlsCache;
+pub(crate) use hls_download::Download;
+
 const LIMIT: u64 = 1024 * 1024 * 1024;
 fn cache_root() -> PathBuf { crate::app_cache::network_root() }
 pub fn is_cached(path: &Path) -> bool { path.starts_with(cache_root()) || path.starts_with(std::env::temp_dir().join("UnityYAMLViewer-network")) }
+fn hls_url(input: &str) -> Option<reqwest::Url> {
+    if !input.starts_with("https://") && !input.starts_with("http://") { return None; }
+    let url = reqwest::Url::parse(input).ok()?;
+    if url.host_str().is_some() && url.path().to_ascii_lowercase().ends_with(".m3u8") {
+        Some(url)
+    } else {
+        None
+    }
+}
+
+pub fn is_hls(path: &Path) -> bool { path.to_str().and_then(hls_url).is_some() }
+
+pub fn stream_label(path: &Path) -> Option<&str> {
+    let input = path.to_str()?;
+    hls_url(input)?;
+    input.split('?').next()?.rsplit('/').next()
+}
+
+pub fn clean_title(value: &str) -> Option<String> {
+    let cleaned: String = value.chars().filter(|c| !c.is_control()).collect();
+    let title = cleaned.trim();
+    (!title.is_empty()).then(|| title.to_owned())
+}
+
+fn link_title(url: &reqwest::Url) -> Option<String> {
+    url.query_pairs().filter(|(key, _)| key == "name")
+        .find_map(|(_, value)| clean_title(&value))
+}
+
+pub fn stream_source(input: &str) -> Option<(PathBuf, Option<String>)> {
+    let normalized = input.replace("https\\://", "https://").replace("http\\://", "http://");
+    let (mut source, title) = if let Some(url) = hls_url(&normalized) {
+        let title = link_title(&url);
+        (url, title)
+    } else {
+        let wrapper = reqwest::Url::parse(&normalized).ok()?;
+        if wrapper.origin().ascii_serialization() != "https://web.zyplayer.fun" { return None; }
+        let raw = wrapper.query()?.split('&').find_map(|pair| pair.strip_prefix("url="));
+        let source = if let Some(source) = raw.and_then(hls_url) {
+            source
+        } else {
+            let (_, source) = wrapper.query_pairs().find(|(key, _)| key == "url")?;
+            hls_url(&source)?
+        };
+        let title = link_title(&wrapper).or_else(|| link_title(&source));
+        (source, title)
+    };
+    source.set_fragment(None);
+    Some((PathBuf::from(source.as_str()), title))
+}
+
 pub fn start(url: String, ctx: eframe::egui::Context) -> mpsc::Receiver<Result<PathBuf, String>> {
     let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || { let _ = sender.send(download(&url)); ctx.request_repaint(); });
+    std::thread::spawn(move || {
+        let _ = sender.send(download(&url));
+        ctx.request_repaint();
+    });
     receiver
 }
 
@@ -69,4 +128,28 @@ fn supported(path: &Path) -> bool {
     crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_office_document(path) || crate::asset_viewer::is_text(path)
         || crate::model_preview::is_model(path)
         || matches!(path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str(), "unity" | "prefab" | "asset" | "controller" | "anim" | "mat")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_hls_and_preserves_signed_source() {
+        let source = "https://example.org/path/index.M3U8?sign=a+b%2Fc";
+        let (direct, title) = stream_source(source).unwrap();
+        assert_eq!(title, None);
+        assert_eq!(direct.to_str(), Some(source));
+        assert_eq!(stream_label(&direct), Some("index.M3U8"));
+        assert_eq!(stream_source(&format!("https://web.zyplayer.fun/?url={source}&name=吞噬星空 第241集")),
+            Some((direct.clone(), Some("吞噬星空 第241集".into()))));
+
+        let mut wrapper = reqwest::Url::parse("https://web.zyplayer.fun/").unwrap();
+        wrapper.query_pairs_mut().append_pair("url", source).append_pair("name", "吞噬星空 第241集");
+        assert_eq!(stream_source(wrapper.as_str()), Some((direct, Some("吞噬星空 第241集".into()))));
+        let named = format!("{source}&name=Episode+241");
+        assert_eq!(stream_source(&named), Some((PathBuf::from(named.as_str()), Some("Episode 241".into()))));
+        assert!(stream_source("https://example.org/?url=https://example.org/index.m3u8").is_none());
+        assert!(stream_source("https://web.zyplayer.fun/?url=file:///index.m3u8").is_none());
+    }
 }

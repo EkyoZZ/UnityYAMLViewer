@@ -95,6 +95,7 @@ pub fn show(ui: &mut egui::Ui, bindings: &[&AnimationBinding], duration: f32, ra
     }
     let mut deleted=false;
     response.context_menu(|ui| {
+        crate::theme::menu_no_wrap(ui);
         if ui.add_enabled(editable && !state.selected.is_empty(),egui::Button::new(localization::tr("删除选中关键帧"))).clicked() {
             let lines=items.iter().filter(|key|state.selected.contains(&key.line)).flat_map(|key|key.time_lines.iter().copied()).collect();
             deleted=crate::animation_curves::delete(ui,&lines); ui.close_menu();

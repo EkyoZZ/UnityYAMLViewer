@@ -3306,3 +3306,19 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 
 - 北京时间 2026-11-04 11:08:20发布 [v1.3.1](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.1)，Release ID 433466401。标签指向远端 master 提交 120d97496a6ad1d0689319330af67eb311b77d18，已核验为最新正式版。
 - Windows x64 附件 ID 708029993，28,517,376 字节，GitHub SHA-256 与本地一致。核验记录见 target/v1.3.1-published.json 和 target/v1.3.1-uploaded-asset.json。
+
+## v1.3.2 Windows 本地构建（2026-11-04）
+
+- Windows Release 构建通过（47.92 秒）。文件版本 1.3.2，产品版本 1.3.2，大小 29361664 字节，SHA-256 为 D7B75D44E9A8D9DE065F4E65D647119DAB311B34E4116FAE7C665B749D5D139A。 产物位于 `target/release/unity_yaml_viewer.exe`。编译前未发现进程，目标文件可独占访问。打包、界面运行验证及发布待完成。
+
+## v1.3.2 HLS 修复后的 Windows 本地构建（2026-11-04）
+
+- Windows Release 构建通过（43.27 秒）。文件版本 1.3.2，产品版本 1.3.2，大小 29360128 字节，SHA-256 为 FE57C763B2430AE4DD55C89076C5A5A244E2B857102B2A68D7BD26E3C90038F3。 产物位于 `target/release/unity_yaml_viewer.exe`。编译前未发现进程，目标文件可独占访问。应用内验证、打包和发布待完成。
+
+## v1.3.2 HLS 后台缓存 Windows 本地构建（2026-11-04）
+
+- Windows Release 构建通过（41.90 秒）。文件版本 1.3.2，产品版本 1.3.2，大小 29359104 字节，SHA-256 为 DDE45ACC1D6B3AE7534AA9F3AFEA00A0753A9781A96EB84A686F0A2BBA85E60F。 产物位于 `target/release/unity_yaml_viewer.exe`。编译前未发现进程，目标文件可独占访问。应用内验证、打包和发布待完成。
+
+## v1.3.2 HLS 音画同步修正后的 Windows 本地构建（2026-11-04）
+
+- Windows Release 构建通过（40.04 秒）。文件版本 1.3.2，产品版本 1.3.2，大小 29324800 字节，SHA-256 为 C33D69C0A466EDC29EF40FFEE2EE464220783EE7D08E86A1271123218F5F600A。 产物位于 `target/release/unity_yaml_viewer.exe`。编译前未发现进程，目标文件可独占访问。应用内验证、打包和发布待完成。

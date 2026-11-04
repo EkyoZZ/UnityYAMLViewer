@@ -51,6 +51,29 @@ mod folder_selection_tests {
         assert_eq!(browser.selected, browser.owner);
     }
 }
+fn folder_images(directory: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().map_err(|e| e.to_string())?.is_file()
+            && is_browsable_image(&entry.path())
+        {
+            files.push(entry.path());
+        }
+    }
+    Ok(files)
+}
+
+#[derive(Default)]
+struct BatchResult {
+    directory: PathBuf,
+    alpha: Vec<PathBuf>,
+    text: Vec<PathBuf>,
+    both: Vec<PathBuf>,
+    unchanged: usize,
+    errors: Vec<String>,
+}
+
 #[derive(Default)]
 pub(super) struct Browser {
     owner: PathBuf,
@@ -63,6 +86,10 @@ pub(super) struct Browser {
     thumbs: HashMap<PathBuf, Result<egui::TextureHandle, String>>,
     error: Option<String>,
     reveal: bool,
+    confirm_optimization: bool,
+    optimization: Option<mpsc::Receiver<BatchResult>>,
+    optimization_result: Option<BatchResult>,
+    optimization_report_open: bool,
 }
 impl Browser {
     pub fn select_from_folder(&mut self, path: &Path) {
@@ -98,25 +125,22 @@ impl Browser {
             .position(|file| file == path)
             .map(|index| (index + 1, self.files.len()))
     }
+    fn directory(&self) -> &Path {
+        self.owner.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."))
+    }
+
     fn scan(&mut self, ctx: &egui::Context) {
-        let directory = self.owner.parent().unwrap_or(Path::new(".")).to_owned();
+        let directory = self.directory().to_owned();
         let (tx, rx) = mpsc::channel();
         self.scan = Some(rx);
         self.error = None;
+        self.confirm_optimization = false;
         self.thumbs.clear();
         self.pending = None;
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = (|| {
-                let mut files = Vec::new();
-                for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
-                    let entry = entry.map_err(|e| e.to_string())?;
-                    if entry.file_type().map_err(|e| e.to_string())?.is_file()
-                        && is_browsable_image(&entry.path())
-                    {
-                        files.push(entry.path());
-                    }
-                }
+                let mut files = folder_images(&directory)?;
                 files.sort_by_cached_key(|p| {
                     p.file_name()
                         .unwrap_or_default()
@@ -192,6 +216,142 @@ impl Browser {
             ui.ctx().request_repaint();
         }
     }
+    pub fn optimizing(&self) -> bool {
+        self.optimization.is_some()
+    }
+
+    pub fn poll_optimization(&mut self) -> Vec<PathBuf> {
+        if let Some(mut result) = self.optimization.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.optimization = None;
+            for files in [&mut result.alpha, &mut result.text, &mut result.both] {
+                files.sort();
+            }
+            let changed = result.alpha.iter().chain(&result.text).chain(&result.both).cloned().collect();
+            self.optimization_result = Some(result);
+            self.optimization_report_open = true;
+            changed
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn optimization_button(&mut self, ui: &mut egui::Ui, enabled: bool) {
+        use crate::localization::tr;
+        if !self.multiple {
+            return;
+        }
+        let can_start = enabled && self.scan.is_none() && !self.optimizing()
+            && self.files.iter().any(|path| extension(path) == "png");
+        if ui.add_enabled(can_start, crate::theme::green_outline_button(ui, tr("批量优化PNG")))
+            .on_hover_text(tr("去除Alpha通道和iTXt元信息")).clicked()
+        {
+            self.confirm_optimization = true;
+        }
+        if self.optimizing() {
+            ui.spinner();
+        }
+        if self.confirm_optimization {
+            let response = egui::Modal::new(ui.id().with("confirm_png_optimization")).show(ui.ctx(), |ui| {
+                ui.set_width(380.0_f32.min(ui.ctx().screen_rect().width() * 0.9));
+                ui.vertical_centered(|ui| ui.heading(tr("批量优化PNG")));
+                ui.add_space(12.0);
+                ui.label(tr("将原位优化当前目录中的 PNG（不含子目录）。批量修改无法撤销。"));
+                ui.label(tr("移除 PNG 中的 iTXt 元信息。"));
+                ui.label(tr("仅当静态 PNG 为 32 位 RGBA 且所有像素的 Alpha 都是 255（完全不透明）时，才移除 Alpha 通道。"));
+                ui.add_space(4.0);
+                ui.label(std::path::absolute(self.directory()).unwrap_or_else(|_| self.directory().to_owned())
+                    .display().to_string());
+                ui.add_space(14.0);
+                let button_size = egui::vec2(80.0, 30.0);
+                let gap = 10.0;
+                ui.vertical_centered(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(button_size.x * 2.0 + gap, button_size.y),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            let confirm = ui.add_enabled(
+                                can_start, egui::Button::new(tr("确认")).min_size(button_size),
+                            ).clicked();
+                            let cancel = ui.add(egui::Button::new(tr("取消")).min_size(button_size)).clicked();
+                            (confirm, cancel)
+                        },
+                    ).inner
+                }).inner
+            });
+            let (confirm, cancel) = response.inner;
+            if confirm || cancel || response.should_close() {
+                self.confirm_optimization = false;
+            }
+            if confirm {
+                let directory = self.directory().to_owned();
+                let (tx, rx) = mpsc::channel();
+                self.optimization = Some(rx);
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let scan = folder_images(&directory);
+                    let mut result = BatchResult { directory, ..Default::default() };
+                    let paths = match scan {
+                        Ok(paths) => paths,
+                        Err(error) => {
+                            result.errors.push(error);
+                            Vec::new()
+                        }
+                    };
+                    use super::image_info::Optimization;
+                    for path in paths.into_iter().filter(|path| extension(path) == "png") {
+                        match super::image_info::optimize_png(&path) {
+                            Ok(Optimization::Alpha) => result.alpha.push(path),
+                            Ok(Optimization::Text) => result.text.push(path),
+                            Ok(Optimization::Both) => result.both.push(path),
+                            Ok(Optimization::Unchanged) => result.unchanged += 1,
+                            Err(error) => result.errors.push(format!("{}: {error}", path.display())),
+                        }
+                    }
+                    let _ = tx.send(result);
+                    ctx.request_repaint();
+                });
+            }
+        }
+    }
+
+    pub fn show_optimization_report(&mut self, ctx: &egui::Context) {
+        use crate::localization::tr;
+        let Some(result) = &self.optimization_result else { return; };
+        crate::native_window::Window::new(tr("PNG 批量优化报告"))
+            .id(egui::Id::new("png_optimization_report"))
+            .open(&mut self.optimization_report_open)
+            .resizable(true)
+            .default_width(540.0)
+            .default_height(420.0)
+            .show(ctx, |ui| {
+                ui.label(result.directory.display().to_string());
+                let changed = result.alpha.len() + result.text.len() + result.both.len();
+                ui.label(crate::lf!("PNG 优化完成：修改 {0}，无需修改 {1}，失败 {2}",
+                    changed, result.unchanged, result.errors.len()));
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (label, files) in [
+                        ("仅去除 Alpha 通道", &result.alpha),
+                        ("仅清理 iTXt 元信息", &result.text),
+                        ("同时去除 Alpha 和 iTXt", &result.both),
+                    ] {
+                        ui.heading(format!("{} ({})", tr(label), files.len()));
+                        for path in files {
+                            ui.label(path.file_name().unwrap_or_default().to_string_lossy());
+                        }
+                        ui.add_space(8.0);
+                    }
+                    if !result.errors.is_empty() {
+                        ui.heading(tr("失败"));
+                        for error in &result.errors {
+                            ui.label(error);
+                        }
+                    }
+                });
+            });
+    }
+
     pub fn navigate(&mut self, ui: &mut egui::Ui, left: egui::Rect, right: egui::Rect) {
         let index = self.files.iter().position(|p| p == &self.selected);
         let mut delta = 0isize;

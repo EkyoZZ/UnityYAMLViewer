@@ -168,8 +168,10 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
         }
     }
     response.context_menu(|ui| {
+        crate::theme::menu_no_wrap(ui);
         ui.add_enabled_ui(crate::editing::active(ui), |ui| {
             ui.menu_button("Create State", |ui| {
+                crate::theme::menu_no_wrap(ui);
                 if ui.button("Empty").clicked() {
                     let position = ui.ctx().data(|data| data.get_temp::<Pos2>(menu_position_id)).unwrap_or(egui::pos2(240.0, 100.0));
                     if let Some(file_id) = crate::editing::create_empty_controller_state(ui, &machine.file_id, position) {
@@ -241,6 +243,7 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
         }
         if node.index.is_some() && node.kind != 4 {
             interaction.context_menu(|ui| {
+                crate::theme::menu_no_wrap(ui);
                 if ui.add_enabled(editable, egui::Button::new(crate::localization::tr("设为默认状态"))).clicked() {
                     crate::editing::set_controller_default(ui, &machine.file_id, &node.id);
                     ui.close_menu();

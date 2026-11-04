@@ -103,7 +103,7 @@ impl Node {
         }
         let mut remove = false;
         if root {
-            response.context_menu(|ui| { remove |= self.settings_ui(ui); });
+            response.context_menu(|ui| {crate::theme::menu_no_wrap(ui); remove |= self.settings_ui(ui); });
             let rect = egui::Rect::from_center_size(
                 egui::pos2(response.rect.right() + ui.spacing().item_spacing.x + icon_size / 2.0, response.rect.center().y),
                 egui::Vec2::splat(icon_size));

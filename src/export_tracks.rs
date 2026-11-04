@@ -80,10 +80,19 @@ impl Tracks {
         let mut remove=None;
         for (index,track) in self.entries.iter_mut().enumerate(){ui.push_id(index,|ui|{
             let supported=track.supported(container);
-            ui.horizontal_wrapped(|ui|{
-                ui.checkbox(&mut track.enabled,tr(if track.subtitle{"字幕"}else{"音轨"}));
-                ui.label(format!("{} · #{} · {}",track.path.file_name().unwrap_or_default().to_string_lossy(),track.index,track.codec));
-                if ui.small_button("×").on_hover_text(tr("从导出列表移除，不修改原文件。")).clicked(){remove=Some(index);}
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut track.enabled, tr(if track.subtitle { "字幕" } else { "音轨" }));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("×").on_hover_text(tr("从导出列表移除，不修改原文件。")).clicked() {
+                        remove = Some(index);
+                    }
+                    ui.label(format!("· #{} · {}", track.index, track.codec));
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let name = track.path.file_name().unwrap_or_default().to_string_lossy();
+                        ui.add(egui::Label::new(name.as_ref()).truncate())
+                            .on_hover_text(name.as_ref());
+                    });
+                });
             });
             ui.add_enabled_ui(supported,|ui|{
                 let label=LANGUAGES.iter().find(|(code,_)|*code==track.language).map_or(track.language.as_str(),|(_,label)|tr(label));

@@ -30,6 +30,7 @@ mod third_party;
 mod component_paths;
 mod media_trim;
 mod video_crop;
+mod video_extract;
 mod export_tracks;
 mod subtitle_player;
 mod audio_edit;
@@ -204,6 +205,8 @@ struct ViewerApp {
     cache_panel: app_cache::Panel,
     show_url: bool,
     url_input: String,
+    video_extract: video_extract::Window,
+    stream_titles: std::collections::HashMap<PathBuf, String>,
     url_error: Option<String>,
     url_job: Option<mpsc::Receiver<Result<PathBuf, String>>>,
     status: String,
@@ -279,6 +282,10 @@ struct ViewerTab {
 
 impl ViewerApp {
     fn displayed_tab_title(&self, path: &std::path::Path) -> String {
+        if let Some(title) = self.stream_titles.get(path) { return title.clone(); }
+        if let Some(label) = remote_file::stream_label(path) {
+            return self.assets.stream_title(path).unwrap_or(label).to_owned();
+        }
         let title_path = if self.folder_preview_path.as_deref() == Some(path) {
             self.folder_preview_root.as_deref().unwrap_or(path)
         } else { path };
@@ -410,10 +417,10 @@ impl ViewerApp {
         self.url_window(ctx);
         if self.show_command_help {
             native_window::Window::new(localization::tr("命令行用法")).id(egui::Id::new("command_help")).open(&mut self.show_command_help).default_width(760.).default_height(600.).solid_scroll().show(ctx,|ui| {
-                ui.label(localization::tr("slice9 默认原位替换，不创建备份；建议先用 --dry-run 查看方案。"));
-                ui.label(localization::tr("简单路径可不加引号；包含空格或命令行特殊字符时，请分别给每个路径加引号。"));
-                if ui.button(localization::tr("复制指令说明")).clicked() {ui.ctx().copy_text(asset_viewer::nine_slice::cli::HELP.to_owned());}
-                ui.label(egui::RichText::new(asset_viewer::nine_slice::cli::HELP).monospace());
+                if ui.button(localization::tr("复制指令说明")).clicked() {
+                    ui.ctx().copy_text(command_line::help());
+                }
+                self.assets.show_command_reference(ui);
             });
         }
         if self.show_supported_formats {
@@ -421,7 +428,7 @@ impl ViewerApp {
                 .id(egui::Id::new("supported_formats")).open(&mut self.show_supported_formats)
                 .default_width(560.0).fit_height().show(ctx, |ui| {
                     for &(label, extensions) in file_associations::FORMAT_GROUPS {
-                        ui.strong(localization::tr(label));
+                        theme::section_heading(ui, localization::tr(label));
                         ui.add(egui::Label::new(extensions).wrap());
                         ui.add_space(6.0);
                     }
@@ -531,7 +538,7 @@ impl ViewerApp {
         let Some(config_path) = last_open_dir_config_path().map(|path| path.with_file_name("open_tabs.txt")) else { return };
         let Some(parent) = config_path.parent() else { return };
         if fs::create_dir_all(parent).is_err() { return; }
-        let session = encode_open_tabs(&self.tabs.iter().filter(|tab| !remote_file::is_cached(&tab.path)).map(|tab| tab.path.clone()).collect::<Vec<_>>(), self.path.as_deref());
+        let session = encode_open_tabs(&self.tabs.iter().filter(|tab| !remote_file::is_cached(&tab.path) && !remote_file::is_hls(&tab.path)).map(|tab| tab.path.clone()).collect::<Vec<_>>(), self.path.as_deref().filter(|path| !remote_file::is_hls(path)));
         let temporary = config_path.with_extension("tmp");
         if fs::write(&temporary, session.as_bytes()).is_ok() {
             let _ = fs::rename(temporary, config_path);
@@ -611,7 +618,7 @@ impl ViewerApp {
         let mut submit = false;
         native_window::Window::new(localization::tr("打开 URL")).id(egui::Id::new("open_url"))
             .open(&mut open).default_width(620.0).fit_height().show(ctx, |ui| {
-                ui.label(localization::tr("输入 HTTP / HTTPS 文件直链，下载完成后打开（最大 1 GiB）。"));
+                ui.label(localization::tr("输入 HTTP / HTTPS 文件直链或 HLS 点播链接。普通文件下载后打开（最大 1 GiB）。"));
                 let pending = self.url_job.is_some();
                 ui.horizontal(|ui| {
                     let input_width = (ui.available_width() - 104.0 - ui.spacing().item_spacing.x).max(40.0);
@@ -627,7 +634,18 @@ impl ViewerApp {
         if !open { self.show_url = false; }
         if submit {
             self.url_error = None;
-            self.url_job = Some(remote_file::start(self.url_input.trim().to_owned(), ctx.clone()));
+            let input = self.url_input.trim();
+            if let Some((path, title)) = remote_file::stream_source(input) {
+                if let Some(title) = title {
+                    self.stream_titles.insert(path.clone(), title);
+                } else {
+                    self.stream_titles.remove(&path);
+                }
+                self.show_url = false;
+                self.open_file_with_directory_tracking(path, false);
+            } else {
+                self.url_job = Some(remote_file::start(input.to_owned(), ctx.clone()));
+            }
         }
     }
 
@@ -727,7 +745,7 @@ impl ViewerApp {
             self.folder_browser.add(path);
             return;
         }
-        if remote_file::is_cached(&path) { /* Cached network files do not change the local open directory. */ }
+        if remote_file::is_cached(&path) || remote_file::is_hls(&path) { /* Network sources do not change the local open directory. */ }
         else if remember_directory && !self.restoring_session {
             self.last_open_dir = path.parent().map(PathBuf::from);
             self.persist_last_open_dir();
@@ -739,7 +757,7 @@ impl ViewerApp {
             if record_recent { self.remember_recent_file(); }
             return;
         }
-        if (playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file() {
+        if remote_file::is_hls(&path) || ((playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file()) {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -753,7 +771,7 @@ impl ViewerApp {
     }
     fn remember_recent_file(&mut self) {
         if !self.restoring_session {
-            if let Some(path) = &self.path { if !remote_file::is_cached(path) { self.recent_files.record(path.clone()); self.recent_files.persist(); } }
+            if let Some(path) = &self.path { if !remote_file::is_cached(path) && !remote_file::is_hls(path) { self.recent_files.record(path.clone()); self.recent_files.persist(); } }
         }
     }
 
@@ -854,6 +872,8 @@ impl ViewerApp {
         self.edits.remove(&self.tabs[index].path);
         self.saved_histories.remove(&self.tabs[index].path);
         self.node_controls.remove(&self.tabs[index].path);
+        self.stream_titles.remove(&self.tabs[index].path);
+        self.assets.forget_hls_download(&self.tabs[index].path);
         self.assets.forget(&self.tabs[index].path);
         self.save_active_tab();
         let closing_path=&self.tabs[index].path;
@@ -1144,6 +1164,7 @@ impl ViewerApp {
                         ui.horizontal_wrapped(|ui| {
                             if ui.button(crate::localization::tr("复制 FileID")).clicked() { ctx.copy_text(doc.file_id.clone()); }
                             ui.menu_button(crate::localization::tr("复制 GUID"), |ui| {
+                                crate::theme::menu_no_wrap(ui);
                                 let entries = guid_entries_from_text(&doc.text);
                                 if entries.is_empty() { ui.label(crate::localization::tr("当前对象没有 GUID")); }
                                 for (field, guid) in entries {
@@ -1434,6 +1455,7 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.assets.cancel_hls_downloads();
         self.assets.pause_media();
         playlist::flush_writes();
         if let Some(error) = media_history::take_error() {
@@ -1444,12 +1466,16 @@ impl eframe::App for ViewerApp {
         render_system::shutdown();
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.assets.poll_hls_downloads(ctx);
         native_window::track_main_window(ctx);
+        if let Some(path) = self.video_extract.show(ctx, self.third_party.is_open()) {
+            self.open_file_with_directory_tracking(path, false);
+        }
+        self.assets.update_rtf_editor_theme(ctx);
         native_window::track_file_drop(ctx, _frame);
         audio_edit::set_undo_limit(self.settings.undo_steps);
         asset_viewer::set_image_undo_limit(self.settings.undo_steps);
         self.assets.set_default_image_browse(self.settings.default_image_browse);
-        self.assets.set_default_image_fit(self.settings.default_image_fit);
         media_preview::show_trim_windows(ctx);
         self.playlist_close_dialog(ctx);
         if let Some(error) = media_history::take_error() { self.status = crate::lf!("播放位置记录保存失败：{0}", error); }
@@ -1515,6 +1541,9 @@ impl eframe::App for ViewerApp {
             if let Some(file_id) = ctx.data_mut(|data| data.remove_temp::<String>(egui::Id::new("created_controller_state"))) {
                 self.selected = self.documents.iter().position(|doc| doc.file_id == file_id);
             }
+        }
+        if ctx.input(|input| input.viewport().close_requested()) && self.assets.request_rtf_editor_close() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if ctx.input(|input| input.viewport().close_requested()) && !self.edits.is_empty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1592,6 +1621,7 @@ impl eframe::App for ViewerApp {
                     let mut open_dialog = false;
                     let mut recent_path = None;
                     egui::menu::menu_custom_button(ui, theme::toolbar_button(ui, crate::localization::tr("文件"), false), |ui| {
+                        crate::theme::menu_no_wrap(ui);
                         if ui.button(crate::localization::tr("打开文件")).clicked() {
                             open_dialog = true;
                             ui.close_menu();
@@ -1605,6 +1635,10 @@ impl eframe::App for ViewerApp {
                         if ui.button(localization::tr("打开 URL")).clicked() {
                             self.show_url = true;
                             self.url_error = None;
+                            ui.close_menu();
+                        }
+                        if ui.button(localization::tr("视频提取")).clicked() {
+                            self.video_extract.open = true;
                             ui.close_menu();
                         }
                         ui.menu_button(crate::localization::tr("最近打开"), |ui| {
@@ -1767,7 +1801,7 @@ impl eframe::App for ViewerApp {
                                 let row_height = ui.text_style_height(&egui::TextStyle::Button) + 4.0;
                                 let widest = members.iter().map(|&member| {
                                     let path = &self.tabs[member].path;
-                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                    let name = self.displayed_tab_title(path);
                                     ui.painter().layout_no_wrap(format!("{name} *"), egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color()).size().x
                                 }).fold(0.0_f32, f32::max);
                                 let row_width = (widest + row_height + 20.0).clamp(180.0, 420.0).min((ctx.screen_rect().width() - 32.0).max(80.0));
@@ -1775,7 +1809,7 @@ impl eframe::App for ViewerApp {
                                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                                     for &member in members {
                                         let path = &self.tabs[member].path;
-                                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(localization::tr("未命名"));
+                                        let name = self.displayed_tab_title(path);
                                         let dirty = self.assets.playlist_dirty(path) || self.edits.get(path).is_some_and(|edit| edit.lock().unwrap().has_changes());
                                         let title = if dirty { format!("{name} *") } else { name.to_owned() };
                                         ui.push_id(path, |ui| {
@@ -1795,7 +1829,8 @@ impl eframe::App for ViewerApp {
                                             let galley = ui.painter().layout_job(job);
                                             ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
                                                 egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
-                                            if name_response.on_hover_text(path.display().to_string()).clicked() {
+                                            let hint = if remote_file::is_hls(path) { self.displayed_tab_title(path) } else { path.display().to_string() };
+                                            if name_response.on_hover_text(hint).clicked() {
                                                 activate = Some(member); ui.memory_mut(|memory| memory.close_popup());
                                             }
                                             let close_response = ui.put(close_rect, egui::Button::new("").frame(false));
@@ -1873,7 +1908,7 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
-        let delimited_tab = self.path.as_ref().is_some_and(|path| path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
+        let delimited_tab = self.path.as_ref().is_some_and(|path| !remote_file::is_hls(path) && path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
         let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
@@ -2068,7 +2103,14 @@ impl eframe::App for ViewerApp {
             if reference_tab && !delimited_tab {
                 editing::publish(ctx, None, 0..0);
                 if material_preview && theme::preview_toggle(ui,self.preview.open).clicked(){self.preview.open=!self.preview.open;ctx.request_repaint();}
-                if let Some(path) = self.path.clone() { self.assets.show(ui, &path, &self.raw); }
+                if let Some(path) = self.path.clone() {
+                    if remote_file::is_hls(&path) {
+                        let title = self.displayed_tab_title(&path);
+                        self.assets.show_hls(ui, &path, &title);
+                    } else {
+                        self.assets.show(ui, &path, &self.raw);
+                    }
+                }
                 if ctx.data_mut(|d|d.remove_temp::<bool>(egui::Id::new("text_reload_request"))).unwrap_or(false){
                     if let Some(path)=&self.path{self.assets.forget(path);}
                     self.reload_current_file(ctx);
@@ -2218,6 +2260,7 @@ impl eframe::App for ViewerApp {
 				let guid_entries = guid_entries_from_text(&doc.text);
 				ui.horizontal(|ui| {
 					ui.menu_button(crate::localization::tr("复制 GUID"), |ui| {
+					    crate::theme::menu_no_wrap(ui);
 						ui.set_min_width(320.0);
 						if guid_entries.is_empty() {
 							ui.label(crate::localization::tr("当前对象没有 GUID"));
@@ -2235,6 +2278,7 @@ impl eframe::App for ViewerApp {
 						}
 					});
 					ui.menu_button(crate::localization::tr("复制 FileID"), |ui| {
+					    crate::theme::menu_no_wrap(ui);
 						ui.set_min_width(320.0);
 						if ui.button(crate::localization::tr("自身 FileID")).clicked() {
 							ctx.copy_text(doc.file_id.clone());
@@ -2527,7 +2571,7 @@ impl eframe::App for ViewerApp {
                         in_use.extend(self.assets.playlist_in_use());
                         if let Ok(executable) = std::env::current_exe() { in_use.push(executable); }
                         if let Some(directory) = self.updater.staged.as_ref().and_then(|path| path.parent()) { in_use.push(directory.to_owned()); }
-                        let busy = self.url_job.is_some() || self.updater.downloading
+                        let busy = self.url_job.is_some() || self.updater.downloading || self.assets.hls_downloads_active() || self.video_extract.busy()
                             || ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("asset_catalog_loading"))).unwrap_or(false);
                         self.cache_panel.show(ui, in_use, busy);
                     });
@@ -2613,7 +2657,24 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(localization::tr("• 新增 pngopt 指令，批量优化 PNG 并输出逐文件结果。指令用法随界面语言切换。"));
+                        ui.label(localization::tr("• RTF 支持独立窗口编辑、插入静态图片和另存为，保存当前文档后自动刷新预览。"));
+                        ui.label(localization::tr("• 打开 URL 支持 HLS 点播，页签可显示链接或媒体内嵌标题。"));
+                        ui.label(localization::tr("• HLS 点播可下载为 MP4，遇到个别损坏数据包时可继续。"));
+                        ui.label(localization::tr("• HLS 导出 MP4 时可修正倒退的时间戳。"));
+                        ui.label(localization::tr("• 常见 HLS 点播在暂停时继续缓存，齐全后可本地播放和保存 MP4。"));
+                        ui.label(localization::tr("• 音视频可用方向键跳转和调整音量。"));
+                        ui.label(localization::tr("• 网页视频可选清晰度和音轨，下载可取消，并可定位已保存文件。"));
+                        ui.label(localization::tr("• 第三方支持可按需安装 yt-dlp，并手动检查更新。"));
+                        ui.label(localization::tr("• 减少窗口重绘时重复更新图标和位置。重绘时复用 Markdown 预处理结果。"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.3.1").strong());
                         ui.label(localization::tr("• 自动安装固定版本的 FFmpeg，减少因版本差异导致的音视频导出失败。手动安装可选经用户导出验证的 8.1。"));
+                        ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.3.0").strong());
                         ui.label(localization::tr("• 文本与代码可保存字号及间距；Markdown 支持常见 HTML 排版、图片缓存、链接与代码着色"));
@@ -2623,10 +2684,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 组件安装状态与操作同排，提供下载进度、校验与错误地址；托管 FFmpeg 可加入用户 PATH"));
                         ui.label(localization::tr("• 手型仅限制预览选中；修复固定行号分割线，CSV／TSV／PSV 行号从 1 开始"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.2.9").strong());
                         ui.label(localization::tr("• XLS／XLSX／ODS 固定行列编号；冻结表头开启时优先沿用可读的 XLSX 设置，否则固定首行；修复冻结区域分割线与滚动内容遮挡"));
                         ui.label(localization::tr("• 办公文档新增“在LibreOffice编辑”，直接打开原文件；保存后可重载预览"));
@@ -3499,6 +3556,7 @@ fn show_animation_frame_ruler(ui: &mut egui::Ui, duration: f32, sample_rate: Opt
     }
     let mut insert = None;
     response.context_menu(|ui| {
+        crate::theme::menu_no_wrap(ui);
         if let Some(time)=ui.ctx().data_mut(|data|data.get_temp::<f64>(position_id)) {
             ui.label(format!("{}: {}",localization::tr("帧"),(time*rate as f64).round()));
             if ui.add_enabled(editing::active(ui) && can_insert,egui::Button::new(localization::tr("新增关键帧"))).clicked() { insert=Some(time);ui.close_menu(); }
@@ -4517,6 +4575,7 @@ impl TabGroup {
 }
 
 fn tab_group_key(path: &std::path::Path) -> String {
+    if remote_file::is_hls(path) { return "hls".to_owned(); }
     path.extension().and_then(|extension| extension.to_str()).unwrap_or("").to_ascii_lowercase()
 }
 
@@ -4552,7 +4611,10 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
             .hover_pos()
             .is_some_and(|pointer| close_rect.contains(pointer))
     });
-    let response = if !close_hovered && !dragged { response.on_hover_text(path.display().to_string()) } else { response };
+    let response = if !close_hovered && !dragged {
+        let hint = if remote_file::is_hls(path) { title.to_owned() } else { path.display().to_string() };
+        response.on_hover_text(hint)
+    } else { response };
     let show_close = grouped || is_active || tab_hovered;
     let (fill, stroke) = if is_active {
         (
@@ -4625,6 +4687,7 @@ fn show_game_object_properties(ui:&mut egui::Ui,text:&str) {
 }
 
 fn main() -> eframe::Result {
+    if let Some(code) = command_line::dispatch_pngopt() { std::process::exit(code); }
     if let Some(code)=asset_viewer::nine_slice::cli::dispatch() {std::process::exit(code);}
     let (command_inbox, startup_paths) = match command_line::start() {
         Ok(command_line::Startup::Primary(inbox, paths)) => (inbox, paths),
@@ -4658,6 +4721,7 @@ fn main() -> eframe::Result {
             };
             app.file_associations.register_on_startup(&creation_context.egui_ctx);
             localization::set_language(&app.settings.language);
+            app.assets.set_default_image_fit(app.settings.default_image_fit);
             app.restore_open_tabs();
             app.accept_open_request(startup_paths,&creation_context.egui_ctx);
             if app.settings.auto_check_updates { app.updater.check(&creation_context.egui_ctx, false); }
@@ -4667,10 +4731,12 @@ fn main() -> eframe::Result {
 }
 
 fn application_icon() -> Arc<egui::IconData> {
-    Arc::new(
-        eframe::icon_data::from_png_bytes(include_bytes!("../assets/app_icon_256.png"))
-            .expect("无法读取窗口图标"),
-    )
+    // egui compares icon identity when updating a native viewport.
+    static ICON: std::sync::OnceLock<Arc<egui::IconData>> = std::sync::OnceLock::new();
+    Arc::clone(ICON.get_or_init(|| {
+        Arc::new(eframe::icon_data::from_png_bytes(include_bytes!("../assets/app_icon_256.png"))
+            .expect("无法读取窗口图标"))
+    }))
 }
 
 fn last_open_dir_config_path() -> Option<PathBuf> {

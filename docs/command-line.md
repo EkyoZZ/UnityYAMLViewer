@@ -2,11 +2,31 @@
 
 [返回首页 / Back to README](../README.md) · [使用指南 / User guide](user-guide.md)
 
+## PNG 批量优化 / Batch PNG optimization
+
+`pngopt [-all] <file-or-directory> [...]`
+
+```powershell
+.\unity_yaml_viewer.exe pngopt "a.png" "b.png" "D:\Project\Assets\UI"
+.\unity_yaml_viewer.exe pngopt -all "D:\Project\Assets\UI"
+.\unity_yaml_viewer.exe pngopt --help
+```
+
+`pngopt` 支持混传多个 PNG 和目录，默认只扫描目录这一层并对重复路径去重。加 `-all` 可扫描子目录，跳过符号链接和目录联接。原位移除 iTXt 元信息。只有所有像素 Alpha 均为 255 的静态 32 位 RGBA PNG 才会移除 Alpha。批量写入无备份，单个路径失败后继续处理其余路径。
+
+`pngopt` accepts multiple PNG files and folders together. It scans direct folder entries by default and deduplicates paths. Add `-all` to include subdirectories. Symbolic links and junctions are skipped. It removes iTXt in place and strips Alpha only from static 32-bit RGBA PNGs whose pixels all have alpha 255. It writes without backups and continues after individual path failures.
+
+标准输出为 JSON，`summary` 是分类计数，`files` 是逐文件记录。状态为 `alpha`、`itxt`、`both`、`unchanged` 或 `failed`，失败记录包含 `reason`。退出码为 0（无失败）、1（有失败）或 2（参数错误）。
+
+Stdout contains JSON with counts in `summary` and per-file results in `files`. Status values are `alpha`, `itxt`, `both`, `unchanged` and `failed`. Failures include a `reason`. Exit codes are 0 for no failures, 1 for path failures and 2 for argument errors.
+
 ## 命令行图片精简 / Command-line image compaction
 
-主窗口顶部“格式支持”右侧的“指令查看”打开独立用法窗口，可复制英文指令说明；文件菜单不重复提供入口。也可使用 `--help` 或 `slice9 --help`。默认命令行无窗口执行，不转发给已打开的 GUI；--preview 则打开或转发到 GUI。
+`slice9 <file-or-directory> [...] [options]`
 
-The **Commands** button beside **Format Support** opens a separate reference window with copyable English syntax and examples. It is not duplicated in the File menu. `--help` and `slice9 --help` show the same reference. CLI jobs run headlessly, independently of the GUI instance, except --preview which opens or forwards to the GUI.
+主窗口顶部“格式支持”右侧的“指令查看”打开独立用法窗口，以 Markdown 显示，可逐个复制代码块或复制英文指令说明；文件菜单不重复提供入口。也可使用 `--help` 或 `slice9 --help`。默认命令行无窗口执行，不转发给已打开的 GUI；--preview 则打开或转发到 GUI。
+
+The **Commands** button beside **Format Support** opens a separate Markdown reference window with individually copyable code blocks and a button to copy the English command help. It is not duplicated in the File menu. `--help` and `slice9 --help` show the same reference. CLI jobs run headlessly, independently of the GUI instance, except --preview which opens or forwards to the GUI.
 
 ```powershell
 # 单张 / Single image

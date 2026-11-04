@@ -391,7 +391,10 @@ impl Trim {
                 if video {
                     let minimum_width=crate::video_crop::Crop::minimum_width(ui).max(260.0);
                     let maximum_width=(ui.available_width()*0.55).max(minimum_width);
-                    egui::SidePanel::right(egui::Id::new(("video_export_settings_fixed",path))).default_width(300.0_f32.max(minimum_width)).width_range(minimum_width..=maximum_width).resizable(true).show_inside(ui,|ui|{
+                    let mut export_frame = egui::Frame::side_top_panel(ui.style());
+                    // The enclosing central panel already provides the outer right margin.
+                    export_frame.inner_margin.right = 0;
+                    egui::SidePanel::right(egui::Id::new(("video_export_settings_fixed",path))).default_width(300.0_f32.max(minimum_width)).width_range(minimum_width..=maximum_width).resizable(true).frame(export_frame).show_inside(ui,|ui|{
                         ui.horizontal(|ui|{
                             let title=tr("导出设置");
                             let title_width=ui.painter().layout_no_wrap(title.to_owned(),egui::TextStyle::Heading.resolve(ui.style()),ui.visuals().text_color()).size().x;
@@ -433,7 +436,7 @@ impl Trim {
                         });
                         if transport_button(ui, Icon::Stop, tr("停止")) { action.stop = true; action.rewind = true; }
                         let mut volume=view.volume;
-                        crate::media_preview::volume_control(ui,path,&mut volume,&mut self.remembered_volume,&mut self.volume_hover);
+                        crate::media_preview::volume_control(ui,path,&mut volume,&mut self.remembered_volume,&mut self.volume_hover,None);
                         if volume!=view.volume {action.volume=Some(volume);}
                         let (rect,response)=ui.allocate_exact_size(egui::vec2(ui.available_width().max(1.0),28.0),egui::Sense::click_and_drag());
                         ui.painter().rect_filled(rect,3.0,ui.visuals().extreme_bg_color);

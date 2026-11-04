@@ -18,16 +18,17 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **材质与 Shader**：节点、2D / 3D 及部分 Shader 单步预览。
 - **场景与动画**：场景、模型、动画、Spine 和部分粒子效果预览；Spine 支持动态播放与预乘 Alpha 切换。
 - **多图浏览**：同目录缩略图、方向键切图与位置计数，切图保留旧画面并预加载相邻图片，可设置默认浏览模式与适应窗口。
-- **图片工具**：缩放、通道预览与图片信息，支持九宫格、Sprite Border、序列拆分合成、去底色及多格式导出；可清理 PNG 冗余 Alpha 和 iTXt 元信息。
+- **图片工具**：缩放、通道预览与图片信息，支持九宫格、Sprite Border、序列拆分合成、去底色及多格式导出；支持清理 PNG 冗余 Alpha 和 iTXt，多图浏览和 `pngopt` 指令都支持批量优化 PNG。
 
 **附加工具**
 
-- **Markdown 与 RTF 富文本**：原生直读，支持常用 HTML 标签与富文本格式。
+- **Markdown 与 RTF 富文本**：原生直读，支持常用 HTML 标签与富文本格式。Windows 上可在独立窗口设置 RTF 文字和段落格式、插入图片与表格，并分页查看。
 - **文本阅读**：文本、代码与 Shader 支持高亮、复制及字号和间距调整。
-- **组件管理**：按需下载固定版本的 FFmpeg，也可下载 LibreOffice 和 PDFium。支持进度查看、自动检测与手动指定路径。
+- **组件管理**：按需安装 FFmpeg、LibreOffice、PDFium 和 yt-dlp，支持进度查看、自动检测与手动指定路径。yt-dlp 可手动检查更新。
 
 - **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
-- **音视频工具**：播放、剪切、裁剪、缩放与转码，支持多音轨、字幕、媒体详情及 GIF／视频／PNG 序列导出。
+- **音视频工具**：播放、剪切、裁剪、缩放与转码，支持多音轨、字幕、媒体详情及 GIF／视频／PNG 序列导出。可通过 URL 播放 HLS 点播流并下载为 MP4。
+- **视频提取**：通过 yt-dlp 分析网页视频链接，可选清晰度和独立音轨，在页签播放或下载。
 - **文本表格**：CSV / TSV / PSV 查看与单元格编辑，支持查找、类型与必填检查、固定行列编号及冻结首行。
 - **电子表格**：XLS / XLSX / ODS 只读预览，支持多工作表切换、查找复制、公式／缓存结果与冻结表头。
 - **文件预览**：PDF、Word／PowerPoint、OpenDocument、RTF、SVG、GIF、ICO、受限 PSD 及常见文本；办公文档可在 LibreOffice 编辑，转换预览的文档支持另存为 PDF。
@@ -76,16 +77,17 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Materials and shaders**: Node views, 2D / 3D previews and step previews for supported shaders.
 - **Scenes and animation**: Preview scenes, models, animation, Spine and supported particle effects; Spine includes animation playback and a premultiplied-alpha toggle.
 - **Image browsing**: Folder thumbnails, arrow-key navigation and position counters, with smooth image switching, adjacent-image preloading and configurable browsing / fit-to-window defaults.
-- **Image tools**: Zoom, channel views and image information; nine-slice, Sprite Border, sequence splitting / composition, background removal and export; cleanup of redundant PNG Alpha and iTXt metadata.
+- **Image tools**: Zoom, channel views and image information; nine-slice, Sprite Border, sequence splitting / composition, background removal and export; cleanup of redundant PNG Alpha and iTXt metadata, with batch optimization in image browsing or via `pngopt`.
 
 **Additional tools**
 
-- **Markdown and RTF rich text**: Direct previews with support for common HTML tags and rich-text formatting.
+- **Markdown and RTF rich text**: Direct previews with support for common HTML tags and rich-text formatting. On Windows, format text and paragraphs, insert images and tables, and navigate RTF pages in a separate editor.
 - **Text reading**: Highlighting, copying, and adjustable font size and spacing for text, code and Shader files.
-- **Component management**: Download a fixed FFmpeg version, LibreOffice and PDFium on demand. Supports progress display, automatic detection and manual paths.
+- **Component management**: Install FFmpeg, LibreOffice, PDFium and yt-dlp on demand, with progress display, automatic detection and manual paths. yt-dlp supports manual update checks.
 
 - **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
-- **Audio and video**: Playback, trimming, cropping, scaling and transcoding, with multiple audio tracks, subtitles, media details and GIF, video or PNG sequence export.
+- **Audio and video**: Playback, trimming, cropping, scaling and transcoding, with multiple audio tracks, subtitles, media details and GIF, video or PNG sequence export. HLS on-demand streams play from a URL and can be downloaded as MP4.
+- **Video extraction**: Analyze web video links with yt-dlp, choose a resolution and separate audio track when available, and play in a tab or download.
 - **Text tables**: View and edit CSV / TSV / PSV cells with search, type / required-cell checks, fixed coordinates and first-row freezing.
 - **Spreadsheets**: Read-only XLS / XLSX / ODS previews with worksheet tabs, search / copy, formulas / cached results and header freezing.
 - **File previews**: PDF, Word / PowerPoint, OpenDocument, RTF, SVG, GIF, ICO, limited PSD and common text files; Office documents can open in LibreOffice, and converted previews can be saved as PDF.

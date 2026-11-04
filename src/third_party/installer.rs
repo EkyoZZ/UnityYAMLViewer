@@ -8,6 +8,10 @@ const FFMPEG_URL: &str = "https://github.com/EkyoZZ/UnityYAMLViewer/releases/dow
 const FFMPEG_SHA256: &str = "471be94adaf65b1eeba4f9b5bef41a27e2c5c1c05eacb51f84fc860f1119782a";
 const FFMPEG_SIZE: u64 = 70_227_964;
 const OFFICE_ROOT:&str="https://download.documentfoundation.org/libreoffice/stable/";
+const YT_DLP_API: &str = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
+const YT_DLP_LATEST: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest";
+const YT_DLP_TAG: &str = "https://github.com/yt-dlp/yt-dlp/releases/tag/";
+const YT_DLP_RELEASES: &str = "https://github.com/yt-dlp/yt-dlp/releases/download";
 fn error(e:impl std::fmt::Display)->String{e.to_string()}
 fn cancelled(progress:&Shared)->Result<(),String>{if progress.cancel_requested(){Err(tr("下载已取消。").into())}else{Ok(())}}
 fn text(client:&reqwest::blocking::Client,url:&str,progress:&Shared)->Result<String,String>{
@@ -61,10 +65,101 @@ impl Drop for Workspace{fn drop(&mut self){if !self.keep{
 struct FfmpegRecord{folder:String,#[serde(default="default_bin")] bin:String}
 fn default_bin()->String{"bin".into()}
 fn relative_directory(value:&str)->bool{!value.is_empty()&&Path::new(value).components().all(|part|matches!(part,std::path::Component::Normal(_)))}
-pub(crate) fn tool_directories(_name:&str)->Vec<PathBuf>{
+pub(crate) fn tool_directories(name:&str)->Vec<PathBuf>{
     let Ok(root)=super::component_root()else{return Vec::new()};
+    if name == "yt-dlp" {
+        let folder = fs::read(root.join("yt-dlp.json")).ok()
+            .and_then(|bytes| serde_json::from_slice::<String>(&bytes).ok());
+        return folder.filter(|name| name.starts_with("yt-dlp-") && name.len() < 100
+            && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
+            .map(|name| vec![root.join(name)]).unwrap_or_default();
+    }
     let record=fs::read(root.join("ffmpeg.json")).ok().and_then(|b|serde_json::from_slice::<FfmpegRecord>(&b).ok());
     record.filter(|r|r.folder.starts_with("ffmpeg-")&&r.folder.len()<100&&r.folder.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-')&&relative_directory(&r.bin)).map(|r|vec![root.join(r.folder).join(r.bin)]).unwrap_or_default()
+}
+struct YtDlpRelease { version: String, url: String, hash: String, size: u64 }
+
+fn yt_dlp_api_release(client: &reqwest::blocking::Client, progress: &Shared) -> Result<YtDlpRelease, String> {
+    let release: serde_json::Value = serde_json::from_str(&text(client, YT_DLP_API, progress)?).map_err(error)?;
+    let invalid = || tr("未找到匹配的 yt-dlp 下载包").to_owned();
+    let version = release["tag_name"].as_str().filter(|version| crate::component_paths::yt_dlp_version_key(version).is_some())
+        .ok_or_else(invalid)?;
+    let asset = release["assets"].as_array().and_then(|assets| assets.iter().find(|asset| asset["name"] == "yt-dlp.exe"))
+        .ok_or_else(invalid)?;
+    let url = format!("{YT_DLP_RELEASES}/{version}/yt-dlp.exe");
+    let size = asset["size"].as_u64().filter(|size| *size > 0 && *size <= LIMIT).ok_or_else(invalid)?;
+    if asset["browser_download_url"].as_str() != Some(&url) { return Err(invalid()); }
+    let hash = hash_value(asset["digest"].as_str().unwrap_or(""))?;
+    Ok(YtDlpRelease { version: version.to_owned(), url, hash, size })
+}
+
+fn yt_dlp_public_version(client: &reqwest::blocking::Client, progress: &Shared) -> Result<String, String> {
+    cancelled(progress)?;
+    progress.log(format!("{}: {YT_DLP_LATEST}", tr("请求地址")));
+    let response = client.head(YT_DLP_LATEST).send().and_then(|response| response.error_for_status()).map_err(error)?;
+    response.url().as_str().strip_prefix(YT_DLP_TAG)
+        .filter(|version| crate::component_paths::yt_dlp_version_key(version).is_some())
+        .map(str::to_owned).ok_or_else(|| tr("未找到匹配的 yt-dlp 下载包").to_owned())
+}
+
+fn yt_dlp_public_release(client: &reqwest::blocking::Client, progress: &Shared) -> Result<YtDlpRelease, String> {
+    let version = yt_dlp_public_version(client, progress)?;
+    cancelled(progress)?;
+    let base = format!("{YT_DLP_RELEASES}/{version}");
+    let checksums = text(client, &format!("{base}/SHA2-256SUMS"), progress)?;
+    let hash = yt_dlp_executable_hash(&checksums)?;
+    Ok(YtDlpRelease { version, url: format!("{base}/yt-dlp.exe"), hash, size: 0 })
+}
+
+fn yt_dlp_executable_hash(checksums: &str) -> Result<String, String> {
+    let mut matches = checksums.lines().filter_map(|line| {
+        let (hash, filename) = line.trim().split_once(char::is_whitespace)?;
+        (filename.trim_start().trim_start_matches('*') == "yt-dlp.exe").then_some(hash)
+    });
+    let hash = matches.next().filter(|_| matches.next().is_none())
+        .ok_or_else(|| tr("组件缺少 SHA-256 校验值").to_owned())?;
+    hash_value(hash)
+}
+
+fn yt_dlp_release(client: &reqwest::blocking::Client, progress: &Shared) -> Result<YtDlpRelease, String> {
+    match yt_dlp_api_release(client, progress) {
+        Ok(release) => Ok(release),
+        Err(api_error) => {
+            progress.log(&api_error);
+            yt_dlp_public_release(client, progress).map_err(|fallback_error| format!("{api_error}\n{fallback_error}"))
+        }
+    }
+}
+
+pub(crate) fn latest_yt_dlp(progress: &Shared) -> Result<String, String> {
+    progress.phase(1);
+    yt_dlp_public_version(&component_client()?, progress)
+}
+
+fn yt_dlp(client: &reqwest::blocking::Client, progress: &Shared) -> Result<(), String> {
+    let release = yt_dlp_release(client, progress)?;
+    progress.log(format!("{}: {}", tr("发行版本"), release.version));
+    let mut workspace = Workspace::new("yt-dlp")?;
+    let program = workspace.path.join("yt-dlp.exe");
+    download(client, &release.url, &program, &release.hash, release.size, progress)?;
+    progress.phase(5);
+    if crate::component_paths::yt_dlp_version(&program)? != release.version {
+        return Err(tr("指定程序与组件不匹配或无法运行。").into());
+    }
+    let root = super::component_root()?;
+    let folder = workspace.path.file_name().and_then(|name| name.to_str()).ok_or("Invalid component path")?;
+    let temporary = root.join("yt-dlp.json.tmp");
+    fs::write(&temporary, serde_json::to_vec(folder).map_err(error)?).map_err(error)?;
+    let published = crate::playlist::replace(&temporary, &root.join("yt-dlp.json"));
+    if published.is_err() { let _ = fs::remove_file(&temporary); }
+    published?;
+    workspace.keep = true;
+    Ok(())
+}
+
+fn component_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder().user_agent("UnityYAMLViewer/third-party").https_only(true)
+        .connect_timeout(Duration::from_secs(20)).timeout(Duration::from_secs(30)).build().map_err(error)
 }
 fn publish_ffmpeg(folder:&Path,bin:&Path)->Result<(),String>{
     for tool in ["ffmpeg","ffprobe"]{crate::component_paths::validate_tool(&folder.join(bin).join(format!("{tool}.exe")),tool)?;}
@@ -118,11 +213,19 @@ fn office(client:&reqwest::blocking::Client,progress:&Shared)->Result<(),String>
 }
 pub(crate) fn install(component:&str,progress:&Shared)->Result<(),String>{
     if !cfg!(all(windows,target_arch="x86_64")){return Err(tr("内置组件安装目前仅支持 Windows x64。").into());}
-    let _guard=super::install_task::Guard::acquire()?;super::install_task::ensure_no_other_installer(None)?;
-    progress.phase(1);let client=reqwest::blocking::Client::builder().user_agent("UnityYAMLViewer/third-party").https_only(true).connect_timeout(Duration::from_secs(20)).timeout(Duration::from_secs(30)).build().map_err(error)?;
-    match component{"ffmpeg"=>ffmpeg(&client,progress),"libreoffice"=>office(&client,progress),_=>Err(tr("不支持的第三方组件").into())}.map_err(|error|format!("{error}\n{}",progress.details()))
+    let _guard=super::install_task::Guard::acquire()?;
+    if component != "yt-dlp" { super::install_task::ensure_no_other_installer(None)?; }
+    progress.phase(1);let client=component_client()?;
+    match component{"ffmpeg"=>ffmpeg(&client,progress),"libreoffice"=>office(&client,progress),"yt-dlp"=>yt_dlp(&client,progress),_=>Err(tr("不支持的第三方组件").into())}.map_err(|error|format!("{error}\n{}",progress.details()))
 }
 #[cfg(test)]mod tests{
     use super::*;
     #[test]fn checksum_requires_sha256(){assert!(hash_value("bad").is_err());assert!(hash_value(&format!("{}  package.msi","a".repeat(64))).is_ok());}
+    #[test]
+    fn yt_dlp_checksums_require_an_exact_unique_executable_entry() {
+        let hash = "a".repeat(64);
+        assert_eq!(yt_dlp_executable_hash(&format!("{hash}  yt-dlp_macos\n{hash} *yt-dlp.exe\n")), Ok(hash.clone()));
+        assert!(yt_dlp_executable_hash(&format!("{hash}  other-yt-dlp.exe")).is_err());
+        assert!(yt_dlp_executable_hash(&format!("{hash}  yt-dlp.exe\n{hash}  yt-dlp.exe")).is_err());
+    }
 }

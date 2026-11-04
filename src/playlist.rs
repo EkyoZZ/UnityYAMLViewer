@@ -8,6 +8,7 @@ const MAX_DOCUMENT: u64 = 8 * 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
 pub fn is_playlist(path: &Path) -> bool {
     matches!(path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase().as_str(), "m3u" | "m3u8")
+        && !crate::remote_file::is_hls(path)
 }
 #[derive(Clone, Debug)]
 pub struct Entry { pub path: PathBuf, pub title: String }
@@ -129,9 +130,9 @@ fn move_file(source: &Path, destination: &Path,overwrite:bool) -> Result<(),Stri
 #[cfg(windows)]
 pub(crate) fn replace(source:&Path,destination:&Path)->Result<(),String>{move_file(source,destination,true)}
 #[cfg(windows)]
-fn move_new(source:&Path,destination:&Path)->Result<(),String>{move_file(source,destination,false)}
+pub(crate) fn move_new(source:&Path,destination:&Path)->Result<(),String>{move_file(source,destination,false)}
 #[cfg(not(windows))]
-fn move_new(source:&Path,destination:&Path)->Result<(),String>{std::fs::hard_link(source,destination).map_err(|e|e.to_string())}
+pub(crate) fn move_new(source:&Path,destination:&Path)->Result<(),String>{std::fs::hard_link(source,destination).map_err(|e|e.to_string())}
 #[cfg(not(windows))]
 pub(crate) fn replace(source:&Path,destination:&Path)->Result<(),String>{std::fs::rename(source,destination).map_err(|e|e.to_string())}
 
@@ -328,7 +329,7 @@ impl Session {
                     if self.edit && response.drag_started(){self.drag=Some(index);}
                     if self.edit && ui.input(|i|i.pointer.any_released()) && response.contains_pointer(){if let Some(from)=self.drag.take(){reorder=Some((from,index));}}
                     let response=response.on_hover_text(format!("{}\n{}",item.title,item.path.display()));
-                    response.context_menu(|ui|{ui.label(tr("显示名称"));if ui.text_edit_singleline(&mut item.title).changed(){self.dirty=true;}});
+                    response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);ui.label(tr("显示名称"));if ui.text_edit_singleline(&mut item.title).changed(){self.dirty=true;}});
                     if self.edit {if ui.small_button("↑").clicked()&&index>0{reorder=Some((index,index-1));}if ui.small_button("−").on_hover_text(tr("移除条目，不删除文件")).clicked(){remove=Some(index);}}
                 });}
             }
@@ -511,7 +512,19 @@ impl Creator {
     }
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path,preview:&mut Preview){
         let bounds=ui.available_rect_before_wrap();
-        let top=ui.horizontal_wrapped(|ui|{crate::asset_viewer::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);if let Some(bytes)=preview.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}preview.header_controls(ui,path);preview.trim_entry_button(ui,path);if ui.button(tr("播放列表")).clicked(){self.open=!self.open;if self.open&&self.entries.is_empty(){self.scan(ui.ctx());}}}).response;
+        let top = ui.horizontal_wrapped(|ui| {
+            crate::asset_viewer::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()), path);
+            if let Some(bytes) = preview.file_size() {
+                ui.small(if bytes < 1048576 { format!("({:.1} KiB)", bytes as f64 / 1024.0) }
+                    else { format!("({:.2} MiB)", bytes as f64 / 1048576.0) });
+            }
+            preview.header_controls(ui, path);
+            preview.trim_entry_button(ui, path);
+            if ui.button(tr("播放列表")).clicked() {
+                self.open = !self.open;
+                if self.open && self.entries.is_empty() { self.scan(ui.ctx()); }
+            }
+        }).response;
         let fraction=ui.ctx().animate_bool(ui.id().with("playlist_creator_open"),self.open);
         let max_width=(bounds.width()/3.0-6.0).max(1.0);let min_width=214.0_f32.min(max_width);
         self.width=self.width.clamp(min_width,max_width);

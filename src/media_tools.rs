@@ -17,6 +17,7 @@ pub fn find_tool(name:&str) -> Option<PathBuf> {
     }
     let file=if cfg!(windows) {format!("{name}.exe")} else {name.to_owned()};
     let mut directories=Vec::new();
+    if name == "yt-dlp" { directories.extend(crate::third_party::installer::tool_directories(name)); }
     if let Some(paths)=std::env::var_os("PATH") {directories.extend(std::env::split_paths(&paths));}
     // Installers update registry PATH, not the environment of this running process.
     #[cfg(windows)] for paths in fresh_windows_paths() {directories.extend(std::env::split_paths(&paths));}
@@ -24,8 +25,9 @@ pub fn find_tool(name:&str) -> Option<PathBuf> {
     for variable in ["ProgramFiles","ProgramFiles(x86)"] {
         if let Some(root)=std::env::var_os(variable) {directories.push(PathBuf::from(root).join("ffmpeg/bin"));}
     }
-    directories.extend(crate::third_party::installer::tool_directories(name));
+    if name != "yt-dlp" { directories.extend(crate::third_party::installer::tool_directories(name)); }
     directories.into_iter().map(|dir|dir.join(&file)).find(|path| {
+        if name == "yt-dlp" { return crate::component_paths::validate_tool(path, name).is_ok(); }
         path.is_file() && command(path).arg("-version").output().is_ok_and(|output|output.status.success())
     })
 }

@@ -95,3 +95,158 @@ impl Inbox {
         }).collect()
     }
 }
+
+
+const PNGOPT_HELP: &str = r#"pngopt [-all] <file-or-directory> [...]
+  -all          Include subdirectories (skip symbolic links and junctions)
+  -h, --help    Show this help
+  --            Treat remaining arguments as paths
+
+Examples (PowerShell):
+  .\unity_yaml_viewer.exe pngopt "a.png" "b.png"
+  .\unity_yaml_viewer.exe pngopt "Assets\UI" "other.png"
+
+By default, directories include only immediate PNG files. Duplicate paths are processed once.
+Removes iTXt metadata. Alpha is removed only from static 32-bit RGBA PNGs
+whose pixels all have alpha 255. Writes in place without backups.
+Output: JSON on stdout. Exit 0: no failures; 1: file failures; 2: argument error.
+"#;
+
+pub fn help() -> String {
+    format!("{}\n{PNGOPT_HELP}", crate::asset_viewer::nine_slice::cli::HELP)
+}
+
+#[cfg(windows)]
+pub(crate) fn attach_console() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn AttachConsole(process: u32) -> i32;
+    }
+    unsafe { AttachConsole(u32::MAX); }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn attach_console() {}
+
+pub fn dispatch_pngopt() -> Option<i32> {
+    use crate::asset_viewer::image_info::{optimize_png, Optimization};
+    use serde_json::json;
+    use std::{collections::BTreeSet, path::Path};
+
+    let mut args = std::env::args_os().skip(1);
+    if args.next()? != "pngopt" {
+        return None;
+    }
+    attach_console();
+    let mut inputs = Vec::new();
+    let mut literal = false;
+    let mut recursive = false;
+    for arg in args {
+        if !literal {
+            match arg.to_str() {
+                Some("-h" | "--help") => {
+                    println!("{PNGOPT_HELP}");
+                    return Some(0);
+                }
+                Some("-all") => {
+                    recursive = true;
+                    continue;
+                }
+                Some("--") => {
+                    literal = true;
+                    continue;
+                }
+                Some(option) if option.starts_with('-') => {
+                    eprintln!("Unknown option: {option}\nUse pngopt --help");
+                    return Some(2);
+                }
+                _ => {}
+            }
+        }
+        inputs.push(PathBuf::from(arg));
+    }
+    if inputs.is_empty() {
+        eprintln!("Provide at least one PNG file or directory. Use pngopt --help.");
+        return Some(2);
+    }
+
+    let is_png = |path: &Path| path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
+    let mut files = BTreeSet::new();
+    let mut records = Vec::new();
+    let mut pending: Vec<_> = inputs.into_iter().map(|path| (path, true)).collect();
+    while let Some((path, explicit)) = pending.pop() {
+        let mut record_failure = |reason: String| {
+            records.push(json!({"path": path.to_string_lossy(), "status": "failed", "reason": reason}));
+        };
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                record_failure(error.to_string());
+                continue;
+            }
+        };
+        // Windows junctions and other reparse points can redirect traversal too.
+        #[cfg(windows)]
+        let is_link = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(not(windows))]
+        let is_link = metadata.file_type().is_symlink();
+        if is_link {
+            if explicit {
+                record_failure("Symbolic links and junctions are not supported".to_owned());
+            }
+        } else if metadata.is_dir() && (explicit || recursive) {
+            match fs::read_dir(&path) {
+                Ok(entries) => {
+                    for entry in entries {
+                        match entry {
+                            Ok(entry) => match entry.file_type() {
+                                Ok(kind) if (recursive && kind.is_dir()) || (kind.is_file() && is_png(&entry.path())) => {
+                                    pending.push((entry.path(), false));
+                                }
+                                Ok(_) => {}
+                                Err(error) => record_failure(error.to_string()),
+                            },
+                            Err(error) => record_failure(error.to_string()),
+                        }
+                    }
+                }
+                Err(error) => record_failure(error.to_string()),
+            }
+        } else if metadata.is_file() && is_png(&path) {
+            match fs::canonicalize(&path) {
+                Ok(path) => { files.insert(path); }
+                Err(error) => record_failure(error.to_string()),
+            }
+        } else if explicit {
+            record_failure("Expected a regular PNG file or directory".to_owned());
+        }
+    }
+    for path in files {
+        let result = optimize_png(&path);
+        let path = path.to_string_lossy();
+        records.push(match result {
+            Ok(result) => {
+                let status = match result {
+                    Optimization::Unchanged => "unchanged",
+                    Optimization::Alpha => "alpha",
+                    Optimization::Text => "itxt",
+                    Optimization::Both => "both",
+                };
+                json!({"path": path, "status": status})
+            }
+            Err(reason) => json!({"path": path, "status": "failed", "reason": reason}),
+        });
+    }
+    let count = |status| records.iter().filter(|record| record["status"] == status).count();
+    let failed = count("failed");
+    let output = json!({
+        "summary": {"alpha": count("alpha"), "itxt": count("itxt"), "both": count("both"),
+                    "unchanged": count("unchanged"), "failed": failed},
+        "files": records,
+    });
+    println!("{output:#}");
+    Some(if failed == 0 { 0 } else { 1 })
+}

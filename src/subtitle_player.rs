@@ -136,6 +136,7 @@ impl Subtitles {
     }
     pub fn menu(&mut self,ui:&mut egui::Ui,sources:&[Source]){
         ui.menu_button(tr("字幕"),|ui|{
+            crate::theme::menu_no_wrap(ui);
             if ui.checkbox(&mut self.manual_override,tr("手动选择字幕（关闭语言跟随）")).changed(){self.manual_required=false;self.needs_follow=!self.manual_override;}
             if ui.selectable_label(self.selected.is_none(),tr("关闭字幕")).clicked(){self.manual_override=true;self.manual_required=false;self.selected=None;self.asset=None;self.job=None;self.revision+=1;ui.close_menu();}
             let choices:Vec<_>=sources.iter().chain(self.external.iter()).cloned().collect();

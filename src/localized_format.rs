@@ -396,4 +396,13 @@ macro_rules! localized_format {
         6 => format!("Impossible de mettre à jour l’inscription des associations de fichiers : {0}" $(, $arg)*),
         _ => format!("无法更新文件关联登记：{0}" $(, $arg)*),
     }};
+    ("PNG 优化完成：修改 {0}，无需修改 {1}，失败 {2}" $(, $arg:expr)* $(,)?) => { match $crate::localization::language_index() {
+        1 => format!("PNG 最佳化完成：修改 {0}，無須修改 {1}，失敗 {2}" $(, $arg)*),
+        2 => format!("PNG optimization complete: {0} modified, {1} unchanged, {2} failed" $(, $arg)*),
+        3 => format!("PNG 最適化完了：変更 {0}、変更なし {1}、失敗 {2}" $(, $arg)*),
+        4 => format!("PNG 최적화 완료: 변경 {0}, 변경 없음 {1}, 실패 {2}" $(, $arg)*),
+        5 => format!("PNG-Optimierung abgeschlossen: {0} geändert, {1} unverändert, {2} fehlgeschlagen" $(, $arg)*),
+        6 => format!("Optimisation PNG terminée : {0} modifiés, {1} inchangés, {2} échecs" $(, $arg)*),
+        _ => format!("PNG 优化完成：修改 {0}，无需修改 {1}，失败 {2}" $(, $arg)*),
+    }};
 }

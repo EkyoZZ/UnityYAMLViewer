@@ -1074,6 +1074,7 @@ impl Preview {
                 self.focus_output = true;
             }
             ui.menu_button(tr("预览说明"), |ui| {
+                crate::theme::menu_no_wrap(ui);
                 ui.set_max_width(340.);
                 ui.label(tr("临时预览输入，不修改文件"));
                 ui.label(tr(

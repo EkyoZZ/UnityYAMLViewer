@@ -121,9 +121,9 @@ fn process(path:&Path,o:&Options)->Result<Value,String> {
 pub fn dispatch()->Option<i32> {
     let mut args=std::env::args_os().skip(1);let first=args.next()?;
     if first!="slice9"&&first!="--help"&&first!="-h" {return None}
-    attach_console();
+    crate::command_line::attach_console();
     let rest:Vec<_>=args.collect();
-    if first!="slice9"||rest.iter().take_while(|a|a.as_os_str()!=std::ffi::OsStr::new("--")).any(|a|a=="--help"||a=="-h") {println!("{HELP}");return Some(0)}
+    if first!="slice9"||rest.iter().take_while(|a|a.as_os_str()!=std::ffi::OsStr::new("--")).any(|a|a=="--help"||a=="-h") {println!("{}", crate::command_line::help());return Some(0)}
     if rest.iter().take_while(|a|a.as_os_str()!=std::ffi::OsStr::new("--")).any(|a|a=="--preview") {return match parse(rest.clone()) {Ok(_)=>None,Err(e)=>{eprintln!("{e}");Some(2)}}}
     let options=match parse(rest) {Ok(o)=>o,Err(e)=>{eprintln!("{e}\nUse slice9 --help");return Some(2)}};
     // Reserve the report before changing any source files; never overwrite an existing file.
@@ -136,9 +136,6 @@ pub fn dispatch()->Option<i32> {
     if let Some(file)=&mut report {use std::io::Write;if let Err(e)=file.write_all(text.as_bytes()).and_then(|_|file.sync_all()){eprintln!("Report: {e}");return Some(2)}}
     Some(if failed>0 {1}else{0})
 }
-#[cfg(windows)]
-fn attach_console(){#[link(name="kernel32")] unsafe extern "system" {fn AttachConsole(process:u32)->i32;} unsafe {AttachConsole(u32::MAX);}}
-#[cfg(not(windows))] fn attach_console(){}
 #[cfg(test)] mod tests {use super::*;#[test]fn arguments_defaults_and_overrides(){let o=parse(vec!["a.png".into(),"-r".into(),"--dry-run".into(),"--center".into(),"8x4".into()]).unwrap();assert!(o.recursive&&o.dry);assert_eq!(o.request.center,[8,4]);assert!(parse(vec!["--center".into(),"0x4".into()]).is_err());assert!(parse(vec!["--bad".into()]).is_err());}}
 
 #[cfg(test)]

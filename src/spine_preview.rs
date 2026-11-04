@@ -403,6 +403,7 @@ impl Preview {
                 }
             }).response.on_hover_text(crate::localization::tr("普通预览按已预乘 Alpha 的贴图读取；关闭后按未预乘读取。Unity 材质预览由材质自身控制。"));
             ui.menu_button("设置",|ui| {
+                crate::theme::menu_no_wrap(ui);
                 changed|=ui.checkbox(&mut self.looping,"循环").changed();
                 ui.add(egui::Slider::new(&mut self.speed,0.1..=3.0).text("速度"));
                 egui::ComboBox::from_id_salt("spine_skin").selected_text(self.skins.get(self.skin).map_or("无皮肤",String::as_str)).show_ui(ui,|ui| {

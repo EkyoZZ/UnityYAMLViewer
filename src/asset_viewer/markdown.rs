@@ -1,5 +1,5 @@
 //! Markdown layout with a limited HTML compatibility layer and asynchronous images.
-use std::{collections::HashMap, io::Read, path::{Path, PathBuf}, sync::mpsc, time::Duration};
+use std::{collections::HashMap, io::Read, path::{Path, PathBuf}, sync::{LazyLock, mpsc}, time::Duration};
 use eframe::egui;
 use pulldown_cmark::{Event, Parser, Tag};
 use sha2::{Digest, Sha256};
@@ -13,11 +13,26 @@ pub(super) struct Preview {
     cache:egui_commonmark::CommonMarkCache,
     images:HashMap<String,Image>,
     document:PathBuf,
+    text: String,
+    sections: Vec<Section>,
+    language: usize,
+}
+
+struct Section {
+    centered: bool,
+    has_heading: bool,
+    source: String,
+    rendered: String,
 }
 
 fn attribute(tag:&str,name:&str)->Option<String>{
-    let pattern=format!(r#"(?i)\b{}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#,name);
-    let re=regex::Regex::new(&pattern).ok()?;
+    static PATTERNS: LazyLock<HashMap<&'static str, regex::Regex>> = LazyLock::new(|| {
+        ["src", "alt", "href", "align", "style", "label", "text", "language"].into_iter().map(|name| {
+            let pattern = format!(r#"(?i)\b{name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#);
+            (name, regex::Regex::new(&pattern).unwrap())
+        }).collect()
+    });
+    let re=PATTERNS.get(name)?;
     let captures=re.captures(tag)?;
     Some(unescape(captures.get(1).or_else(||captures.get(2)).or_else(||captures.get(3))?.as_str()))
 }
@@ -193,33 +208,83 @@ fn download(source:&str)->Download {
 impl Preview {
     pub fn invalidate(&mut self){self.document=PathBuf::new();}
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path,text:&str,reading:&super::TextReading){
-        if self.document!=path {for image in self.images.values(){if let Image::Ready(uri)=image{ui.ctx().forget_image(uri);}} self.images.clear();self.cache=Default::default();self.document=path.to_owned();}
+        self.prepare(ui.ctx(), path, text);
         ui.scope(|ui|{
+            let visuals = &mut ui.style_mut().visuals;
+            visuals.code_bg_color = if visuals.dark_mode {
+                egui::Color32::from_rgb(48, 62, 82)
+            } else {
+                egui::Color32::from_rgb(218, 232, 249)
+            };
             let base=egui::TextStyle::Body.resolve(ui.style()).size;
             for font in ui.style_mut().text_styles.values_mut(){font.size*=reading.size/base;}
             ui.style_mut().spacing.item_spacing.y=reading.paragraph+reading.size*(reading.line-1.0);
-            for (index,(centered,section)) in aligned_sections(text).into_iter().enumerate(){
-                let has_heading=Parser::new(&normalized(&section)).any(|event|matches!(event,Event::Start(Tag::Heading{level:pulldown_cmark::HeadingLevel::H1|pulldown_cmark::HeadingLevel::H2,..})));
-                let rendered=linked_images(&self.resolve_images(ui,path,&if centered{normalized(&section)}else{heading_rules(&normalized(&section))}));
+            for (index, section) in self.sections.iter().enumerate() {
+                let rendered = &section.rendered;
                 if rendered.trim().is_empty(){continue;}
                 ui.push_id(("markdown_section",index),|ui|{
                     let width=ui.available_width().max(1.0);
-                    if centered{
+                    if section.centered{
                         let origin=ui.next_widget_position();
                         let mut measure=ui.new_child(egui::UiBuilder::new().id_salt("measure").max_rect(egui::Rect::from_min_size(origin,egui::vec2(width,100000.0))).layout(egui::Layout::top_down(egui::Align::LEFT)).sizing_pass().invisible());
-                        egui_commonmark::CommonMarkViewer::new().render_html_fn(Some(&inline_image)).max_image_width(Some(width as usize)).show(&mut measure,&mut self.cache,&rendered);
+                        egui_commonmark::CommonMarkViewer::new().render_html_fn(Some(&inline_image)).max_image_width(Some(width as usize)).show(&mut measure,&mut self.cache,rendered);
                         let size=measure.min_rect().size();let content_width=size.x.min(width).max(1.0);
                         let rect=egui::Rect::from_min_size(origin+egui::vec2((width-content_width)*0.5,0.0),egui::vec2(content_width,size.y));
                         let mut child=ui.new_child(egui::UiBuilder::new().id_salt("centered").max_rect(rect).layout(egui::Layout::top_down(egui::Align::LEFT)));
-                        egui_commonmark::CommonMarkViewer::new().render_html_fn(Some(&inline_image)).max_image_width(Some(content_width as usize)).show(&mut child,&mut self.cache,&rendered);
+                        egui_commonmark::CommonMarkViewer::new().render_html_fn(Some(&inline_image)).max_image_width(Some(content_width as usize)).show(&mut child,&mut self.cache,rendered);
                         ui.advance_cursor_after_rect(egui::Rect::from_min_max(origin,egui::pos2(origin.x+width,child.min_rect().bottom())));
-                        if has_heading{ui.separator();}
-                    }else{egui_commonmark::CommonMarkViewer::new().render_html_fn(Some(&inline_image)).max_image_width(Some(width as usize)).show(ui,&mut self.cache,&rendered);}
+                        if section.has_heading{ui.separator();}
+                    }else{egui_commonmark::CommonMarkViewer::new().render_html_fn(Some(&inline_image)).max_image_width(Some(width as usize)).show(ui,&mut self.cache,rendered);}
                 });
             }
         });
     }
-    fn resolve_images(&mut self,ui:&mut egui::Ui,path:&Path,text:&str)->String{
+    fn prepare(&mut self, ctx: &egui::Context, path: &Path, text: &str) {
+        let changed = self.document != path || self.text != text;
+        if changed {
+            for image in self.images.values() {
+                if let Image::Ready(uri) = image { ctx.forget_image(uri); }
+            }
+            self.images.clear();
+            self.cache = Default::default();
+            self.document = path.to_owned();
+            self.text = text.to_owned();
+            self.sections = aligned_sections(text).into_iter().map(|(centered, section)| {
+                let normalized = normalized(&section);
+                let has_heading = centered && Parser::new(&normalized).any(|event| matches!(event,
+                    Event::Start(Tag::Heading { level: pulldown_cmark::HeadingLevel::H1 | pulldown_cmark::HeadingLevel::H2, .. })));
+                let source = if centered { normalized } else { heading_rules(&normalized) };
+                Section { centered, has_heading, source, rendered: String::new() }
+            }).collect();
+        }
+        let mut images_changed = false;
+        for (source, image) in &mut self.images {
+            let Image::Pending(receiver) = image else { continue; };
+            let result = match receiver.try_recv() {
+                Ok(result) => result,
+                Err(mpsc::TryRecvError::Empty) => continue,
+                Err(mpsc::TryRecvError::Disconnected) => Err(crate::localization::tr("网络加载任务已中断").into()),
+            };
+            *image = match result {
+                Ok((bytes, svg)) => {
+                    let uri = format!("bytes://markdown/{:x}.{}", Sha256::digest(source.as_bytes()), if svg { "svg" } else { "png" });
+                    ctx.include_bytes(uri.clone(), bytes);
+                    Image::Ready(uri)
+                }
+                Err(error) => Image::Failed(error),
+            };
+            images_changed = true;
+        }
+        let language = crate::localization::language_index();
+        if changed || images_changed || self.language != language {
+            self.language = language;
+            for section in &mut self.sections {
+                section.rendered = linked_images(&Self::resolve_images(&mut self.images, ctx, path, &section.source));
+            }
+        }
+    }
+
+    fn resolve_images(images: &mut HashMap<String, Image>, ctx: &egui::Context, path:&Path,text:&str)->String{
         let mut rendered=text.to_owned();
         let replacements:Vec<_>=Parser::new_ext(&rendered,pulldown_cmark::Options::all()).into_offset_iter().filter_map(|(event,range)|{
             if let Event::Start(Tag::Image{dest_url,..})=event {Some((range,dest_url.into_string()))}else{None}
@@ -229,20 +294,14 @@ impl Preview {
                 if matches!(url.scheme(),"http"|"https"|"file"){Some(url.to_string())}else{None}
             }else{reqwest::Url::from_file_path(path).ok().and_then(|base|base.join(&destination).ok()).map(|u|u.to_string())};
             let Some(source)=source else {rendered.replace_range(range,"[unsupported image URL]");continue};
-            if !self.images.contains_key(&source) && self.images.len()<32 && self.images.values().filter(|image|matches!(image,Image::Pending(_))).count()<4 {
-                let (tx,rx)=mpsc::channel();self.images.insert(source.clone(),Image::Pending(rx));
-                let ctx=ui.ctx().clone();let source=source.clone();std::thread::spawn(move||{let _=tx.send(download(&source));ctx.request_repaint();});
+            if !images.contains_key(&source) && images.len()<32 && images.values().filter(|image|matches!(image,Image::Pending(_))).count()<4 {
+                let (tx,rx)=mpsc::channel();images.insert(source.clone(),Image::Pending(rx));
+                let ctx=ctx.clone();let source=source.clone();std::thread::spawn(move||{let _=tx.send(download(&source));ctx.request_repaint();});
             }
-            if let Some(Image::Pending(rx))=self.images.get(&source) {
-                if let Ok(result)=rx.try_recv(){let state=match result {
-                    Ok((bytes,svg))=>{let uri=format!("bytes://markdown/{:x}.{}",Sha256::digest(source.as_bytes()),if svg{"svg"}else{"png"});ui.ctx().include_bytes(uri.clone(),bytes);Image::Ready(uri)},
-                    Err(error)=>Image::Failed(error),
-                };self.images.insert(source.clone(),state);}
-            }
-            let replacement=match self.images.get(&source){
+            let replacement=match images.get(&source){
                 Some(Image::Ready(uri))=>format!("![image](<{uri}>)"),
                 Some(Image::Failed(error))=>format!("[{}: {}]",crate::localization::tr("图片加载失败"),error.replace(['[',']','\n']," ")),
-                None if self.images.len()>=32=>format!("[{}]",crate::localization::tr("图片数量超过预览限制")),
+                None if images.len()>=32=>format!("[{}]",crate::localization::tr("图片数量超过预览限制")),
                 _=>format!("[{}]",crate::localization::tr("正在加载图片")),
             };rendered.replace_range(range,&replacement);
         }

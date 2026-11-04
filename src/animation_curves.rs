@@ -275,10 +275,11 @@ pub fn show(ui:&mut egui::Ui,text:&str,bindings:&[&AnimationBinding],duration:f3
             }
         }
         response.context_menu(|ui|{
+            crate::theme::menu_no_wrap(ui);
             ui.add_enabled_ui(editing::active(ui)&&!selected.is_empty(),|ui|{
                 for mode in ["Clamped Auto","Auto","Free Smooth","Flat","Broken"]{if ui.button(menu_label(mode)).clicked(){changed=tangent(ui,bindings,&selected,2,mode,None);ui.close_menu();}}
                 ui.separator();
-                for (label,side) in [("Left Tangent",0),("Right Tangent",1),("Both Tangents",2)]{ui.menu_button(menu_label(label),|ui|{for mode in ["Free","Linear","Constant","Weighted"]{if ui.button(menu_label(mode)).clicked(){changed=tangent(ui,bindings,&selected,side,mode,None);ui.close_menu();}}});}
+                for (label,side) in [("Left Tangent",0),("Right Tangent",1),("Both Tangents",2)]{ui.menu_button(menu_label(label),|ui|{crate::theme::menu_no_wrap(ui);for mode in ["Free","Linear","Constant","Weighted"]{if ui.button(menu_label(mode)).clicked(){changed=tangent(ui,bindings,&selected,side,mode,None);ui.close_menu();}}});}
                 ui.separator();if ui.button(tr("删除选中关键帧")).clicked(){let lines=deletion_lines(bindings,&selected);changed=delete(ui,&lines);ui.close_menu();}
             });
         });

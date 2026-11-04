@@ -300,7 +300,7 @@ pub(super) fn draw(ui:&mut egui::Ui,group:&stages::Group,index:usize,r:Rect,canv
             if can_join(members_reachable[node],center,bounds){region.members.insert(node);}else{region.members.remove(&node);}
         }}
         if let Some(region)=&mut region{
-            response.clone().context_menu(|ui|{let bounds=Rect::from_min_size(r.min+region.position*zoom,region.size*zoom);
+            response.clone().context_menu(|ui|{crate::theme::menu_no_wrap(ui);let bounds=Rect::from_min_size(r.min+region.position*zoom,region.size*zoom);
                 if ui.add_enabled(can_join(members_reachable[node],rect.center(),bounds),egui::Button::new(tr("加入范围框"))).clicked(){region.members.insert(node);ui.close_menu();}
                 if ui.button(tr("移出范围框")).clicked(){region.members.remove(&node);ui.close_menu();}
             });

@@ -174,6 +174,7 @@ pub struct Window<'a> {
     height: f32,
     resizable: bool,
     minimum_width: Option<f32>,
+    minimum_height: Option<f32>,
     maximum_width: Option<f32>,
     modal: bool,
     always_on_top: bool,
@@ -193,6 +194,7 @@ impl<'a> Window<'a> {
             height: 480.0,
             resizable: true,
             minimum_width: None,
+            minimum_height: None,
             maximum_width: None,
             modal: false,
             always_on_top: false,
@@ -221,6 +223,10 @@ impl<'a> Window<'a> {
     }
     pub fn min_width(mut self, width: f32) -> Self {
         self.minimum_width = Some(width + 16.0);
+        self
+    }
+    pub fn min_height(mut self, height: f32) -> Self {
+        self.minimum_height = Some(height + 16.0);
         self
     }
     pub fn max_width(mut self, width: f32) -> Self {
@@ -275,7 +281,6 @@ impl<'a> Window<'a> {
         if self.open.as_deref() == Some(&false) {
             return;
         }
-        track_main_window(ctx);
         let viewport_id = egui::ViewportId(self.id);
         let state_id = self.id.with("native_dialog_placement");
         let pass = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
@@ -336,11 +341,11 @@ impl<'a> Window<'a> {
         if self.always_on_top {
             builder = builder.with_window_level(egui::WindowLevel::AlwaysOnTop);
         }
-        if let Some(width) = self.minimum_width {
-            builder =
-                builder.with_min_inner_size(initial_max.map_or(egui::vec2(width, 120.), |limit| {
-                    egui::vec2(width.min(limit.x), 120_f32.min(limit.y))
-                }));
+        let minimum_inner = (self.minimum_width.is_some() || self.minimum_height.is_some()).then(|| {
+            egui::vec2(self.minimum_width.unwrap_or(1.0), self.minimum_height.unwrap_or(120.0))
+        });
+        if let Some(minimum) = minimum_inner {
+            builder = builder.with_min_inner_size(initial_max.map_or(minimum, |limit| minimum.min(limit)));
         }
         if let Some(width) = self.maximum_width {
             builder = builder.with_max_inner_size([width, f32::INFINITY]);
@@ -363,6 +368,9 @@ impl<'a> Window<'a> {
                     .id(self.id)
                     .default_width(self.width - 16.0)
                     .resizable(self.resizable);
+                if let Some(height) = self.minimum_height {
+                    window = window.min_height(height - 16.0);
+                }
                 if fresh {
                     window = window.current_pos(
                         child_ctx.screen_rect().center()
@@ -425,8 +433,8 @@ impl<'a> Window<'a> {
                                     .map(|size| (size.y - 100.).max(120.))
                             })
                             .unwrap_or(800.0);
-                        let height = (content_size.y + 16.0)
-                            .clamp(80_f32.min(maximum_height), maximum_height);
+                        let minimum_height = self.minimum_height.unwrap_or(80.0).min(maximum_height);
+                        let height = (content_size.y + 16.0).clamp(minimum_height, maximum_height);
                         let current_height = child_ctx.input(|input| input.screen_rect().height());
                         if (current_height - height).abs() > 1.0 {
                             target_inner = egui::vec2(
@@ -458,12 +466,9 @@ impl<'a> Window<'a> {
                                 let limit = (work.size() / child_ctx.pixels_per_point()
                                     - decoration)
                                     .max(egui::vec2(1., 1.));
-                                if let Some(width) = self.minimum_width {
+                                if let Some(minimum) = minimum_inner {
                                     child_ctx.send_viewport_cmd(
-                                        egui::ViewportCommand::MinInnerSize(egui::vec2(
-                                            width.min(limit.x),
-                                            120_f32.min(limit.y),
-                                        )),
+                                        egui::ViewportCommand::MinInnerSize(minimum.min(limit)),
                                     );
                                 }
                                 child_ctx.send_viewport_cmd(egui::ViewportCommand::MaxInnerSize(
@@ -501,8 +506,10 @@ impl<'a> Window<'a> {
                                 )
                             });
                         if let Some(position) = position {
-                            child_ctx
-                                .send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+                            let current = child_ctx.input(|input| input.viewport().outer_rect.map(|rect| rect.min));
+                            if current.is_none_or(|current| (current - position).length() > 1.0) {
+                                child_ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+                            }
                         }
                         placement.stable = if !resizing
                             && placement
@@ -536,6 +543,11 @@ impl<'a> Window<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_viewports_reuse_the_same_icon_identity() {
+        assert!(std::sync::Arc::ptr_eq(&crate::application_icon(), &crate::application_icon()));
+    }
+
     #[test]
     fn first_centers_on_parent_then_corrects_only_overflow() {
         let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920., 1040.));

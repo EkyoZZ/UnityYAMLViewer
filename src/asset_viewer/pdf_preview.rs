@@ -293,7 +293,13 @@ impl Preview {
         let badge=egui::Rect::from_center_size(egui::pos2(canvas.center().x,canvas.bottom()-8.0-badge_size.y*0.5),badge_size);
         painter.rect_filled(badge,6.0,Color32::from_black_alpha(128));
         painter.galley(badge.min+egui::vec2(12.0,6.0),galley,Color32::WHITE);
-        if let Some(value)=crate::theme::zoom_preset_menu(ui,badge,zoom,badge.right()-12.0){self.zoom=Some(value);self.pan=egui::Vec2::ZERO;}
+        if let Some(value) = crate::theme::zoom_preset_menu_with_fit(
+            ui, badge, zoom, badge.right() - 12.0, Some(self.zoom.is_none() && !self.fit_width),
+        ) {
+            self.zoom = value;
+            if value.is_none() { self.fit_width = false; }
+            self.pan = egui::Vec2::ZERO;
+        }
         let mut target=self.page;
         for (previous,x) in [(true,badge.left()-12.0-badge_size.y*0.5),(false,badge.right()+12.0+badge_size.y*0.5)]{
             let center=egui::pos2(x,badge.center().y);

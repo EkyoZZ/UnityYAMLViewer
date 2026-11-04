@@ -13,6 +13,20 @@ pub fn network_root() -> PathBuf {
     root().map_or_else(|| std::env::temp_dir().join("UnityYAMLViewer-network"), |path| path.join("network_cache"))
 }
 
+static ACTIVE_TASK_CACHES: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+pub fn create_task_cache(path: &Path) -> std::io::Result<()> {
+    let mut active = ACTIVE_TASK_CACHES.lock().unwrap();
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+    std::fs::create_dir(path)?;
+    active.push(path.to_owned());
+    Ok(())
+}
+
+pub fn forget_task_cache(path: &Path) {
+    ACTIVE_TASK_CACHES.lock().unwrap().retain(|active| active != path);
+}
+
 fn legacy_update(name: &str) -> bool {
     let Some(suffix) = name.strip_prefix("UnityYAMLViewer-update-") else { return false; };
     let parts: Vec<_> = suffix.split('-').collect();
@@ -124,6 +138,8 @@ fn measure() -> Snapshot {
 fn cleanup(in_use: &[PathBuf]) -> Snapshot {
     crate::playlist::flush_writes();
     let _cache_guard = mutation_guard();
+    let tasks = ACTIVE_TASK_CACHES.lock().unwrap();
+    let in_use = [in_use, tasks.as_slice()].concat();
     let before = measure().bytes();
     let mut errors = Vec::new();
     for path in roots() {
@@ -135,11 +151,11 @@ fn cleanup(in_use: &[PathBuf]) -> Snapshot {
         if root().as_ref() == Some(&path) {
             // Only known disposable locations; configuration, recent files, tabs and unknown files stay.
             for name in ["project_indexes", "network_cache", "updates", "playlist_positions", "image_edit_temp"] {
-                clean_tree(&path.join(name), &boundary, in_use, &mut errors);
+                clean_tree(&path.join(name), &boundary, &in_use, &mut errors);
             }
             if let Err(error) = crate::media_history::clear() { errors.push(error); }
         } else {
-            clean_tree(&path, &boundary, in_use, &mut errors);
+            clean_tree(&path, &boundary, &in_use, &mut errors);
         }
     }
     let mut after = measure();

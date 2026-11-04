@@ -22,9 +22,34 @@ fn save(key:&str,path:Option<PathBuf>)->Result<(),String>{
 pub(crate) fn validate_tool(path:&Path,name:&str)->Result<(),String>{
     if !path.is_absolute()||!path.is_file(){return Err(tr("请选择存在的程序或 DLL 的绝对路径。").into())}
     if name=="pdfium" {return crate::third_party::validate_library(path)}
+    if name=="yt-dlp" {return yt_dlp_version(path).map(|_| ());}
     let output=crate::media_tools::command(path).arg("-version").output().map_err(|e|e.to_string())?;
     if output.status.success()&&String::from_utf8_lossy(&output.stdout).trim_start().starts_with(&format!("{name} version")){Ok(())}
     else{Err(tr("指定程序与组件不匹配或无法运行。").into())}
+}
+pub(crate) fn yt_dlp_version_key(version: &str) -> Option<[u32; 4]> {
+    let mut parts = version.split('.');
+    let mut key = [0; 4];
+    for (part, width) in key[..3].iter_mut().zip([4, 2, 2]) {
+        let value = parts.next()?;
+        if value.len() != width || !value.bytes().all(|byte| byte.is_ascii_digit()) { return None; }
+        *part = value.parse().ok()?;
+    }
+    if let Some(value) = parts.next() {
+        if !value.bytes().all(|byte| byte.is_ascii_digit()) { return None; }
+        key[3] = value.parse().ok()?;
+    }
+    if parts.next().is_some() || !(1..=12).contains(&key[1]) || !(1..=31).contains(&key[2]) { return None; }
+    Some(key)
+}
+
+pub(crate) fn yt_dlp_version(path: &Path) -> Result<String, String> {
+    let output = crate::media_tools::command(path).args(["--ignore-config", "--no-update", "--version"])
+        .output().map_err(|error| error.to_string())?;
+    let version = String::from_utf8_lossy(&output.stdout);
+    let version = version.trim();
+    if output.status.success() && yt_dlp_version_key(version).is_some() { return Ok(version.to_owned()); }
+    Err(tr("指定程序与组件不匹配或无法运行。").into())
 }
 #[derive(Default)]
 pub(crate) struct Picker {value:Option<String>,error:Option<String>}
