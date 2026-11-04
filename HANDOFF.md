@@ -3296,3 +3296,8 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 先建草稿，再上传核验附件，随后正式发布。附件UnityYAMLViewer-v1.3.0-windows-x64.exe，28,507,136字节，GitHub上传状态uploaded，SHA256与本地一致：DB46D382054BB80BB2EEA3AE5577D815DCD0ECFC991940EC96C4D185E09CBDA0。
 - 发布证据target/v1.3.0-published.json；附件证据target/v1.3.0-uploaded-asset.json。更新发布说明、版本索引与CHANGELOG的发布状态，不修改其他Release或附件。
 - 保留已确认的验证边界，未补做完整GUI回归或执行测试程序。发布后文档更新未自动stage、提交或推送，等待用户自行纳入后续提交。
+
+## 1.3.1 发布准备（2026-11-04）
+
+- 已准备 docs/releases/1.3.1.md。Windows x64 候选 target/releases/v1.3.1/UnityYAMLViewer-v1.3.1-windows-x64.exe 的 SHA-256 与已核验的构建产物一致。
+- 等待用户提交并推送，发布前核对目标提交与构建内容。计划使用标签及标题 v1.3.1。

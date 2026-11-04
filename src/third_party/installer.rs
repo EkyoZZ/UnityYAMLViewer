@@ -4,7 +4,9 @@ use sha2::{Digest,Sha256};
 use super::install_progress::Shared;
 use crate::localization::tr;
 const LIMIT:u64=1024*1024*1024;
-const FFMPEG_API:&str="https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
+const FFMPEG_URL: &str = "https://github.com/EkyoZZ/UnityYAMLViewer/releases/download/ffmpeg-20250731/ffmpeg-N-120424-g03b9180fe3-20250731-win64-gpl-shared.zip";
+const FFMPEG_SHA256: &str = "471be94adaf65b1eeba4f9b5bef41a27e2c5c1c05eacb51f84fc860f1119782a";
+const FFMPEG_SIZE: u64 = 70_227_964;
 const OFFICE_ROOT:&str="https://download.documentfoundation.org/libreoffice/stable/";
 fn error(e:impl std::fmt::Display)->String{e.to_string()}
 fn cancelled(progress:&Shared)->Result<(),String>{if progress.cancel_requested(){Err(tr("下载已取消。").into())}else{Ok(())}}
@@ -70,25 +72,11 @@ fn publish_ffmpeg(folder:&Path,bin:&Path)->Result<(),String>{
     let temp=root.join("ffmpeg.json.tmp");fs::write(&temp,serde_json::to_vec(&record).map_err(error)?).map_err(error)?;
     fs::rename(temp,root.join("ffmpeg.json")).map_err(error)
 }
-fn ffmpeg_shared_asset(name:&str)->bool{
-    name.starts_with("ffmpeg-")&&name.ends_with("-win64-gpl-shared.zip")
-}
-fn ffmpeg(client:&reqwest::blocking::Client,progress:&Shared)->Result<(),String>{
-    let metadata:serde_json::Value=serde_json::from_str(&text(client,FFMPEG_API,progress)?).map_err(error)?;cancelled(progress)?;
-    progress.log(format!("{}: {}",tr("发行版本"),metadata["tag_name"].as_str().unwrap_or("?")));
-    progress.log(format!("{}: ffmpeg-*-win64-gpl-shared.zip",tr("目标下载包")));
-    let assets=metadata["assets"].as_array().ok_or_else(||tr("组件发行信息格式无效").to_owned())?;
-    let asset=assets.iter().find(|asset|asset["name"].as_str().is_some_and(ffmpeg_shared_asset)).ok_or_else(||{
-        let names=assets.iter().filter_map(|a|a["name"].as_str()).filter(|name|name.contains("win64")&&name.contains("shared")).take(12).collect::<Vec<_>>().join("\n");
-        format!("{}\n{}",tr("未找到 FFmpeg Shared 下载包"),names)
-    })?;
-    progress.log(asset["name"].as_str().unwrap_or("?"));
-    let url=asset["browser_download_url"].as_str().filter(|u|u.starts_with("https://github.com/BtbN/FFmpeg-Builds/releases/download/")).ok_or_else(||tr("组件下载地址无效").to_owned())?;
-    progress.log(format!("{}: {url}",tr("下载地址")));
-    let hash=hash_value(asset["digest"].as_str().unwrap_or(""))?;
-    let size=asset["size"].as_u64().filter(|n|*n>0&&*n<=LIMIT).ok_or_else(||tr("组件下载大小无效").to_owned())?;
+fn ffmpeg(client: &reqwest::blocking::Client, progress: &Shared) -> Result<(), String> {
+    progress.log(format!("{}: N-120424-g03b9180fe3-20250731", tr("发行版本")));
     let mut workspace=Workspace::new("ffmpeg")?;let package=workspace.path.join("package.zip");
-    download(client,url,&package,&hash,size,progress)?;progress.phase(4);
+    download(client, FFMPEG_URL, &package, FFMPEG_SHA256, FFMPEG_SIZE, progress)?;
+    progress.phase(4);
     let mut archive=zip::ZipArchive::new(fs::File::open(&package).map_err(error)?).map_err(error)?;let mut total=0u64;let mut bin_directory=None;
     for index in 0..archive.len(){let mut entry=archive.by_index(index).map_err(error)?;
         let enclosed=entry.enclosed_name().ok_or_else(||tr("组件压缩包路径无效").to_owned())?;
@@ -136,9 +124,5 @@ pub(crate) fn install(component:&str,progress:&Shared)->Result<(),String>{
 }
 #[cfg(test)]mod tests{
     use super::*;
-    #[test]fn shared_package_matches_daily_and_floating_names_only(){
-        for name in ["ffmpeg-master-latest-win64-gpl-shared.zip","ffmpeg-N-128352-gec887b13a8-win64-gpl-shared.zip"]{assert!(ffmpeg_shared_asset(name));}
-        for name in ["ffmpeg-master-latest-win64-lgpl-shared.zip","ffmpeg-master-latest-win64-gpl.zip","ffmpeg-master-latest-winarm64-gpl-shared.zip","ffmpeg-n9.0.2-win64-gpl-shared-9.0.zip"]{assert!(!ffmpeg_shared_asset(name));}
-    }
     #[test]fn checksum_requires_sha256(){assert!(hash_value("bad").is_err());assert!(hash_value(&format!("{}  package.msi","a".repeat(64))).is_ok());}
 }

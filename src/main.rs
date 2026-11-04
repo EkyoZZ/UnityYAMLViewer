@@ -2612,6 +2612,9 @@ impl eframe::App for ViewerApp {
                     ui.separator();
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
+                        ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(localization::tr("• 自动安装固定版本的 FFmpeg，减少因版本差异导致的音视频导出失败。手动安装可选经用户导出验证的 8.1。"));
+                        ui.add_space(8.0);
                         ui.label(RichText::new("1.3.0").strong());
                         ui.label(localization::tr("• 文本与代码可保存字号及间距；Markdown 支持常见 HTML 排版、图片缓存、链接与代码着色"));
                         ui.label(localization::tr("• Windows RTF 直接只读渲染，支持缩放和复制全文；复杂排版仍有限制"));
@@ -2620,6 +2623,10 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 组件安装状态与操作同排，提供下载进度、校验与错误地址；托管 FFmpeg 可加入用户 PATH"));
                         ui.label(localization::tr("• 手型仅限制预览选中；修复固定行号分割线，CSV／TSV／PSV 行号从 1 开始"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.2.9").strong());
                         ui.label(localization::tr("• XLS／XLSX／ODS 固定行列编号；冻结表头开启时优先沿用可读的 XLSX 设置，否则固定首行；修复冻结区域分割线与滚动内容遮挡"));
                         ui.label(localization::tr("• 办公文档新增“在LibreOffice编辑”，直接打开原文件；保存后可重载预览"));
@@ -2631,10 +2638,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 多图切换保留旧画面，预加载相邻图片并限制额外缓存预算"));
                         ui.label(localization::tr("• 电子表格支持多工作表底栏、查找复制、公式／缓存结果及可选必填检查，不重算公式"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.2.8").strong());
                         ui.label(localization::tr("• 新增目录浏览：多个根目录、按需展开、独立忽略规则，目录与规则自动保存"));
                         ui.label(localization::tr("• 目录预览固定首位并显示根目录名，修改后保留普通页签，同目录切图复用缓存"));

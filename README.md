@@ -24,7 +24,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 
 - **Markdown 与 RTF 富文本**：原生直读，支持常用 HTML 标签与富文本格式。
 - **文本阅读**：文本、代码与 Shader 支持高亮、复制及字号和间距调整。
-- **组件管理**：按需下载 FFmpeg、LibreOffice 和 PDFium，支持进度查看、自动检测与手动指定路径。
+- **组件管理**：按需下载固定版本的 FFmpeg，也可下载 LibreOffice 和 PDFium。支持进度查看、自动检测与手动指定路径。
 
 - **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
 - **音视频工具**：播放、剪切、裁剪、缩放与转码，支持多音轨、字幕、媒体详情及 GIF／视频／PNG 序列导出。
@@ -82,7 +82,7 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 
 - **Markdown and RTF rich text**: Direct previews with support for common HTML tags and rich-text formatting.
 - **Text reading**: Highlighting, copying, and adjustable font size and spacing for text, code and Shader files.
-- **Component management**: Download FFmpeg, LibreOffice and PDFium on demand, with progress, automatic detection and manual paths.
+- **Component management**: Download a fixed FFmpeg version, LibreOffice and PDFium on demand. Supports progress display, automatic detection and manual paths.
 
 - **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
 - **Audio and video**: Playback, trimming, cropping, scaling and transcoding, with multiple audio tracks, subtitles, media details and GIF, video or PNG sequence export.
