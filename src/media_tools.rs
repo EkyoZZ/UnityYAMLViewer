@@ -1,6 +1,7 @@
 //! Optional external FFmpeg tools; installation is only started by a user click.
 use std::{path::PathBuf, process::Command, sync::mpsc};
 use eframe::egui;
+pub(crate) mod yt_cache;
 
 pub(crate) fn command(program:impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command=Command::new(program);
@@ -12,6 +13,10 @@ pub(crate) fn command(program:impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 pub fn find_tool(name:&str) -> Option<PathBuf> {
+    if name=="yt-dlp" {
+        let selected=crate::component_paths::selected(name);
+        if let Some(path)=yt_cache::lookup(selected.as_deref()){return Some(path);}
+    }
     if let Some(path)=crate::component_paths::selected(name){
         return crate::component_paths::validate_tool(&path,name).ok().map(|_|path);
     }

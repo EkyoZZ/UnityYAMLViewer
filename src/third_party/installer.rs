@@ -79,11 +79,16 @@ pub(crate) fn tool_directories(name:&str)->Vec<PathBuf>{
 }
 struct YtDlpRelease { version: String, url: String, hash: String, size: u64 }
 
+fn yt_dlp_api_version(release: &serde_json::Value) -> Result<&str, String> {
+    release["tag_name"].as_str()
+        .filter(|version| crate::component_paths::yt_dlp_version_key(version).is_some())
+        .ok_or_else(|| tr("未找到有效的 yt-dlp 稳定版版本号").to_owned())
+}
+
 fn yt_dlp_api_release(client: &reqwest::blocking::Client, progress: &Shared) -> Result<YtDlpRelease, String> {
     let release: serde_json::Value = serde_json::from_str(&text(client, YT_DLP_API, progress)?).map_err(error)?;
     let invalid = || tr("未找到匹配的 yt-dlp 下载包").to_owned();
-    let version = release["tag_name"].as_str().filter(|version| crate::component_paths::yt_dlp_version_key(version).is_some())
-        .ok_or_else(invalid)?;
+    let version = yt_dlp_api_version(&release)?;
     let asset = release["assets"].as_array().and_then(|assets| assets.iter().find(|asset| asset["name"] == "yt-dlp.exe"))
         .ok_or_else(invalid)?;
     let url = format!("{YT_DLP_RELEASES}/{version}/yt-dlp.exe");
@@ -96,10 +101,10 @@ fn yt_dlp_api_release(client: &reqwest::blocking::Client, progress: &Shared) -> 
 fn yt_dlp_public_version(client: &reqwest::blocking::Client, progress: &Shared) -> Result<String, String> {
     cancelled(progress)?;
     progress.log(format!("{}: {YT_DLP_LATEST}", tr("请求地址")));
-    let response = client.head(YT_DLP_LATEST).send().and_then(|response| response.error_for_status()).map_err(error)?;
+    let response = client.get(YT_DLP_LATEST).send().and_then(|response| response.error_for_status()).map_err(error)?;
     response.url().as_str().strip_prefix(YT_DLP_TAG)
         .filter(|version| crate::component_paths::yt_dlp_version_key(version).is_some())
-        .map(str::to_owned).ok_or_else(|| tr("未找到匹配的 yt-dlp 下载包").to_owned())
+        .map(str::to_owned).ok_or_else(|| tr("未找到有效的 yt-dlp 稳定版版本号").to_owned())
 }
 
 fn yt_dlp_public_release(client: &reqwest::blocking::Client, progress: &Shared) -> Result<YtDlpRelease, String> {
@@ -133,7 +138,14 @@ fn yt_dlp_release(client: &reqwest::blocking::Client, progress: &Shared) -> Resu
 
 pub(crate) fn latest_yt_dlp(progress: &Shared) -> Result<String, String> {
     progress.phase(1);
-    yt_dlp_public_version(&component_client()?, progress)
+    let client = component_client()?;
+    yt_dlp_public_version(&client, progress).or_else(|public_error| {
+        let fallback = (|| {
+            let release = serde_json::from_str(&text(&client, YT_DLP_API, progress)?).map_err(error)?;
+            yt_dlp_api_version(&release).map(str::to_owned)
+        })();
+        fallback.map_err(|api_error| format!("{public_error}\n{api_error}"))
+    })
 }
 
 fn yt_dlp(client: &reqwest::blocking::Client, progress: &Shared) -> Result<(), String> {

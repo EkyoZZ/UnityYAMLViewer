@@ -29,8 +29,11 @@ mod media_tools;
 mod third_party;
 mod component_paths;
 mod media_trim;
+mod media_edit_queue;
 mod video_crop;
 mod video_extract;
+mod background_tasks;
+mod network_video;
 mod export_tracks;
 mod subtitle_player;
 mod audio_edit;
@@ -208,7 +211,7 @@ struct ViewerApp {
     video_extract: video_extract::Window,
     stream_titles: std::collections::HashMap<PathBuf, String>,
     url_error: Option<String>,
-    url_job: Option<mpsc::Receiver<Result<PathBuf, String>>>,
+    url_job: Option<(String, mpsc::Receiver<Result<remote_file::Opened, String>>)>,
     status: String,
     encoding: String,
     selected_keyframe: Option<SelectedKeyframe>,
@@ -283,6 +286,9 @@ struct ViewerTab {
 impl ViewerApp {
     fn displayed_tab_title(&self, path: &std::path::Path) -> String {
         if let Some(title) = self.stream_titles.get(path) { return title.clone(); }
+        if self.assets.has_network_source(path) {
+            return self.assets.stream_title(path).map(str::to_owned).unwrap_or_else(|| network_video::url_title(path));
+        }
         if let Some(label) = remote_file::stream_label(path) {
             return self.assets.stream_title(path).unwrap_or(label).to_owned();
         }
@@ -538,7 +544,7 @@ impl ViewerApp {
         let Some(config_path) = last_open_dir_config_path().map(|path| path.with_file_name("open_tabs.txt")) else { return };
         let Some(parent) = config_path.parent() else { return };
         if fs::create_dir_all(parent).is_err() { return; }
-        let session = encode_open_tabs(&self.tabs.iter().filter(|tab| !remote_file::is_cached(&tab.path) && !remote_file::is_hls(&tab.path)).map(|tab| tab.path.clone()).collect::<Vec<_>>(), self.path.as_deref().filter(|path| !remote_file::is_hls(path)));
+        let session = encode_open_tabs(&self.tabs.iter().filter(|tab| !remote_file::is_cached(&tab.path) && !remote_file::is_hls(&tab.path) && !self.assets.has_network_source(&tab.path)).map(|tab| tab.path.clone()).collect::<Vec<_>>(), self.path.as_deref().filter(|path| !remote_file::is_hls(path) && !self.assets.has_network_source(path)));
         let temporary = config_path.with_extension("tmp");
         if fs::write(&temporary, session.as_bytes()).is_ok() {
             let _ = fs::rename(temporary, config_path);
@@ -600,12 +606,24 @@ impl ViewerApp {
     }
 
     fn url_window(&mut self, ctx: &egui::Context) {
-        if let Some(job) = &self.url_job {
+        if let Some((source, job)) = &self.url_job {
             match job.try_recv() {
                 Ok(result) => {
+                    let source = source.clone();
                     self.url_job = None;
                     match result {
-                        Ok(path) => { self.show_url = false; self.open_file_with_directory_tracking(path, false); }
+                        Ok(remote_file::Opened::File(path)) => {
+                            self.show_url = false;
+                            self.open_file_with_directory_tracking(path, false);
+                            self.record_recent_url(source);
+                        }
+                        Ok(remote_file::Opened::Video { path, hls }) => {
+                            let key = video_extract::extraction_source(&source).map_or_else(|| source.clone(), |(url, _)| url);
+                            let title = network_video::url_title(&path);
+                            let mut video = network_video::Source::direct(key, path, title);
+                            video.video[0].input.as_mut().unwrap().hls = hls;
+                            self.open_network_video(video, source, false);
+                        }
                         Err(error) => { self.url_error = Some(error); self.show_url = true; }
                     }
                 }
@@ -618,12 +636,15 @@ impl ViewerApp {
         let mut submit = false;
         native_window::Window::new(localization::tr("打开 URL")).id(egui::Id::new("open_url"))
             .open(&mut open).default_width(620.0).fit_height().show(ctx, |ui| {
-                ui.label(localization::tr("输入 HTTP / HTTPS 文件直链或 HLS 点播链接。普通文件下载后打开（最大 1 GiB）。"));
+                ui.label(localization::tr("输入 HTTP / HTTPS 直链。视频直接播放，普通文件下载后打开（最大 1 GiB）。"));
                 let pending = self.url_job.is_some();
                 ui.horizontal(|ui| {
                     let input_width = (ui.available_width() - 104.0 - ui.spacing().item_spacing.x).max(40.0);
                     let response = ui.add_enabled_ui(!pending, |ui| ui.add_sized([input_width, 32.0],
                         TextEdit::singleline(&mut self.url_input).vertical_align(egui::Align::Center).hint_text("https://"))).inner;
+                    if !pending && theme::paste_replace_menu(&response, &mut self.url_input) {
+                        self.url_error = None;
+                    }
                     submit = ui.add_enabled_ui(!pending, |ui| ui.add_sized([104.0, 32.0],
                         egui::Button::new(localization::tr("确定")))).inner.clicked()
                         || (!pending && response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)));
@@ -633,20 +654,56 @@ impl ViewerApp {
             });
         if !open { self.show_url = false; }
         if submit {
-            self.url_error = None;
-            let input = self.url_input.trim();
-            if let Some((path, title)) = remote_file::stream_source(input) {
-                if let Some(title) = title {
-                    self.stream_titles.insert(path.clone(), title);
-                } else {
-                    self.stream_titles.remove(&path);
-                }
-                self.show_url = false;
-                self.open_file_with_directory_tracking(path, false);
-            } else {
-                self.url_job = Some(remote_file::start(input.to_owned(), ctx.clone()));
-            }
+            self.open_url_input(self.url_input.clone(), ctx);
         }
+    }
+
+    fn record_recent_url(&mut self, source: String) {
+        self.recent_files.record(PathBuf::from(source));
+        self.recent_files.persist();
+    }
+
+    fn open_url_input(&mut self, input: String, ctx: &egui::Context) {
+        if self.url_job.is_some() { return; }
+        let source = input.trim().replace("https\\://", "https://").replace("http\\://", "http://");
+        self.url_input = source.clone();
+        self.url_error = None;
+        let stream = remote_file::stream_source(&source)
+            .or_else(|| remote_file::direct_video(&source).map(|path| (path, None)));
+        let key = video_extract::extraction_source(&source).map(|(url, _)| url);
+        let cached = key.as_deref().and_then(network_video::cached_source);
+        if let Some(mut cached) = cached {
+            if let Some((path, title)) = stream {
+                if let Some(title) = title { cached.title = title; }
+                if cached.video.iter().all(|format| format.input.is_none()) {
+                    let mut online = network_video::Source::direct(cached.url.clone(), path, localization::tr("在线播放").to_owned());
+                    online.video[0].label = online.title;
+                    cached.video.append(&mut online.video);
+                }
+            }
+            self.open_network_video(cached, source, true);
+        } else if let Some((path, title)) = stream {
+            let explicit_title = title.is_some();
+            let title = title.unwrap_or_else(|| network_video::url_title(&path));
+            self.open_network_video(network_video::Source::direct(key.unwrap_or(source.clone()), path, title), source, explicit_title);
+        } else {
+            self.show_url = true;
+            let job = remote_file::start(source.clone(), ctx.clone());
+            self.url_job = Some((source, job));
+        }
+    }
+
+    fn open_network_video(&mut self, source: network_video::Source, recent: String, explicit_title: bool) {
+        let path = PathBuf::from(&source.url);
+        if explicit_title {
+            self.stream_titles.insert(path.clone(), source.title.clone());
+        } else {
+            self.stream_titles.remove(&path);
+        }
+        self.assets.set_network_source(path.clone(), source);
+        self.show_url = false;
+        self.open_file_with_options(path, false, false);
+        self.record_recent_url(recent);
     }
 
     fn show_open_dialog(&mut self) {
@@ -672,6 +729,7 @@ impl ViewerApp {
         .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
         .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
         .add_filter(crate::localization::tr("播放列表"), &["m3u8", "m3u"])
+        .add_filter(crate::localization::tr("编辑工程"), &["uyap", "uyvp"])
         .add_filter(crate::localization::tr("视频"), &["mp4", "m4v", "mkv", "webm", "mov", "avi", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts", "3gp", "bytes"]);
         let dialog = if let Some(directory) = &self.last_open_dir {
             dialog.set_directory(directory)
@@ -742,10 +800,14 @@ impl ViewerApp {
             self.folder_preview_path = None;
         }
         if path.is_dir() {
-            self.folder_browser.add(path);
+            let path = self.folder_browser.add(path);
+            if record_recent && !self.restoring_session {
+                self.recent_files.record(path);
+                self.recent_files.persist();
+            }
             return;
         }
-        if remote_file::is_cached(&path) || remote_file::is_hls(&path) { /* Network sources do not change the local open directory. */ }
+        if remote_file::is_cached(&path) || remote_file::is_hls(&path) || self.assets.has_network_source(&path) { /* Network sources do not change the local open directory. */ }
         else if remember_directory && !self.restoring_session {
             self.last_open_dir = path.parent().map(PathBuf::from);
             self.persist_last_open_dir();
@@ -757,7 +819,7 @@ impl ViewerApp {
             if record_recent { self.remember_recent_file(); }
             return;
         }
-        if remote_file::is_hls(&path) || ((playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file()) {
+        if self.assets.has_network_source(&path) || remote_file::is_hls(&path) || ((media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file()) {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -771,13 +833,13 @@ impl ViewerApp {
     }
     fn remember_recent_file(&mut self) {
         if !self.restoring_session {
-            if let Some(path) = &self.path { if !remote_file::is_cached(path) && !remote_file::is_hls(path) { self.recent_files.record(path.clone()); self.recent_files.persist(); } }
+            if let Some(path) = &self.path { if !remote_file::is_cached(path) && !remote_file::is_hls(path) && !self.assets.has_network_source(path) { self.recent_files.record(path.clone()); self.recent_files.persist(); } }
         }
     }
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if self.assets.has_network_source(&path) || media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
@@ -873,7 +935,7 @@ impl ViewerApp {
         self.saved_histories.remove(&self.tabs[index].path);
         self.node_controls.remove(&self.tabs[index].path);
         self.stream_titles.remove(&self.tabs[index].path);
-        self.assets.forget_hls_download(&self.tabs[index].path);
+        self.assets.close_network_source(&self.tabs[index].path);
         self.assets.forget(&self.tabs[index].path);
         self.save_active_tab();
         let closing_path=&self.tabs[index].path;
@@ -1455,7 +1517,7 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.assets.cancel_hls_downloads();
+        self.assets.cancel_network_downloads();
         self.assets.pause_media();
         playlist::flush_writes();
         if let Some(error) = media_history::take_error() {
@@ -1466,10 +1528,14 @@ impl eframe::App for ViewerApp {
         render_system::shutdown();
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.assets.poll_hls_downloads(ctx);
+        self.assets.poll_network_downloads(ctx);
+        if let Some(url) = ctx.data_mut(|data| data.remove_temp::<String>(egui::Id::new("background_task_open_url"))) {
+            self.open_url_input(url, ctx);
+        }
         native_window::track_main_window(ctx);
-        if let Some(path) = self.video_extract.show(ctx, self.third_party.is_open()) {
-            self.open_file_with_directory_tracking(path, false);
+        if let Some(source) = self.video_extract.show(ctx, self.third_party.is_open()) {
+            let recent = source.url.clone();
+            self.open_network_video(source, recent, true);
         }
         self.assets.update_rtf_editor_theme(ctx);
         native_window::track_file_drop(ctx, _frame);
@@ -1605,7 +1671,18 @@ impl eframe::App for ViewerApp {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let toolbar_spacing = ui.spacing().item_spacing.x;
+                ui.spacing_mut().item_spacing.x = 4.0;
                 if theme::settings_button(ui).clicked() { native_window::wake(ctx,egui::Id::new("settings_window"));self.show_settings = true; }
+                if let Some(url) = background_tasks::button(ui) {
+                    let key = std::path::Path::new(&url);
+                    if self.assets.has_network_source(key) {
+                        self.open_file_with_options(key.to_owned(), false, false);
+                    } else {
+                        self.open_url_input(url, ctx);
+                    }
+                }
+                ui.spacing_mut().item_spacing.x = toolbar_spacing;
                 let previous_theme = self.settings.theme.clone();
                 ui.push_id("toolbar_theme", |ui| theme::toolbar_selector(ui, &mut self.settings.theme));
                 if previous_theme != self.settings.theme {
@@ -1616,11 +1693,15 @@ impl eframe::App for ViewerApp {
                 ui.allocate_ui_with_layout(egui::vec2(left_width, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
                     if self.updater.release.is_some() && ui.add(theme::toolbar_button(ui, "New", true)).clicked() {
+                        native_window::wake(ctx, egui::Id::new("update_release"));
                         self.updater.show = true;
                     }
                     let mut open_dialog = false;
                     let mut recent_path = None;
+                    let previous_spacing = ui.spacing().item_spacing.x;
+                    ui.spacing_mut().item_spacing.x = 7.0;
                     egui::menu::menu_custom_button(ui, theme::toolbar_button(ui, crate::localization::tr("文件"), false), |ui| {
+                        ui.spacing_mut().item_spacing.x = previous_spacing;
                         crate::theme::menu_no_wrap(ui);
                         if ui.button(crate::localization::tr("打开文件")).clicked() {
                             open_dialog = true;
@@ -1629,16 +1710,17 @@ impl eframe::App for ViewerApp {
                         if ui.button(localization::tr("打开目录")).clicked() {
                             let mut dialog = rfd::FileDialog::new();
                             if let Some(path) = &self.last_open_dir { dialog = dialog.set_directory(path); }
-                            if let Some(path) = dialog.pick_folder() { self.folder_browser.add(path); }
+                            if let Some(path) = dialog.pick_folder() { self.open_file(path); }
                             ui.close_menu();
                         }
                         if ui.button(localization::tr("打开 URL")).clicked() {
+                            native_window::wake(ctx, egui::Id::new("open_url"));
                             self.show_url = true;
                             self.url_error = None;
                             ui.close_menu();
                         }
                         if ui.button(localization::tr("视频提取")).clicked() {
-                            self.video_extract.open = true;
+                            self.video_extract.open(ctx);
                             ui.close_menu();
                         }
                         ui.menu_button(crate::localization::tr("最近打开"), |ui| {
@@ -1647,8 +1729,8 @@ impl eframe::App for ViewerApp {
                             let mut remove = None;
                             let row_height = ui.text_style_height(&egui::TextStyle::Button) + 4.0;
                             let widest = self.recent_files.paths().iter().map(|path| {
-                                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                                ui.painter().layout_no_wrap(name.into_owned(), egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color()).size().x
+                                let name = recent_files::label(path);
+                                ui.painter().layout_no_wrap(name, egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color()).size().x
                             }).fold(0.0_f32, f32::max);
                             let row_width = (widest + row_height + 20.0).clamp(180.0, 420.0).min((ctx.screen_rect().width() - 32.0).max(80.0));
                             // Reset the popup's content width as well as its rows. Otherwise the
@@ -1669,18 +1751,23 @@ impl eframe::App for ViewerApp {
                                             let name_rect = egui::Rect::from_min_max(row.min, egui::pos2(close_rect.left() - 4.0, row.bottom()));
                                             ui.spacing_mut().interact_size.y = row_height;
                                             ui.spacing_mut().button_padding.y = 2.0;
-                                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                            let name = recent_files::label(path);
+                                            let available = recent_files::url(path).is_some() || path.exists();
+                                            let color = if available { ui.visuals().text_color() } else { ui.visuals().error_fg_color };
                                             let name_response = ui.put(name_rect, egui::Button::new(""));
                                             let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
-                                            let galley = ui.painter().layout(name.into_owned(), egui::TextStyle::Button.resolve(ui.style()),
-                                                ui.visuals().text_color(), text_rect.width());
+                                            let galley = ui.painter().layout(name, egui::TextStyle::Button.resolve(ui.style()),
+                                                color, text_rect.width());
                                             let mut job = galley.job.as_ref().clone();
                                             job.wrap.max_rows = 1;
                                             job.wrap.break_anywhere = true;
                                             let galley = ui.painter().layout_job(job);
                                             ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
-                                                egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
-                                            if name_response.on_hover_text(path.display().to_string()).clicked() {
+                                                egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, color);
+                                            let hint = if available { path.display().to_string() } else {
+                                                format!("{}\n{}", localization::tr("原路径已失效"), path.display())
+                                            };
+                                            if name_response.on_hover_text(hint).clicked() && available {
                                                 recent_path = Some(path.clone());
                                                 ui.close_menu();
                                             }
@@ -1698,8 +1785,13 @@ impl eframe::App for ViewerApp {
                         });
                     });
                     if open_dialog { self.show_open_dialog(); }
-                    if let Some(path) = recent_path { self.open_file(path); }
-                    let previous_spacing = ui.spacing().item_spacing.x;
+                    if let Some(path) = recent_path {
+                        if let Some(url) = recent_files::url(&path) {
+                            self.open_url_input(url.to_owned(), ctx);
+                        } else {
+                            self.open_file(path);
+                        }
+                    }
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if icons::button(ui, icons::Icon::Search, localization::tr("查找")).clicked() {
                         self.show_search = !self.show_search;
@@ -1725,7 +1817,10 @@ impl eframe::App for ViewerApp {
                         ui.scope(|ui| {
                             ui.spacing_mut().interact_size.y = 20.0;
                             ui.spacing_mut().button_padding.y = 1.0;
-                            if ui.put(button_rect,egui::Button::new(button_text)).clicked() { self.show_supported_formats = true; }
+                            if ui.put(button_rect,egui::Button::new(button_text)).clicked() {
+                                native_window::wake(ctx, egui::Id::new("supported_formats"));
+                                self.show_supported_formats = true;
+                            }
                         });
                     }
                     if !self.show_search && ui.button(localization::tr("指令查看")).clicked() {self.show_command_help=true;native_window::wake(ui.ctx(),egui::Id::new("command_help"));}
@@ -1759,7 +1854,7 @@ impl eframe::App for ViewerApp {
                 }
                 let mut visible = Vec::new();
                 for (key, members) in &groups {
-                    if members.len() > 3 || self.closing_tab_group.as_ref() == Some(key) {
+                    if members.len() > 3 || (members.len()>1 && matches!(key.as_str(),"uyap"|"uyvp")) || self.closing_tab_group.as_ref() == Some(key) {
                         let index = members.iter().copied().find(|&i| i == self.active_tab)
                             .or_else(|| members.iter().copied().find(|&i| self.tab_group_active.get(key) == Some(&self.tabs[i].path))).unwrap_or(members[0]);
                         visible.push(TabGroup { selected: index, members: members.clone() });
@@ -1792,7 +1887,7 @@ impl eframe::App for ViewerApp {
                         let title = if dirty { format!("{title} *") } else { title.to_string() };
                         let slot=slots[position].translate(strip_rect.min.to_vec2());
                         let (open_clicked, close_clicked, response, slot) = unified_tab(ui, &title, is_active, &tab.path,slot,members.len());
-                        asset_viewer::file_context_menu(&response,&tab.path);
+                        if !self.assets.has_network_source(&tab.path) { asset_viewer::file_context_menu(&response,&tab.path); }
                         tab_rects.push(slot);
                         if grouped {
                             let popup_id = ui.id().with(("tab_group", self.displayed_tab_group_key(&tab.path)));
@@ -1820,7 +1915,7 @@ impl eframe::App for ViewerApp {
                                             ui.spacing_mut().button_padding.y = 2.0;
                                             if member == index { ui.painter().rect_filled(name_rect, 3.0, ui.visuals().selection.bg_fill); }
                                             let name_response = ui.put(name_rect, egui::Button::new("").frame(false));
-                                            asset_viewer::file_context_menu(&name_response,path);
+                                            if !self.assets.has_network_source(path) { asset_viewer::file_context_menu(&name_response,path); }
                                             let text_rect = name_rect.shrink2(egui::vec2(6.0, 0.0));
                                             let galley = ui.painter().layout(title, egui::TextStyle::Button.resolve(ui.style()), ui.visuals().text_color(), text_rect.width());
                                             let mut job = galley.job.as_ref().clone();
@@ -1829,7 +1924,7 @@ impl eframe::App for ViewerApp {
                                             let galley = ui.painter().layout_job(job);
                                             ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(
                                                 egui::pos2(text_rect.left(), text_rect.center().y - galley.size().y * 0.5), galley, ui.visuals().text_color());
-                                            let hint = if remote_file::is_hls(path) { self.displayed_tab_title(path) } else { path.display().to_string() };
+                                            let hint = if remote_file::is_hls(path) || self.assets.has_network_source(path) { self.displayed_tab_title(path) } else { path.display().to_string() };
                                             if name_response.on_hover_text(hint).clicked() {
                                                 activate = Some(member); ui.memory_mut(|memory| memory.close_popup());
                                             }
@@ -1908,8 +2003,8 @@ impl eframe::App for ViewerApp {
         let hierarchy_width = self.hierarchy_preferred_width(ctx);
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
-        let delimited_tab = self.path.as_ref().is_some_and(|path| !remote_file::is_hls(path) && path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
-        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let delimited_tab = self.path.as_ref().is_some_and(|path| !self.assets.has_network_source(path) && !remote_file::is_hls(path) && path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| self.assets.has_network_source(path) || media_preview::is_project(path) || playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -2098,15 +2193,14 @@ impl eframe::App for ViewerApp {
         }
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("inspector_hide_property_types"), self.preview.open));
         let mut content_frame=egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill);
-        if self.path.as_ref().is_some_and(|path|playlist::is_playlist(path)||media_preview::is_media(path)) {content_frame=content_frame.inner_margin(egui::Margin::same(8));}
+        if self.path.as_ref().is_some_and(|path|self.assets.has_network_source(path)||playlist::is_playlist(path)||media_preview::is_media(path)) {content_frame=content_frame.inner_margin(egui::Margin::same(8));}
         egui::CentralPanel::default().frame(content_frame).show(ctx, |ui| {
             if reference_tab && !delimited_tab {
                 editing::publish(ctx, None, 0..0);
                 if material_preview && theme::preview_toggle(ui,self.preview.open).clicked(){self.preview.open=!self.preview.open;ctx.request_repaint();}
                 if let Some(path) = self.path.clone() {
-                    if remote_file::is_hls(&path) {
-                        let title = self.displayed_tab_title(&path);
-                        self.assets.show_hls(ui, &path, &title);
+                    if self.assets.has_network_source(&path) {
+                        self.assets.show_network(ui, &path, false);
                     } else {
                         self.assets.show(ui, &path, &self.raw);
                     }
@@ -2453,7 +2547,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
+                    if media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();
@@ -2569,9 +2663,11 @@ impl eframe::App for ViewerApp {
                         ui.set_width(208.0);
                         let mut in_use: Vec<_> = self.tabs.iter().map(|tab| tab.path.clone()).collect();
                         in_use.extend(self.assets.playlist_in_use());
+                        in_use.extend(self.assets.network_files_in_use());
+                        in_use.extend(media_preview::trim_files_in_use());
                         if let Ok(executable) = std::env::current_exe() { in_use.push(executable); }
                         if let Some(directory) = self.updater.staged.as_ref().and_then(|path| path.parent()) { in_use.push(directory.to_owned()); }
-                        let busy = self.url_job.is_some() || self.updater.downloading || self.assets.hls_downloads_active() || self.video_extract.busy()
+                        let busy = self.url_job.is_some() || self.updater.downloading || self.assets.network_downloads_active() || self.video_extract.busy() || background_tasks::active(ui.ctx())
                             || ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("asset_catalog_loading"))).unwrap_or(false);
                         self.cache_panel.show(ui, in_use, busy);
                     });
@@ -2657,6 +2753,22 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度和语言。"));
+                        ui.label(localization::tr("• 手动缓存后自动切换本地播放，分离的画面和音轨可独立复用。"));
+                        ui.label(localization::tr("• 视频提取下载可复用缓存，播放优先使用对应的已下载文件。"));
+                        ui.label(localization::tr("• 后台任务中心显示视频缓存、下载和音视频导出进度，图标提示新结果。"));
+                        ui.label(localization::tr("• 音视频编辑支持列表排序、逐条导出和居中等比补边合并，弹窗内可查看后台任务。"));
+                        ui.label(localization::tr("• 音视频列表移除后可用 Ctrl+Z 恢复条目及编辑设置，撤销记录仅在当前窗口保留。"));
+                        ui.label(localization::tr("• 音视频编辑支持保存和打开工程，继续编辑当前结果；原素材按路径引用，不保存撤销历史。"));
+                        ui.label(localization::tr("• 音视频工程先在页签打开，检测到 FFmpeg 后可进入编辑，同类工程页签可折叠分组。"));
+                        ui.label(localization::tr("• 工程页签可打包普通 ZIP，自动收集引用素材并改用相对路径，便于分享后继续编辑。"));
+                        ui.label(localization::tr("• 音视频编辑显示毫秒时间码，视频暂停时拖动播放指针可预览画面。"));
+                        ui.label(localization::tr("• 音视频编辑可分别锁定起始和结束，禁用对应输入及边界拖动，工程保留锁定状态。"));
+                        ui.label(localization::tr("• 视频画布支持向外扩展并使用填充色，重置恢复原尺寸；填充色可输入十六进制值。"));
+                        ui.label(localization::tr("• yt-dlp 复用已验证的安装路径与版本，文件变化或重新检测时才再次验证。"));
+                        ui.label(localization::tr("• 再次点击打开 URL、视频提取或格式支持时，已有窗口回到前台。"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.3.2").strong());
                         ui.label(localization::tr("• 新增 pngopt 指令，批量优化 PNG 并输出逐文件结果。指令用法随界面语言切换。"));
                         ui.label(localization::tr("• RTF 支持独立窗口编辑、插入静态图片和另存为，保存当前文档后自动刷新预览。"));
                         ui.label(localization::tr("• 打开 URL 支持 HLS 点播，页签可显示链接或媒体内嵌标题。"));
@@ -2668,13 +2780,13 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 第三方支持可按需安装 yt-dlp，并手动检查更新。"));
                         ui.label(localization::tr("• 减少窗口重绘时重复更新图标和位置。重绘时复用 Markdown 预处理结果。"));
                         ui.add_space(8.0);
-                        ui.label(RichText::new("1.3.1").strong());
-                        ui.label(localization::tr("• 自动安装固定版本的 FFmpeg，减少因版本差异导致的音视频导出失败。手动安装可选经用户导出验证的 8.1。"));
-                        ui.add_space(8.0);
                         if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
                             self.show_older_history = !self.show_older_history;
                         }
                         if self.show_older_history {
+                        ui.label(RichText::new("1.3.1").strong());
+                        ui.label(localization::tr("• 自动安装固定版本的 FFmpeg，减少因版本差异导致的音视频导出失败。手动安装可选经用户导出验证的 8.1。"));
+                        ui.add_space(8.0);
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.3.0").strong());
                         ui.label(localization::tr("• 文本与代码可保存字号及间距；Markdown 支持常见 HTML 排版、图片缓存、链接与代码着色"));

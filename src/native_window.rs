@@ -181,6 +181,7 @@ pub struct Window<'a> {
     fit_height: bool,
     solid_scroll: bool,
     scrollable: bool,
+    retain_on_close_request: bool,
 }
 
 impl<'a> Window<'a> {
@@ -190,6 +191,7 @@ impl<'a> Window<'a> {
             id: egui::Id::new(&title),
             title,
             open: None,
+            retain_on_close_request: false,
             width: 380.0,
             height: 480.0,
             resizable: true,
@@ -274,6 +276,11 @@ impl<'a> Window<'a> {
         self.width = size.x + 16.0;
         self.height = size.y + 16.0;
         self.resizable = false;
+        self
+    }
+
+    pub fn retain_on_close_request(mut self) -> Self {
+        self.retain_on_close_request=true;
         self
     }
 
@@ -532,7 +539,7 @@ impl<'a> Window<'a> {
                 }
             }
         });
-        placement.closed = !open;
+        placement.closed = !open && !self.retain_on_close_request;
         ctx.data_mut(|data| data.insert_temp(state_id, placement));
         if let Some(value) = self.open.as_mut() {
             **value = open;

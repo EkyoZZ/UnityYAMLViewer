@@ -27,8 +27,8 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **组件管理**：按需安装 FFmpeg、LibreOffice、PDFium 和 yt-dlp，支持进度查看、自动检测与手动指定路径。yt-dlp 可手动检查更新。
 
 - **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
-- **音视频工具**：播放、剪切、裁剪、缩放与转码，支持多音轨、字幕、媒体详情及 GIF／视频／PNG 序列导出。可通过 URL 播放 HLS 点播流并下载为 MP4。
-- **视频提取**：通过 yt-dlp 分析网页视频链接，可选清晰度和独立音轨，在页签播放或下载。
+- **音视频工具**：支持多文件编辑、画布调整、缩放与转码，可合并导出或按队列分别导出，支持多音轨、字幕及 GIF／视频／PNG 序列输出。音频／视频工程可保存续编，并打包素材分享。
+- **网络视频**：通过 yt-dlp 提取网页视频，支持直链／HLS 点播、清晰度与音轨选择、下载及手动缓存复用；后台任务中心统一查看处理进度和结果。
 - **文本表格**：CSV / TSV / PSV 查看与单元格编辑，支持查找、类型与必填检查、固定行列编号及冻结首行。
 - **电子表格**：XLS / XLSX / ODS 只读预览，支持多工作表切换、查找复制、公式／缓存结果与冻结表头。
 - **文件预览**：PDF、Word／PowerPoint、OpenDocument、RTF、SVG、GIF、ICO、受限 PSD 及常见文本；办公文档可在 LibreOffice 编辑，转换预览的文档支持另存为 PDF。
@@ -51,7 +51,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - ICO／PSD 只读且不提供图片编辑工具；ICO 不切换内部尺寸，PSD 仅支持 8 位 RGB／灰度、Raw／RLE，最大 8192 × 8192，不支持图层编辑或 ICC 色彩管理。
 - 不支持 Unity 二进制序列化；未知属性和原始 YAML 保持只读。
 - 场景、Spine、粒子和 Shader 兼容性有限，不能完整替代 Unity 渲染；不支持节点连线编辑或 Shader 生成。
-- 不支持视频合并、自由多轨剪辑、PDF 或 Office 内置编辑；暂不支持加密文档、宏格式及苹果办公格式。
+- 不支持自由多轨剪辑、PDF 或 Office 内置编辑；暂不支持加密文档、宏格式及苹果办公格式。
 - 电子表格不重算公式或还原样式、合并与图表；冻结设置仅能读取 XLSX，无法读取时可冻结首行。Word／演示文档按转换后的 PDF 预览，字体与排版可能不同，不支持文字选择或搜索。
 - Word／演示文档预览需要 LibreOffice 和 PDFium，电子表格内置读取；音视频需要相应第三方组件，可指定组件路径，无需修改 PATH。连续图不自动修补接缝；九宫格原位替换会覆盖文件，建议先预览或使用 `--dry-run`。
 
@@ -86,8 +86,8 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - **Component management**: Install FFmpeg, LibreOffice, PDFium and yt-dlp on demand, with progress display, automatic detection and manual paths. yt-dlp supports manual update checks.
 
 - **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
-- **Audio and video**: Playback, trimming, cropping, scaling and transcoding, with multiple audio tracks, subtitles, media details and GIF, video or PNG sequence export. HLS on-demand streams play from a URL and can be downloaded as MP4.
-- **Video extraction**: Analyze web video links with yt-dlp, choose a resolution and separate audio track when available, and play in a tab or download.
+- **Audio and video**: Multi-file editing, canvas adjustments, scaling and transcoding, with merged or separate queue exports, multiple audio tracks, subtitles and GIF / video / PNG sequence output. Save audio/video projects to resume editing or package them with media for sharing.
+- **Online video**: Extract web videos with yt-dlp, play direct links / HLS, choose resolutions and audio tracks, download or explicitly cache for reuse. Background Tasks tracks processing progress and results.
 - **Text tables**: View and edit CSV / TSV / PSV cells with search, type / required-cell checks, fixed coordinates and first-row freezing.
 - **Spreadsheets**: Read-only XLS / XLSX / ODS previews with worksheet tabs, search / copy, formulas / cached results and header freezing.
 - **File previews**: PDF, Word / PowerPoint, OpenDocument, RTF, SVG, GIF, ICO, limited PSD and common text files; Office documents can open in LibreOffice, and converted previews can be saved as PDF.
@@ -110,7 +110,7 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 - ICO / PSD are read-only without image editing tools. ICO has no size selector; PSD supports only 8-bit RGB / grayscale, Raw / RLE, up to 8192 × 8192, without layer editing or ICC color management.
 - Unity binary serialization is unsupported. Unknown properties and raw YAML remain read-only.
 - Scene, Spine, particle and shader compatibility is partial and does not fully reproduce Unity rendering. Node connection editing and shader generation are unsupported.
-- Video merging, free multitrack editing, built-in PDF / Office editing, encrypted documents, macro-enabled formats and Apple office formats are unsupported.
+- Free multitrack editing, built-in PDF / Office editing, encrypted documents, macro-enabled formats and Apple office formats are unsupported.
 - Spreadsheets do not recalculate formulas or reproduce styles, merges or charts. Original freeze settings can only be read from XLSX, otherwise first-row freezing is available. Word / presentation previews use converted PDFs; fonts and layout may differ, and text selection / search is unavailable.
 - Word / presentation previews require LibreOffice and PDFium; spreadsheets use a built-in reader. Media needs the relevant third-party components; custom paths work without changing PATH. Seamless repeats do not repair seams automatically. Nine-slice replacement overwrites files; preview first or use `--dry-run`.
 

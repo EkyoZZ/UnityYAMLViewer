@@ -39,7 +39,23 @@ impl RecentFiles {
     }
 }
 fn limit_config() -> Option<PathBuf> { config().map(|path| path.with_file_name("recent_files_limit.txt")) }
+pub fn url(path: &Path) -> Option<&str> {
+    let value = path.to_str()?;
+    (value.starts_with("http://") || value.starts_with("https://")).then_some(value)
+}
+
+pub fn label(path: &Path) -> String {
+    if let Some(value) = url(path) {
+        if let Some((_, Some(title))) = crate::remote_file::stream_source(value) {
+            return title;
+        }
+        return value.split(['?', '#']).next().unwrap_or(value).to_owned();
+    }
+    path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned()
+}
+
 fn same_path(first: &Path, second: &Path) -> bool {
+    if url(first).is_some() || url(second).is_some() { return first.as_os_str() == second.as_os_str(); }
     if cfg!(windows) { first.to_string_lossy().eq_ignore_ascii_case(&second.to_string_lossy()) } else { first == second }
 }
 fn config() -> Option<PathBuf> { crate::last_open_dir_config_path().map(|path| path.with_file_name("recent_files.json")) }

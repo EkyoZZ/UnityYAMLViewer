@@ -14,6 +14,7 @@ pub const FORMAT_GROUPS: &[(&str, &str)] = &[
     ("视频", ".mp4 .m4v .mkv .webm .mov .avi .wmv .flv .mpeg .mpg .ts .mts .m2ts .3gp"),
     ("文本 / 代码", ".cs .txt .md .json .xml .shader .hlsl .cginc .compute .glsl .uxml .uss .asmdef .asmref .meta .csv .tsv .psv .log .ini .toml .js .ts .lua .py .pyw .c .cpp .h .hpp .rs .java .html .css .sh .ps1 .bat .cmd"),
     ("播放列表", ".m3u8 .m3u"),
+    ("编辑工程", ".uyap .uyvp"),
 ];
 
 fn extensions(group: usize) -> Vec<String> {
@@ -65,6 +66,7 @@ impl Dialog {
     }
 
     pub fn open(&mut self, ctx: &egui::Context) {
+        native_window::wake(ctx, egui::Id::new("file_associations"));
         if !self.open {
             self.open = true;
             self.focused = None;
@@ -141,7 +143,7 @@ impl Dialog {
                     if self.pending.is_some() { ui.spinner(); ui.label(tr("正在查询默认程序…")); }
                 });
                 ui.add_space(8.0);
-                ui.label(tr("启动时自动更新程序名称与文件图标登记，不会自动更改默认程序。点击去设置会重试登记、复制后缀并打开 Windows 默认应用页面，请粘贴搜索并选择本程序。"));
+                ui.label(tr("启动时登记打开方式，未关联的音视频工程默认用本程序打开；其他已有默认程序保持不变。"));
                 if !cfg!(windows) { ui.label(tr("文件关联设置仅支持 Windows。")); }
                 if matches!(self.group, 3 | 5 | 6) {
                     ui.small(tr("关联按最后一个后缀生效：.skel.bytes 使用 .bytes，.json.txt 使用 .txt；.json 和 .ts 等后缀可能包含不同类型的内容。"));
@@ -275,8 +277,8 @@ fn query(extension: &str, current_exe: Option<&std::path::Path>) -> Association 
 fn query(_: &str, _: Option<&std::path::Path>) -> Association { Association::Unsupported }
 
 
-// Register only our own classes and Open With candidates. Never overwrite extension
-// defaults or Explorer UserChoice; default selection remains in Windows Settings.
+// Register our classes and Open With candidates. Only our project extensions get
+// a default when unassigned; existing defaults and Explorer UserChoice are preserved.
 #[cfg(windows)]
 fn register_file_types() -> Result<(), String> {
     use std::{ffi::c_void, os::windows::ffi::OsStrExt};
@@ -342,6 +344,20 @@ fn register_file_types() -> Result<(), String> {
     for ext in all {
         set(&format!("Software\\Classes\\{ext}\\OpenWithProgids"), "UnityYAMLViewer.File", "".as_ref())?;
         set(&format!("{app}\\SupportedTypes"), &ext, "".as_ref())?;
+    }
+    for (ext, id, description) in [
+        (".uyap", "UnityYAMLViewer.AudioProject", "Unity YAML Viewer Audio Project"),
+        (".uyvp", "UnityYAMLViewer.VideoProject", "Unity YAML Viewer Video Project"),
+    ] {
+        let class = format!("Software\\Classes\\{id}");
+        set(&class, "", description.as_ref())?;
+        set(&format!("{class}\\Application"), "ApplicationName", "Unity YAML Viewer".as_ref())?;
+        set(&format!("{class}\\DefaultIcon"), "", &icon)?;
+        set(&format!("{class}\\shell\\open\\command"), "", &command)?;
+        set(&format!("Software\\Classes\\{ext}\\OpenWithProgids"), id, "".as_ref())?;
+        if matches!(query(ext, Some(&exe)), Association::Unset) {
+            set(&format!("Software\\Classes\\{ext}"), "", id.as_ref())?;
+        }
     }
     #[link(name = "shell32")]
     unsafe extern "system" {

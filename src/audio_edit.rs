@@ -18,8 +18,9 @@ impl Drop for Cache {fn drop(&mut self){
 }}
 pub struct Clip {pub path:PathBuf,pub duration:f64,cache:Arc<Cache>}
 impl Drop for Clip {fn drop(&mut self){let _=std::fs::remove_file(&self.path);}}
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
+    #[serde(skip)]
     pub clip:Option<Arc<Clip>>,pub mode:String,pub start:f64,pub end:f64,
     pub db:f64,pub fade_in:f64,pub fade_out:f64,
     pub in_curve:String,pub out_curve:String,
@@ -69,6 +70,17 @@ pub struct Session {
     ffmpeg:PathBuf,channels:usize,gesture:bool,
 }
 impl Session {
+    pub(crate) fn from_project(mut state: State, clip: &Path, duration: f64, ffmpeg: PathBuf, channels: usize) -> Result<Self, String> {
+        let root=std::env::temp_dir().join(format!("unity-audio-edit-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
+        std::fs::create_dir(&root).map_err(|error|error.to_string())?;
+        let cache=Arc::new(Cache(root));
+        let path=cache.0.join("project.wav");
+        if std::fs::rename(clip,&path).is_err() {
+            std::fs::copy(clip,&path).map_err(|error|error.to_string())?;
+        }
+        state.clip=Some(Arc::new(Clip { path, duration, cache }));
+        Ok(Self { state, error:None, undo:vec![], redo:vec![], job:None, ffmpeg, channels, gesture:false })
+    }
     pub fn new(ffmpeg:&Path,source:&Path,duration:f64,audio:u64,channels:usize,ctx:&egui::Context)->Result<Self,String> {
         let root=std::env::temp_dir().join(format!("unity-audio-edit-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
         std::fs::create_dir(&root).map_err(|e|e.to_string())?;

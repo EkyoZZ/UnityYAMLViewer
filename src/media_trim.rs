@@ -3,9 +3,17 @@ use std::{path::{Path, PathBuf}, sync::mpsc};
 use eframe::egui;
 use crate::{localization::tr, media_tools::command};
 
+mod batch;
+mod project;
+pub(crate) use project::EditState;
+pub(crate) use batch::{ExportPlan, MergeSettings, export_queue};
+
 #[derive(Default)]
 pub struct Trim {
     open: bool,
+    trim_playback: bool,
+    boundary_locks: [bool; 2],
+    range_resets: Vec<(f64,f64)>,
     sequence_source:Option<std::sync::Arc<crate::media_preview::SequenceSource>>,
     start: f64,
     end: f64,
@@ -25,7 +33,7 @@ pub struct Trim {
     history_changed:bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct VideoSettings { codec: usize, container: usize, quality: u32, bitrate_mode:bool, two_pass:bool, video_bitrate:u32, fps:String, audio_bitrate: u32, audio_codec:usize, audio_rate:u32, matte:[u8;3],flatten:bool,gif_compress:bool, gif_fps:u32, gif_loops:u32, gif_filter:usize, gif_colors:u32, gif_dither:usize, gif_bayer:u32, crop:crate::video_crop::Crop }
 impl Default for VideoSettings {fn default()->Self{Self{codec:0,container:0,quality:18,bitrate_mode:false,two_pass:false,video_bitrate:6000,fps:"source".into(),audio_bitrate:192,audio_codec:0,audio_rate:48000,matte:[0;3],flatten:false,gif_compress:false,gif_fps:15,gif_loops:0,gif_filter:2,gif_colors:256,gif_dither:4,gif_bayer:2,crop:Default::default()}}}
 impl VideoSettings {
@@ -57,7 +65,7 @@ impl VideoSettings {
     const GIF_FILTERS:[(&'static str,&'static str);4]=[("Nearest","neighbor"),("Bilinear","bilinear"),("Bicubic","bicubic"),("Lanczos","lanczos")];
     fn flatten_alpha(&self)->bool {self.container<9||self.flatten}
     fn spatial_filter(&self,scaler:&str)->String {
-        let filter=format!("format=rgba,{}",self.crop.filter_with_scaler(scaler));
+        let filter=format!("format=rgba,{}",self.crop.filter_with_scaler(scaler,self.matte));
         if !self.flatten_alpha(){return filter}
         let [r,g,b]=self.matte;
         format!("{filter},format=rgba,split[matte_fg][matte_bg];[matte_bg]lut=r={r}:g={g}:b={b}:a=255[matte_base];[matte_base][matte_fg]overlay=shortest=1:format=auto")
@@ -72,6 +80,9 @@ impl VideoSettings {
     fn use_two_pass(&self)->bool{self.bitrate_mode&&self.two_pass&&self.two_pass_available()}
     const FPS:[(&'static str,&'static str);9]=[("source","跟随源视频"),("24000/1001","23.976 fps"),("24","24 fps"),("25","25 fps"),("30000/1001","29.97 fps"),("30","30 fps"),("50","50 fps"),("60000/1001","59.94 fps"),("60","60 fps")];
     fn configure(&self,cmd:&mut std::process::Command){
+        self.configure_with_filter(cmd, None);
+    }
+    fn configure_with_filter(&self,cmd:&mut std::process::Command,filter:Option<&str>){
         if self.codec==10 {
             cmd.args(["-c:v","gif","-vf",&self.gif_filter_chain(),"-loop",&self.gif_loops.to_string(),"-an","-sn","-f","gif"]);
             return;
@@ -79,7 +90,8 @@ impl VideoSettings {
         if self.fps!="source"{cmd.args(["-r",&self.fps,"-fps_mode","cfr"]);}
         else if self.codec==9 {cmd.args(["-r","25","-fps_mode","cfr"]);}
         let pixel=match self.codec{4=>if self.container==4{"bgr24"}else{"rgb24"},5=>"yuvj422p",7=>"yuv422p10le",_=>"yuv420p"};
-        cmd.args(["-c:v",self.encoder(),"-vf",&self.spatial_filter("lanczos"),"-pix_fmt",pixel]);
+        let spatial = filter.map(str::to_owned).unwrap_or_else(|| self.spatial_filter("lanczos"));
+        cmd.args(["-c:v",self.encoder(),"-vf",&spatial,"-pix_fmt",pixel]);
         if self.bitrate_mode&&self.bitrate_available(){
             cmd.args(["-b:v",&format!("{}k",self.video_bitrate)]);
             if self.h26x(){cmd.args(["-preset","medium"]);}
@@ -116,7 +128,7 @@ impl VideoSettings {
         }).response.on_hover_text(tr(Self::CODECS[self.codec]));
         });
         if self.container<9 {ui.small(tr("当前视频编码不保留透明度，透明区域使用底色。"));}else{ui.checkbox(&mut self.flatten,tr("添加底色"));}
-        if self.flatten_alpha(){ui.horizontal(|ui|{ui.label(tr("导出底色"));ui.color_edit_button_srgb(&mut self.matte);});}
+        ui.horizontal_wrapped(|ui|{ui.label(tr("填充色"));fill_color_input(ui,&mut self.matte);});
         if self.bitrate_available(){
             let mut mode=if self.bitrate_mode{"bitrate"}else{"quality"}.to_owned();
             crate::theme::compact_selector(ui,&mut mode,[("quality","质量模式"),("bitrate","目标码率")]);
@@ -174,13 +186,13 @@ impl VideoSettings {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum AudioFormat { Mp3, Wav, Flac, M4a }
 impl AudioFormat {
     fn extension(self) -> &'static str { match self { Self::Mp3=>"mp3", Self::Wav=>"wav", Self::Flac=>"flac", Self::M4a=>"m4a" } }
     fn lossy(self) -> bool { matches!(self, Self::Mp3 | Self::M4a) }
 }
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct AudioSettings { format: AudioFormat, rate: u32, bits: u32, channels: u32, bitrate: u32 }
 impl Default for AudioSettings {
     fn default() -> Self { Self { format:AudioFormat::Mp3, rate:44100, bits:16, channels:2, bitrate:192 } }
@@ -188,6 +200,14 @@ impl Default for AudioSettings {
 impl AudioSettings {
     fn controls(&mut self, ui: &mut egui::Ui) {
         ui.label(tr("导出设置"));
+        self.format_and_rate(ui);
+        self.channels_and_quality(ui);
+    }
+    fn controls_rows(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| self.format_and_rate(ui));
+        ui.horizontal_wrapped(|ui| self.channels_and_quality(ui));
+    }
+    fn format_and_rate(&mut self, ui: &mut egui::Ui) {
         egui::ComboBox::from_id_salt("trim_format").width(58.0).selected_text(self.format.extension()).show_ui(ui, |ui| {
             for format in [AudioFormat::Mp3, AudioFormat::Wav, AudioFormat::Flac, AudioFormat::M4a] {
                 ui.selectable_value(&mut self.format, format, format.extension());
@@ -199,6 +219,8 @@ impl AudioSettings {
         egui::ComboBox::from_id_salt("trim_rate").width(78.0).selected_text(format!("{} Hz",self.rate)).show_ui(ui, |ui| {
             for rate in rates { ui.selectable_value(&mut self.rate, *rate, format!("{rate} Hz")); }
         }).response.on_hover_text(tr("采样率"));
+    }
+    fn channels_and_quality(&mut self, ui: &mut egui::Ui) {
         let depths: &[u32] = if self.format==AudioFormat::Wav { &[8,16,24,32] } else { &[16,24] };
         if !self.format.lossy() && !depths.contains(&self.bits) { self.bits=16; }
         if !self.format.lossy() {
@@ -230,6 +252,9 @@ impl AudioSettings {
 #[derive(Default)]
 pub struct Action {
     pub seek: Option<f64>,
+    pub manual_seek: bool,
+    pub trim_playback_changed: bool,
+    pub scrub: Option<f64>,
     pub toggle: bool,
     pub stop: bool,
     pub rewind: bool,
@@ -239,6 +264,7 @@ pub struct Action {
 }
 
 pub struct AudioView<'a> {
+    pub fps: f64,
     pub video_texture: Option<&'a egui::TextureHandle>,
     pub video_size: Option<[usize;2]>,
     pub frame_times: Option<&'a [f64]>,
@@ -251,6 +277,17 @@ pub struct AudioView<'a> {
 }
 
 impl Trim {
+    pub fn playback_ranges(&self) -> Option<Vec<(f64, f64)>> {
+        if !self.trim_playback { return None; }
+        if let Some(session) = &self.session {
+            Some(session.state.kept_ranges())
+        } else {
+            Some(vec![(self.start, self.end)])
+        }
+    }
+    pub fn interval_playback(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| session.state.interval())
+    }
     pub fn preview_range(&self)->(f64,f64){(self.start,self.end)}
     pub fn sequence_source(&self)->Option<std::sync::Arc<crate::media_preview::SequenceSource>>{self.sequence_source.clone()}
     pub fn keep_sequence_source(&mut self,source:std::sync::Arc<crate::media_preview::SequenceSource>){self.video_settings.gif_fps=source.fps();self.sequence_source=Some(source);}
@@ -261,26 +298,30 @@ impl Trim {
         if let Some(session)=&mut self.session{session.poll(ctx);}
     }
     pub fn clip(&self)->Option<std::sync::Arc<crate::audio_edit::Clip>>{self.session.as_ref()?.state.clip.clone()}
-    fn range_values(&mut self,ui:&mut egui::Ui,duration:f64,position:f64) {
-        let interval=self.session.as_ref().is_some_and(|session|session.state.interval());
-        ui.label(tr(if interval{"区间起点"}else{"保留起点"}));
-        ui.add(egui::DragValue::new(&mut self.start).speed(0.1).range(0.0..=duration).max_decimals(3).suffix(" s"));
-        if ui.button(tr("以当前位置为起点")).clicked(){self.start=position.clamp(0.0,duration);}
-        ui.label(tr(if interval{"区间终点"}else{"保留终点"}));
-        ui.add(egui::DragValue::new(&mut self.end).speed(0.1).range(0.0..=duration).max_decimals(3).suffix(" s"));
-        if ui.button(tr("以当前位置为终点")).clicked(){self.end=position.clamp(0.0,duration);}
-    }
-    fn range_actions(&mut self,ui:&mut egui::Ui,duration:f64,video:bool,action:&mut Action) {
-        if ui.button(tr("重置范围")).clicked(){self.start=0.0;self.end=duration;}
-        if video && ui.add_enabled(valid_range(self.start,self.end,duration),egui::Button::new(tr("试听保留片段"))).clicked(){action.audition=Some((self.start,self.end));}
-        if ui.button(tr("跳到起点")).clicked(){action.seek=Some(self.start);}
-        if ui.button(tr("跳到终点")).clicked(){action.seek=Some(self.end);}
+    fn range_values(&mut self,ui:&mut egui::Ui,duration:f64,_position:f64) {
+        range_label(ui, "起始");
+        ui.add_enabled_ui(!self.boundary_locks[0],|ui| {ui.add_sized([90.0,28.0],range_time_input(&mut self.start,duration));});
+        boundary_lock_button(ui,&mut self.boundary_locks[0],true);
+        range_label(ui, "结束");
+        ui.add_enabled_ui(!self.boundary_locks[1],|ui| {ui.add_sized([90.0,28.0],range_time_input(&mut self.end,duration));});
+        boundary_lock_button(ui,&mut self.boundary_locks[1],false);
+        if ui.add_enabled(!self.boundary_locks.iter().all(|locked|*locked),egui::Button::new(tr("重置范围"))).clicked(){
+            let before=(self.start,self.end);
+            if !self.boundary_locks[0]{self.start=0.0;}
+            if !self.boundary_locks[1]{self.end=duration;}
+            if before!=(self.start,self.end) {
+                self.range_resets.push(before);
+                if self.range_resets.len()>100 {self.range_resets.remove(0);}
+                self.history_changed=true;
+            }
+        }
     }
     pub fn open(&mut self, duration: f64) {
         if !self.open && self.pending.is_none() { self.start=0.0;self.end=duration;self.result=None; }
         self.open=true;
     }
     pub fn is_open(&self)->bool {self.open}
+    pub(crate) fn keep_open(&mut self) { self.open=true; }
     fn edit_buttons(&mut self,ui:&mut egui::Ui,duration:f64,action:&mut Action){
         let Some(session)=&mut self.session else{return};
         if ui.add_enabled(session.ready()&&(session.state.interval()||valid_range(self.start,self.end,duration)),egui::Button::new(tr("剪切"))).clicked(){
@@ -360,12 +401,13 @@ impl Trim {
         if apply {session.apply(false,ctx,self.dialog_before.take());self.fade_dialog=None;self.gain_dialog=false;}
         else if cancel||!open {if let Some(before)=self.dialog_before.take(){session.state=before;}self.fade_dialog=None;self.gain_dialog=false;}
     }
-    pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, ffmpeg: &Path, duration: f64, position: f64, video: bool, audio: Option<u64>, view: AudioView<'_>) -> Action {
+    pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, window_path: &Path, queue: &mut crate::media_edit_queue::Panel, ffmpeg: &Path, duration: f64, position: f64, video: bool, audio: Option<u64>, view: AudioView<'_>) -> Action {
         if video {self.video_tracks.initialize(path,audio,ui.ctx());}
         if let Some(size)=view.video_size {self.video_settings.crop.prepare(size);}
         self.history_changed=false;
         let before=self.session.as_ref().map(|session|session.state.clone());
         if let Some(session)=&self.session{self.start=session.state.start;self.end=session.state.end;}
+        let locked_bounds=(self.start,self.end);
         let settings_open=self.fade_dialog.is_some()||self.gain_dialog;
         let edit_busy=self.session.as_ref().is_some_and(|session|!session.ready())||self.session_error.is_some();
         let mut action = Action::default();
@@ -373,43 +415,84 @@ impl Trim {
             match receiver.try_recv() {
                 Ok(result) => { self.result = Some(result); self.pending = None; }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    let result=Err(tr("剪切任务意外中断").into());notify_export_result(&result);
+                    let result=Err(tr("剪切任务意外中断").into());
                     self.result = Some(result); self.pending = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
         if self.pending.is_some() { ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)); }
-        let title = if video { format!("{} - {}",tr("视频编辑"),path.file_name().unwrap_or_default().to_string_lossy()) } else {
-            format!("{} - {}", tr("音频编辑"), path.file_name().unwrap_or_default().to_string_lossy())
-        };
+        let editor_name = tr(if video { "视频编辑" } else { "音频编辑" });
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+        let title = if let Some(project) = &queue.project_path {
+            format!("{} - {} - {}", editor_name, project.file_name().unwrap_or_default().to_string_lossy(), file_name)
+        } else { format!("{} - {}", editor_name, file_name) };
         let mut open = self.open;
-        crate::native_window::Window::new(title).id(egui::Id::new(("media_trim", path)))
+        crate::native_window::Window::new(title).id(egui::Id::new(("media_trim", window_path)))
+            .retain_on_close_request()
             .open(&mut open).resizable(true).default_width(if video { 1100.0 } else { 900.0 })
             .scrollable(false).min_width(if video {800.0}else{560.0}).default_height(640.0).show(ui.ctx(), |ui| {
+                if queue.can_undo_remove && !queue.confirm_discard && !ui.ctx().wants_keyboard_input()
+                    && ui.input(|input|input.focused)
+                    && ui.input_mut(|input|input.consume_key(egui::Modifiers::CTRL,egui::Key::Z)) {
+                    queue.undo_remove=true;
+                }
+                if !queue.undo_remove && !self.range_resets.is_empty() && !queue.confirm_discard
+                    && !settings_open && !edit_busy && !ui.ctx().wants_keyboard_input()
+                    && ui.input(|input|input.focused)
+                    && ui.input_mut(|input|input.consume_key(egui::Modifiers::CTRL,egui::Key::Z)) {
+                    if let Some((start,end))=self.range_resets.pop() {
+                        if !self.boundary_locks[0] {self.start=start.clamp(0.0,duration);}
+                        if !self.boundary_locks[1] {self.end=end.clamp(0.0,duration);}
+                        if let Some(session)=&mut self.session {session.state.start=self.start;session.state.end=self.end;}
+                        self.history_changed=true;
+                    }
+                }
+                if ui.input(|input|input.viewport().close_requested()) {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                }
                 let mut export_requested=false;
+                queue.sidebar(ui, video);
+                let mut edit_rect = ui.available_rect_before_wrap();
+                if queue.expanded {
+                    // Splitting off the list consumes the original left edge.
+                    // Restore the editor's own padding after the divider.
+                    edit_rect.min.x = (edit_rect.min.x + 8.0).min(edit_rect.max.x);
+                }
+                ui.scope_builder(egui::UiBuilder::new().id_salt("media_edit_content").max_rect(edit_rect), |ui| {
                 if video {
-                    let minimum_width=crate::video_crop::Crop::minimum_width(ui).max(260.0);
+                    let header_width = ["保存工程", "导出"].iter().map(|label|
+                        (ui.painter().layout_no_wrap(tr(label).to_owned(),egui::FontId::proportional(16.0),egui::Color32::WHITE).size().x + 20.0).max(72.0)).sum::<f32>() + ui.spacing().item_spacing.x + 12.0;
+                    let minimum_width=crate::video_crop::Crop::minimum_width(ui).max(header_width);
                     let maximum_width=(ui.available_width()*0.55).max(minimum_width);
                     let mut export_frame = egui::Frame::side_top_panel(ui.style());
                     // The enclosing central panel already provides the outer right margin.
                     export_frame.inner_margin.right = 0;
                     egui::SidePanel::right(egui::Id::new(("video_export_settings_fixed",path))).default_width(300.0_f32.max(minimum_width)).width_range(minimum_width..=maximum_width).resizable(true).frame(export_frame).show_inside(ui,|ui|{
                         ui.horizontal(|ui|{
-                            let title=tr("导出设置");
-                            let title_width=ui.painter().layout_no_wrap(title.to_owned(),egui::TextStyle::Heading.resolve(ui.style()),ui.visuals().text_color()).size().x;
-                            ui.allocate_ui_with_layout(egui::vec2(title_width,40.0),egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.heading(title);});
-                            let width=(ui.painter().layout_no_wrap(tr("另存为").to_owned(),egui::FontId::proportional(20.0),egui::Color32::WHITE).size().x+24.0).max(100.0);
+                            let width=(ui.painter().layout_no_wrap(tr("导出").to_owned(),egui::FontId::proportional(16.0),egui::Color32::WHITE).size().x+20.0).max(72.0);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
-                                let button=ui.add_enabled(self.pending.is_none()&&(self.video_settings.container==10||self.video_tracks.valid(self.video_settings.container))&&valid_range(self.start,self.end,duration),egui::Button::new("").fill(egui::Color32::from_rgb(30,140,65)).min_size(egui::vec2(width,40.0)));
-                                button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,button.enabled(),tr("另存为")));
-                                ui.painter().text(button.rect.center(),egui::Align2::CENTER_CENTER,tr("另存为"),egui::FontId::proportional(20.0),if button.enabled(){egui::Color32::WHITE}else{ui.visuals().weak_text_color()});
+                                let button=ui.add_enabled(self.pending.is_none()&&(queue.merge&&self.video_tracks.ready()||!queue.merge&&(self.video_settings.container==10||self.video_tracks.valid(self.video_settings.container)))&&valid_range(self.start,self.end,duration),egui::Button::new("").fill(egui::Color32::from_rgb(30,140,65)).min_size(egui::vec2(width,32.0)));
+                                button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,button.enabled(),tr("导出")));
+                                paint_save_label(ui, &button);
                                 export_requested=button.clicked();
+                                project_save_button(ui, queue);
+                                edit_count_badge(ui,queue);
                             });
                         });
+                        ui.heading(tr("导出设置"));
                         ui.separator();
                         ui.style_mut().spacing.scroll.floating=false;
                         egui::ScrollArea::vertical().show(ui,|ui|{
+                            if queue.merge {
+                                let color = if ui.visuals().dark_mode {
+                                    egui::Color32::from_rgb(240, 170, 75)
+                                } else {
+                                    egui::Color32::from_rgb(150, 75, 0)
+                                };
+                                ui.add(egui::Label::new(egui::RichText::new(tr("合并导出时覆盖编码设置，单条设置仍可编辑并保留。"))
+                                    .small().color(color)).wrap());
+                            }
                             ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_settings.controls(ui);});
                             if self.video_settings.container!=10 {ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_tracks.controls(ui,self.video_settings.container,path,audio);});}
                             ui.add_enabled_ui(self.pending.is_none(),|ui|{self.video_settings.crop.controls(ui);});
@@ -420,20 +503,81 @@ impl Trim {
                         });
                     });
                 }
+                // Size this header from its contents: a panel's remembered height
+                // can clip the second row after controls grow or wrap.
+                let mut toolbar_frame = if video {
+                    egui::Frame::side_top_panel(ui.style())
+                } else {
+                    // The editor content already has outer padding. Avoid adding
+                    // a second inset above/below the row and beside Export.
+                    egui::Frame::NONE
+                };
+                toolbar_frame.inner_margin.top = 0;
+                toolbar_frame.inner_margin.left = 0;
+                toolbar_frame.inner_margin.right = 0;
+                toolbar_frame.show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    if video {
+                        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), crate::media_edit_queue::HEADER_HEIGHT), egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true), |ui| {
+                            queue.toolbar(ui);
+                            self.range_values(ui, duration, position);
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!("{}: {}", tr("区间时长"), crate::media_preview::time(self.end - self.start)));
+                        });
+                    } else {
+                        ui.horizontal_top(|ui| {
+                            let button_width = (ui.painter().layout_no_wrap(tr("导出").to_owned(), egui::FontId::proportional(16.0), egui::Color32::WHITE).size().x + 20.0).max(72.0);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let enabled = self.pending.is_none() && !edit_busy && !settings_open &&
+                                    self.session.as_ref().map_or(valid_range(self.start, self.end, duration), |session| session.ready());
+                                let button = ui.add_enabled(enabled, egui::Button::new("")
+                                    .fill(egui::Color32::from_rgb(30, 140, 65)).min_size(egui::vec2(button_width, 32.0)));
+                                button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tr("导出")));
+                                paint_save_label(ui, &button);
+                                export_requested = button.clicked();
+                                project_save_button(ui, queue);
+                                edit_count_badge(ui,queue);
+                                let width = ui.available_width();
+                                ui.allocate_ui_with_layout(egui::vec2(width, crate::media_edit_queue::HEADER_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    queue.toolbar(ui);
+                                    ui.add_enabled_ui(self.pending.is_none() && !edit_busy && !settings_open, |ui| {
+                                        ui.horizontal_wrapped(|ui| self.settings.controls(ui));
+                                    });
+                                });
+                            });
+                        });
+                    }
+                });
                 {
                     egui::TopBottomPanel::bottom("trim_transport").exact_height(28.0+ui.spacing().item_spacing.y).resizable(false).show_separator_line(false).frame(egui::Frame::NONE).show_inside(ui, |ui| {
                         ui.add_space(ui.spacing().item_spacing.y);
                     ui.add_enabled_ui(!edit_busy,|ui| {ui.horizontal(|ui| {
                         use crate::icons::Icon;
                         use crate::media_preview::transport_button;
-                        if transport_button(ui, if view.playing { Icon::Pause } else { Icon::Play }, tr(if view.playing { "暂停" } else { "播放" })) { action.toggle = true; }
+                        if transport_button(ui,Icon::Previous,tr("跳到起点")){action.seek=Some(self.start);}
+                        if transport_button(ui,Icon::Next,tr("跳到终点")){action.seek=Some(self.end);}
                         ui.add_enabled_ui(valid_range(self.start, self.end, duration)||self.session.as_ref().is_some_and(|session|session.state.interval()), |ui| {
-                            if transport_button(ui, Icon::TrimPlay, tr("剪切播放")) {
-                                if let Some(session)=&self.session {
-                                    let ranges=session.state.kept_ranges();action.audition=ranges.first().copied();action.audition_tail=ranges.get(1).copied();
-                                }else{action.audition=Some((self.start,self.end));}
+                            let widgets=&mut ui.visuals_mut().widgets;
+                            for visuals in [&mut widgets.inactive,&mut widgets.hovered,&mut widgets.active,&mut widgets.open,&mut widgets.noninteractive] {
+                                visuals.expansion=0.0;
+                            }
+                            let button = if self.trim_playback {
+                                egui::Button::new("").fill(crate::theme::BLUE)
+                                    .stroke(egui::Stroke::new(1.0_f32, crate::theme::BLUE))
+                                    .corner_radius(3)
+                            } else {
+                                egui::Button::new("")
+                            };
+                            let response = ui.add_sized([28.0, 28.0], button);
+                            let color = if self.trim_playback { egui::Color32::WHITE } else { ui.visuals().weak_text_color() };
+                            crate::icons::paint(ui, Icon::TrimPlay, response.rect.shrink(5.0), color);
+                            if response.on_hover_text(tr("剪切播放")).clicked() {
+                                self.trim_playback = !self.trim_playback;
+                                action.trim_playback_changed = true;
                             }
                         });
+                        if transport_button(ui, if view.playing { Icon::Pause } else { Icon::Play }, tr(if view.playing { "暂停" } else { "播放" })) { action.toggle = true; }
                         if transport_button(ui, Icon::Stop, tr("停止")) { action.stop = true; action.rewind = true; }
                         let mut volume=view.volume;
                         crate::media_preview::volume_control(ui,path,&mut volume,&mut self.remembered_volume,&mut self.volume_hover,None);
@@ -445,6 +589,7 @@ impl Trim {
                             if let Some(pointer)=response.interact_pointer_pos() {
                                 cursor=((pointer.x-rect.left())/rect.width()).clamp(0.0,1.0) as f64*duration;
                                 action.seek=Some(cursor);
+                                action.manual_seek = true;
                             }
                         }
                         if duration>0.0 {
@@ -457,25 +602,21 @@ impl Trim {
                     });
                 }
                 if video {
-                    egui::TopBottomPanel::top("video_trim_range").resizable(false).show_inside(ui,|ui|{
-                        ui.add_enabled_ui(self.pending.is_none(),|ui|{
-                            ui.horizontal_wrapped(|ui|{self.range_values(ui,duration,position);});
-                            ui.horizontal_wrapped(|ui|{self.range_actions(ui,duration,false,&mut action);ui.label(format!("{}: {:.3} s",tr("区间时长"),(self.end-self.start).max(0.0)));});
-                        });
-                    });
                     egui::TopBottomPanel::bottom("video_edit_timeline").exact_height(88.0).resizable(false).show_inside(ui,|ui|{
                         ui.add_enabled_ui(self.pending.is_none(),|ui|{
-                            if let Some(seek)=crate::media_preview::paint_video_edit_timeline(ui,position,duration,&mut self.start,&mut self.end,view.playing,view.frame_times){action.seek=Some(seek);}
+                            if let Some((position, dragging)) = crate::media_preview::paint_video_edit_timeline(ui,position,duration,&mut self.start,&mut self.end,view.playing,view.fps,view.frame_times,self.boundary_locks) {
+                                action.manual_seek = true;
+                                if dragging { action.scrub = Some(position); }
+                                else { action.seek = Some(position); }
+                            }
                         });
                     });
                 }
                 if !video {
                     ui.add_enabled_ui(self.pending.is_none() && !edit_busy && !settings_open, |ui| {
                         ui.horizontal_top(|ui| {
-                            let button_width=(ui.painter().layout_no_wrap(tr("另存为").to_owned(),egui::FontId::proportional(20.0),egui::Color32::WHITE).size().x+24.0).max(120.0);
-                            let left_width=(ui.available_width()-button_width-ui.spacing().item_spacing.x).max(1.0);
+                            let left_width=ui.available_width().max(1.0);
                             ui.allocate_ui_with_layout(egui::vec2(left_width,0.0),egui::Layout::top_down(egui::Align::Min),|ui| {
-                                ui.horizontal_wrapped(|ui| {self.settings.controls(ui);});
                                 ui.horizontal_wrapped(|ui| {
                                     if let Some(session)=&mut self.session {
                                         if crate::theme::compact_selector(ui,&mut session.state.mode,[("ends","头尾"),("interval","区间")]) {
@@ -485,9 +626,9 @@ impl Trim {
                                             else{let low=self.start.min(self.end);self.end=self.start.max(self.end);self.start=low;}
                                         }
                                         let selected=(self.end.clamp(0.0,duration)-self.start.clamp(0.0,duration)).abs();
-                                        ui.label(format!("{}: {:.3} s",tr("区间时长"),selected));
+                                        ui.label(format!("{}: {}",tr("区间时长"),crate::media_preview::time(selected)));
                                         if session.state.interval(){
-                                            ui.label(format!("{}: {:.3} s",tr("剪切后时长"),(duration-selected).max(0.0)));
+                                            ui.label(format!("{}: {}",tr("剪切后时长"),crate::media_preview::time((duration-selected).max(0.0))));
                                         }
                                     }
                                     self.edit_buttons(ui,duration,&mut action);
@@ -495,24 +636,21 @@ impl Trim {
                                 egui::ScrollArea::horizontal().id_salt("trim_range_controls").auto_shrink([false,true]).show(ui,|ui| {
                                     ui.horizontal(|ui| {self.range_values(ui,duration,position);});
                                 });
-                                ui.horizontal_wrapped(|ui| {self.range_actions(ui,duration,false,&mut action);});
                             });
-                            let export_button=ui.add_enabled(self.session.as_ref().map_or(valid_range(self.start,self.end,duration),|session|session.ready()),
-                                egui::Button::new("").fill(egui::Color32::from_rgb(30,140,65)).min_size(egui::vec2(button_width,40.0)));
-                            export_button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,export_button.enabled(),tr("另存为")));
-                            ui.painter().text(export_button.rect.center(),egui::Align2::CENTER_CENTER,tr("另存为"),egui::FontId::proportional(20.0),
-                                if export_button.enabled(){egui::Color32::WHITE}else{ui.visuals().weak_text_color()});
-                            export_requested=export_button.clicked();
                         });
                     });
                 }
                 ui.add_enabled_ui(self.pending.is_none() && !edit_busy && !settings_open, |ui| {
                     if !video {ui.label(tr("仅导出当前音轨；音量控件仅影响试听。"));
-                    ui.small(tr("重新编码，边界受帧 / 采样精度限制；保存确认后可覆盖同名文件，PNG 序列需新文件夹。"));
+                    ui.small(tr("重新编码，边界受采样精度限制；确认后可覆盖同名音频文件。"));
                     }
                     let valid = valid_range(self.start, self.end, duration);
                     if !valid && !self.session.as_ref().is_some_and(|session|session.state.interval()) { ui.colored_label(ui.visuals().warn_fg_color, tr("终点必须大于起点且不超过媒体时长")); }
-                    if export_requested {
+                    if export_requested && !queue.items.iter().any(|item|item.enabled) {
+                        queue.error=Some(tr("请至少勾选一个导出条目。").into());
+                    } else if export_requested && (queue.items.len() > 1 || queue.merge) {
+                        queue.export = true;
+                    } else if export_requested {
                         let extension = if video { self.video_settings.extension() } else { self.settings.format.extension() };
                         let name = if video&&self.video_settings.container==10 {format!("{}_frames",path.file_stem().unwrap_or_default().to_string_lossy())}else{format!("{}_trim.{extension}", path.file_stem().unwrap_or_default().to_string_lossy())};
                         let dialog = rfd::FileDialog::new().set_file_name(&name);
@@ -533,10 +671,17 @@ impl Trim {
                                 let settings=self.settings.clone();
                                 let video_settings=self.video_settings.clone();
                                 let tracks=self.video_tracks.entries.clone();let sequence_source=self.sequence_source.clone();
+                                use crate::background_tasks::{Outcome, Progress, Target, Task};
+                                let task = Task::start(&ctx, if video { "视频编辑" } else { "音频编辑" },
+                                    target.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                                    || Progress { stage: tr("正在导出剪切片段…").into(), fraction: None, cancellable: false }, None);
                                 std::thread::spawn(move || {
                                     let _cache=clip;let _sequence_source=sequence_source;
                                     let result = export(&ffmpeg, &source, &target, start, end, duration, video, audio, &settings,&video_settings,&tracks,filter.as_deref());
-                                    notify_export_result(&result);
+                                    task.finish(match &result {
+                                        Ok(path) => Outcome::Complete(Some(Target::File(path.clone()))),
+                                        Err(error) => Outcome::Failed(error.clone()),
+                                    });
                                     let _ = tx.send(result); ctx.request_repaint();
                                 });
                             }
@@ -557,15 +702,16 @@ impl Trim {
                     ui.small(tr(if self.session.as_ref().is_some_and(|session|session.state.interval()) {
                         "区间：左键设起点，右键设终点；删除两条边界之间的范围并拼接两端。"
                     }else{"波形左键设置起点，右键设置终点；拖动绿色边界调整范围。"}));
-                    ui.small(tr("选择仅作预览；点击剪切提交，另存为输出当前完整时间轴。"));
+                    ui.small(tr("选择仅作预览；点击剪切提交，导出输出当前完整时间轴。"));
                     crate::media_preview::paint_level_meter(ui, view.wave, position, duration, &mut self.meter_trails);
                     if self.session.as_ref().is_some_and(|session|session.busy()) {ui.horizontal(|ui|{ui.spinner();ui.label(tr("正在处理无损音频…"));});}
                     if let Some(error)=self.session_error.as_ref().or_else(||self.session.as_ref().and_then(|session|session.error.as_ref())){ui.colored_label(ui.visuals().error_fg_color,tr(error));}
                     let processed_wave=self.session.as_ref().filter(|session|session.state.db!=0.0||session.state.fade_in>0.0||session.state.fade_out>0.0).and_then(|session|view.wave.map(|wave|session.filter_preview(wave)));
                     if let Some(wave) = processed_wave.as_deref().or(view.wave) {
                         ui.add_enabled_ui(!edit_busy && !settings_open,|ui| {ui.allocate_ui(egui::vec2(ui.available_width(), ui.available_height().max(1.0)), |ui| {
-                            if let Some(seek) = crate::media_preview::paint_trim_waveform(ui, wave, position, duration, &mut self.start, &mut self.end,self.session.as_ref().is_some_and(|session|session.state.interval()),view.playing) {
+                            if let Some(seek) = crate::media_preview::paint_trim_waveform(ui, wave, position, duration, &mut self.start, &mut self.end,self.session.as_ref().is_some_and(|session|session.state.interval()),view.playing,self.boundary_locks) {
                                 action.seek = Some(seek);
+                                action.manual_seek = true;
                             }
                         });});
                     } else if let Some(error) = view.wave_error {
@@ -575,10 +721,12 @@ impl Trim {
                 } else {
                     let available=egui::vec2(ui.available_width().max(1.0),ui.available_height().max(1.0));
                     let (rect,response)=ui.allocate_exact_size(available,egui::Sense::click());
-                    ui.painter().rect_filled(rect,0.0,egui::Color32::BLACK);
+                    ui.painter().rect_filled(rect,0.0,egui::Color32::from_rgb(self.video_settings.matte[0],self.video_settings.matte[1],self.video_settings.matte[2]));
                     if let Some(texture)=view.video_texture {
-                        let size=self.video_settings.crop.preview_size(texture.size_vec2());let scale=(rect.width()/size.x).min(rect.height()/size.y);
-                        let image=egui::Rect::from_center_size(rect.center(),size*scale);
+                        let (image,canvas)=self.video_settings.crop.preview_rects(rect,texture.size_vec2());
+                        if self.video_settings.crop.enabled {
+                            ui.painter().rect_filled(canvas,0.0,egui::Color32::from_rgb(self.video_settings.matte[0],self.video_settings.matte[1],self.video_settings.matte[2]));
+                        }
                         if self.video_settings.flatten_alpha(){ui.painter().rect_filled(image,0.0,egui::Color32::from_rgb(self.video_settings.matte[0],self.video_settings.matte[1],self.video_settings.matte[2]));}else{
                             let painter=ui.painter().with_clip_rect(image.intersect(rect));let cell=16.;
                             let columns=(image.width()/cell).ceil() as u32;let rows=(image.height()/cell).ceil() as u32;
@@ -586,11 +734,60 @@ impl Trim {
                         }
                         ui.painter().image(texture.id(),image,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
                         self.video_settings.crop.overlay(ui,image,self.pending.is_none());
-                    } else {ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,tr("播放"),egui::FontId::proportional(16.0),egui::Color32::WHITE);}
+                    } else {
+                        let diameter=128.0_f32.min(rect.width().min(rect.height())).max(1.0);
+                        let button_rect=egui::Rect::from_center_size(rect.center(),egui::Vec2::splat(diameter));
+                        let hovered=ui.input(|input|input.pointer.hover_pos().is_some_and(|point|button_rect.contains(point)));
+                        crate::media_preview::paint_large_play(ui,button_rect,if hovered {crate::theme::BLUE}else{egui::Color32::WHITE});
+                    }
                     if response.clicked() && !self.video_settings.crop.enabled {action.toggle=true;}
+                }
+                });
+                if ui.is_enabled() && !queue.confirm_discard && !edit_busy && !settings_open && !ui.ctx().wants_keyboard_input()
+                    && ui.input(|input|input.focused)
+                {
+                    let space = ui.input_mut(|input| {
+                        let pressed = input.events.iter().any(|event| matches!(event,
+                            egui::Event::Key {key:egui::Key::Space,pressed:true,repeat:false,modifiers,..}
+                                if *modifiers == egui::Modifiers::NONE));
+                        pressed && input.consume_key(egui::Modifiers::NONE,egui::Key::Space)
+                    });
+                    if space { action.toggle = true; }
+                }
+                if queue.confirm_discard {
+                    egui::Modal::new(egui::Id::new(("discard_media_edits",window_path))).show(ui.ctx(),|ui| {
+                        ui.set_width(320.0);
+                        let header_fill=if ui.visuals().dark_mode {egui::Color32::from_rgb(47,50,64)}else{egui::Color32::from_rgb(225,230,237)};
+                        egui::Frame::new().fill(header_fill).inner_margin(egui::Margin::symmetric(8,8)).show(ui,|ui| {
+                            ui.set_width(304.0);
+                            ui.vertical_centered(|ui| {ui.heading(tr("放弃修改？"));});
+                        });
+                        ui.separator();
+                        ui.add_space(6.0);
+                        ui.vertical_centered(|ui| {
+                            ui.add(egui::Label::new(tr("编辑内容尚未保存，是否放弃修改并关闭窗口？")).wrap().halign(egui::Align::Center));
+                        });
+                        ui.add_space(12.0);
+                        let labels=[tr("确定"),tr("取消")];
+                        let button_width=labels.iter().map(|label|ui.painter().layout_no_wrap((*label).to_owned(),egui::FontId::proportional(16.0),ui.visuals().text_color()).size().x+32.0).fold(96.0_f32,f32::max);
+                        ui.horizontal(|ui| {
+                            ui.add_space(((ui.available_width()-button_width*2.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
+                            if ui.add_sized([button_width,34.0],egui::Button::new(egui::RichText::new(labels[0]).size(16.0).color(egui::Color32::WHITE))
+                                .fill(egui::Color32::from_rgb(190,45,55))).clicked() {
+                                queue.discard_confirmed=true;queue.confirm_discard=false;
+                            }
+                            if ui.add_sized([button_width,34.0],egui::Button::new(egui::RichText::new(labels[1]).size(16.0).color(egui::Color32::WHITE))
+                                .fill(egui::Color32::from_rgb(30,140,65))).clicked() {
+                                queue.confirm_discard=false;
+                            }
+                        });
+                        if ui.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape)) {queue.confirm_discard=false;}
+                    });
                 }
             });
         self.open = open;
+        if self.boundary_locks[0] { self.start=locked_bounds.0; }
+        if self.boundary_locks[1] { self.end=locked_bounds.1; }
         if let Some(session)=&mut self.session {
             session.state.start=self.start;session.state.end=self.end;
             let (start,end)=session.state.bounds();let span=(end-start).max(0.0);session.state.fade_in=session.state.fade_in.min(span);session.state.fade_out=session.state.fade_out.min((span-session.state.fade_in).max(0.0));
@@ -601,22 +798,127 @@ impl Trim {
     }
 }
 
-fn valid_range(start: f64, end: f64, duration: f64) -> bool {
-    start.is_finite() && end.is_finite() && duration.is_finite() && start >= 0.0 && end > start && end <= duration
+fn parse_fill_hex(text:&str)->Option<[u8;3]> {
+    let text=text.trim().strip_prefix('#').unwrap_or(text.trim());
+    if !text.bytes().all(|value|value.is_ascii_hexdigit()){return None;}
+    let value=u32::from_str_radix(text,16).ok()?;
+    match text.len() {
+        6=>Some([(value>>16) as u8,(value>>8) as u8,value as u8]),
+        3=>Some([((value>>8)&15) as u8*17,((value>>4)&15) as u8*17,(value&15) as u8*17]),
+        _=>None,
+    }
+}
+fn fill_color_input(ui:&mut egui::Ui,color:&mut [u8;3]) {
+    let picked=ui.color_edit_button_srgb(color).changed();
+    let id=ui.id().with("fill_hex");
+    let format=|c:[u8;3]|format!("#{:02X}{:02X}{:02X}",c[0],c[1],c[2]);
+    let focused=ui.memory(|memory|memory.has_focus(id));
+    let mut value=if focused && !picked {ui.ctx().data(|data|data.get_temp::<String>(id)).unwrap_or_else(||format(*color))}else{format(*color)};
+    let response=ui.add(egui::TextEdit::singleline(&mut value).id(id).desired_width(78.0).char_limit(7));
+    if response.changed(){if let Some(parsed)=parse_fill_hex(&value){*color=parsed;}}
+    if response.lost_focus(){value=format(*color);}
+    ui.ctx().data_mut(|data|data.insert_temp(id,value));
 }
 
-fn notify_export_result(result:&Result<PathBuf,String>){
-    let (title,description,level)=match result {
-        Ok(path)=>(tr("导出完成").to_owned(),path.display().to_string(),rfd::MessageLevel::Info),
-        Err(error)=>(tr("导出失败").to_owned(),error.clone(),rfd::MessageLevel::Error),
-    };
-    std::thread::spawn(move||{rfd::MessageDialog::new().set_title(title).set_description(description).set_level(level).show();});
+fn boundary_lock_button(ui:&mut egui::Ui,locked:&mut bool,start:bool) {
+    ui.scope(|ui| {
+    let widgets=&mut ui.visuals_mut().widgets;
+    for visuals in [&mut widgets.inactive,&mut widgets.hovered,&mut widgets.active,&mut widgets.open,&mut widgets.noninteractive] {
+        visuals.expansion=0.0;
+    }
+    let mut button=egui::Button::new("");
+    if *locked {button=button.fill(egui::Color32::from_rgb(190,45,55)).stroke(egui::Stroke::new(1.0_f32,egui::Color32::from_rgb(220,65,75)));}
+    let response=ui.add_sized([28.0,28.0],button);
+    crate::icons::paint(ui,if start {crate::icons::Icon::MarkStart}else{crate::icons::Icon::MarkEnd},response.rect.shrink(5.0),if *locked {egui::Color32::WHITE}else{ui.visuals().text_color()});
+    let label=tr(match (start,*locked) {(true,false)=>"锁定起始",(true,true)=>"解除起始锁定",(false,false)=>"锁定结束",(false,true)=>"解除结束锁定"});
+    response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Checkbox,response.enabled(),*locked,label));
+    if response.on_hover_text(label).clicked(){*locked=!*locked;}
+    });
+}
+
+fn range_label(ui: &mut egui::Ui, text: &str) {
+    let width = ui.painter().layout_no_wrap(tr(text).to_owned(), egui::TextStyle::Body.resolve(ui.style()), ui.visuals().text_color()).size().x;
+    ui.add_sized([width, 28.0], egui::Label::new(tr(text)));
+}
+
+fn edit_count_badge(ui:&mut egui::Ui,queue:&crate::media_edit_queue::Panel) {
+    let count=if queue.items.len()==1 {1}else{queue.items.iter().filter(|item|item.enabled).count()};
+    let label=if count>1 {format!("{} ({count})",tr("多个"))}else{tr("单个").to_owned()};
+    let color=ui.visuals().weak_text_color();
+    ui.add(egui::Label::new(egui::RichText::new(label).color(color).strong()).selectable(false))
+        .on_hover_text(tr("按勾选参与导出的素材数量显示；只有一份素材时默认选中。"));
+}
+
+fn project_save_button(ui: &mut egui::Ui, queue: &mut crate::media_edit_queue::Panel) {
+    let label = tr(if queue.project_path.is_some() { "保存" } else { "保存工程" });
+    let color = egui::Color32::WHITE;
+    let galley = ui.painter().layout_no_wrap(label.to_owned(),egui::FontId::proportional(16.0),color);
+    let button = ui.add_enabled(!queue.project_saving,egui::Button::new("").fill(crate::theme::BLUE)
+        .min_size(egui::vec2((galley.size().x+20.0).max(72.0),32.0)));
+    button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,button.enabled(),label));
+    let offset=galley.mesh_bounds.center().to_vec2();
+    ui.painter().galley(button.rect.center()-offset,galley,color);
+    if button.clicked() || ui.ctx().input_mut(|input|input.consume_key(egui::Modifiers::CTRL,egui::Key::S)) {
+        queue.save_project=true;
+    }
+    button.context_menu(|ui| {
+        if ui.button(tr("工程另存为…")).clicked() {queue.project_save_as=true;queue.save_project=true;ui.close_menu();}
+    });
+}
+
+fn paint_save_label(ui: &egui::Ui, button: &egui::Response) {
+    let color = if button.enabled() { egui::Color32::WHITE } else { ui.visuals().weak_text_color() };
+    let galley = ui.painter().layout_no_wrap(tr("导出").to_owned(), egui::FontId::proportional(16.0), color);
+    // Center the visible glyphs, including fallback CJK fonts with different metrics.
+    let offset = galley.mesh_bounds.center().to_vec2();
+    ui.painter().galley(button.rect.center()-offset, galley, color);
+}
+
+fn range_time_input(value: &mut f64, duration: f64) -> egui::DragValue<'_> {
+    egui::DragValue::new(value).speed(0.1).range(0.0..=duration).max_decimals(3)
+        .custom_formatter(|seconds, _| crate::media_preview::time(seconds))
+        .custom_parser(parse_video_time)
+}
+
+fn parse_video_time(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if let Some((hours, rest)) = value.split_once(':') {
+        let (minutes, seconds) = rest.split_once(':')?;
+        let hours = hours.parse::<u32>().ok()?;
+        let minutes = minutes.parse::<u32>().ok()?;
+        let seconds = seconds.parse::<f64>().ok()?;
+        (minutes < 60 && (0.0..60.0).contains(&seconds))
+            .then(|| f64::from(hours) * 3600.0 + f64::from(minutes) * 60.0 + seconds)
+    } else {
+        value.parse::<f64>().ok().filter(|seconds| seconds.is_finite())
+    }
+}
+
+fn valid_range(start: f64, end: f64, duration: f64) -> bool {
+    start.is_finite() && end.is_finite() && duration.is_finite() && start >= 0.0 && end > start && end <= duration
 }
 
 struct PassLogs(PathBuf);
 #[cfg(test)]
 mod rate_control_tests {
+    #[test]
+    fn fill_hex_accepts_six_and_three_digits() {
+        assert_eq!(super::parse_fill_hex("#FFFFFF"),Some([255;3]));
+        assert_eq!(super::parse_fill_hex("#f08"),Some([255,0,136]));
+        assert_eq!(super::parse_fill_hex("102030"),Some([16,32,48]));
+        assert_eq!(super::parse_fill_hex("#FFFFF"),None);
+        assert_eq!(super::parse_fill_hex("#GG0000"),None);
+    }
     use super::*;
+    #[test]
+    fn video_range_accepts_timecode_and_seconds() {
+        assert_eq!(parse_video_time("00:05:31.756"), Some(331.756));
+        assert_eq!(parse_video_time("01:00:00.001"), Some(3600.001));
+        assert_eq!(parse_video_time("331.756"), Some(331.756));
+        assert_eq!(parse_video_time("00:60:00.000"), None);
+        assert_eq!(parse_video_time("00:00:60.000"), None);
+        assert_eq!(parse_video_time("NaN"), None);
+    }
     #[test]
     fn default_is_single_pass_quality_and_source_fps(){
         let settings=VideoSettings::default();assert!(!settings.use_two_pass());assert!(!settings.bitrate_mode);assert_eq!(settings.fps,"source");
@@ -704,8 +1006,8 @@ fn export_png_sequence(ffmpeg:&Path,source:&Path,target:&Path,start:f64,end:f64,
 }
 
 fn commit_export(temporary:&Path,target:&Path)->Result<(),String>{
-    std::fs::OpenOptions::new().write(true).open(temporary).and_then(|file|file.sync_all()).map_err(|e|e.to_string())?;
-    crate::playlist::replace(temporary,target)
+    std::fs::OpenOptions::new().write(true).open(temporary).and_then(|file|file.sync_all()).map_err(|e|format!("{}: {e}",temporary.display()))?;
+    crate::playlist::replace(temporary,target).map_err(|error|format!("{} → {}: {error}",temporary.display(),target.display()))
 }
 
 fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, duration: f64, video: bool, audio: Option<u64>, settings: &AudioSettings, video_settings:&VideoSettings, tracks:&[crate::export_tracks::Track], audio_filter:Option<&str>) -> Result<PathBuf, String> {

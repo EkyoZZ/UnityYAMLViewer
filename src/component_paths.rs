@@ -44,11 +44,15 @@ pub(crate) fn yt_dlp_version_key(version: &str) -> Option<[u32; 4]> {
 }
 
 pub(crate) fn yt_dlp_version(path: &Path) -> Result<String, String> {
+    if let Some(version)=crate::media_tools::yt_cache::version(path){return Ok(version);}
     let output = crate::media_tools::command(path).args(["--ignore-config", "--no-update", "--version"])
         .output().map_err(|error| error.to_string())?;
     let version = String::from_utf8_lossy(&output.stdout);
     let version = version.trim();
-    if output.status.success() && yt_dlp_version_key(version).is_some() { return Ok(version.to_owned()); }
+    if output.status.success() && yt_dlp_version_key(version).is_some() {
+        crate::media_tools::yt_cache::remember(path,version);
+        return Ok(version.to_owned());
+    }
     Err(tr("指定程序与组件不匹配或无法运行。").into())
 }
 #[derive(Default)]

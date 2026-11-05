@@ -2,7 +2,7 @@
 use eframe::egui;
 
 #[derive(Clone, Copy)]
-pub enum Icon { Gear, Eye, Hand, Play, Pause, Stop, Next, TrimPlay, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup }
+pub enum Icon { Gear, BackgroundTasks, EditList, Eye, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, DragHandle, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup }
 
 pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) {
     // Keep Next's triangle and bar at their original scale; TrimPlay adds a bar.
@@ -14,20 +14,27 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         Icon::Minus => egui::include_image!("../assets/icons/minus.svg"),
         Icon::Search => egui::include_image!("../assets/icons/search.svg"),
         Icon::Close => egui::include_image!("../assets/icons/close.svg"),
+        Icon::EditList => egui::include_image!("../assets/icons/edit-list.svg"),
+        Icon::BackgroundTasks => egui::include_image!("../assets/icons/background-tasks.svg"),
         Icon::Gear => egui::include_image!("../assets/icons/gear.svg"),
         Icon::Eye => egui::include_image!("../assets/icons/eye.svg"),
         Icon::Hand => egui::include_image!("../assets/icons/hand.svg"),
         Icon::Play => egui::include_image!("../assets/icons/play.svg"),
         Icon::ChevronLeft => egui::include_image!("../assets/icons/chevron-left.svg"),
         Icon::ChevronRight => egui::include_image!("../assets/icons/chevron-right.svg"),
-        Icon::Next => egui::include_image!("../assets/icons/next.svg"),
+        Icon::Next | Icon::Previous => egui::include_image!("../assets/icons/next.svg"),
         Icon::TrimPlay => egui::include_image!("../assets/icons/trim-play.svg"),
+        Icon::DragHandle => egui::include_image!("../assets/icons/drag-handle.svg"),
+        Icon::MarkStart => egui::include_image!("../assets/icons/mark-start.svg"),
+        Icon::MarkEnd => egui::include_image!("../assets/icons/mark-end.svg"),
         Icon::Stop => egui::include_image!("../assets/icons/stop.svg"),
         Icon::Pause => egui::include_image!("../assets/icons/pause.svg"),
         Icon::TriangleRight => egui::include_image!("../assets/icons/triangle-right.svg"),
         Icon::TriangleDown => egui::include_image!("../assets/icons/triangle-down.svg"),
     };
-    egui::Image::new(source).fit_to_exact_size(rect.size()).tint(color).paint_at(ui, rect);
+    let mut image=egui::Image::new(source).fit_to_exact_size(rect.size()).tint(color);
+    if matches!(icon,Icon::Previous) {image=image.uv(egui::Rect::from_min_max(egui::pos2(1.0,0.0),egui::pos2(0.0,1.0)));}
+    image.paint_at(ui,rect);
 }
 
 /// Square vector-icon button shared by compact toolbar controls.

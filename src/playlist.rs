@@ -313,7 +313,10 @@ impl Session {
             if !is_audio && self.state.numbers && !self.edit {
                 let columns=(ui.available_width()/54.0).floor().max(1.0) as usize;
                 egui::Grid::new(("playlist_numbers",path)).spacing(egui::vec2(4.0,4.0)).show(ui,|ui|{
-                    for (index,item) in self.entries.iter().enumerate(){let response=ui.add_sized([50.0,44.0],egui::Button::new((index+1).to_string()).selected(index==self.current));
+                    for (index,item) in self.entries.iter().enumerate(){
+                        let mut label=egui::RichText::new((index+1).to_string());
+                        if !item.path.is_file(){label=label.color(ui.visuals().error_fg_color);}
+                        let response=ui.add_sized([50.0,44.0],egui::Button::new(label).selected(index==self.current));
                         if self.scroll_current&&index==self.current{response.scroll_to_me(Some(egui::Align::Center));}
                         if response.clicked(){select=Some(index);}
                         response.on_hover_text(format!("{}\n{}",item.title,item.path.display()));if (index+1)%columns==0{ui.end_row();}
@@ -323,7 +326,9 @@ impl Session {
                 for (index,item) in self.entries.iter_mut().enumerate(){ui.horizontal(|ui|{
                     let text=if !is_audio&&self.state.numbers{(index+1).to_string()}else{item.title.clone()};
                     let width=(ui.available_width()-if self.edit{80.0}else{0.0}).max(30.0);
-                    let response=ui.add_sized([width,30.0],egui::Button::new(egui::RichText::new(text)).selected(index==self.current).sense(egui::Sense::click_and_drag()).truncate());
+                    let mut label=egui::RichText::new(text);
+                    if !item.path.is_file(){label=label.color(ui.visuals().error_fg_color);}
+                    let response=ui.add_sized([width,30.0],egui::Button::new(label).selected(index==self.current).sense(egui::Sense::click_and_drag()).truncate());
                     if self.scroll_current&&index==self.current{response.scroll_to_me(Some(egui::Align::Center));}
                     if response.clicked(){select=Some(index);}
                     if self.edit && response.drag_started(){self.drag=Some(index);}

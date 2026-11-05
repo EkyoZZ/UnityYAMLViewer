@@ -217,16 +217,45 @@ pub fn preview_warning_details(ui:&mut egui::Ui,key:&str,label:&str,issues:&[Str
     }
 }
 
+pub(crate) fn paste_replace_menu(response: &egui::Response, text: &mut String) -> bool {
+    if !response.enabled() { return false; }
+    let mut changed = false;
+    response.context_menu(|ui| {
+        if ui.button(crate::localization::tr("粘贴")).clicked() {
+            ui.close_menu();
+            if let Ok(pasted) = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+                let pasted = pasted.replace("\r\n", " ").replace(['\r', '\n'], " ");
+                if !pasted.is_empty() {
+                    changed = *text != pasted;
+                    *text = pasted;
+                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(text.chars().count()),
+                        )));
+                        state.store(ui.ctx(), response.id);
+                    }
+                    response.request_focus();
+                }
+            }
+        }
+    });
+    changed
+}
+
 pub fn settings_button(ui: &mut egui::Ui) -> egui::Response {
+    toolbar_icon(ui, crate::icons::Icon::Gear, crate::localization::tr("设置"))
+}
+
+pub(crate) fn toolbar_icon(ui: &mut egui::Ui, icon: crate::icons::Icon, label: &str) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::localization::tr("设置")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     let visuals = ui.style().interact(&response);
     if response.hovered() || response.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
     }
-    crate::icons::paint(ui, crate::icons::Icon::Gear,
+    crate::icons::paint(ui, icon,
         egui::Rect::from_center_size(rect.center(), egui::vec2(22.0, 22.0)), visuals.fg_stroke.color);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::localization::tr("设置"))
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
 }
 
 /// Lightweight preview toggle, aligned with the Inspector heading.

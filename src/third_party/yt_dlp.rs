@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::mpsc, time::Duration};
+use std::{cmp::Ordering, path::PathBuf, sync::mpsc, time::Duration};
 use eframe::egui;
 use crate::{component_paths, localization::tr};
 use super::{component_header_actions, install_progress::Shared, installer};
@@ -16,7 +16,7 @@ pub(super) struct Settings {
     pending: Option<(Action, mpsc::Receiver<Result<(Option<Installed>, Option<String>), String>>)>,
     progress: Shared,
     picker: component_paths::Picker,
-    error: Option<String>,
+    error: Option<(Action, String)>,
 }
 
 impl Settings {
@@ -28,9 +28,11 @@ impl Settings {
         let progress = self.progress.clone();
         let ctx = ctx.clone();
         let (sender, receiver) = mpsc::channel();
+        let force_detection = action == Action::Install || action == Action::Detect && self.checked;
         self.pending = Some((action, receiver));
         std::thread::spawn(move || {
             let result = (|| {
+                if force_detection {crate::media_tools::yt_cache::invalidate();}
                 if action == Action::Install { installer::install("yt-dlp", &progress)?; }
                 let installed = crate::media_tools::find_tool("yt-dlp").map(|path| {
                     let version = component_paths::yt_dlp_version(&path)?;
@@ -47,7 +49,8 @@ impl Settings {
     }
 
     pub(super) fn poll(&mut self) {
-        let Some((_, pending)) = &self.pending else { return; };
+        let Some((action, pending)) = &self.pending else { return; };
+        let action = *action;
         let result = match pending.try_recv() {
             Ok(result) => result,
             Err(mpsc::TryRecvError::Empty) => return,
@@ -57,16 +60,17 @@ impl Settings {
         self.checked = true;
         match result {
             Ok((installed, latest)) => { self.installed = installed; self.latest = latest; }
-            Err(error) => self.error = Some(error),
+            Err(error) => self.error = Some((action, error)),
         }
     }
 
     pub(super) fn show(&mut self, ui: &mut egui::Ui) {
         if !self.checked && self.pending.is_none() { self.start(ui.ctx(), Action::Detect); }
         let busy = self.pending.is_some();
-        let update = self.installed.as_ref().zip(self.latest.as_deref()).is_some_and(|(installed, latest)| {
-            component_paths::yt_dlp_version_key(latest) > component_paths::yt_dlp_version_key(&installed.version)
+        let comparison = self.installed.as_ref().zip(self.latest.as_deref()).and_then(|(installed, latest)| {
+            Some(component_paths::yt_dlp_version_key(&installed.version)?.cmp(&component_paths::yt_dlp_version_key(latest)?))
         });
+        let update = comparison == Some(Ordering::Less);
         let managed = self.installed.as_ref().is_some_and(|installed| installed.managed);
         let supported = cfg!(all(windows, target_arch = "x86_64"));
         let install = if self.checked && self.installed.is_none() && component_paths::selected("yt-dlp").is_none() {
@@ -87,8 +91,10 @@ impl Settings {
             if update {
                 ui.label(format!("{} {latest}", tr("可用新版本")));
                 if !managed { ui.small(tr("手动安装的 yt-dlp 请通过原安装方式更新。")); }
-            } else {
+            } else if comparison == Some(Ordering::Equal) {
                 ui.label(tr("目前已是最新版本。"));
+            } else if comparison == Some(Ordering::Greater) {
+                ui.label(format!("{} {latest}", tr("已安装版本高于最新稳定版")));
             }
         }
         if let Some((action, _)) = &self.pending {
@@ -105,7 +111,15 @@ impl Settings {
             changed = self.picker.show(ui, "yt-dlp", tr("yt-dlp 程序路径"));
         });
         ui.hyperlink_to(tr("手动安装"), "https://github.com/yt-dlp/yt-dlp/releases");
-        if let Some(error) = &self.error { ui.add(egui::Label::new(egui::RichText::new(error).color(ui.visuals().warn_fg_color)).wrap().selectable(true)); }
+        if let Some((action, error)) = &self.error {
+            if *action == Action::Check {
+                ui.colored_label(ui.visuals().warn_fg_color, tr("无法确认 yt-dlp 最新版本，请重试或查看官方发布页。"));
+                ui.hyperlink_to(tr("查看最新稳定版"), "https://github.com/yt-dlp/yt-dlp/releases/latest");
+                ui.collapsing(tr("详细信息"), |ui| { ui.add(egui::Label::new(error).wrap().selectable(true)); });
+            } else {
+                ui.add(egui::Label::new(egui::RichText::new(error).color(ui.visuals().warn_fg_color)).wrap().selectable(true));
+            }
+        }
         if install { self.start(ui.ctx(), Action::Install); }
         else if check { self.start(ui.ctx(), Action::Check); }
         else if detect || changed { self.start(ui.ctx(), Action::Detect); }

@@ -49,10 +49,11 @@
 - 音轨菜单读取标题（缺失时读取 handler_name）；常见语言名称与代码按界面语言显示，包含英语、国语、粤语、日语等 18 类语言；未覆盖的标记保留原文，泛中文不推定方言，悬浮查看原始名称和语言标记，便于区分多音轨；不识别实际语音或自动纠正文件标记。
 
 - 工具栏提供可收起的放大镜查找入口，窄窗口自动换行；收起时显示拖入文件提示及格式支持按钮，可打开后缀列表；最近打开支持单项删除及非空时全部清空；删除长名称后框体宽度随列表调整，矢量减号保持右侧对齐。浅色音频电平峰值线使用深灰色配色；悬浮文件页签名称显示完整路径；过长页签名称中间省略，保留末尾两个字符及扩展名。
-- 文件菜单的“打开 URL”支持 HTTP / HTTPS 文件直链，后台下载后打开，最大 1 GiB、总超时 5 分钟。普通文件缓存在软件数据目录，不加入最近打开或恢复页签，可在设置中清理未使用的下载缓存。
-- 同一入口支持具有已知时长的 HLS 点播。可粘贴 HTTP / HTTPS 的 `.m3u8` 直链或带 `url` 参数的 ZyPlayer 网页链接，保留流地址中的签名参数。页签标题依次取链接 `name`、FFmpeg 识别的内嵌标题或源文件名。未加密的 TS 点播会在后台预取切片，暂停时继续。浅绿色竖线表示最靠后已缓存的位置，前面可能有缺片。缓存齐全前从源链接播放，齐全后下一次开始、恢复或跳转时使用本地缓存。流地址不加入最近打开或恢复页签。暂不支持直播、通用网页解析、登录认证及 HLS 剪辑。
-- 在 HLS 播放页点“下载 MP4”，选择保存目录和文件名。软件优先复用播放缓存，等缺片补齐后合并并弹窗显示保存位置。补片在后台最多自动重试 20 次，仍缺片时提示文件不完整。播放缓存随页签关闭清理。下载可以取消，同名文件保留。下载使用首个视频和音轨（若存在），需要音视频编码能封装为 MP4。
-- “文件 → 视频提取”可粘贴网页链接或分享文字。先分析，再选择视频格式和可用的独立音轨。点“下载视频”后选择保存路径，下载时优先保留 MP4 或 WebM，其他组合使用 MKV。点“播放”会先准备缓存文件，再转到播放页签。需要 yt-dlp 和 FFmpeg，可在“第三方支持”安装或手动指定路径。分析仅处理单条视频，多视频链接取第一项。网站实际可用格式取决于提取器及访问条件，暂不支持直播或 DRM。
+- 文件菜单的“打开 URL”支持 HTTP / HTTPS 文件直链，后台下载后打开，最大 1 GiB、总超时 5 分钟。普通文件缓存在软件数据目录。最近打开记录原 URL，点击可重新下载打开。网络页签不自动恢复，可在设置中清理未使用的下载缓存。
+- 视频直链和具有已知时长的 HLS 点播直接在播放页打开。HLS 支持 HTTP / HTTPS 的 `.m3u8` 及带 `url` 参数的 ZyPlayer 链接，保留签名参数。最近打开可按原链接重开。网络页签不自动恢复。
+- 播放页按可用格式显示清晰度和语言选项。播放器只在点击“缓存到本地”后启动后台缓存。“缓存中…”时可取消，显示“缓存完毕”后会在原页签切换到本地并隐藏缓存按钮。切换到未缓存的格式会重新显示按钮。分离的画面和音轨分别保存，换语言时复用同一清晰度的本地画面，缺少的语言音轨直接在线播放。单路视频和音频无需选择。同语言有多个音频编码或码率时，播放页只提供一个语言选项。
+- “文件 → 视频提取”可粘贴网页链接或分享文字。分析后选择格式，点“播放”直接进入同一播放页，优先使用匹配的已下载成品或缓存。蓝色“下载视频”仍由你指定保存路径，按格式输出 MP4、WebM 或 MKV。命中缓存的轨道可直接用于合成，只下载缺失的轨道。视频提取需要 yt-dlp 和 FFmpeg，站点可用格式取决于提取器和访问条件。部分站点格式只能通过下载后播放。暂不支持直播或 DRM。
+- 主工具栏设置齿轮左侧的后台任务图标可展开后台任务中心。蓝点表示任务运行中。收到新结果时橙点轻闪两次后常亮，打开面板即清除提醒。同一轮闪烁内的新结果共用一次提醒。面板显示视频缓存、视频提取下载和音视频编辑导出，可取消支持取消的任务，完成后可返回播放页或在资源管理器中定位输出。点击面板外或按 Esc 收起。记录仅在本次运行期间保留。
 - 网站要求会话时，可开启“使用浏览器会话”并选择浏览器，再重新分析。Windows 登记的浏览器仅作参考。QQ 浏览器等无法直接读取的浏览器可选择只包含目标站点 Cookie 的 Netscape 文本文件。软件使用临时副本，保留原文件。
 - 第三方支持的 yt-dlp 项可以手动检查最新稳定版。由软件安装的副本可以在发现新版后直接更新。手动选择或从系统路径检测到的副本沿用原安装方式更新。
 
@@ -236,8 +237,8 @@ The project now supports **property editing**: change recognized values through 
 - Audio track menus read metadata titles (falling back to handler_name), localize 18 common language categories including English, Mandarin, Cantonese and Japanese (unknown tags remain unchanged; generic Chinese tags do not imply a dialect), and show original names and language tags on hover; no speech identification or automatic metadata correction.
 
 - A collapsible magnifying-glass search control moves to a second row in narrow windows; when collapsed, a drag-and-drop hint and Supported formats button open an extension list; recent files can be removed individually or cleared when nonempty; deleting a long name also updates the menu width, keeping vector minus buttons aligned at the right. Audio peak lines use dark gray in light mode; hovering over a file tab name shows its full path. Long tab names use middle ellipsis, retaining the last two stem characters and extension.
-- Open URL in the File menu opens direct HTTP / HTTPS file URLs after a background download (up to 1 GiB, 5-minute total timeout). Regular downloads use the app data directory and are excluded from recent files and restored tabs. Clear unused downloads in Settings.
-- Open URL also plays HLS on-demand streams with a known duration. Paste a direct HTTP / HTTPS `.m3u8` link or a ZyPlayer web link with a `url` parameter. The app preserves signing parameters. The tab uses the link’s `name`, an embedded title recognized by FFmpeg, or the source filename, in that order. Unencrypted TS streams prefetch segments in the background, including while paused. The light green line shows the end of the furthest cached segment. There may be gaps before that point. Playback uses the original URL until all segments are cached. It switches to local segments the next time you start, resume, or seek. Stream URLs are excluded from recent files and restored tabs. Live streams, general web-page parsing, login, and HLS editing are unsupported.
+- Open URL in the File menu opens direct HTTP / HTTPS file URLs after a background download (up to 1 GiB, 5-minute total timeout). Regular downloads use the app data directory. Recent Files stores the original URL so it can be opened again. Network tabs are excluded from session restore. Clear unused downloads in Settings.
+- Open URL also plays HLS on-demand streams with a known duration. Paste a direct HTTP / HTTPS `.m3u8` link or a ZyPlayer web link with a `url` parameter. The app preserves signing parameters. The tab uses the link’s `name`, an embedded title recognized by FFmpeg, or the source filename, in that order. Unencrypted TS streams prefetch segments in the background, including while paused. The light green line shows the end of the furthest cached segment. There may be gaps before that point. Playback uses the original URL until all segments are cached. It switches to local segments the next time you start, resume, or seek. Recent Files retains the stream URL and its signing parameters. Network tabs are excluded from session restore. Live streams, general web-page parsing, login, and HLS editing are unsupported.
 - Select “Download MP4” in the HLS playback tab and choose the destination and filename. The app reuses playback segments and waits for missing segments before merging. It retries each missing segment up to 20 times and reports an incomplete download if one remains unavailable. The playback cache is cleared after the tab closes. A completion dialog shows where the file was saved. Downloads can be cancelled and existing files are preserved. The first video and audio tracks, when present, must be compatible with MP4.
 - In File → Video extraction, paste a web link or share text. Analyze it, then choose a video format and a separate audio track when available. Download preserves MP4 or WebM for matching tracks and uses MKV for other combinations. Play prepares a cached file before opening it in a playback tab. Install yt-dlp and FFmpeg in Third-party Support or select their paths manually. The extractor handles a single video and takes the first item from multi-video links. Available formats depend on the site's extractor and access conditions. Live streams and DRM are unsupported.
 - When a site requires a session, enable “Use browser session”, choose a browser, and analyze again. The Windows browser list shows registered browsers for reference. For a browser yt-dlp cannot read directly, such as QQ Browser, select a Netscape-format text file containing only the target site's cookies. The app uses a temporary copy and preserves the original.
@@ -452,3 +453,64 @@ Vert, Frag and helpers use named, typed boundary inputs wired to internal operat
 - A hint below the top buttons explains the controls. Left-click selects; left-drag blank space draws a marquee. Shift-click / marquee toggles hits; clicking blank space clears selection. Drag a node title or non-control body to move the selection. Fields, buttons and snapshots retain their own interactions.
 - Node dragging and blank-space selection remain active when the output preview is offscreen. Open popups retain wheel input while canvas zoom and pan pause. Right-drag pans starting within the visible canvas, including over nodes. Wheel zoom stays centered on the pointer, from 10% to 175%, and does not also change numeric fields. There are no modes, Q/W shortcuts or tool icons.
 - Nodes and expanded / collapsed function groups support mixed selection. Marquees intersect visible bounds. Drag expanded group titles or collapsed card bodies. Groups move explicit members; selecting both a group and its member moves the member once. Reset View clears selection. Drag capture is centralized; release or focus loss clears it, and a new press resets stale state. Layout stays in preview memory without writing Shader / Material files.
+
+
+### 音视频编辑列表
+
+编辑窗口左上角的列表图标用于展开或收起侧栏，旁边的后台任务中心与主窗口共享进度和结果。展开后可点“添加文件…”或拖入同类音视频文件，点击整张卡片切换编辑，按住左上角的双横线手柄拖动排序，右上角叉号用于移除条目。每条独立保留裁切范围、画面处理和导出设置。同一路径在一个列表中保留一项。
+
+- “队列”模式按列表顺序分别导出。“另存为”选择输出目录，自动给同名成品增加编号。列表只有一条时仍使用原来的文件保存对话框。
+- “合并”模式在模式 Tab 和文件列表之间提供独立的“合并导出编码设置”，可设置分辨率、帧率、封装、音视频编码及采样参数。每段直接按合并参数编码，画面按指定分辨率等比缩放并居中补黑边，最后按列表顺序拼接，音视频轨道在拼接时直接复制。单条的裁切和音频编辑仍会应用，单条的编码及画面大小在合并导出时由合并设置覆盖。所有单条设置始终可编辑，切回队列后仍生效。音轨按位置对应，缺少的音轨补静音。
+- 文本字幕按片段时间顺延后合并，样式按文本字幕输出。图形字幕、GIF 和 PNG 序列可用队列导出，合并模式会提示更换设置。
+- 导出确认后可关闭编辑窗口，在后台任务中心查看结果并定位文件。缓存片段在任务结束后清理。任务运行期间暂停软件缓存清理。
+
+
+## 音视频工程
+
+音频编辑工程使用 `.uyap`，视频编辑工程使用 `.uyvp`。点击蓝色“保存工程”首次选择位置；保存后按钮变为“保存”，后续点击或按 Ctrl+S 更新当前工程。右键按钮可选择“工程另存为…”。保存不会重载编辑窗口或暂停当前试听，标题改为工程文件名。绿色“导出”输出音视频文件，与保存工程分开。
+
+通过文件打开、拖入主窗口或在资源管理器双击工程，先在主窗口页签显示工程摘要，检测到 FFmpeg/FFprobe 后点击中央绿色“进入编辑窗口”恢复编辑窗口；缺少组件时不显示编辑按钮，提供第三方支持入口。同类多个工程页签折叠分组，音频和视频分别成组。工程记录列表顺序、选中条目、队列/合并模式及独立合并设置、每条素材的范围、裁剪/缩放、编码与音轨字幕设置、播放位置。已提交的音频编辑结果随工程保存，恢复后可继续编辑；撤销/重做历史和正在编辑但未确认的参数弹窗不保存。
+
+工程包内含带格式标识和版本号的 UTF-8 JSON，音频编辑数据及临时图片序列转换的视频作为附件保存。原始素材及外加音轨/字幕通常仅记录路径：优先查找工程目录下的相对位置，再查找原绝对路径。缺失素材会列出路径并阻止不完整打开；当前需恢复素材原路径后重试，不提供重新定位向导。保存工程的文件复制在后台进行，可在后台任务中心查看结果。
+
+Windows 启动时为两类工程登记打开方式；无默认应用时关联本程序，保留已有默认程序和系统 UserChoice。系统要求确认默认应用时，可在设置的默认打开程序中选择本程序。
+
+### Audio and video projects
+
+Use `.uyap` for audio projects and `.uyvp` for video projects. Save Project first asks for a destination, then becomes Save; Ctrl+S updates the current project and its context menu offers Save Project As. Saving preserves the live editor and updates its title. Export creates media separately.
+
+Open a project from the file picker, drop it onto the main window, or double-click it in Explorer to show its project tab. After FFmpeg/FFprobe detection, click the central green Open Editor button to resume editing. Missing components hide the edit entry and show a Third-party Support link. Multiple project tabs are grouped separately by audio/video type. Projects restore ordered items, selection, batch/merge mode and separate merge settings, per-item ranges, cropping, scaling, encoding, track/subtitle choices and playback positions. Committed audio edits are embedded; undo/redo history and unconfirmed parameter dialogs are not saved.
+
+The archive contains versioned UTF-8 JSON and necessary edited audio or temporary sequence media. Original media and added tracks/subtitles remain path references, resolved relative to the project first and then by the original absolute path. Missing sources prevent an incomplete restore; restore their paths before reopening. Relinking is not currently provided. Saving runs in the background with results in Background Tasks.
+
+Windows startup registers both project types and assigns this app when no default exists, preserving existing defaults and UserChoice. Confirm the default in Windows Settings when required.
+
+音视频编辑起始/结束旁的图标是独立锁定开关，红色表示已锁定，对应输入、边界拖动及点击设置被禁用。解锁后恢复，重置范围只修改未锁定的一端；播放指针和播放跳转仍可使用。工程会保存锁定状态。
+
+The icons beside Start/End independently lock those boundaries. Red means locked: the matching input, boundary dragging and click-to-set are disabled. Unlock to resume editing; Reset Range changes only unlocked boundaries. Playback and seeking remain available. Projects preserve both locks.
+
+音视频编辑列表的复选框决定条目是否参与队列/合并导出，默认全部勾选，取消勾选不删除素材或设置。右键条目可移除，至少保留一项；工程保存勾选状态。
+
+Audio/video list checkboxes control inclusion in queue and merge exports. All are checked initially; unchecking preserves media and settings. Right-click an item to remove it (at least one remains). Projects preserve these selections.
+
+
+### 工程分享与 ZIP 打包
+
+建议将工程放在素材的上级目录，保留内部目录结构。工程页签的“打包工程”自动收集原素材、音轨与字幕，生成普通 ZIP，包内工程使用相对路径，同一源文件只收集一次。取消勾选的素材也会收集，以便对方继续编辑。工程内已有的编辑音频仍被保留。先在编辑窗口保存修改，再打包；该操作使用磁盘已保存版本，不修改原工程与素材。缺少素材时列出路径并停止，不生成不完整包。对方解压到任意目录，保持内部结构，打开 .uyap/.uyvp 后从页签进入编辑即可。后台任务中心可定位生成的 ZIP；当前不提供缺失素材重新定位向导。
+
+### Sharing projects as ZIP bundles
+
+Keep the project above its media folders and preserve their structure. Package Project collects source media, audio tracks and subtitles into a standard ZIP, rewriting the bundled project's references to relative paths and collecting each source file once. Unchecked items are included for continued editing, and embedded edited audio is preserved. Save editor changes first: packaging uses the on-disk project without changing the original project or media. Missing media paths are reported and no incomplete archive is produced. Recipients can extract anywhere, preserve the structure, open .uyap/.uyvp and enter the editor from the tab. Locate the ZIP from Background Tasks. A missing-media relinking wizard is not currently provided.
+
+编辑列表移除后可在当前编辑窗口按 Ctrl+Z 恢复条目、原顺序及编辑设置，最多保留 100 项移除记录；有移除记录时优先撤销移除，记录不随工程保存。
+
+In an editor, Ctrl+Z restores removed list items with their former position and edit settings, retaining up to 100 removals. Removal undo takes priority while available and is not saved in project files.
+
+
+### 视频画布与填充色
+
+“画布大小”可缩小或扩展原视频的显示区域，W/H 最大 8192 像素，X/Y 是画布相对原视频的原点，可输入负数向左/上扩展。只扩展画布不会拉伸原画面；超出原视频的区域使用“填充色”。拖动框内移动画布，边缘调整单边、四角按比例调整。“重置范围”恢复原视频画布尺寸和零偏移，不改变下方独立的画面缩放。填充色支持色板和 #RRGGBB（如 #FFFFFF）或 #RGB（如 #FFF）输入。
+
+### Video canvas and fill color
+
+Canvas Size crops or extends the video area, up to 8192 pixels per side. X/Y describe its origin relative to the source; negative values extend left/up. Extending does not stretch the source image; new areas use Fill Color. Drag inside to move the canvas, edges to resize one dimension, and corners proportionally. Reset Range restores source dimensions and zero offset without changing separate picture scaling. Fill Color supports the picker and #RRGGBB or #RGB input.

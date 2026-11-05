@@ -235,6 +235,15 @@ impl ImageTab {
         });
     }
 }
+type NetworkPlayback = (PathBuf, Option<(crate::network_video::Input, Option<crate::network_video::Input>)>);
+
+struct NetworkTab {
+    source: crate::network_video::Source,
+    active: Option<NetworkPlayback>,
+    active_selection: Option<String>,
+    promoting_cache: bool,
+}
+
 #[derive(Default)]
 pub struct Assets {
     rtf:rtf_preview::Preview,
@@ -249,7 +258,9 @@ pub struct Assets {
     playlists: crate::playlist::Lists,
     material_graphs: HashMap<PathBuf, crate::material_graph::Preview>,
     media: HashMap<PathBuf, crate::media_preview::Preview>,
-    hls_downloads: HashMap<PathBuf, crate::remote_file::Download>,
+    network_sources: HashMap<PathBuf, NetworkTab>,
+    network_downloads: HashMap<(PathBuf, String), crate::remote_file::Download>,
+    network_errors: HashMap<(PathBuf, String), String>,
     models: HashMap<PathBuf, crate::model_preview::Preview>,
     images: HashMap<PathBuf, ImageTab>,
     pdfs: HashMap<PathBuf, pdf_preview::Preview>,
@@ -375,12 +386,13 @@ impl Assets {
         let changed=fullscreen && owner.as_deref().is_some_and(|owner|Some(owner)!=path);
         let toggle=video && ctx.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::F11));
         let escape=fullscreen && ctx.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
-        if toggle || escape || changed || (fullscreen && !video) {crate::media_preview::set_fullscreen(ctx,video && !fullscreen && !escape && !changed);}
+        if toggle || escape || changed || (fullscreen && !video && !path.and_then(|path| self.media.get(path)).is_some_and(|preview| preview.playback_starting())) {crate::media_preview::set_fullscreen(ctx,video && !fullscreen && !escape && !changed);}
         let fullscreen=crate::media_preview::is_fullscreen(ctx);
         ctx.data_mut(|data|{if fullscreen {if let Some(path)=path{data.insert_temp(owner_id,path.to_owned());}}else{data.remove::<PathBuf>(owner_id);}});
         fullscreen
     }
     pub fn show_media_fullscreen(&mut self,ui:&mut egui::Ui,path:&Path) {
+        if self.has_network_source(path) { self.show_network(ui, path, true); return; }
         if crate::playlist::is_playlist(path){self.playlists.show(ui,path,true);return;}
         if let Some(preview)=self.media.get_mut(path){preview.show(ui,path);}
     }
@@ -437,28 +449,142 @@ impl Assets {
             }
         }
     }
-    pub fn show_hls(&mut self, ui: &mut egui::Ui, path: &Path, title: &str) {
-        let preview = self.media.entry(path.to_owned()).or_insert_with(|| crate::media_preview::Preview::new(path));
-        let download = self.hls_downloads.entry(path.to_owned()).or_default();
-        ui.horizontal_wrapped(|ui| {
-            preview.header_controls(ui, path);
-            download.button(ui, path, title, preview.stream_download_source(), preview.hls_cache());
+    pub fn set_network_source(&mut self, path: PathBuf, source: crate::network_video::Source) {
+        self.network_sources.insert(path, NetworkTab { source, active: None, active_selection: None, promoting_cache: false });
+    }
+
+    pub fn has_network_source(&self, path: &Path) -> bool { self.network_sources.contains_key(path) }
+
+    pub fn close_network_source(&mut self, path: &Path) {
+        self.network_sources.remove(path);
+        self.network_errors.retain(|(key, _), _| key != path);
+    }
+
+    pub fn network_files_in_use(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.network_sources.values().flat_map(|tab| {
+            let mut files = Vec::new();
+            if let Some((path, inputs)) = &tab.active {
+                if path.is_file() { files.push(path.clone()); }
+                if let Some(audio) = inputs.as_ref().and_then(|(_, audio)| audio.as_ref()).filter(|audio| audio.local) {
+                    files.push(audio.path.clone());
+                }
+            }
+            files
+        })
+    }
+
+    pub fn show_network(&mut self, ui: &mut egui::Ui, key: &Path, fullscreen: bool) {
+        use crate::localization::tr;
+        let Some(tab) = self.network_sources.get_mut(key) else { return; };
+        let source = &mut tab.source;
+        if source.is_direct_default() {
+            if let Some((video, audio)) = self.media.get(key).and_then(|preview| preview.network_variants()) {
+                if !video.is_empty() {
+                    let first = source.selected_video;
+                    source.video.splice(first..=first, video.iter().cloned());
+                    source.audio = audio.clone();
+                    source.selected_audio = 0;
+                }
+            }
+        }
+        if !fullscreen {
+            ui.horizontal_wrapped(|ui| {
+                if source.video.len() > 1 {
+                    egui::ComboBox::from_id_salt(("network_video", key)).selected_text(&source.video[source.selected_video].label)
+                        .show_ui(ui, |ui| for (index, format) in source.video.iter().enumerate() {
+                            ui.selectable_value(&mut source.selected_video, index, &format.label);
+                        });
+                }
+                let languages = source.audio_languages();
+                if source.video[source.selected_video].separate_audio && languages.len() > 1 {
+                    egui::ComboBox::from_id_salt(("network_audio", key)).selected_text(&source.audio[source.selected_audio].label)
+                        .show_ui(ui, |ui| for index in languages {
+                            ui.selectable_value(&mut source.selected_audio, index, &source.audio[index].label);
+                        });
+                }
+            });
+        }
+        let selection = source.selection();
+        let job_key = (key.to_owned(), selection.key());
+        let downloaded = selection.downloaded();
+        let fully_cached = selection.fully_cached();
+        let same_selection = tab.active_selection.as_ref() == Some(&job_key.1);
+        let playback = if let Some(path) = &downloaded {
+            Some((path.clone(), None))
+        } else if same_selection && self.network_downloads.contains_key(&job_key) {
+            tab.active.clone()
+        } else {
+            selection.inputs().map(|inputs| {
+                let path = inputs.0.path.clone();
+                let needs_tracks = !inputs.0.local || inputs.1.is_some();
+                (path, needs_tracks.then_some(inputs))
+            })
+        };
+        let Some((path, inputs)) = playback else {
+            self.media.remove(key);
+            tab.active = None;
+            tab.active_selection = None;
+            ui.label(tr("此格式无法在线播放，可在视频提取窗口下载后播放。"));
+            return;
+        };
+        let discover = source.is_direct_default();
+        let identity = (path.clone(), inputs.clone());
+        if tab.active.as_ref() != Some(&identity) || !self.media.contains_key(key) {
+            tab.promoting_cache = same_selection && fully_cached && tab.active.as_ref().is_some_and(|(_, inputs)| {
+                inputs.as_ref().is_some_and(|(video, audio)| !video.local || audio.as_ref().is_some_and(|audio| !audio.local))
+            });
+            let previous = self.media.get(key);
+            let preview = crate::media_preview::Preview::for_network(inputs.clone(), discover, previous);
+            self.media.insert(key.to_owned(), preview);
+            tab.active = Some(identity);
+        }
+        tab.active_selection = Some(job_key.1.clone());
+        let preview = self.media.get_mut(key).unwrap();
+        if preview.has_media_info() || preview.playlist_failed() { tab.promoting_cache = false; }
+        if !fullscreen {
+            ui.horizontal_wrapped(|ui| {
+                preview.header_controls(ui, &path);
+                if let Some(job) = self.network_downloads.get_mut(&job_key) {
+                    job.show(ui);
+                } else if tab.promoting_cache {
+                    ui.add_enabled(false, egui::Button::new(tr("缓存完毕")));
+                } else if fully_cached || downloaded.is_some() {
+                    if downloaded.is_some() && ui.link(tr("已下载"))
+                        .on_hover_text(tr("打开文件所在目录")).clicked() {
+                        if let Err(error) = reveal_file(&path) { self.network_errors.insert(job_key.clone(), error.to_string()); }
+                    }
+                } else if ui.add_enabled(!discover && preview.playlist_duration().is_some(), egui::Button::new(tr("缓存到本地"))).clicked() {
+                    self.network_errors.remove(&job_key);
+                    self.network_downloads.insert(job_key.clone(), crate::remote_file::Download::start(
+                        ui.ctx(), format!("{} · {}", source.title, source.video[source.selected_video].label),
+                        source.url.clone(), selection, inputs.unwrap(), preview.playlist_duration().unwrap_or_default()));
+                    ui.ctx().request_repaint();
+                }
+            });
+            if let Some(error) = self.network_errors.get(&job_key) {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
+        }
+        preview.show(ui, &path);
+    }
+
+    pub fn poll_network_downloads(&mut self, ctx: &egui::Context) {
+        self.network_downloads.retain(|path, job| {
+            match job.poll() {
+                Some(result) => {
+                    if let Err(error) = result { self.network_errors.insert(path.clone(), error); }
+                    false
+                }
+                None => true,
+            }
         });
-        download.status(ui);
-        preview.show(ui, path);
+        if !self.network_downloads.is_empty() { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
     }
-    pub fn forget_hls_download(&mut self, path: &Path) {
-        self.hls_downloads.remove(path);
-    }
-    pub fn poll_hls_downloads(&mut self, ctx: &egui::Context) {
-        for download in self.hls_downloads.values_mut() { download.poll(); }
-        if self.hls_downloads_active() { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
-    }
-    pub fn hls_downloads_active(&self) -> bool {
-        self.hls_downloads.values().any(crate::remote_file::Download::active)
-    }
-    pub fn cancel_hls_downloads(&mut self) { self.hls_downloads.clear(); }
+
+    pub fn network_downloads_active(&self) -> bool { !self.network_downloads.is_empty() }
+    pub fn cancel_network_downloads(&mut self) { self.network_downloads.clear(); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
+        if crate::media_preview::is_project(path) {crate::media_preview::show_project_tab(ui,path);return;}
         let browsed = if is_browsable_image(path) { Some(self.browser.show(ui,path)) } else { None };
         let path = browsed.as_deref().unwrap_or(path);
         self.svgs.retain(|other, _| other == path);

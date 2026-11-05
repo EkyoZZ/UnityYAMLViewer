@@ -7,6 +7,7 @@ pub struct FolderBrowser {
     roots: Vec<Node>,
     saved: Vec<SavedRoot>,
     save_error: Option<String>,
+    locate_root: Option<PathBuf>,
 }
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,7 +35,7 @@ impl Node {
         Self { path, directory, children: None, pending: None, error: None, ignored: String::new() }
     }
 
-    fn show(&mut self, ui: &mut egui::Ui, active: Option<&Path>, open: &mut Option<PathBuf>, root: bool, ignored: &[String]) -> bool {
+    fn show(&mut self, ui: &mut egui::Ui, active: Option<&Path>, open: &mut Option<PathBuf>, root: bool, ignored: &[String], locate: bool) -> bool {
         let name = self.path.file_name().unwrap_or(self.path.as_os_str()).to_string_lossy().into_owned();
         let icon_size = ui.text_style_height(&egui::TextStyle::Button);
         let settings_width = if root { icon_size + ui.spacing().item_spacing.x } else { 0.0 };
@@ -50,7 +51,7 @@ impl Node {
             (ui.available_width() - ui.spacing().indent - ui.spacing().button_padding.x * 2.0 - settings_width).max(0.0),
             egui::TextStyle::Button);
         let root_background = root.then(|| (ui.painter().add(egui::Shape::Noop), ui.available_rect_before_wrap()));
-        let response = egui::CollapsingHeader::new(title).id_salt(&self.path).default_open(root).show(ui, |ui| {
+        let response = egui::CollapsingHeader::new(title).id_salt(&self.path).default_open(root).open(locate.then_some(true)).show(ui, |ui| {
             let line_top = ui.cursor().top();
             if let Some(receiver) = &self.pending {
                 match receiver.try_recv() {
@@ -87,11 +88,12 @@ impl Node {
                         let name = name.to_string_lossy().to_lowercase();
                         ignored.iter().any(|pattern| wildcard_matches(pattern, &name))
                     });
-                    if !hidden { child.show(ui, active, open, false, ignored); }
+                    if !hidden { child.show(ui, active, open, false, ignored, false); }
                 }
             } else { ui.spinner(); }
             paint_hierarchy_line(ui, line_top);
         }).header_response.on_hover_text(self.path.display().to_string());
+        if locate { response.scroll_to_me(Some(egui::Align::Center)); }
         if let Some((shape, bounds)) = root_background {
             let row = egui::Rect::from_min_max(
                 egui::pos2(bounds.left(), response.rect.top()),
@@ -239,16 +241,19 @@ impl FolderBrowser {
 
     pub fn take_save_error(&mut self) -> Option<String> { self.save_error.take() }
 
-    pub fn add(&mut self, path: PathBuf) {
+    pub fn add(&mut self, path: PathBuf) -> PathBuf {
         let path = std::fs::canonicalize(&path).unwrap_or(path);
         if !self.roots.iter().any(|root| root.path == path) {
-            self.roots.push(Node::new(path, true));
+            self.roots.push(Node::new(path.clone(), true));
             self.persist_if_changed();
         }
+        self.locate_root = Some(path.clone());
+        path
     }
 
     pub fn show(&mut self, ctx: &egui::Context, active: Option<&Path>) -> Option<(PathBuf, PathBuf)> {
         if self.roots.is_empty() { return None; }
+        let locate_root = self.locate_root.take();
         let mut open = None;
         let mut remove = None;
         let width_limit = (ctx.screen_rect().width() * 0.8).max(140.0);
@@ -279,7 +284,8 @@ impl FolderBrowser {
                     let ignored: Vec<String> = root.ignored.split([';', ',', '\n']).map(str::trim)
                         .filter(|rule| !rule.is_empty()).map(str::to_lowercase).collect();
                     let mut selected_file = None;
-                    if root.show(ui, active, &mut selected_file, true, &ignored) { remove = Some(index); }
+                    let locate = locate_root.as_ref() == Some(&root.path);
+                    if root.show(ui, active, &mut selected_file, true, &ignored, locate) { remove = Some(index); }
                     if let Some(path) = selected_file { open = Some((path, root.path.clone())); }
                 }
             });

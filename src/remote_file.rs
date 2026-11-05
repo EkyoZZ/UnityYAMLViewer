@@ -1,10 +1,8 @@
-//! Direct HTTP(S) files are downloaded off-thread, then opened by existing viewers.
+//! Classify HTTP(S) links and open video streams or download ordinary files.
 use std::{io::{Read, Write}, path::{Path, PathBuf}, sync::mpsc, time::Duration};
 
-mod hls_download;
-mod hls_cache;
-pub(crate) use hls_cache::Cache as HlsCache;
-pub(crate) use hls_download::Download;
+mod video_cache;
+pub(crate) use video_cache::Download;
 
 const LIMIT: u64 = 1024 * 1024 * 1024;
 fn cache_root() -> PathBuf { crate::app_cache::network_root() }
@@ -20,6 +18,14 @@ fn hls_url(input: &str) -> Option<reqwest::Url> {
 }
 
 pub fn is_hls(path: &Path) -> bool { path.to_str().and_then(hls_url).is_some() }
+
+pub fn direct_video(input: &str) -> Option<PathBuf> {
+    let url = reqwest::Url::parse(input).ok()?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() { return None; }
+    let extension = Path::new(url.path()).extension()?.to_str()?.to_ascii_lowercase();
+    matches!(extension.as_str(), "mp4" | "m4v" | "mkv" | "webm" | "mov" | "avi" | "wmv" |
+        "flv" | "mpeg" | "mpg" | "ts" | "mts" | "m2ts" | "3gp").then(|| PathBuf::from(url.as_str()))
+}
 
 pub fn stream_label(path: &Path) -> Option<&str> {
     let input = path.to_str()?;
@@ -60,7 +66,12 @@ pub fn stream_source(input: &str) -> Option<(PathBuf, Option<String>)> {
     Some((PathBuf::from(source.as_str()), title))
 }
 
-pub fn start(url: String, ctx: eframe::egui::Context) -> mpsc::Receiver<Result<PathBuf, String>> {
+pub enum Opened {
+    File(PathBuf),
+    Video { path: PathBuf, hls: bool },
+}
+
+pub fn start(url: String, ctx: eframe::egui::Context) -> mpsc::Receiver<Result<Opened, String>> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = sender.send(download(&url));
@@ -69,7 +80,7 @@ pub fn start(url: String, ctx: eframe::egui::Context) -> mpsc::Receiver<Result<P
     receiver
 }
 
-fn download(input: &str) -> Result<PathBuf, String> {
+fn download(input: &str) -> Result<Opened, String> {
     let tr = crate::localization::tr;
     let url = reqwest::Url::parse(input).map_err(|error| format!("{}: {error}", tr("URL 格式无效")))?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
@@ -79,9 +90,15 @@ fn download(input: &str) -> Result<PathBuf, String> {
         .timeout(Duration::from_secs(300)).build().map_err(|error| format!("{}: {error}", tr("网络加载失败")))?;
     let mut response = client.get(url).send().and_then(|response| response.error_for_status())
         .map_err(|error| format!("{}: {error}", tr("网络加载失败")))?;
-    if response.content_length().is_some_and(|size| size > LIMIT) { return Err(tr("文件超过 1 GiB，无法通过 URL 打开").into()); }
     let mime = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
         .unwrap_or("").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let url = response.url().as_str();
+    let hls = hls_url(url).is_some() || matches!(mime.as_str(),
+        "application/vnd.apple.mpegurl" | "application/x-mpegurl" | "audio/mpegurl" | "audio/x-mpegurl");
+    if hls || mime.starts_with("video/") || direct_video(url).is_some() {
+        return Ok(Opened::Video { path: PathBuf::from(url), hls });
+    }
+    if response.content_length().is_some_and(|size| size > LIMIT) { return Err(tr("文件超过 1 GiB，无法通过 URL 打开").into()); }
     if matches!(mime.as_str(), "text/html" | "application/xhtml+xml") {
         return Err(tr("此 URL 返回网页，请提供文件直链；暂不支持网页解析或登录认证").into());
     }
@@ -93,8 +110,8 @@ fn download(input: &str) -> Result<PathBuf, String> {
         let extension = match mime.as_str() {
             "application/pdf" => "pdf", "image/gif" => "gif", "image/svg+xml" => "svg", "image/png" => "png", "image/jpeg" => "jpg", "image/webp" => "webp", "image/bmp" => "bmp",
             "audio/mpeg" => "mp3", "audio/wav" | "audio/x-wav" => "wav", "audio/flac" => "flac",
-            "audio/ogg" => "ogg", "audio/mp4" => "m4a", "video/mp4" => "mp4", "video/webm" => "webm",
-            "video/x-matroska" => "mkv", "text/plain" => "txt",
+            "audio/ogg" => "ogg", "audio/mp4" => "m4a",
+            "text/plain" => "txt",
             _ => return Err(tr("无法识别受支持的文件类型，请使用带文件扩展名的直链").into()),
         };
         path.set_extension(extension);
@@ -122,7 +139,7 @@ fn download(input: &str) -> Result<PathBuf, String> {
         Ok(())
     })();
     if let Err(error) = result { let _ = std::fs::remove_file(&partial); let _ = std::fs::remove_dir(&root); return Err(error); }
-    Ok(path)
+    Ok(Opened::File(path))
 }
 fn supported(path: &Path) -> bool {
     crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_office_document(path) || crate::asset_viewer::is_text(path)

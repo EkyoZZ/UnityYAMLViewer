@@ -4,7 +4,7 @@ use crate::{localization::tr,media_tools::command};
 
 const LANGUAGES:&[(&str,&str)]=&[("und","未标注语言"),("zho","中文"),("cmn","国语"),("yue","粤语"),("eng","英语"),("jpn","日语"),("kor","韩语"),("deu","德语"),("fra","法语"),("spa","西班牙语"),("ita","意大利语"),("por","葡萄牙语"),("rus","俄语"),("ara","阿拉伯语"),("hin","印地语"),("tha","泰语"),("vie","越南语"),("ind","印度尼西亚语"),("msa","马来语"),("mul","多种语言"),("zxx","无语言内容")];
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Track {pub path:PathBuf,pub index:u64,pub subtitle:bool,pub codec:String,pub language:String,pub title:String,pub enabled:bool,pub default:bool,pub forced:bool}
 impl Track {
     pub fn subtitle_encoder(&self,container:usize)->Option<&'static str>{
@@ -21,6 +21,9 @@ impl Track {
 #[derive(Default)]
 pub struct Tracks {pub entries:Vec<Track>,job:Option<mpsc::Receiver<Result<Vec<Track>,String>>>,initialized:bool,source_failed:bool,loading_source:bool,error:Option<String>}
 impl Tracks {
+    pub(crate) fn from_project(entries: Vec<Track>) -> Self {
+        Self { entries, initialized: true, ..Default::default() }
+    }
     pub fn ready(&self)->bool{self.initialized&&self.job.is_none()&&!self.source_failed}
     pub fn initialize(&mut self,path:&Path,selected:Option<u64>,ctx:&egui::Context){
         if !self.initialized {self.initialized=true;self.start(vec![path.to_owned()],None,selected,ctx);}
@@ -147,7 +150,7 @@ fn srt_time(time:f64)->String{
     let ms=(time.max(0.0)*1000.0).round() as u64;
     format!("{:02}:{:02}:{:02},{:03}",ms/3600000,ms/60000%60,ms/1000%60,ms%1000)
 }
-fn clip_subtitle(text:&str,start:f64,duration:f64)->String{
+pub(crate) fn clip_subtitle(text:&str,start:f64,duration:f64)->String{
     let normalized=text.replace("\r\n","\n");let mut result=String::new();let mut count=0;
     for block in normalized.trim().split("\n\n") {
         let lines:Vec<_>=block.lines().collect();
