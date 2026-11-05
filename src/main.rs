@@ -208,6 +208,8 @@ struct ViewerApp {
     cache_panel: app_cache::Panel,
     show_url: bool,
     url_input: String,
+    url_hls_candidates: Vec<String>,
+    url_hls_page: String,
     video_extract: video_extract::Window,
     stream_titles: std::collections::HashMap<PathBuf, String>,
     url_error: Option<String>,
@@ -624,8 +626,16 @@ impl ViewerApp {
                             video.video[0].input.as_mut().unwrap().hls = hls;
                             self.open_network_video(video, source, false);
                         }
-                        Ok(remote_file::Opened::Webpage) => {
-                            self.extract_url_for_playback(source, ctx);
+                        Ok(remote_file::Opened::Webpage { page, hls }) => {
+                            if hls.is_empty() {
+                                self.extract_url_for_playback(source, ctx);
+                            } else if hls.len() == 1 {
+                                self.open_discovered_hls(hls[0].clone(), &page);
+                            } else {
+                                self.url_hls_candidates = hls;
+                                self.url_hls_page = page;
+                                self.show_url = true;
+                            }
                         }
                         Err(error) => {
                             let http = reqwest::Url::parse(&source).is_ok_and(|url|
@@ -646,6 +656,7 @@ impl ViewerApp {
         if !self.show_url { return; }
         let mut open = true;
         let mut submit = false;
+        let mut chosen_hls = None;
         native_window::Window::new(localization::tr("打开 URL")).id(egui::Id::new("open_url"))
             .open(&mut open).default_width(620.0).fit_height().show(ctx, |ui| {
                 ui.label(localization::tr("输入 HTTP / HTTPS 链接。无法识别文件时尝试提取视频，普通文件下载后打开（最大 1 GiB）。"));
@@ -656,8 +667,10 @@ impl ViewerApp {
                     if !pending { theme::prepare_url_paste(ui, input_id); }
                     let response = ui.add_enabled_ui(!pending, |ui| ui.add_sized([input_width, 32.0],
                         TextEdit::singleline(&mut self.url_input).id(input_id).vertical_align(egui::Align::Center).hint_text("https://"))).inner;
-                    if !pending && theme::paste_replace_menu(&response, &mut self.url_input) {
+                    let pasted = !pending && theme::paste_replace_menu(&response, &mut self.url_input);
+                    if response.changed() || pasted {
                         self.url_error = None;
+                        self.url_hls_candidates.clear();
                     }
                     submit = ui.add_enabled_ui(!pending, |ui| ui.add_sized([104.0, 32.0],
                         egui::Button::new(localization::tr("确定")))).inner.clicked()
@@ -665,9 +678,34 @@ impl ViewerApp {
                 });
                 if let Some(error) = &self.url_error { ui.colored_label(ui.visuals().error_fg_color, error); }
                 if pending { ui.horizontal(|ui| { ui.spinner(); ui.label(localization::tr("正在网络加载…")); }); }
+                if !self.url_hls_candidates.is_empty() {
+                    ui.separator();
+                    ui.label(localization::tr("发现的 HLS 地址"));
+                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                        for candidate in &self.url_hls_candidates {
+                            ui.horizontal(|ui| {
+                                let button_width = 64.0;
+                                let text_width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(1.0);
+                                let label = ui.add_sized([text_width, 26.0], egui::Label::new(candidate).truncate()
+                                    .halign(egui::Align::Min).sense(egui::Sense::click())).on_hover_text(candidate);
+                                label.context_menu(|ui| {
+                                    if ui.button(localization::tr("复制地址")).clicked() {
+                                        ui.ctx().copy_text(candidate.clone());
+                                        ui.close_menu();
+                                    }
+                                });
+                                if ui.add_sized([button_width, 26.0], egui::Button::new(localization::tr("打开"))).clicked() {
+                                    chosen_hls = Some(candidate.clone());
+                                }
+                            });
+                        }
+                    });
+                }
             });
         if !open { self.show_url = false; }
-        if submit {
+        if let Some(candidate) = chosen_hls {
+            self.open_discovered_hls(candidate, &self.url_hls_page.clone());
+        } else if submit {
             self.open_url_input(self.url_input.clone(), ctx);
         }
     }
@@ -675,6 +713,16 @@ impl ViewerApp {
     fn record_recent_url(&mut self, source: String) {
         self.recent_files.record(PathBuf::from(source));
         self.recent_files.persist();
+    }
+
+    fn open_discovered_hls(&mut self, url: String, page: &str) {
+        let path = PathBuf::from(&url);
+        let title = network_video::url_title(&path);
+        let mut source = network_video::Source::direct(url.clone(), path, title);
+        if !page.is_empty() && reqwest::header::HeaderValue::from_str(page).is_ok() {
+            source.video[0].input.as_mut().unwrap().headers = format!("Referer: {page}\r\n");
+        }
+        self.open_network_video(source, url, false);
     }
 
     fn extract_url_for_playback(&mut self, source: String, ctx: &egui::Context) {
@@ -689,6 +737,8 @@ impl ViewerApp {
 
     fn open_url_input(&mut self, input: String, ctx: &egui::Context) {
         if self.url_job.is_some() { return; }
+        self.url_hls_candidates.clear();
+        self.url_hls_page.clear();
         let source = input.trim().replace("https\\://", "https://").replace("http\\://", "http://");
         self.url_input = source.clone();
         self.url_error = None;
@@ -766,6 +816,13 @@ impl ViewerApp {
     }
 
     fn accept_open_request(&mut self,request:command_line::OpenRequest,ctx:&egui::Context) {
+        if let Some(browser) = request.browser {
+            if remote_file::is_hls(std::path::Path::new(&browser.url)) {
+                self.open_discovered_hls(browser.url, browser.referer.as_deref().unwrap_or(""));
+            } else {
+                self.open_url_input(browser.url, ctx);
+            }
+        }
         let mut omitted=0;
         for path in request.paths {
             if let Some(settings)=&request.preview {
@@ -2777,6 +2834,8 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
+                        ui.label(localization::tr("• Windows 支持由独立油猴脚本嗅探 HLS 并唤起软件播放。"));
+                        ui.label(localization::tr("• 打开 URL 可查找网页源码中的 HLS，多个结果可逐项选择播放。"));
                         ui.label(localization::tr("• 播放页缓存进度使用紧凑文字显示，并可取消。"));
                         ui.label(localization::tr("• 粘贴链接时还原 Unicode 转义，保留百分号编码。"));
                         ui.label(localization::tr("• 打开 URL 无法识别文件时尝试提取视频，成功后自动播放。"));

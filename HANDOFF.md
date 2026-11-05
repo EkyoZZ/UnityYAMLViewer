@@ -1,5 +1,31 @@
 # 当前发布：1.3.3（已正式发布）
 
+- 2026-11-06，独立油猴助手 1.0.5：展开浮层按三个操作按钮的实际宽度加间距/内边距/滚动条计算，地址与提示不撑宽面板；展开/新增候选/窗口缩放刷新宽度，窄屏允许按钮换行。保留折叠最小态及两态 30% 不透明背景；node --check、git diff --check 通过，浏览器实际宽度待验证，无需编译应用。
+
+- 2026-11-06，独立油猴助手 1.0.3：默认最小态仅“▶ HLS 数量”，宽度随文字、折叠底色为 30% 不透明且文字清晰；标题栏可拖动，拖动不误触展开，展开/窗口缩放时校正可视边界，位置仅当前页。node --check、git diff --check 和 Node 模拟拖动/点击/边界检查通过；真实浏览器外观/触控待验证，仅脚本与文档修改，无需编译应用。
+
+- 2026-11-06，最新本地产物（油猴唤起协议）：用户明确授权且测试/编译前进程与目标独占访问检查通过，2 项协议解析/IPC 测试通过，Release 离线构建成功（32.19 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,777,856 字节，SHA-256：08B4313F7EB7FE4A42E087F6ED25743C57D0F7FF80A846B1872A020D3D588776。独立脚本 scripts/Tampermonkey/UnityYAMLViewer-HLS/UnityYAMLViewer-HLS.user.js 为 1.0.1，含复制链接/原在线工具/本地软件三按钮；原威软脚本未改。构建仅保留 spine38 的 158 项警告，Node 语法及 git diff --check 通过。日志 target/browser-protocol-regression-tests.log、target/browser-protocol-release-build.log。未自动运行程序/注册协议；用户需先正常启动新版一次，再验证浏览器首次确认、唤起/单实例和播放。未更新已发布附件或历史候选副本，下列尚未构建状态为此前记录。
+
+- 2026-11-06，独立油猴助手 1.0.1 保留“在工具中打开”：按钮顺序为复制链接→原在线工具→UnityYamlViewer，第三项替代原直接下载 TS。仅改新目录，原威软脚本未修改；node --check、git diff --check 通过，真实浏览器待验证。软件协议支持仍待重新编译；此次脚本调整本身无需编译应用。
+
+- 2026-11-06，独立油猴助手与 Windows 自定义协议尚未重建：新目录 scripts/Tampermonkey/UnityYAMLViewer-HLS/ 含可安装 .user.js 和说明，原威软目录未改。协议 unityyamlviewer://open?url=...&referer=...，启动注册当前用户关联，沿用单实例转交，HLS 直接播放并保留来源 Referer，不传 Cookie。已完成 Rust 编译检查、Node 语法检查，新增协议/IPC 测试尚未执行；未编译新版、未实际写注册表或启动浏览器。需新版正常启动一次后安装脚本验证。README、七语言关于摘要及版本/使用说明同步，真实浏览器与 GUI 待验证；当前可执行程序不含本功能。
+
+- 2026-11-06，最新本地产物（网页 HLS 候选扫描/选择）：用户明确授权，测试及编译前进程/目标独占访问检查通过；4 项 remote_file 测试通过，Release 离线构建成功（30.56 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,655,488 字节，SHA-256：C417DBB7D72077A21D8A620C9812900F1A478C637E63EDB79C9333E20025B74F。包含静态网页 HLS 发现、单条直接播放、多条截断列表/悬浮完整地址/右键复制/右侧打开，Referer 随播放传递；不执行脚本或监听浏览器 fetch/XHR。构建仅保留 spine38 的 158 项警告，测试缓存提示不影响通过。日志 target/hls-discovery-regression-tests.log、target/hls-discovery-release-build.log，git diff --check 通过；实际 GUI 待用户验证。未更新 GitHub 附件或历史候选副本；下列尚未构建状态为此前时点记录。
+
+- 2026-11-06，网页 HLS 候选扫描/选择尚未重建：参考 scripts/Tampermonkey 下用户脚本的静态源码扫描部分（未修改/执行脚本），新增 HTML 响应扫描，单条直接打开、多条在 URL 弹窗下方单行截断列表选择，悬停完整地址、右键复制、右侧打开；播放携带来源页 Referer。最多读取 3,000,000 字节、返回 300 条并去重，保留百分号编码，无结果继续 yt-dlp。未实现浏览器 fetch/XHR 运行时监听、脚本/iframe 递归或认证绕过；不等同油猴完整嗅探。cargo check --tests --locked --offline 通过，新增测试尚未运行；七语言及 README/使用指南/版本记录同步，实际 GUI 待验证。当前可执行程序不含本修改，未自动编译或发布。
+
+- 2026-11-06，最新本地产物（缓存工具栏顺序＋间距）：用户明确授权、进程及目标独占访问检查通过，Release 离线构建成功（30.65 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,755,840 字节，SHA-256：47554111E391739E906F3BDBFCAFAAA2EA3F91F46826E1D53D70A209A8118A8F。包含缩放比例后同排显示视频已缓存→音频已缓存→帧索引状态，及无格式选项/缓存链接时消除空白行；仅保留 spine38 的 158 项警告。日志 target/cache-toolbar-order-release-build.log，git diff --check 通过，实际 GUI 待用户验证；未更新 GitHub 附件或历史候选副本。下列未重建状态为此前时点记录。
+
+- 2026-11-06，缓存链接位置更正尚未重建：“视频已缓存／音频已缓存”已移入播放工具栏，在缩放比例/缓存操作之后、帧索引状态之前，删除独立缓存链接行。链接外观及定位功能保持；cargo check --tests --locked --offline、git diff --check 通过，实际 GUI 待验证，当前程序不含此修改及此前空白行间距修正。
+
+- 2026-11-06，网络播放页间距修正尚未重建：仅在有多个格式选项时创建选择行，仅在当前格式有本地轨道缓存时创建缓存链接行，消除两处无内容布局空行。cargo check --tests --locked --offline、git diff --check 通过，实际不同格式/缓存状态间距待用户验证；现有可执行程序不含本次修正。
+
+- 2026-11-06，最新本地产物（缓存对齐＋帧索引后移）：用户明确授权、进程及目标独占访问检查通过，Release 离线构建成功（32.17 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,756,864 字节，SHA-256：84ABDDC897737D753402AB252D834C80728AE0E81AA4FC949C5C0F8E02DB69AF。包含缓存状态/取消按钮统一 24 点高度和居中、网络工具栏帧索引状态移到缓存操作之后；仅保留 spine38 的 158 项警告。日志 target/cache-alignment-release-build.log，git diff --check 通过；实际 GUI 待用户验证。未更新 GitHub 附件或历史候选副本；下列尚未重建状态是此前时点记录。
+
+- 2026-11-06，缓存状态对齐修正尚未重建：缓存文字框和取消按钮统一 24 点高度，与前方解码/缩放控件一致，按文字宽度分配单行居中布局，保留真实进度/处理/取消状态。cargo check --tests --locked --offline、git diff --check 通过。实际 GUI 待验证；当前程序不含本修正及此前帧索引状态后移。
+
+- 2026-11-06，帧索引提示后移尚未重建：网络播放页把“正在索引视频帧…”放在工具栏末尾，缓存状态/取消之后，转圈和文字同组；普通本地/列表播放顺序保持。cargo check --tests --locked --offline、git diff --check 通过，实际顺序及窄窗口待验证；现有可执行程序不含本次修改。
+
 - 2026-11-06，最新本地产物（缓存界面精简）：用户明确授权、进程及目标文件占用检查通过，Release 离线构建成功（32.48 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,774,784 字节，SHA-256：B51ADA10ED7588B7634016895D019B3B9AC53730CCAC6D2702F31AE1943FC5EE。包含缓存完成链接文字精简、悬停路径/点击定位及缓存中描边百分比文本＋取消；仅保留 spine38 的 158 项警告。日志 target/compact-cache-ui-release-build.log；git diff --check 通过，实际 GUI 待用户验证。未更新 GitHub 附件或历史候选副本；下列尚未重建描述是此前时点记录。
 
 - 2026-11-06，缓存进度紧凑显示尚未重建：播放页移除进度条/转圈和重复缓存按钮，改为描边百分比文字及紧跟取消按钮，控件组内不换行；处理与取消阶段显示真实状态。七语言和文档同步，cargo check --tests --locked --offline、git diff --check 通过，实际 GUI 待验证。现有可执行程序不包含本次修改及前述缓存链接文字精简。

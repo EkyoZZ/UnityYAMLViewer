@@ -803,8 +803,17 @@ impl Preview {
             .inner_margin(egui::Margin::symmetric(5, 1))
             .show(ui, |ui| ui.small(crate::localization::tr(mirror)));
         self.scale_controls(ui);
-        if self.index_job.is_some(){ui.spinner();ui.label(crate::localization::tr("正在索引视频帧…"));}
+        if !self.network_tab { self.frame_index_status(ui); }
         if previous!=self.decoder {let playing=self.is_playing();self.stop_playback();self.cache=Arc::new(Mutex::new(FrameCache::default()));if playing{self.play(ui.ctx(),path);}else{self.error=None;}}
+    }
+    pub fn frame_index_status(&self, ui: &mut egui::Ui) {
+        if self.index_job.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.add(egui::Label::new(crate::localization::tr("正在索引视频帧…"))
+                    .wrap_mode(egui::TextWrapMode::Extend));
+            });
+        }
     }
     fn scale_controls(&mut self,ui:&mut egui::Ui) {
         let previous_scale=self.scale_mode.clone();

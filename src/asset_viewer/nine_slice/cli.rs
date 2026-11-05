@@ -164,7 +164,7 @@ pub(crate) fn preview_request(args:Vec<std::ffi::OsString>)->Result<crate::comma
     let failures=records.iter().filter(|r|r["status"]=="failed").count();
     let notice=if omitted>0||failures>0 {format!("{}: {omitted}; {}: {failures}",crate::localization::tr("超出预览上限，未打开"),crate::localization::tr("无法访问的路径"))}else{String::new()};
     if files.is_empty(){return Err("No supported images found for preview".into())}
-    Ok(crate::command_line::OpenRequest {paths:files.into_iter().take(10).collect(),preview:Some(request),notice})
+    Ok(crate::command_line::OpenRequest {paths:files.into_iter().take(10).collect(),preview:Some(request),notice,browser:None})
 }
 #[cfg(test)] mod preview_tests {
     use super::*;

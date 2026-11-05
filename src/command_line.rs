@@ -5,6 +5,62 @@ pub struct OpenRequest {
     pub paths:Vec<PathBuf>,
     pub preview:Option<crate::asset_viewer::nine_slice::processing::Request>,
     #[serde(default)] pub notice:String,
+    #[serde(default)] pub browser:Option<BrowserRequest>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct BrowserRequest { pub url: String, pub referer: Option<String> }
+
+pub fn parse_browser_request(input: &str) -> Result<BrowserRequest, String> {
+    if input.len() > 32_000 || input.chars().any(char::is_control) { return Err("Invalid browser URL length or characters".into()); }
+    let uri = reqwest::Url::parse(input).map_err(|_| "Invalid browser protocol URL")?;
+    if uri.scheme() != "unityyamlviewer" || uri.host_str() != Some("open") || !matches!(uri.path(), "" | "/")
+        || uri.fragment().is_some() || !uri.username().is_empty() || uri.password().is_some() || uri.port().is_some() {
+        return Err("Expected unityyamlviewer://open?url=...".into());
+    }
+    let mut url = None;
+    let mut referer = None;
+    for (key, value) in uri.query_pairs() {
+        let slot = match key.as_ref() { "url" => &mut url, "referer" => &mut referer, _ => return Err("Unknown browser URL parameter".into()) };
+        if slot.is_some() { return Err("Duplicate browser URL parameter".into()); }
+        let parsed = reqwest::Url::parse(&value).map_err(|_| "Invalid HTTP URL")?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none()
+            || !parsed.username().is_empty() || parsed.password().is_some() || value.chars().any(char::is_control) {
+            return Err("Only HTTP/HTTPS browser URLs without embedded credentials are supported".into());
+        }
+        *slot = Some(value.into_owned());
+    }
+    Ok(BrowserRequest { url: url.ok_or("Missing url parameter")?, referer })
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::*;
+    #[test]
+    fn browser_protocol_preserves_nested_signature_encoding_and_ipc_payload() {
+        let url = "https://example.org/video.m3u8?a=%26%2B&b=a+b&name=中文";
+        let mut protocol = reqwest::Url::parse("unityyamlviewer://open").unwrap();
+        protocol.query_pairs_mut().append_pair("url", url).append_pair("referer", "https://example.org/watch/1");
+        let browser = parse_browser_request(protocol.as_str()).unwrap();
+        assert_eq!(browser.url, url);
+        assert_eq!(browser.referer.as_deref(), Some("https://example.org/watch/1"));
+        let request = OpenRequest { paths: Vec::new(), preview: None, notice: String::new(), browser: Some(browser) };
+        let restored: OpenRequest = serde_json::from_slice(&serde_json_bytes(&request).unwrap()).unwrap();
+        assert_eq!(restored.browser.unwrap().url, url);
+        assert!(serde_json::from_str::<OpenRequest>(r#"{"paths":[],"preview":null,"notice":""}"#).unwrap().browser.is_none());
+    }
+    #[test]
+    fn browser_protocol_rejects_local_files_commands_and_ambiguous_parameters() {
+        for input in ["unityyamlviewer://open?url=file%3A%2F%2F%2FC%3A%2Fa.txt",
+            "unityyamlviewer://open?url=javascript%3Aalert(1)", "unityyamlviewer://delete?url=https%3A%2F%2Fexample.org",
+            "unityyamlviewer://open?url=https%3A%2F%2Fexample.org&url=https%3A%2F%2Fother.org",
+            "unityyamlviewer://open?url=https%3A%2F%2Fexample.org&command=run",
+            "unityyamlviewer://open?url=https%3A%2F%2Fuser%3Apass%40example.org",
+            "unityyamlviewer://open?url=https%3A%2F%2Fexample.org&referer=file%3A%2F%2Fx",
+            "unityyamlviewer://open"] {
+            assert!(parse_browser_request(input).is_err(), "{input}");
+        }
+    }
 }
 pub struct Inbox {
     _lock: fs::File,
@@ -19,13 +75,19 @@ pub enum Startup {
 
 pub fn start() -> io::Result<Startup> {
     let args:Vec<_>=std::env::args_os().skip(1).collect();
+    if args.first().and_then(|arg| arg.to_str()).is_some_and(|arg| arg.to_ascii_lowercase().starts_with("unityyamlviewer:")) {
+        if args.len() != 1 { return Err(io::Error::other("Browser protocol accepts one argument")); }
+        let browser = parse_browser_request(args[0].to_str().ok_or_else(|| io::Error::other("Invalid browser URL"))?)
+            .map_err(io::Error::other)?;
+        return start_with_paths(OpenRequest { paths: Vec::new(), preview: None, notice: String::new(), browser: Some(browser) });
+    }
     if args.first().is_some_and(|a|a=="slice9") {
         let request=crate::asset_viewer::nine_slice::cli::preview_request(args.into_iter().skip(1).collect()).map_err(io::Error::other)?;
         return start_with_paths(request)
     }
     let cwd=std::env::current_dir()?;
     let paths=args.into_iter().map(|a|{let p=PathBuf::from(a);let p=if p.is_absolute(){p}else{cwd.join(p)};fs::canonicalize(&p).unwrap_or(p)}).collect();
-    let paths=OpenRequest {paths,preview:None,notice:String::new()};
+    let paths=OpenRequest {paths,preview:None,notice:String::new(),browser:None};
     start_with_paths(paths)
 }
 
@@ -89,7 +151,7 @@ impl Inbox {
         requests.into_iter().filter_map(|path| {
             if fs::metadata(&path).ok()?.len() > 1024 * 1024 { return None; }
             let bytes=fs::read(&path).ok()?;
-            let paths=serde_json::from_slice::<OpenRequest>(&bytes).or_else(|_|serde_json::from_slice::<Vec<PathBuf>>(&bytes).map(|paths|OpenRequest {paths,preview:None,notice:String::new()})).ok()?;
+            let paths=serde_json::from_slice::<OpenRequest>(&bytes).or_else(|_|serde_json::from_slice::<Vec<PathBuf>>(&bytes).map(|paths|OpenRequest {paths,preview:None,notice:String::new(),browser:None})).ok()?;
             fs::remove_file(path).ok()?;
             Some(paths)
         }).collect()

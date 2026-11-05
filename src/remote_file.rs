@@ -2,6 +2,7 @@
 use std::{io::{Read, Write}, path::{Path, PathBuf}, sync::mpsc, time::Duration};
 
 mod video_cache;
+mod hls_scan;
 pub(crate) use video_cache::Download;
 
 const LIMIT: u64 = 1024 * 1024 * 1024;
@@ -103,7 +104,7 @@ pub fn stream_source(input: &str) -> Option<(PathBuf, Option<String>)> {
 pub enum Opened {
     File(PathBuf),
     Video { path: PathBuf, hls: bool },
-    Webpage,
+    Webpage { page: String, hls: Vec<String> },
 }
 
 pub fn start(url: String, ctx: eframe::egui::Context) -> mpsc::Receiver<Result<Opened, String>> {
@@ -135,7 +136,13 @@ fn download(input: &str) -> Result<Opened, String> {
     }
     if response.content_length().is_some_and(|size| size > LIMIT) { return Err(tr("文件超过 1 GiB，无法通过 URL 打开").into()); }
     if matches!(mime.as_str(), "text/html" | "application/xhtml+xml") {
-        return Ok(Opened::Webpage);
+        let page = url.to_owned();
+        let mut bytes = Vec::new();
+        response.take(3_000_001).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+        if bytes.len() > 3_000_000 { bytes.truncate(3_000_000); }
+        let text = String::from_utf8_lossy(&bytes);
+        let hls = hls_scan::scan(&text, &page);
+        return Ok(Opened::Webpage { page, hls });
     }
     let candidate = response.url().path_segments().and_then(|mut parts| parts.next_back()).unwrap_or("download");
     let mut name: String = candidate.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).take(160).collect();

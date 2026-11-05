@@ -330,6 +330,11 @@ fn register_file_types() -> Result<(), String> {
     let mut command = std::ffi::OsString::from("\"");
     command.push(&exe);
     command.push("\" \"%1\"");
+    let protocol = "Software\\Classes\\unityyamlviewer";
+    set(protocol, "", "URL:Unity YAML Viewer".as_ref())?;
+    set(protocol, "URL Protocol", "".as_ref())?;
+    set(&format!("{protocol}\\DefaultIcon"), "", &icon)?;
+    set(&format!("{protocol}\\shell\\open\\command"), "", &command)?;
     let class = "Software\\Classes\\UnityYAMLViewer.File";
     set(class, "", "Unity YAML Viewer File".as_ref())?;
     set(&format!("{class}\\Application"), "ApplicationName", "Unity YAML Viewer".as_ref())?;

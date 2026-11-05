@@ -487,15 +487,17 @@ impl Assets {
                 }
             }
         }
-        if !fullscreen {
+        let video_choices = source.video.len() > 1;
+        let audio_choices = source.video[source.selected_video].separate_audio && source.audio.len() > 1;
+        if !fullscreen && (video_choices || audio_choices) {
             ui.horizontal_wrapped(|ui| {
-                if source.video.len() > 1 {
+                if video_choices {
                     egui::ComboBox::from_id_salt(("network_video", key)).selected_text(&source.video[source.selected_video].label)
                         .show_ui(ui, |ui| for (index, format) in source.video.iter().enumerate() {
                             ui.selectable_value(&mut source.selected_video, index, &format.label);
                         });
                 }
-                if source.video[source.selected_video].separate_audio && source.audio.len() > 1 {
+                if audio_choices {
                     egui::ComboBox::from_id_salt(("network_audio", key)).selected_text(&source.audio[source.selected_audio].label)
                         .show_ui(ui, |ui| for (index, audio) in source.audio.iter().enumerate() {
                             ui.selectable_value(&mut source.selected_audio, index, &audio.label);
@@ -559,8 +561,6 @@ impl Assets {
                         source.url.clone(), selection.clone(), inputs.unwrap(), preview.playlist_duration().unwrap_or_default()));
                     ui.ctx().request_repaint();
                 }
-            });
-            ui.horizontal_wrapped(|ui| {
                 for (track, label) in [
                     (crate::network_video::Track::Video, "视频已缓存"),
                     (crate::network_video::Track::Audio, "音频已缓存"),
@@ -578,6 +578,7 @@ impl Assets {
                         }
                     }
                 }
+                preview.frame_index_status(ui);
             });
             if let Some(error) = self.network_errors.get(&job_key) {
                 ui.colored_label(ui.visuals().error_fg_color, error);

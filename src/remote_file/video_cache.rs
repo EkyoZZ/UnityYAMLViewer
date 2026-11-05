@@ -110,14 +110,19 @@ impl Download {
         } else {
             format!("{}{percent}%", tr("缓存中…"))
         };
-        ui.horizontal(|ui| {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let measure = |text: &str| ui.painter().layout_no_wrap(
+            text.to_owned(), font.clone(), ui.visuals().text_color()).size().x.ceil();
+        let status_width = measure(&status) + 12.0;
+        let cancel_width = measure(tr("取消")) + 2.0 * ui.spacing().button_padding.x;
+        let width = status_width + ui.spacing().item_spacing.x + cancel_width;
+        ui.allocate_ui_with_layout(egui::vec2(width, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            egui::Frame::NONE
+            ui.add_sized([status_width, 24.0], egui::Button::new(status)
+                .fill(egui::Color32::TRANSPARENT)
                 .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-                .corner_radius(3.0)
-                .inner_margin(egui::vec2(5.0, 2.0))
-                .show(ui, |ui| { ui.label(status); });
-            if ui.add_enabled(active, egui::Button::new(tr("取消"))).clicked() {
+                .corner_radius(3.0).sense(egui::Sense::hover()));
+            if ui.add_enabled_ui(active, |ui| ui.add_sized([cancel_width, 24.0], egui::Button::new(tr("取消")))).inner.clicked() {
                 self.cancel.lock().unwrap().take();
             }
         });

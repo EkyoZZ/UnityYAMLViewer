@@ -28,7 +28,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 
 - **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
 - **音视频工具**：支持多文件编辑、画布调整、缩放与转码，可合并导出或按队列分别导出，支持多音轨、字幕及 GIF／视频／PNG 序列输出。音频／视频工程可保存续编，并打包素材分享。
-- **网络视频**：打开视频网页可自动提取播放，支持直链／HLS 点播、清晰度与音轨选择、下载及手动缓存复用；后台任务中心统一查看处理进度和结果。
+- **网络视频**：扫描网页 HLS 或通过 yt-dlp 提取播放，Windows 可由独立油猴脚本唤起；支持地址与音视频格式选择、下载及手动缓存复用，后台任务中心查看进度和结果。
 - **文本表格**：CSV / TSV / PSV 查看与单元格编辑，支持查找、类型与必填检查、固定行列编号及冻结首行。
 - **电子表格**：XLS / XLSX / ODS 只读预览，支持多工作表切换、查找复制、公式／缓存结果与冻结表头。
 - **文件预览**：PDF、Word／PowerPoint、OpenDocument、RTF、SVG、GIF、ICO、受限 PSD 及常见文本；办公文档可在 LibreOffice 编辑，转换预览的文档支持另存为 PDF。
@@ -87,7 +87,7 @@ Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运�
 
 - **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
 - **Audio and video**: Multi-file editing, canvas adjustments, scaling and transcoding, with merged or separate queue exports, multiple audio tracks, subtitles and GIF / video / PNG sequence output. Save audio/video projects to resume editing or package them with media for sharing.
-- **Online video**: Open video pages for automatic extraction and playback, play direct links / HLS, choose resolutions and audio tracks, download or explicitly cache for reuse. Background Tasks tracks processing progress and results.
+- **Online video**: Find HLS in page source or extract videos with yt-dlp; a separate userscript can launch the app on Windows. Choose addresses and media formats, download or explicitly cache for reuse, and track progress in Background Tasks.
 - **Text tables**: View and edit CSV / TSV / PSV cells with search, type / required-cell checks, fixed coordinates and first-row freezing.
 - **Spreadsheets**: Read-only XLS / XLSX / ODS previews with worksheet tabs, search / copy, formulas / cached results and header freezing.
 - **File previews**: PDF, Word / PowerPoint, OpenDocument, RTF, SVG, GIF, ICO, limited PSD and common text files; Office documents can open in LibreOffice, and converted previews can be saved as PDF.
