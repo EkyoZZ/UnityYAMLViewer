@@ -1,3 +1,11 @@
+# 当前发布：1.3.3（已正式发布）
+
+- 正式发布：用户确认 1.3.3 新增内容验证通过并明确授权发布；远程 master 与本地提交 cd776fd41cc061e7c308d92f5d53feb727c8e351 一致。225 项候选输入中排除 1 个不参与构建的 Python 字节码缓存，其余与提交无实质差异，155 项仅换行格式不同。未重新编译。先创建草稿，上传 30,748,160 字节附件并核对 GitHub SHA-256 为 DE80D78C2A1EC3C8D7AC3CDBF73CEC5047D047A7E44316EBC2927C8CF67B4BDA，再于北京时间 2026-11-05 22:31:05 正式发布 v1.3.3（Release ID 435309872），标题仅版本号、非预发布、latest API 确认为最新稳定版。证据 target/v1.3.3-publish-audit.json、target/v1.3.3-release-asset.json、target/v1.3.3-published.json。以下待验证/未发布表述保留开发阶段史实，不代表当前发布状态。
+
+- 发布后的状态文档仅更新在本地，未自动提交或推送；没有修改其他历史 Release。
+
+以下为发布前准备及开发历史记录。
+
 # 1.3.3 提交与发布交接
 
 - 文档已整理：README 中英文能力概览、docs/user-guide.md 使用说明、docs/versions/1.3.3.md、版本索引、CHANGELOG、docs/releases/1.3.3.md 发布准备稿。1.3.2 已发布后变更归入 1.3.3，保留旧构建事实。
