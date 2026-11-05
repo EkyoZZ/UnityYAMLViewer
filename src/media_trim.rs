@@ -6,7 +6,7 @@ use crate::{localization::tr, media_tools::command};
 mod batch;
 mod project;
 pub(crate) use project::EditState;
-pub(crate) use batch::{ExportPlan, MergeSettings, export_queue};
+pub(crate) use batch::{MergeSettings, export_queue};
 
 #[derive(Default)]
 pub struct Trim {

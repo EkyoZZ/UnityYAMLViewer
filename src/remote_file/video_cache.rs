@@ -75,7 +75,8 @@ impl Download {
             );
             let outcome = match &result {
                 Ok(()) if selection.fully_cached() => {
-                    Outcome::Complete(Some(Target::Playback(url)))
+                    Outcome::Complete(selection.track_cache(Track::Video)
+                        .map(|path| Target::Playback { url, path }))
                 }
                 Ok(()) => Outcome::Cancelled,
                 Err(error) => Outcome::Failed(error.clone()),
@@ -101,27 +102,25 @@ impl Download {
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let percent = self.percent.load(Ordering::Relaxed);
-        if percent > 0 && percent < 100 {
-            ui.add(
-                egui::ProgressBar::new(f32::from(percent) / 100.0)
-                    .text(format!("{} {percent}%", tr("缓存中…"))),
-            );
-        } else {
-            ui.spinner();
-        }
-        ui.add_enabled(false, egui::Button::new(tr("缓存中…")));
         let active = self.cancel.lock().unwrap().is_some();
-        if !active {
-            ui.label(tr("正在取消…"));
+        let status = if !active {
+            tr("正在取消…").to_owned()
         } else if percent == 100 {
-            ui.label(tr("正在处理音视频…"));
-        }
-        if ui
-            .add_enabled(active, egui::Button::new(tr("取消")))
-            .clicked()
-        {
-            self.cancel.lock().unwrap().take();
-        }
+            tr("正在处理音视频…").to_owned()
+        } else {
+            format!("{}{percent}%", tr("缓存中…"))
+        };
+        ui.horizontal(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            egui::Frame::NONE
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                .corner_radius(3.0)
+                .inner_margin(egui::vec2(5.0, 2.0))
+                .show(ui, |ui| { ui.label(status); });
+            if ui.add_enabled(active, egui::Button::new(tr("取消"))).clicked() {
+                self.cancel.lock().unwrap().take();
+            }
+        });
     }
 }
 

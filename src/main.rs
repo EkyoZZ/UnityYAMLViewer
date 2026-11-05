@@ -624,7 +624,19 @@ impl ViewerApp {
                             video.video[0].input.as_mut().unwrap().hls = hls;
                             self.open_network_video(video, source, false);
                         }
-                        Err(error) => { self.url_error = Some(error); self.show_url = true; }
+                        Ok(remote_file::Opened::Webpage) => {
+                            self.extract_url_for_playback(source, ctx);
+                        }
+                        Err(error) => {
+                            let http = reqwest::Url::parse(&source).is_ok_and(|url|
+                                matches!(url.scheme(), "http" | "https") && url.host_str().is_some());
+                            if http {
+                                self.extract_url_for_playback(source, ctx);
+                            } else {
+                                self.url_error = Some(error);
+                                self.show_url = true;
+                            }
+                        }
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => { self.url_job = None; self.url_error = Some(localization::tr("网络加载任务已中断").into()); }
@@ -636,12 +648,14 @@ impl ViewerApp {
         let mut submit = false;
         native_window::Window::new(localization::tr("打开 URL")).id(egui::Id::new("open_url"))
             .open(&mut open).default_width(620.0).fit_height().show(ctx, |ui| {
-                ui.label(localization::tr("输入 HTTP / HTTPS 直链。视频直接播放，普通文件下载后打开（最大 1 GiB）。"));
+                ui.label(localization::tr("输入 HTTP / HTTPS 链接。无法识别文件时尝试提取视频，普通文件下载后打开（最大 1 GiB）。"));
                 let pending = self.url_job.is_some();
                 ui.horizontal(|ui| {
                     let input_width = (ui.available_width() - 104.0 - ui.spacing().item_spacing.x).max(40.0);
+                    let input_id = ui.make_persistent_id("url_input");
+                    if !pending { theme::prepare_url_paste(ui, input_id); }
                     let response = ui.add_enabled_ui(!pending, |ui| ui.add_sized([input_width, 32.0],
-                        TextEdit::singleline(&mut self.url_input).vertical_align(egui::Align::Center).hint_text("https://"))).inner;
+                        TextEdit::singleline(&mut self.url_input).id(input_id).vertical_align(egui::Align::Center).hint_text("https://"))).inner;
                     if !pending && theme::paste_replace_menu(&response, &mut self.url_input) {
                         self.url_error = None;
                     }
@@ -661,6 +675,16 @@ impl ViewerApp {
     fn record_recent_url(&mut self, source: String) {
         self.recent_files.record(PathBuf::from(source));
         self.recent_files.persist();
+    }
+
+    fn extract_url_for_playback(&mut self, source: String, ctx: &egui::Context) {
+        if self.video_extract.analyze_and_play(source, ctx) {
+            self.show_url = false;
+            self.url_error = None;
+        } else {
+            self.url_error = Some(localization::tr("视频提取正在处理其他任务，请稍后重试。").into());
+            self.show_url = true;
+        }
     }
 
     fn open_url_input(&mut self, input: String, ctx: &egui::Context) {
@@ -2753,9 +2777,14 @@ impl eframe::App for ViewerApp {
                     ui.heading(crate::localization::tr("更新历史"));
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
-                        ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度和语言。"));
+                        ui.label(localization::tr("• 播放页缓存进度使用紧凑文字显示，并可取消。"));
+                        ui.label(localization::tr("• 粘贴链接时还原 Unicode 转义，保留百分号编码。"));
+                        ui.label(localization::tr("• 打开 URL 无法识别文件时尝试提取视频，成功后自动播放。"));
+                        ui.label(localization::tr("• 方向键调音量时显示居中百分比提示，松键后 0.2 秒消失。"));
+                        ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度及不同编码、码率的音轨。"));
                         ui.label(localization::tr("• 手动缓存后自动切换本地播放，分离的画面和音轨可独立复用。"));
-                        ui.label(localization::tr("• 视频提取下载可复用缓存，播放优先使用对应的已下载文件。"));
+                        ui.label(localization::tr("• 播放页可定位本地缓存，完成的缓存任务也可定位文件。"));
+                        ui.label(localization::tr("• 网页视频播放携带提取到的会话信息，并优先复用已下载文件。"));
                         ui.label(localization::tr("• 后台任务中心显示视频缓存、下载和音视频导出进度，图标提示新结果。"));
                         ui.label(localization::tr("• 音视频编辑支持列表排序、逐条导出和居中等比补边合并，弹窗内可查看后台任务。"));
                         ui.label(localization::tr("• 音视频列表移除后可用 Ctrl+Z 恢复条目及编辑设置，撤销记录仅在当前窗口保留。"));

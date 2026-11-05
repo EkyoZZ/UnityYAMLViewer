@@ -8,7 +8,7 @@ use std::{
 
 pub(crate) enum Target {
     File(PathBuf),
-    Playback(String),
+    Playback { url: String, path: PathBuf },
 }
 
 pub(crate) enum Outcome {
@@ -159,15 +159,23 @@ fn task_row(ui: &mut egui::Ui, entry: &Entry) -> Option<String> {
         let status_width = (ui.painter().layout_no_wrap(status.clone(),font.clone(),color).size().x+2.0).min(width*0.36);
         let name_width = (ui.painter().layout_no_wrap(entry.name.clone(),font,color).size().x+2.0)
             .min((ui.available_width()-status_width-cancel_width-6.0).max(1.0));
-        let missing = matches!(target, Some(Target::File(path)) if !path.exists());
+        let missing = matches!(target, Some(Target::File(path) | Target::Playback { path, .. }) if !path.exists());
         let name_color = if missing { ui.visuals().error_fg_color } else if target.is_some() {ui.visuals().hyperlink_color} else {ui.visuals().text_color()};
         let label = egui::RichText::new(&entry.name).color(name_color);
         let name = if target.is_some() && !missing {
             ui.add_sized([name_width,24.0],egui::Label::new(label).truncate().halign(egui::Align::Min).sense(egui::Sense::click()))
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
         } else {ui.add_sized([name_width,24.0],egui::Label::new(label).truncate().halign(egui::Align::Min))};
+        if let Some(Target::Playback { url, .. }) = target {
+            name.context_menu(|ui| {
+                if ui.button(tr("打开播放页")).clicked() {
+                    playback = Some(url.clone());
+                    ui.close_menu();
+                }
+            });
+        }
         match target {
-            Some(Target::File(path)) => {
+            Some(Target::File(path) | Target::Playback { path, .. }) => {
                 let error_id = ui.id().with("reveal_error");
                 let error = ui.ctx().data(|data|data.get_temp::<String>(error_id));
                 let mut hint = format!("{}\n{}",tr(if missing {"原路径已失效"}else{"打开文件所在目录"}),path.display());
@@ -177,9 +185,6 @@ fn task_row(ui: &mut egui::Ui, entry: &Entry) -> Option<String> {
                         else {crate::asset_viewer::reveal_file(path)};
                     ui.ctx().data_mut(|data|{data.remove::<String>(error_id);if let Err(error)=result {data.insert_temp(error_id,error.to_string());}});
                 }
-            }
-            Some(Target::Playback(url)) => {
-                if name.on_hover_text(format!("{}\n{}",tr("打开播放页"),url)).clicked() {playback=Some(url.clone());}
             }
             None => {name.on_hover_text(&entry.name);}
         }

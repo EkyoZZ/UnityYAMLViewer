@@ -62,6 +62,7 @@ fn action_button(label: &str, color: egui::Color32) -> egui::Button<'_> {
 #[derive(Default)]
 pub struct Window {
     open: bool,
+    autoplay: bool,
     components_ready: Option<bool>,
     component_probe: Option<mpsc::Receiver<bool>>,
     component_window_open: bool,
@@ -164,11 +165,21 @@ enum Session { Browser(&'static str), CookieFile(PathBuf) }
 
 impl Window {
     pub fn open(&mut self, ctx: &egui::Context) {
+        self.autoplay = false;
         native_window::wake(ctx, egui::Id::new(WINDOW_ID));
         self.open = true;
     }
 
     pub fn busy(&self) -> bool { self.job.is_some() }
+
+    pub fn analyze_and_play(&mut self, input: String, ctx: &egui::Context) -> bool {
+        if self.busy() { return false; }
+        self.open(ctx);
+        self.input = input;
+        self.analyze();
+        self.autoplay = self.job.is_some();
+        true
+    }
 
     pub fn show(&mut self, ctx: &egui::Context, component_window_open: bool) -> Option<crate::network_video::Source> {
         if let Some(job) = &self.job {
@@ -183,18 +194,23 @@ impl Window {
                             self.result = Some(media);
                             self.video = 0;
                             self.audio = 0;
+                            if std::mem::take(&mut self.autoplay) && self.open {
+                                self.open = false;
+                                return self.result.as_ref().map(|media| media.source(0, 0));
+                            }
                         }
                         Ok(Outcome::Saved { record_error, .. }) => {
                             if let Some(error) = record_error {
                                 self.error = Some(format!("{} · {error}", tr("视频下载记录保存失败")));
                             }
                         }
-                        Err(error) => { self.error = Some(error); if !transfer { self.open = true; } }
+                        Err(error) => { self.autoplay = false; self.error = Some(error); if !transfer { self.open = true; } }
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.job = None;
+                    self.autoplay = false;
                     self.transfer_progress = None;
                     self.transfer_cancel = None;
                     self.error = Some(tr("网络加载任务已中断").into());
@@ -335,7 +351,10 @@ impl Window {
                         let label = tr("分析");
                         let button_width = action_width(ui, label, 76.0);
                         let input_width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(32.0);
+                        let input_id = ui.make_persistent_id("extract_url_input");
+                        crate::theme::prepare_url_paste(ui, input_id);
                         let input = egui::TextEdit::singleline(&mut self.input)
+                            .id(input_id)
                             .vertical_align(egui::Align::Center)
                             .min_size(egui::vec2(0.0, ROW_HEIGHT));
                         let response = ui.add_sized([input_width, ROW_HEIGHT], input);
@@ -444,6 +463,7 @@ impl Window {
                 }
             });
         self.open = open && saved_playback.is_none();
+        if !self.open { self.autoplay = false; }
         saved_playback
     }
 
@@ -790,6 +810,9 @@ fn playback_input(entry: &Value, format: &Value) -> Option<crate::network_video:
     if !matches!(protocol, "http" | "https" | "m3u8" | "m3u8_native") { return None; }
     let mut input = crate::network_video::Input::new(PathBuf::from(url.as_str()));
     input.hls |= protocol.starts_with("m3u8");
+    // yt-dlp deliberately keeps scoped cookies separate from http_headers.
+    input.cookies = playback_cookies(format["cookies"].as_str()
+        .or_else(|| entry["cookies"].as_str()).unwrap_or_default(), &url);
     let mut headers = std::collections::BTreeMap::new();
     for values in [&entry["http_headers"], &format["http_headers"]] {
         if let Some(values) = values.as_object() {
@@ -805,6 +828,83 @@ fn playback_input(entry: &Value, format: &Value) -> Option<crate::network_video:
         input.headers.push_str(&format!("{name}: {value}\r\n"));
     }
     Some(input)
+}
+
+/// Convert yt-dlp's serialized cookies into FFmpeg's scoped Set-Cookie lines.
+/// Never flatten these into a Cookie header, which would lose redirect scoping.
+fn playback_cookies(serialized: &str, url: &reqwest::Url) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_secs();
+    let host = url.host_str().unwrap_or_default();
+    let mut result = String::new();
+    let mut cookie = Vec::<(&str, &str)>::new();
+    let mut secure = false;
+    let mut valid = true;
+    let flush = |cookie: &[(&str, &str)], secure: bool, valid: bool, result: &mut String| {
+        let Some(&(name, encoded_value)) = cookie.first() else { return; };
+        let Some(value) = playback_cookie_value(encoded_value) else { return; };
+        let attribute = |key: &str| cookie.iter().skip(1)
+            .find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| *value);
+        let Some(domain) = attribute("domain") else { return; };
+        let domain = domain.trim_start_matches('.');
+        let Some(path) = attribute("path").filter(|path| path.starts_with('/')) else { return; };
+        let domain_matches = host.eq_ignore_ascii_case(domain) || host.to_ascii_lowercase()
+            .strip_suffix(&domain.to_ascii_lowercase()).is_some_and(|prefix| prefix.ends_with('.'));
+        let path_matches = url.path() == path || url.path().strip_prefix(path)
+            .is_some_and(|suffix| path.ends_with('/') || suffix.starts_with('/'));
+        let expired = attribute("expires").is_some_and(|value| value.parse::<u64>().map_or(true, |expires| expires <= now));
+        if !valid || domain.is_empty() || !domain_matches || !path_matches || expired
+            || (secure && url.scheme() != "https") { return; }
+        result.push_str(&format!("{name}={value}; domain={domain}; path={path};{}\r\n",
+            if secure { " secure;" } else { "" }));
+    };
+    // Python's SimpleCookie serialization escapes semicolons in quoted values.
+    for part in serialized.split(';').map(str::trim).filter(|part| !part.is_empty()) {
+        let (name, value) = part.split_once('=').unwrap_or((part, ""));
+        let attribute = matches!(name.to_ascii_lowercase().as_str(),
+            "domain" | "path" | "expires" | "version" | "secure" | "httponly" | "samesite" | "max-age");
+        if !attribute {
+            flush(&cookie, secure, valid, &mut result);
+            cookie.clear();
+            secure = false;
+            valid = part.contains('=') && reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok();
+        }
+        valid &= part.bytes().all(|byte| (0x20..=0x7e).contains(&byte));
+        if name.eq_ignore_ascii_case("secure") { secure = true; }
+        cookie.push((name, value));
+    }
+    flush(&cookie, secure, valid, &mut result);
+    result
+}
+
+// Python SimpleCookie quotes values such as base64 tokens containing '='.
+// FFmpeg expects the decoded value, including decoded backslash/octal escapes.
+fn playback_cookie_value(encoded: &str) -> Option<String> {
+    let mut decoded = Vec::new();
+    if encoded.starts_with('"') {
+        let inner = encoded.strip_prefix('"')?.strip_suffix('"')?;
+        let bytes = inner.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            let mut byte = bytes[index];
+            if byte == b'\\' {
+                index += 1;
+                byte = *bytes.get(index)?;
+                if (b'0'..=b'3').contains(&byte) && bytes.get(index + 1..index + 3)
+                    .is_some_and(|digits| digits.iter().all(|digit| (b'0'..=b'7').contains(digit))) {
+                    byte = (byte - b'0') * 64 + (bytes[index + 1] - b'0') * 8 + (bytes[index + 2] - b'0');
+                    index += 2;
+                }
+            }
+            decoded.push(byte);
+            index += 1;
+        }
+    } else {
+        decoded.extend_from_slice(encoded.as_bytes());
+    }
+    // Do not allow escaped delimiters to create new Set-Cookie attributes/lines.
+    decoded.iter().all(|byte| (0x20..=0x7e).contains(byte) && *byte != b';')
+        .then(|| String::from_utf8(decoded).ok()).flatten()
 }
 
 fn formats(entry: &Value) -> (Vec<Format>, Vec<Format>) {
@@ -856,6 +956,84 @@ fn combined_size(video: Option<u64>, audio: Option<Option<u64>>) -> Option<u64> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn url_autoplay_selects_first_video_and_audio_without_downloading() {
+        let metadata = serde_json::json!({"formats": [
+            {"format_id":"first-video", "url":"https://example.org/video.mp4", "vcodec":"h264", "acodec":"none", "ext":"mp4"},
+            {"format_id":"second-video", "url":"https://example.org/other.mp4", "vcodec":"h264", "acodec":"none", "ext":"mp4"},
+            {"format_id":"first-audio", "url":"https://example.org/audio.m4a", "vcodec":"none", "acodec":"aac", "ext":"m4a"}
+        ]});
+        let (video, audio) = formats(&metadata);
+        let first_video_id = video[0].id.clone();
+        let first_audio_id = audio[0].id.clone();
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Ok(Outcome::Analyzed(Media { tool: PathBuf::new(), url:"https://example.org/watch".into(),
+            browser_session:None, title:"Test".into(), video, audio }))).unwrap_or_else(|_| panic!("receiver dropped"));
+        let mut window = Window { open:true, autoplay:true, job:Some(receiver), ..Default::default() };
+        let source = window.show(&egui::Context::default(), false).expect("automatic playback source");
+        assert_eq!(source.video[source.selected_video].id, first_video_id);
+        assert_eq!(source.audio[source.selected_audio].id, first_audio_id);
+        assert!(source.video[0].separate_audio);
+        assert!(window.job.is_none());
+        assert!(!window.open && !window.autoplay);
+    }
+
+    #[test]
+    fn automatic_extraction_does_not_replace_an_active_job() {
+        let (_sender, receiver) = mpsc::channel();
+        let mut window = Window { input:"existing task".into(), job:Some(receiver), ..Default::default() };
+        assert!(!window.analyze_and_play("https://example.org/new".into(), &egui::Context::default()));
+        assert_eq!(window.input, "existing task");
+        assert!(!window.autoplay);
+    }
+
+    #[test]
+    fn playback_keeps_format_headers_and_scoped_cookies() {
+        let entry = serde_json::json!({"http_headers": {"User-Agent": "base", "Referer": "https://example.org/"},
+            "cookies": "wrong=entry; Domain=elsewhere.invalid; Path=/"});
+        let format = serde_json::json!({"url": "https://cdn.example.org/video/test.mp4", "protocol": "https",
+            "http_headers": {"User-Agent": "format"},
+            "cookies": "token=abc; Domain=.example.org; Path=/video; Secure; other=def; Domain=cdn.example.org; Path=/"});
+        let input = playback_input(&entry, &format).unwrap();
+        assert!(input.headers.contains("user-agent: format\r\n"));
+        assert!(input.headers.contains("referer: https://example.org/\r\n"));
+        assert!(!input.headers.to_ascii_lowercase().contains("cookie:"));
+        assert_eq!(input.cookies, "token=abc; domain=example.org; path=/video; secure;\r\nother=def; domain=cdn.example.org; path=/;\r\n");
+        let mut command = std::process::Command::new("ffprobe");
+        input.options(&mut command);
+        let args: Vec<_> = command.get_args().map(|value| value.to_string_lossy().into_owned()).collect();
+        assert!(args.windows(2).any(|pair| pair[0] == "-cookies" && pair[1] == input.cookies));
+    }
+
+    #[test]
+    fn playback_decodes_python_cookie_values_before_passing_to_ffmpeg() {
+        let url = reqwest::Url::parse("https://cdn.example.org/video.mp4").unwrap();
+        assert_eq!(playback_cookies(r#"tt_chain_token="abc=="; Domain=.example.org; Path=/; Secure"#, &url),
+            "tt_chain_token=abc==; domain=example.org; path=/; secure;\r\n");
+        assert_eq!(playback_cookie_value(r#""abc\075\075""#).as_deref(), Some("abc=="));
+        assert_eq!(playback_cookie_value(r#""abc\\def""#).as_deref(), Some(r"abc\def"));
+        assert!(playback_cookie_value(r#""abc\015\012injected""#).is_none());
+        assert!(playback_cookie_value(r#""abc\073path=/""#).is_none());
+        assert!(playback_cookie_value(r#""abc\377""#).is_none());
+        assert!(playback_cookie_value("\"unterminated").is_none());
+    }
+
+    #[test]
+    fn playback_rejects_unscoped_expired_and_unrelated_cookies() {
+        let url = reqwest::Url::parse("https://cdn.example.org/video/test.mp4").unwrap();
+        for cookies in ["token=abc", "token=abc; Domain=example.org", "token=abc; Domain=evil.example.org; Path=/",
+            "token=abc; Domain=ample.org; Path=/", "token=abc; Domain=example.org; Path=/videos",
+            "token=abc; Domain=example.org; Path=/; Expires=1",
+            "token=abc\r\nx-injected: yes; Domain=example.org; Path=/"] {
+            assert!(playback_cookies(cookies, &url).is_empty(), "{cookies:?}");
+        }
+        let entry = serde_json::json!({"cookies": "token=abc; Domain=.example.org; Path=/"});
+        let input = playback_input(&entry, &serde_json::json!({"url": url.as_str()})).unwrap();
+        assert!(input.cookies.starts_with("token=abc;"));
+        let http = reqwest::Url::parse("http://cdn.example.org/video/test.mp4").unwrap();
+        assert!(playback_cookies("token=abc; Domain=example.org; Path=/; Secure", &http).is_empty());
+    }
 
     #[test]
     fn transfer_progress_reads_estimated_bytes_and_separate_track_index() {

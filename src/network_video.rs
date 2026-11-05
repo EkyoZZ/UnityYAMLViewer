@@ -10,6 +10,7 @@ use std::{
 pub(crate) struct Input {
     pub path: PathBuf,
     pub headers: String,
+    pub cookies: String,
     pub hls: bool,
     pub local: bool,
     pub stream: Option<u64>,
@@ -21,6 +22,7 @@ impl Input {
             hls: crate::remote_file::is_hls(&path),
             path,
             headers: String::new(),
+            cookies: String::new(),
             stream: None,
             local: false,
         }
@@ -48,6 +50,9 @@ impl Input {
         }
         if !self.headers.is_empty() {
             command.arg("-headers").arg(&self.headers);
+        }
+        if !self.cookies.is_empty() {
+            command.arg("-cookies").arg(&self.cookies);
         }
     }
 }
@@ -125,18 +130,6 @@ impl Source {
     pub fn is_direct_default(&self) -> bool {
         let video = &self.video[self.selected_video];
         video.id.is_empty() && video.input.is_some()
-    }
-
-    pub fn audio_languages(&self) -> Vec<usize> {
-        let mut languages = std::collections::HashSet::new();
-        std::iter::once(self.selected_audio)
-            .chain(0..self.audio.len())
-            .filter(|index| {
-                self.audio.get(*index).is_some_and(|format| {
-                    !format.language.is_empty() && languages.insert(format.language.as_str())
-                })
-            })
-            .collect()
     }
 
     pub fn selection(&self) -> Selection {
@@ -481,7 +474,6 @@ mod tests {
             selected_video: 0,
             selected_audio: 0,
         };
-        assert_eq!(source.audio_languages(), [0, 2]);
         let first = source.selection();
         source.selected_audio = 2;
         let other_language = source.selection();

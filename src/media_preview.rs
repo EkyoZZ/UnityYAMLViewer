@@ -78,7 +78,7 @@ fn is_mp4_header(bytes:&[u8])->bool {
     false
 }
 #[derive(Clone)]
-struct AudioTrack {language:String,codec:String,rate:u64,channels:u64,layout:String,sample_format:String,depth:Option<u64>,profile:String,bit_rate:u64,index:u64,label:String,default:bool,ordinal:usize,language_name:Option<&'static str>,details:String}
+struct AudioTrack {codec:String,rate:u64,channels:u64,layout:String,sample_format:String,depth:Option<u64>,profile:String,bit_rate:u64,index:u64,label:String,default:bool,ordinal:usize,language_name:Option<&'static str>,details:String}
 impl AudioTrack {
     fn display_label(&self)->String {
         match self.language_name {
@@ -233,7 +233,7 @@ fn probe(path: &Path, video_input: Option<NetworkInput>, audio_input: Option<Net
         let description=if title.is_empty(){language.to_owned()}else{format!("{title} ({language})")};
         let depth=s["bits_per_raw_sample"].as_str().and_then(|v|v.parse::<u64>().ok()).filter(|v|*v>0)
             .or_else(||s["bits_per_sample"].as_u64().filter(|v|*v>0));
-        AudioTrack {language:crate::network_video::language_key(language),codec:codec.clone(),rate,channels,layout:s["channel_layout"].as_str().unwrap_or("未知").to_owned(),
+        AudioTrack {codec:codec.clone(),rate,channels,layout:s["channel_layout"].as_str().unwrap_or("未知").to_owned(),
             sample_format:s["sample_fmt"].as_str().unwrap_or("未知").to_owned(),depth,profile:s["profile"].as_str().unwrap_or("未知").to_owned(),bit_rate:s["bit_rate"].as_str().and_then(|v|v.parse::<u64>().ok()).or_else(||s["bit_rate"].as_u64()).unwrap_or(0),index,label:format!("{} · {description} · {codec} · {rate} Hz · {channels} ch",ordinal+1),default,
             ordinal:ordinal+1,language_name:audio_language_name(title,language),details:format!("{codec} · {rate} Hz · {channels} ch")}
     }).collect();
@@ -692,8 +692,8 @@ pub fn show_trim_windows(ctx:&egui::Context) {
 
 pub struct Preview { subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
     waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
-    frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64>,keyboard_seek:Option<f64>,keyboard_seek_hint:Option<(f64,Instant)> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None}}}
+    frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64>,keyboard_seek:Option<f64>,keyboard_seek_hint:Option<(f64,Instant)>,keyboard_volume_hint:Option<Instant> }
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
 impl Preview {
     fn refresh_subtitles(&mut self,ctx:&egui::Context,path:&Path){
         let Some(info)=&self.info else{return;};
@@ -858,6 +858,7 @@ impl Preview {
     pub fn deactivate(&mut self) {
         self.keyboard_seek = None;
         self.keyboard_seek_hint = None;
+        self.keyboard_volume_hint = None;
         self.autoplay_pending = false;
         self.meter_trails=[0.0;2];
         self.video_gesture=None;
@@ -1289,7 +1290,7 @@ impl Preview {
         if !ui.ctx().wants_keyboard_input() && ui.input(|input| input.focused)
             && self.info.as_ref().is_some_and(|info| info.gif.is_none())
         {
-            let (seek_steps, volume_steps, seeking) = ui.input_mut(|input| {
+            let (seek_steps, volume_steps, seeking, adjusting_volume) = ui.input_mut(|input| {
                 let mut seek_steps = 0;
                 let mut volume_steps = 0;
                 input.events.retain(|event| {
@@ -1310,16 +1311,22 @@ impl Preview {
                     }
                 });
                 let seeking = input.key_down(egui::Key::ArrowLeft) || input.key_down(egui::Key::ArrowRight);
-                (seek_steps, volume_steps, seeking)
+                let adjusting_volume = input.key_down(egui::Key::ArrowUp) || input.key_down(egui::Key::ArrowDown);
+                (seek_steps, volume_steps, seeking, adjusting_volume)
             });
             if volume_steps != 0 {
                 keyboard_volume_changed = true;
+                self.keyboard_volume_hint = Some(Instant::now() + Duration::from_millis(200));
                 self.volume = (self.volume + volume_steps as f32 * 0.05).clamp(0.0, 1.0);
                 if self.volume > 0.0 {
                     self.remembered_volume = self.volume;
                 }
             }
+            if adjusting_volume && self.keyboard_volume_hint.is_some() {
+                self.keyboard_volume_hint = Some(Instant::now() + Duration::from_millis(200));
+            }
             if seek_steps != 0 {
+                self.keyboard_volume_hint = None;
                 let origin = self.keyboard_seek.unwrap_or(position);
                 self.keyboard_seek = Some((origin + f64::from(seek_steps) * 5.0).clamp(0.0, duration));
                 self.keyboard_seek_hint = None;
@@ -1330,6 +1337,7 @@ impl Preview {
         } else {
             self.keyboard_seek = None;
             self.keyboard_seek_hint = None;
+            self.keyboard_volume_hint = None;
         }
         let mut toggle=video_clicked || space_toggle;let mut stop=false;let mut next=false;let mut seek=wave_seek.as_ref().is_some_and(|gesture|gesture.finished);
         let screen=ui.clip_rect();
@@ -1396,6 +1404,7 @@ impl Preview {
         if seek || stop || next || toggle {
             self.keyboard_seek = None;
             self.keyboard_seek_hint = None;
+            self.keyboard_volume_hint = None;
         } else if let Some(target) = keyboard_target {
             position = target;
             seek = true;
@@ -1408,9 +1417,20 @@ impl Preview {
             Some(target)
         });
         if lingering_target.is_none() { self.keyboard_seek_hint = None; }
-        if let Some(target) = self.keyboard_seek.or(lingering_target) {
+        let volume_hint = self.keyboard_volume_hint.is_some_and(|until| {
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { return false; }
+            ui.ctx().request_repaint_after(remaining);
+            true
+        });
+        if !volume_hint { self.keyboard_volume_hint = None; }
+        let hint = if volume_hint {
+            Some(crate::lf!("音量:{0}%", (self.volume * 100.0).round() as u32))
+        } else {
+            self.keyboard_seek.or(lingering_target).map(|target| format!("{} / {}", time(target), time(duration)))
+        };
+        if let Some(label) = hint {
             let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
-            let label = format!("{} / {}", time(target), time(duration));
             let text = painter.layout_no_wrap(label, egui::FontId::proportional(28.0), egui::Color32::WHITE);
             let background = egui::Rect::from_center_size(body.center(), text.size() + egui::vec2(24.0, 16.0));
             painter.rect_filled(background, 6.0, egui::Color32::from_black_alpha(190));
@@ -1580,11 +1600,7 @@ fn details_menu(ui:&mut egui::Ui,info:&Info) {
 fn audio_menu(ui:&mut egui::Ui,info:&Info,selected:&mut Option<u64>,network_tab:bool) {
     details_menu(ui,info);
     if info.gif.is_some() { return; }
-    let mut languages = std::collections::HashSet::new();
-    let current = info.audio_tracks.iter().find(|track| Some(track.index) == *selected);
-    let tracks: Vec<_> = if network_tab {
-        current.into_iter().chain(&info.audio_tracks).filter(|track| !track.language.is_empty() && languages.insert(&track.language)).collect()
-    } else { info.audio_tracks.iter().collect() };
+    let tracks: Vec<_> = info.audio_tracks.iter().collect();
     if network_tab && tracks.len() <= 1 { return; }
     ui.menu_button(crate::localization::tr("音轨 / 语言"),|ui| {
         crate::theme::menu_no_wrap(ui);

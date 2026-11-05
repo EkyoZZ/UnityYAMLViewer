@@ -151,7 +151,7 @@ pub(crate) fn green_outline_button(ui: &egui::Ui, label: &str) -> egui::Button<'
     };
     egui::Button::new(egui::RichText::new(label.to_owned()).color(green))
         .fill(egui::Color32::TRANSPARENT)
-        .stroke(egui::Stroke::new(1.0, green))
+        .stroke(egui::Stroke::new(1.0_f32, green))
 }
 
 pub(crate) fn preview_navigation_button(label:&str)->egui::Button<'_> {
@@ -217,6 +217,18 @@ pub fn preview_warning_details(ui:&mut egui::Ui,key:&str,label:&str,issues:&[Str
     }
 }
 
+pub(crate) fn prepare_url_paste(ui: &egui::Ui, id: egui::Id) {
+    if ui.is_enabled() && ui.memory(|memory| memory.has_focus(id)) {
+        ui.input_mut(|input| {
+            for event in &mut input.events {
+                if let egui::Event::Paste(text) = event {
+                    *text = crate::remote_file::decode_pasted_unicode(text);
+                }
+            }
+        });
+    }
+}
+
 pub(crate) fn paste_replace_menu(response: &egui::Response, text: &mut String) -> bool {
     if !response.enabled() { return false; }
     let mut changed = false;
@@ -224,7 +236,8 @@ pub(crate) fn paste_replace_menu(response: &egui::Response, text: &mut String) -
         if ui.button(crate::localization::tr("粘贴")).clicked() {
             ui.close_menu();
             if let Ok(pasted) = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
-                let pasted = pasted.replace("\r\n", " ").replace(['\r', '\n'], " ");
+                let pasted = crate::remote_file::decode_pasted_unicode(&pasted)
+                    .replace("\r\n", " ").replace(['\r', '\n'], " ");
                 if !pasted.is_empty() {
                     changed = *text != pasted;
                     *text = pasted;

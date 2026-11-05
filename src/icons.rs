@@ -2,7 +2,7 @@
 use eframe::egui;
 
 #[derive(Clone, Copy)]
-pub enum Icon { Gear, BackgroundTasks, EditList, Eye, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, DragHandle, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup }
+pub enum Icon { Gear, BackgroundTasks, EditList, Eye, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup }
 
 pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) {
     // Keep Next's triangle and bar at their original scale; TrimPlay adds a bar.
@@ -24,7 +24,6 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         Icon::ChevronRight => egui::include_image!("../assets/icons/chevron-right.svg"),
         Icon::Next | Icon::Previous => egui::include_image!("../assets/icons/next.svg"),
         Icon::TrimPlay => egui::include_image!("../assets/icons/trim-play.svg"),
-        Icon::DragHandle => egui::include_image!("../assets/icons/drag-handle.svg"),
         Icon::MarkStart => egui::include_image!("../assets/icons/mark-start.svg"),
         Icon::MarkEnd => egui::include_image!("../assets/icons/mark-end.svg"),
         Icon::Stop => egui::include_image!("../assets/icons/stop.svg"),

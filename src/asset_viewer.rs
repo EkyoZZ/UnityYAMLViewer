@@ -495,11 +495,10 @@ impl Assets {
                             ui.selectable_value(&mut source.selected_video, index, &format.label);
                         });
                 }
-                let languages = source.audio_languages();
-                if source.video[source.selected_video].separate_audio && languages.len() > 1 {
+                if source.video[source.selected_video].separate_audio && source.audio.len() > 1 {
                     egui::ComboBox::from_id_salt(("network_audio", key)).selected_text(&source.audio[source.selected_audio].label)
-                        .show_ui(ui, |ui| for index in languages {
-                            ui.selectable_value(&mut source.selected_audio, index, &source.audio[index].label);
+                        .show_ui(ui, |ui| for (index, audio) in source.audio.iter().enumerate() {
+                            ui.selectable_value(&mut source.selected_audio, index, &audio.label);
                         });
                 }
             });
@@ -557,8 +556,27 @@ impl Assets {
                     self.network_errors.remove(&job_key);
                     self.network_downloads.insert(job_key.clone(), crate::remote_file::Download::start(
                         ui.ctx(), format!("{} · {}", source.title, source.video[source.selected_video].label),
-                        source.url.clone(), selection, inputs.unwrap(), preview.playlist_duration().unwrap_or_default()));
+                        source.url.clone(), selection.clone(), inputs.unwrap(), preview.playlist_duration().unwrap_or_default()));
                     ui.ctx().request_repaint();
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                for (track, label) in [
+                    (crate::network_video::Track::Video, "视频已缓存"),
+                    (crate::network_video::Track::Audio, "音频已缓存"),
+                ] {
+                    if let Some(cached_path) = selection.track_cache(track) {
+                        let response = ui.add(egui::Label::new(
+                            egui::RichText::new(tr(label)).underline().color(ui.visuals().hyperlink_color))
+                            .sense(egui::Sense::click()))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(format!("{}\n{}", tr("打开文件所在目录"), cached_path.display()));
+                        if response.clicked() {
+                            if let Err(error) = reveal_file(&cached_path) {
+                                self.network_errors.insert(job_key.clone(), error.to_string());
+                            }
+                        }
+                    }
                 }
             });
             if let Some(error) = self.network_errors.get(&job_key) {

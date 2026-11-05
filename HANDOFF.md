@@ -1,5 +1,25 @@
 # 当前发布：1.3.3（已正式发布）
 
+- 2026-11-06，最新本地产物（缓存界面精简）：用户明确授权、进程及目标文件占用检查通过，Release 离线构建成功（32.48 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,774,784 字节，SHA-256：B51ADA10ED7588B7634016895D019B3B9AC53730CCAC6D2702F31AE1943FC5EE。包含缓存完成链接文字精简、悬停路径/点击定位及缓存中描边百分比文本＋取消；仅保留 spine38 的 158 项警告。日志 target/compact-cache-ui-release-build.log；git diff --check 通过，实际 GUI 待用户验证。未更新 GitHub 附件或历史候选副本；下列尚未重建描述是此前时点记录。
+
+- 2026-11-06，缓存进度紧凑显示尚未重建：播放页移除进度条/转圈和重复缓存按钮，改为描边百分比文字及紧跟取消按钮，控件组内不换行；处理与取消阶段显示真实状态。七语言和文档同步，cargo check --tests --locked --offline、git diff --check 通过，实际 GUI 待验证。现有可执行程序不包含本次修改及前述缓存链接文字精简。
+
+- 2026-11-06，缓存链接文字精简尚未重建：播放页改为带下划线的“视频已缓存／音频已缓存”，悬停显示完整路径，点击定位，两个链接同排且可换行；去掉常驻路径及截断触发的额外悬浮提示。七语言和文档同步，cargo check --tests --locked --offline 通过。实际 GUI 待验证；现有可执行程序不含本次精简。
+
+- 2026-11-06，最新本地产物（缓存路径＋Unicode 粘贴）：用户明确授权且测试/编译前进程与目标独占访问检查通过，2 项 remote_file 测试通过，Release 离线构建成功（29.49 秒）。target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,717,440 字节，SHA-256：C168B21F9C91D4A4295D28DBB3BED0A274AE354DD86AD6EC580D62D7F50551E7。包含播放页视频/音频缓存路径、缓存完成任务点击定位及右键打开播放页、打开 URL/视频提取粘贴时单层 Unicode 解码并保留百分号编码。仅保留 spine38 的 158 项构建警告；测试构建有增量缓存整理/硬链接提示但退出成功。日志 target/pasted-unicode-regression-tests.log、target/cache-path-unicode-release-build.log；新增七语言和 git diff --check 通过。实际界面待用户验证，未更新 GitHub 附件或历史候选副本；下列未重建状态是此前时点记录。
+
+- 2026-11-06，新增缓存路径定位修改尚未重建：播放页显示当前格式的视频/音频本地缓存路径，点击定位；已完成缓存任务保存实际视频缓存路径，左键定位，右键保留打开原播放页，已删除缓存沿用失效路径提示。cargo check --tests --locked --offline、git diff --check 和新增七语言文案核对通过。实际界面、HLS 完成切换及文件删除场景待验证；现有可执行程序仍为下列用户已测试通过的旧构建，不包含本修改。
+
+- 2026-11-06，用户确认最新本地产物测试通过，覆盖本轮 Cookie 修正、完整音频选项、音量悬浮提示及 URL 通用提取兜底。确认对象 target/release/unity_yaml_viewer.exe，SHA-256：6F36B9AF153486BB9BEFBC03AEAC51B254CF9D2DC69EDDFD7B45459CA16857DD。不代表所有站点/语言或全部历史功能已全面回归，关于窗口折叠未单独报告验证；未自动提交、推送或更新 GitHub 发布附件。
+
+- 2026-11-06，最新本地验证产物：用户再次明确授权，测试及 Release 编译前均确认程序未运行、目标可独占访问；13 项视频提取测试及 1 项网络视频缓存复用测试全部通过。Release 离线构建成功（32.15 秒），target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,703,616 字节，SHA-256：6F36B9AF153486BB9BEFBC03AEAC51B254CF9D2DC69EDDFD7B45459CA16857DD。包含 Cookie 引号/转义解码、完整音频格式选项、方向键音量居中提示（松键 0.2 秒消失）和打开 URL 无法加载文件时由 yt-dlp 兜底自动播放。构建仅保留 spine38 的 158 项警告；测试阶段增量缓存整理/硬链接提示不影响通过。日志 target/url-playback-regression-tests.log、target/network-video-regression-tests.log、target/url-playback-release-build.log。关键七语言文案和 git diff --check 核对通过；实际 TikTok/B 站播放、音轨切换、音量提示及关于窗口展示待用户验证。自动选择第一个格式指提取界面既有高质量优先排序的第一项。未更新 GitHub 附件或 target/releases 历史候选副本；下列“尚未构建”等为先前时点记录。
+
+- 2026-11-06，Cookie 解码后续修正尚未构建：同一 TikTok 媒体地址在解码 tt_chain_token 序列化引号后 FFprobe 成功（时长 23.127007 秒），此前同参数未解码返回 403，yt-dlp 前 10 KiB 读取成功。已修改源码并新增引号/转义/注入过滤回归测试，cargo check --tests --locked --offline 通过。编译前目标 target/release/unity_yaml_viewer.exe 独占访问失败，未运行测试构建或 Release 重建；用户关闭占用并再次明确确认后须复查，当前可执行程序仍为下列旧构建。GUI 待验证。
+
+- 2026-11-06，发布后 Cookie 传递修正本地构建：补传 yt-dlp cookies 到 FFmpeg，保留域名/路径作用域，探测、播放和手动缓存共用；cargo check --tests --locked --offline、2 项针对性测试通过。用户授权且构建前进程/目标文件占用复查通过，Release 构建成功（31.13 秒）。产物 target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,707,200 字节，SHA-256：10D5F129D292E5346E7B9DA1ED37E1196AAD34A10F418CD7D22198FCBF2CB270。日志 target/playback-cookie-check.log、target/playback-cookie-tests.log、target/playback-cookie-release-build.log。仅保留 spine38 警告；TikTok DNS 解析失败，需用户通过“视频提取 → 重新分析 → 不下载直接播放”验证，不能宣称 403 已解决。七语言关于摘要已更新，GUI 待验证；未更新 GitHub 附件或历史候选副本。
+
+- 2026-11-05，发布后警告清理本地构建：用户明确授权，检查程序未运行且目标可独占访问后，cargo build --release --locked --offline 成功，耗时 42.62 秒。产物 target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,615,552 字节，SHA-256：436EC0FB87DF4EB105EE12958D4A96410B137AF687DFE90A91E4BCABCA913164。项目自身 3 项代码警告已消除，仅保留 spine38 的 158 项警告；日志 target/warning-cleanup-release-build.log。未运行 GUI 验证，未更新已发布附件及 target/releases 下历史候选副本。
+
 - 正式发布：用户确认 1.3.3 新增内容验证通过并明确授权发布；远程 master 与本地提交 cd776fd41cc061e7c308d92f5d53feb727c8e351 一致。225 项候选输入中排除 1 个不参与构建的 Python 字节码缓存，其余与提交无实质差异，155 项仅换行格式不同。未重新编译。先创建草稿，上传 30,748,160 字节附件并核对 GitHub SHA-256 为 DE80D78C2A1EC3C8D7AC3CDBF73CEC5047D047A7E44316EBC2927C8CF67B4BDA，再于北京时间 2026-11-05 22:31:05 正式发布 v1.3.3（Release ID 435309872），标题仅版本号、非预发布、latest API 确认为最新稳定版。证据 target/v1.3.3-publish-audit.json、target/v1.3.3-release-asset.json、target/v1.3.3-published.json。以下待验证/未发布表述保留开发阶段史实，不代表当前发布状态。
 
 - 发布后的状态文档仅更新在本地，未自动提交或推送；没有修改其他历史 Release。

@@ -5,6 +5,40 @@ mod video_cache;
 pub(crate) use video_cache::Download;
 
 const LIMIT: u64 = 1024 * 1024 * 1024;
+
+/// Decode one layer of pasted Unicode escapes; preserve percent encoding.
+pub(crate) fn decode_pasted_unicode(text: &str) -> String {
+    let unit = |value: &str| value.strip_prefix("\\u").and_then(|value| value.get(..4))
+        .filter(|value| value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .and_then(|value| u16::from_str_radix(value, 16).ok());
+    let mut output = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        if rest.starts_with("\\\\") {
+            output.push_str("\\\\");
+            index += 2;
+            continue;
+        }
+        if let Some(first) = unit(rest) {
+            let length = if (0xd800..=0xdbff).contains(&first)
+                && rest.get(6..).and_then(unit).is_some_and(|second| (0xdc00..=0xdfff).contains(&second)) { 12 } else { 6 };
+            if let Some(encoded) = rest.get(..length) {
+                if let Ok(decoded) = serde_json::from_str::<String>(&format!("\"{encoded}\"")) {
+                    if !decoded.chars().any(char::is_control) {
+                        output.push_str(&decoded);
+                        index += length;
+                        continue;
+                    }
+                }
+            }
+        }
+        let ch = rest.chars().next().unwrap();
+        output.push(ch);
+        index += ch.len_utf8();
+    }
+    output
+}
 fn cache_root() -> PathBuf { crate::app_cache::network_root() }
 pub fn is_cached(path: &Path) -> bool { path.starts_with(cache_root()) || path.starts_with(std::env::temp_dir().join("UnityYAMLViewer-network")) }
 fn hls_url(input: &str) -> Option<reqwest::Url> {
@@ -69,6 +103,7 @@ pub fn stream_source(input: &str) -> Option<(PathBuf, Option<String>)> {
 pub enum Opened {
     File(PathBuf),
     Video { path: PathBuf, hls: bool },
+    Webpage,
 }
 
 pub fn start(url: String, ctx: eframe::egui::Context) -> mpsc::Receiver<Result<Opened, String>> {
@@ -100,7 +135,7 @@ fn download(input: &str) -> Result<Opened, String> {
     }
     if response.content_length().is_some_and(|size| size > LIMIT) { return Err(tr("文件超过 1 GiB，无法通过 URL 打开").into()); }
     if matches!(mime.as_str(), "text/html" | "application/xhtml+xml") {
-        return Err(tr("此 URL 返回网页，请提供文件直链；暂不支持网页解析或登录认证").into());
+        return Ok(Opened::Webpage);
     }
     let candidate = response.url().path_segments().and_then(|mut parts| parts.next_back()).unwrap_or("download");
     let mut name: String = candidate.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).take(160).collect();
@@ -150,6 +185,17 @@ fn supported(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pasted_unicode_preserves_url_encoding_and_only_decodes_once() {
+        assert_eq!(decode_pasted_unicode(r"https://example.org/?a=1\u0026b=%26%2B%3D"),
+            "https://example.org/?a=1&b=%26%2B%3D");
+        assert_eq!(decode_pasted_unicode(r"\u4e2d\u6587\uD83D\uDE00"), "中文😀");
+        for unchanged in [r"\uD800", r"\uDC00", r"\u12", r"\uZZZZ", r"\u000a", r"\\u0026", "%26", "&amp;", "普通文字"] {
+            assert_eq!(decode_pasted_unicode(unchanged), unchanged);
+        }
+        assert_eq!(decode_pasted_unicode(r"\u005cu0026"), r"\u0026");
+    }
 
     #[test]
     fn recognizes_hls_and_preserves_signed_source() {
