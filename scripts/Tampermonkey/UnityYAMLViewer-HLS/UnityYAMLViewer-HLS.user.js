@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UnityYAMLViewer · HLS 嗅探助手
 // @namespace    https://github.com/EkyoZZ/UnityYAMLViewer
-// @version      1.0.5
+// @version      1.0.6
 // @description  发现 HLS 地址，复制链接、在原在线工具或 UnityYamlViewer 中打开；脚本不直接下载视频。
 // @author       UnityYAMLViewer contributors
 // @license      MIT
@@ -75,6 +75,14 @@
       message.textContent = '已复制地址';
     } catch { message.textContent = '复制失败，请选中地址手动复制。'; }
   }
+  function openInApp(url) {
+    const referer = new URL(location.href);
+    referer.hash = '';
+    const uri = `unityyamlviewer://open?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer.href)}`;
+    if (uri.length > 32000) { message.textContent = '地址过长，请复制后在软件中粘贴打开。'; return; }
+    message.textContent = '已请求打开软件。首次使用请先运行新版软件，并允许浏览器打开外部应用。';
+    location.assign(uri);
+  }
   function append(url) {
     const item = document.createElement('div');
     item.className = 'uyv-item';
@@ -86,14 +94,7 @@
     actions.className = 'uyv-actions';
     actions.append(button('复制链接', () => copy(url)), button('在工具中打开', () => {
       window.open(`${TOOL_URL}?url=${encodeURIComponent(url)}`, '_blank', 'noopener,noreferrer');
-    }, 'uyv-online'), button('在 UnityYamlViewer 中打开', () => {
-      const referer = new URL(location.href);
-      referer.hash = '';
-      const uri = `unityyamlviewer://open?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer.href)}`;
-      if (uri.length > 32000) { message.textContent = '地址过长，请复制后在软件中粘贴打开。'; return; }
-      message.textContent = '已请求打开软件。首次使用请先运行新版软件，并允许浏览器打开外部应用。';
-      location.assign(uri);
-    }, 'uyv-app'));
+    }, 'uyv-online'), button('在 UnityYamlViewer 中打开', () => openInApp(url), 'uyv-app'));
     item.append(address, actions);
     list.appendChild(item);
     badge.textContent = `HLS ${seen.size}`;
@@ -101,8 +102,17 @@
   }
   function fitExpandedWidth() {
     if (!panel?.open) return;
+    const header = panel.querySelector('summary');
+    const headerStyle = getComputedStyle(header);
+    const headerWidth = Array.from(header.children).reduce((sum, entry) => sum + entry.getBoundingClientRect().width, 0)
+      + parseFloat(headerStyle.fontSize) + 2 * (parseFloat(headerStyle.columnGap) || 0)
+      + parseFloat(headerStyle.paddingLeft) + parseFloat(headerStyle.paddingRight)
+      + panel.offsetWidth - panel.clientWidth;
     const actions = list.querySelector('.uyv-actions');
-    if (!actions) return;
+    if (!actions) {
+      panel.style.setProperty('--uyv-expanded-width', `${Math.ceil(headerWidth)}px`);
+      return;
+    }
     const buttons = Array.from(actions.children);
     const gap = parseFloat(getComputedStyle(actions).columnGap) || 0;
     const itemStyle = getComputedStyle(actions.parentElement);
@@ -110,7 +120,7 @@
     const scrollbarsAndBorder = list.offsetWidth - list.clientWidth + panel.offsetWidth - panel.clientWidth;
     const width = buttons.reduce((sum, entry) => sum + entry.getBoundingClientRect().width, 0)
       + gap * Math.max(0, buttons.length - 1) + padding + scrollbarsAndBorder;
-    panel.style.setProperty('--uyv-expanded-width', `${Math.ceil(width)}px`);
+    panel.style.setProperty('--uyv-expanded-width', `${Math.ceil(Math.max(width, headerWidth))}px`);
   }
   function scanDOM() {
     document.querySelectorAll('video[src],source[src]').forEach(element => record(element.src));
@@ -127,6 +137,7 @@
       element.style.top = `${Math.max(0, Math.min(rect.top, window.innerHeight - rect.height))}px`;
     }
     handle.addEventListener('pointerdown', event => {
+      if (event.target.closest('button')) return;
       if (event.button !== 0 || !event.isPrimary) return;
       const rect = element.getBoundingClientRect();
       drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, moved: false };
@@ -171,16 +182,20 @@
     style.textContent += `#${panelId} button.uyv-online{background:#1f6feb;border-color:#388bfd}#${panelId} button.uyv-online:hover{background:#388bfd}#${panelId} button.uyv-app{background:#238636;border-color:#2ea043}#${panelId} button.uyv-app:hover{background:#2ea043}`;
     style.textContent += `#${panelId}{box-sizing:border-box;max-height:calc(100vh - 16px);overflow:auto}#${panelId}:not([open]){width:max-content;background:rgba(32,36,44,.3)}#${panelId}:not([open]) .uyv-brand{display:none}#${panelId} summary{white-space:nowrap;user-select:none;touch-action:none;cursor:grab}#${panelId} summary:active{cursor:grabbing}`;
     style.textContent += `#${panelId}[open]{width:var(--uyv-expanded-width,360px)}#${panelId} .uyv-actions{display:flex;gap:6px;flex-wrap:wrap}#${panelId} .uyv-actions button{margin-right:0;flex-shrink:0;white-space:nowrap}`;
+    style.textContent += `#${panelId} summary{display:flex;align-items:center;gap:6px}#${panelId} summary::before{content:'▶';font-size:10px}#${panelId}[open] summary::before{content:'▼'}#${panelId} summary::-webkit-details-marker{display:none}#${panelId} summary .uyv-page-open{margin:0 0 0 auto;flex-shrink:0;white-space:nowrap}#${panelId}:not([open]) .uyv-page-open{display:none}`;
     document.head.appendChild(style);
     panel = document.createElement('details');
     panel.id = panelId;
     const header = document.createElement('summary');
     badge = document.createElement('span');
     badge.textContent = 'HLS 0';
-    const brand = document.createElement('span');
-    brand.className = 'uyv-brand';
-    brand.textContent = 'UnityYAMLViewer · ';
-    header.append(brand, badge);
+    const pageOpen = button('在 UnityYamlViewer 中解析', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openInApp(location.href);
+    }, 'uyv-app uyv-page-open');
+    pageOpen.title = '将当前网页交给 UnityYamlViewer 分析';
+    header.append(badge, pageOpen);
     list = document.createElement('div');
     list.className = 'uyv-list';
     message = document.createElement('p');
