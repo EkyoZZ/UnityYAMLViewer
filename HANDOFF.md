@@ -1,3 +1,11 @@
+# 当前发布：1.3.4（已正式发布）
+
+- 正式发布：用户提交 Git 后明确授权发布，本地与远程 master 均为 56cac36cc56f303f663657d100105ad4e84a75fe。225 项准备时构建输入未改变，提交内容无实质差异（156 项仅换行不同）。未重新编译；上传 30,860,288 字节附件并核验 GitHub SHA-256 为 A3CCBCC9D9309CCD40237E9DAFF03636E617F397687B9133887FA992DA4B7F45，于北京时间 2026-11-06 11:25:21 正式发布 v1.3.4（Release ID 436065305）。标题仅 v1.3.4，非草稿、非预发布，latest API 确认为最新稳定版；标签指向已核对。证据：target/v1.3.4-publish-audit.json、target/v1.3.4-release-asset.json、target/v1.3.4-published.json、target/v1.3.4-published-verification.json。以下未发布、待提交或待验证描述保留开发阶段史实；测试通过的范围仍以用户实际反馈为准。
+
+- 发布地址：[v1.3.4](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.4)。发布后的状态记录仅更新本地文档，未自动提交或推送。Greasy Fork 在线脚本未在本轮更新。
+
+以下保留发布前交接与开发历史，相关未发布状态仅代表当时时点。
+
 # 1.3.4 发布准备交接
 
 - 状态：文档与本地候选已准备，用户自行提交 Git 后另行通知发布。尚未创建 v1.3.4 标签、GitHub Release 或上传附件；本轮未提交或推送。
