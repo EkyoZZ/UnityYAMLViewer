@@ -3,6 +3,11 @@ use crate::network_video::{Format as NetworkFormat, Input as NetworkInput};
 use std::{io::{Read,BufRead}, path::{Path,PathBuf}, process::{Child,Stdio}, sync::{Arc,Mutex,mpsc,atomic::{AtomicBool,AtomicU32,Ordering}}, time::{Duration,Instant}};
 use eframe::egui;
 use crate::media_tools::{command,find_tool};
+mod receive_rate;
+
+fn text_input_active(ctx:&egui::Context)->bool{
+    ctx.memory(|memory|memory.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some())
+}
 
 pub fn fullscreen_controls_visible(ctx:&egui::Context)->bool {
     let (now, active) = ctx.input(|input| {
@@ -15,7 +20,7 @@ pub fn fullscreen_controls_visible(ctx:&egui::Context)->bool {
         });
         (input.time, active)
     });
-    let editing=ctx.wants_keyboard_input();
+    let editing=text_input_active(ctx) || ctx.memory(|memory|memory.any_popup_open());
     let last=ctx.data_mut(|data|{let id=egui::Id::new("media_last_motion");let last=if active||editing{now}else{data.get_temp::<f64>(id).unwrap_or(now)};data.insert_temp(id,last);last});
     let visible=now-last<1.0;
     if visible{ctx.request_repaint_after(Duration::from_secs_f64((1.0-(now-last)).max(0.001)));}
@@ -157,11 +162,46 @@ fn probe_stream_title(data: &serde_json::Value) -> Option<String> {
 fn probe_data(ffprobe: &Path, path: &Path, input: Option<&NetworkInput>) -> Result<serde_json::Value, String> {
     let mut probe = command(ffprobe);
     probe.args(["-v", "error", "-show_streams", "-show_format", "-of", "json"]);
+    if input.is_some_and(|input|crate::network_video::is_realtime(&input.path)) {
+        probe.args(["-analyzeduration","5000000","-probesize","5000000"]);
+    }
     if input.map_or_else(|| crate::remote_file::is_hls(path), |input| input.hls) { probe.arg("-show_programs"); }
     if let Some(input) = input { input.options(&mut probe); } else { hls_input_options(&mut probe, path); }
-    let output = probe.arg(path).output().map_err(|error| error.to_string())?;
+    probe.arg(path);
+    let output = if input.is_some_and(|input|crate::network_video::is_realtime(&input.path)) {
+        realtime_probe_output(&mut probe)?
+    } else { probe.output().map_err(|error|error.to_string())? };
     if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).into()); }
     serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+fn realtime_probe_output(command: &mut std::process::Command) -> Result<std::process::Output,String> {
+    let mut child=command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|error|error.to_string())?;
+    fn capture(reader: impl Read + Send + 'static) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
+        std::thread::spawn(move||{
+            let mut limited=reader.take(2*1024*1024);let mut bytes=Vec::new();limited.read_to_end(&mut bytes)?;
+            std::io::copy(&mut limited.into_inner(),&mut std::io::sink())?;Ok(bytes)
+        })
+    }
+    let stdout=capture(child.stdout.take().expect("piped stdout"));
+    let stderr=capture(child.stderr.take().expect("piped stderr"));
+    let started=Instant::now();
+    let status=loop {
+        match child.try_wait() {
+            Ok(Some(status))=>break Ok(status),
+            Ok(None) if started.elapsed()<Duration::from_secs(20)=>std::thread::sleep(Duration::from_millis(50)),
+            result=>{
+                let _=child.kill();let _=child.wait();
+                break Err(match result {
+                    Err(error)=>error.to_string(),
+                    _=>crate::localization::tr("网络流读取超时，请检查频道地址、网络线路及组播接收条件。").to_owned(),
+                });
+            }
+        }
+    };
+    let stdout=stdout.join().map_err(|_|"Probe output reader failed".to_owned())?.map_err(|error|error.to_string())?;
+    let stderr=stderr.join().map_err(|_|"Probe error reader failed".to_owned())?.map_err(|error|error.to_string())?;
+    Ok(std::process::Output{status:status?,stdout,stderr})
 }
 
 fn direct_variants(data: &serde_json::Value, input: &NetworkInput) -> (Vec<NetworkFormat>, Vec<NetworkFormat>) {
@@ -193,6 +233,10 @@ fn direct_variants(data: &serde_json::Value, input: &NetworkInput) -> (Vec<Netwo
 }
 
 fn probe(path: &Path, video_input: Option<NetworkInput>, audio_input: Option<NetworkInput>, discover: bool) -> Result<Info, String> {
+    probe_with_live(path,video_input,audio_input,discover,false)
+}
+
+fn probe_with_live(path: &Path, video_input: Option<NetworkInput>, audio_input: Option<NetworkInput>, discover: bool, allow_live: bool) -> Result<Info, String> {
     let ffmpeg=find_tool("ffmpeg").ok_or("未安装 FFmpeg，请前往第三方支持安装。")?;
     let ffprobe=find_tool("ffprobe").ok_or("未安装 ffprobe，请前往第三方支持安装。")?;
     let data = probe_data(&ffprobe, path, video_input.as_ref())?;
@@ -295,13 +339,13 @@ fn probe(path: &Path, video_input: Option<NetworkInput>, audio_input: Option<Net
     if video.is_some_and(|[w,h]|w>8192 || h>8192 || w.saturating_mul(h)>32*1024*1024) {return Err("视频分辨率超过预览内存预算".into());}
     if !audio && video.is_none() {return Err("没有可播放的音视频流".into());}
     let duration=data["format"]["duration"].as_str().and_then(|s|s.parse::<f64>().ok()).or_else(||streams.iter().filter_map(|s|s["duration"].as_str()?.parse::<f64>().ok()).max_by(f64::total_cmp)).unwrap_or(0.0);
-    if (crate::remote_file::is_hls(path) || video_input.as_ref().is_some_and(|input|input.hls)) && !(duration.is_finite() && duration > 0.0) {
+    if !allow_live && (crate::remote_file::is_hls(path) || video_input.as_ref().is_some_and(|input|input.hls)) && !(duration.is_finite() && duration > 0.0) {
         return Err(crate::localization::tr("HLS 仅支持具有已知时长的点播流。").into());
     }
     let start_time=data["format"]["start_time"].as_str().and_then(|s|s.parse::<f64>().ok()).filter(|t|t.is_finite()).unwrap_or(0.0);
     Ok(Info {network_video:video_input,network_audio:audio_input,variants,stream_title,audio_tags,video_details,reported_fps,subtitles,gif:if video_codec=="gif" {Some(crate::gif_playback::read(path)?)}else{None},ffmpeg,ffprobe,start_time,duration:if duration.is_finite(){duration.max(0.0)}else{0.0},video,audio,channels,sample_rate,bits,source_channels,file_size,fps,audio_tracks,video_codec,pixel_format,container,bit_rate,subtitle_count,sample_aspect,video_bits,dynamic_range,color_transfer})
 }
-struct Control { stop:AtomicBool, volume:AtomicU32, children:Mutex<Vec<Child>>, clock:Mutex<Option<Instant>>,video_ready:AtomicBool,paused:AtomicBool,pause_at:Mutex<Option<Instant>> }
+struct Control { stop:AtomicBool, volume:AtomicU32, children:Mutex<Vec<Child>>, clock:Mutex<Option<Instant>>,video_ready:AtomicBool,paused:AtomicBool,pause_at:Mutex<Option<Instant>>,receive_rate:Option<Arc<receive_rate::Meter>> }
 struct Playback { control:Arc<Control>, frames:mpsc::Receiver<(usize,egui::ColorImage)>, errors:mpsc::Receiver<String>, done:Arc<AtomicBool> }
 
 impl Drop for Playback {
@@ -311,23 +355,29 @@ impl Drop for Playback {
         std::thread::spawn(move|| {for mut child in children {let _=child.kill();let _=child.wait();}});
     }
 }
+fn remote_input(path:&Path,input:Option<&NetworkInput>)->bool {
+    input.map_or_else(||crate::remote_file::is_hls(path),|input|!input.local && crate::network_video::playback_url(&input.path).is_some())
+}
 fn spawn_decoder(control:&Control,ffmpeg:&Path,path:&Path,position:f64,realtime:bool,hardware:Option<&str>,args:&[String],input:Option<&NetworkInput>)->Result<std::process::ChildStdout,String> {
     let mut cmd=command(ffmpeg);
-    cmd.args(["-nostdin","-v","error"]);
+    let meter=control.receive_rate.as_ref().filter(|_|remote_input(path,input)).cloned();
+    if meter.is_some(){cmd.args(["-nostdin","-v","info","-nostats","-dump"]);}else{cmd.args(["-nostdin","-v","error"]);}
     if realtime {cmd.arg("-re");}
     if path.extension().is_some_and(|extension|extension.eq_ignore_ascii_case("gif")) {cmd.args(["-ignore_loop","1"]);}
     if let Some(mode)=hardware {cmd.args(["-hwaccel",mode]);}
     if position>0.0 {cmd.args(["-ss",&position.to_string()]);}
     if let Some(input) = input { input.options(&mut cmd); } else { hls_input_options(&mut cmd, path); }
     let mut child=cmd.arg("-i").arg(path)
-        .args(args).args(["-threads","2","pipe:1"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e|e.to_string())?;
+        .args(args).args(["-threads","2","pipe:1"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(if meter.is_some(){Stdio::piped()}else{Stdio::null()}).spawn().map_err(|e|e.to_string())?;
     let stdout=child.stdout.take().ok_or("无法读取解码输出")?;
+    if let Some(meter)=meter {if let Some(stderr)=child.stderr.take(){std::thread::spawn(move||meter.read_packets(stderr));}}
     let mut children=control.children.lock().unwrap();
     if control.stop.load(Ordering::Relaxed) {let _=child.kill();let _=child.wait();return Err("播放已停止".into());}
     children.push(child);Ok(stdout)
 }
 fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&str,audio_track:Option<u64>,info_frame_times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,subtitle:Option<crate::subtitle_player::Render>,preview_end:Option<f64>,ctx:&egui::Context)->Playback {
-    let control=Arc::new(Control {stop:AtomicBool::new(false),volume:AtomicU32::new(volume.to_bits()),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(info.video.is_none()),paused:AtomicBool::new(false),pause_at:Mutex::new(None)});
+    let track_rate=remote_input(path,info.network_video.as_ref()) || info.network_audio.as_ref().is_some_and(|input|remote_input(&input.path,Some(input)));
+    let control=Arc::new(Control {stop:AtomicBool::new(false),volume:AtomicU32::new(volume.to_bits()),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(info.video.is_none()),paused:AtomicBool::new(false),pause_at:Mutex::new(None),receive_rate:track_rate.then(||Arc::new(receive_rate::Meter::default()))});
     let (frame_tx,frames)=mpsc::sync_channel(2);let (error_tx,errors)=mpsc::channel();
     let done=Arc::new(AtomicBool::new(false));
     let remaining=Arc::new(AtomicU32::new(u32::from(info.video.is_some())+u32::from(audio_track.is_some())));
@@ -690,10 +740,10 @@ pub fn show_trim_windows(ctx:&egui::Context) {
     TRIM_EDITORS.with(|editors| { editors.borrow_mut().retain(|path, editor| editor.show(ctx, path)); });
 }
 
-pub struct Preview { subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
-    waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
+pub struct Preview { subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_previous:bool,playlist_previous_available:bool,playlist_sources:Option<(usize,Vec<(usize,String)>)>,playlist_source_pick:Option<usize>,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
+    waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,display_aspect:u8,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64>,keyboard_seek:Option<f64>,keyboard_seek_hint:Option<(f64,Instant)>,keyboard_volume_hint:Option<Instant> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_previous:false,playlist_previous_available:false,playlist_sources:None,playlist_source_pick:None,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),display_aspect:0,zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
 impl Preview {
     fn refresh_subtitles(&mut self,ctx:&egui::Context,path:&Path){
         let Some(info)=&self.info else{return;};
@@ -733,6 +783,9 @@ impl Preview {
         preview.autoplay_pending=autoplay;
         preview
     }
+    pub(crate) fn set_playlist_network(&mut self, path: &Path) {
+        self.network=Some((NetworkInput::new(path.to_owned()),None));
+    }
     pub fn set_overlay_interactive(&mut self,visible:bool){self.overlay_interactive=visible;}
     pub fn set_sidebar_width(&mut self,width:f32){self.sidebar_width=width.max(0.0);}
     pub fn overlay_rect(&self)->Option<egui::Rect>{self.overlay_rect}
@@ -742,6 +795,73 @@ impl Preview {
     pub fn playlist_duration(&self)->Option<f64> {self.info.as_ref().map(|i|i.duration)}
     pub fn playlist_playing(&self)->bool {self.is_playing()}
     pub fn playlist_failed(&self)->bool {self.error.is_some()}
+    pub fn set_playlist_previous_available(&mut self,available:bool){self.playlist_previous_available=available;}
+    pub fn take_playlist_previous(&mut self)->bool {std::mem::take(&mut self.playlist_previous)}
+    pub(crate) fn set_playlist_sources(&mut self,sources:Option<(usize,Vec<(usize,String)>)>){self.playlist_sources=sources;}
+    pub(crate) fn take_playlist_source(&mut self)->Option<usize>{self.playlist_source_pick.take()}
+    fn television_keyboard(&mut self,ui:&egui::Ui)->bool{
+        if self.playlist_sources.is_none() || text_input_active(ui.ctx()) || ui.ctx().memory(|memory|memory.any_popup_open()) || !ui.input(|input|input.focused){return false;}
+        let mut channel=0;let mut source=0;let mut volume=0;
+        ui.input_mut(|input|input.events.retain(|event|{
+            let egui::Event::Key{key,pressed:true,modifiers,repeat,..}=event else{return true;};
+            if *modifiers==egui::Modifiers::NONE{
+                match key{
+                    egui::Key::ArrowLeft=>{if !repeat{channel=-1;}},
+                    egui::Key::ArrowRight=>{if !repeat{channel=1;}},
+                    egui::Key::ArrowUp=>volume+=1,
+                    egui::Key::ArrowDown=>volume-=1,
+                    _=>return true,
+                }
+                false
+            }else if modifiers.ctrl && !modifiers.alt && !modifiers.shift && !modifiers.mac_cmd && matches!(key,egui::Key::ArrowLeft|egui::Key::ArrowRight){
+                if !repeat{source=if *key==egui::Key::ArrowLeft{-1}else{1};}false
+            }else{true}
+        }));
+        self.keyboard_seek=None;self.keyboard_seek_hint=None;
+        if channel<0 && self.playlist_previous_available{self.playlist_previous=true;}
+        if channel>0{self.playlist_next=true;}
+        if source!=0{if let Some((selected,sources))=&self.playlist_sources{self.playlist_source_pick=cycled_source(*selected,sources,source);}}
+        if volume!=0{
+            self.volume=(self.volume+volume as f32*0.05).clamp(0.0,1.0);if self.volume>0.0{self.remembered_volume=self.volume;}
+            self.keyboard_volume_hint=Some(Instant::now()+Duration::from_millis(200));
+            let mut preference=volume_preference().lock().unwrap();preference.volume=self.volume;preference.remembered=self.remembered_volume;preference.dirty=true;
+            if let Some(job)=&self.playback{job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);}
+        }
+        if ui.input(|input|input.key_down(egui::Key::ArrowUp)||input.key_down(egui::Key::ArrowDown)) && self.keyboard_volume_hint.is_some(){self.keyboard_volume_hint=Some(Instant::now()+Duration::from_millis(200));}
+        volume!=0
+    }
+    #[cfg(test)]
+    pub(crate) fn test_probe_pending(&mut self)->impl std::any::Any{
+        let (sender,receiver)=mpsc::channel::<Result<Info,String>>();self.probe=Some(receiver);self.info=None;self.error=None;sender
+    }
+    #[cfg(test)]
+    pub(crate) fn test_probe_error(&mut self){self.probe=None;self.info=None;self.error=Some("Test source: HTTP 404".into());}
+    fn source_menu_width(&self)->f32{
+        if self.playlist_sources.is_some(){56.0}else{0.0}
+    }
+    fn source_menu(&mut self,ui:&mut egui::Ui){
+        if let Some((selected,sources))=&self.playlist_sources{
+            let ordinal=sources.iter().position(|(index,_)|index==selected).unwrap_or(0)+1;
+            let label=crate::localization::tr("源{0}").replace("{0}",&ordinal.to_string());
+            ui.allocate_ui_with_layout(egui::vec2(56.0,28.0),egui::Layout::centered_and_justified(egui::Direction::LeftToRight),|ui|{
+                egui::menu::menu_custom_button(ui,egui::Button::new(label).min_size(egui::vec2(56.0,28.0)).truncate(),|ui|{
+                crate::theme::menu_no_wrap(ui);
+                for (ordinal,(index,address)) in sources.iter().enumerate(){
+                    if ui.selectable_label(index==selected,crate::localization::tr("源{0}").replace("{0}",&(ordinal+1).to_string())).on_hover_text(address).clicked(){self.playlist_source_pick=Some(*index);ui.close_menu();}
+                }
+                });
+            });
+        }
+    }
+    fn pending_source_controls(&mut self,ui:&mut egui::Ui,fullscreen:bool){
+        if self.playlist_sources.is_none(){return;}
+        let bounds=ui.available_rect_before_wrap();
+        let width=self.source_menu_width()+28.0+ui.spacing().item_spacing.x;
+        let rect=egui::Rect::from_min_size(egui::pos2(bounds.right()-width,bounds.bottom()-32.0),egui::vec2(width,32.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)),|ui|{
+            self.source_menu(ui);if fullscreen_button(ui,fullscreen){set_fullscreen(ui.ctx(),!fullscreen);}
+        });
+    }
     pub fn take_playlist_next(&mut self)->bool {std::mem::take(&mut self.playlist_next)}
     pub fn take_playlist_end(&mut self)->bool {std::mem::take(&mut self.playlist_ended)}
     pub fn playlist_seek(&mut self,ctx:&egui::Context,path:&Path,position:f64){
@@ -780,6 +900,7 @@ impl Preview {
             preview.initial_audio = previous.info.as_ref().and_then(|info| info.audio_tracks.iter().position(|track| Some(track.index) == previous.selected_audio));
             preview.decoder = previous.decoder.clone();
             preview.scale_mode = previous.scale_mode.clone();
+            preview.display_aspect = previous.display_aspect;
         }
         preview
     }
@@ -796,12 +917,6 @@ impl Preview {
         if let Some(metadata)=self.info.as_ref().and_then(|info|info.gif) {self.gif_loop.controls(ui,metadata);}
         let previous=self.decoder.clone();
         crate::theme::video_decoder_selector(ui,&mut self.decoder);
-        let mirror=match (self.flip_x,self.flip_y){(false,false)=>"无镜像",(true,false)=>"左右镜像",(false,true)=>"上下镜像",(true,true)=>"上下左右镜像"};
-        egui::Frame::new()
-            .stroke(ui.visuals().widgets.inactive.bg_stroke)
-            .corner_radius(3)
-            .inner_margin(egui::Margin::symmetric(5, 1))
-            .show(ui, |ui| ui.small(crate::localization::tr(mirror)));
         self.scale_controls(ui);
         if !self.network_tab { self.frame_index_status(ui); }
         if previous!=self.decoder {let playing=self.is_playing();self.stop_playback();self.cache=Arc::new(Mutex::new(FrameCache::default()));if playing{self.play(ui.ctx(),path);}else{self.error=None;}}
@@ -818,14 +933,28 @@ impl Preview {
     fn scale_controls(&mut self,ui:&mut egui::Ui) {
         let previous_scale=self.scale_mode.clone();
         crate::theme::video_scale_selector(ui,&mut self.scale_mode);
+        let aspect=match self.display_aspect{1=>"16:9",2=>"4:3",_=>crate::localization::tr("原始比例")};
+        egui::Frame::new()
+            .stroke(ui.visuals().widgets.inactive.bg_stroke)
+            .corner_radius(3)
+            .inner_margin(egui::Margin::symmetric(5,1))
+            .show(ui,|ui|ui.small(aspect)).response.on_hover_text(crate::localization::tr("显示比例"));
         if previous_scale!=self.scale_mode {
             self.video_gesture=None;
             self.pan=egui::Vec2::ZERO;
             if self.scale_mode=="native"{self.zoom=Some(1.0);}
             if self.scale_mode=="fit"{self.zoom=None;}
         }
+        let mirror=match (self.flip_x,self.flip_y){(false,false)=>"无镜像",(true,false)=>"左右镜像",(false,true)=>"上下镜像",(true,true)=>"上下左右镜像"};
+        egui::Frame::new()
+            .stroke(ui.visuals().widgets.inactive.bg_stroke)
+            .corner_radius(3)
+            .inner_margin(egui::Margin::symmetric(5, 1))
+            .show(ui, |ui| ui.small(crate::localization::tr(mirror)));
         if let Some(zoom)=self.zoom {ui.small(format!("{:.1}%",zoom*100.0));}
     }
+    pub(crate) fn display_aspect(&self)->u8 {self.display_aspect}
+    pub(crate) fn set_display_aspect(&mut self,aspect:u8){self.display_aspect=aspect.min(2);}
     pub fn file_size(&self)->Option<u64> {self.info.as_ref().map(|info|info.file_size)}
     pub fn trim_entry_button(&mut self,ui:&mut egui::Ui,path:&Path) {
         let duration=self.info.as_ref().map_or(0.0,|info|info.duration);
@@ -1056,6 +1185,7 @@ impl Preview {
         let controls_visible=!fullscreen||fullscreen_controls_visible(ui.ctx());
         if fullscreen&&!controls_visible{ui.ctx().set_cursor_icon(egui::CursorIcon::None);}
         let preference=*volume_preference().lock().unwrap();self.volume=preference.volume;self.remembered_volume=preference.remembered;
+        let television_volume_changed=self.television_keyboard(ui);
         if let Some(error) = &self.history_error {
             ui.colored_label(ui.visuals().warn_fg_color, crate::lf!("播放位置记录保存失败：{0}", error));
         }
@@ -1063,17 +1193,18 @@ impl Preview {
             let (tx,rx)=mpsc::channel();self.probe=Some(rx);let path=path.to_owned();let ctx=ui.ctx().clone();
             let (video, audio) = self.network.clone().map_or((None,None), |(video,audio)| (Some(video),audio));
             let discover = self.discover_network;
+            let allow_live = self.playlist_mode && self.network.is_some();
             std::thread::spawn(move || {
-                let result = probe(&path, video, audio, discover);
+                let result = probe_with_live(&path, video, audio, discover, allow_live);
                 let _ = tx.send(result);
                 ctx.request_repaint();
             });
         }
         if let Some(receiver)=&self.probe {match receiver.try_recv() {
-            Ok(result)=>{self.probe=None;match result {Ok(info)=>{self.position=crate::media_history::restore_position(self.position,info.duration);self.selected_audio=self.initial_audio.take().and_then(|index|info.audio_tracks.get(index)).or_else(||info.audio_tracks.iter().find(|t|t.default)).or_else(||info.audio_tracks.first()).map(|t|t.index);if info.stream_title.is_some() { ui.ctx().request_repaint(); }self.info=Some(info);if self.autoplay_pending && !(self.discover_network && self.info.as_ref().is_some_and(|info| !info.variants.0.is_empty())) {self.autoplay_pending=false;self.play(ui.ctx(),path);}},Err(error)=>self.error=Some(error)}},
+            Ok(result)=>{self.probe=None;match result {Ok(info)=>{self.position=if self.playlist_mode&&info.duration<=0.0{0.0}else{crate::media_history::restore_position(self.position,info.duration)};self.selected_audio=self.initial_audio.take().and_then(|index|info.audio_tracks.get(index)).or_else(||info.audio_tracks.iter().find(|t|t.default)).or_else(||info.audio_tracks.first()).map(|t|t.index);if info.stream_title.is_some() { ui.ctx().request_repaint(); }self.info=Some(info);if self.autoplay_pending && !(self.discover_network && self.info.as_ref().is_some_and(|info| !info.variants.0.is_empty())) {self.autoplay_pending=false;self.play(ui.ctx(),path);}},Err(error)=>self.error=Some(error)}},
             Err(mpsc::TryRecvError::Disconnected)=>{self.probe=None;self.error=Some("媒体信息读取失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
-        if self.probe.is_some() {ui.spinner();ui.label(crate::localization::tr("正在读取媒体信息…"));ui.ctx().request_repaint_after(Duration::from_millis(100));return;}
+        if self.probe.is_some() {ui.spinner();ui.label(crate::localization::tr("正在读取媒体信息…"));ui.ctx().request_repaint_after(Duration::from_millis(100));self.pending_source_controls(ui,fullscreen);return;}
         if self.autoplay_pending && self.info.is_some() && self.error.is_none() {
             self.autoplay_pending = false;
             if self.info.as_ref().is_some_and(|info| info.duration > 0.0 && self.position >= info.duration) { self.position = 0.0; }
@@ -1098,7 +1229,7 @@ impl Preview {
         if let Some(error)=&self.error {ui.add(egui::Label::new(egui::RichText::new(error).color(ui.visuals().warn_fg_color)).wrap());
             if ui.button(crate::localization::tr("前往第三方支持")).clicked(){crate::third_party::request_open(ui.ctx());}
             if ui.button(crate::localization::tr("重试")).clicked(){self.stop_playback();if hls {self.autoplay_pending=true;}self.cache=Arc::new(Mutex::new(FrameCache::default()));self.error=None;self.poster=None;self.texture=None;self.info=None;self.wave_job=None;self.waveform=None;self.wave_error=None;self.frame_times=None;self.index_job=None;self.index_error=None;self.frame_job=None;self.current_frame=None;}}
-        let Some(info)=&self.info else{return};let duration=info.duration;
+        if self.info.is_none(){self.pending_source_controls(ui,fullscreen);return;}let Some(info)=&self.info else{return};let duration=info.duration;
         if !hls && info.video.is_some() && self.texture.is_none() && !self.is_playing() {
             if let Some(poster)=&self.poster {self.texture=Some(ui.ctx().load_texture("media_frame",poster.clone(),egui::TextureOptions::LINEAR));}
             else if self.frame_job.is_none() && self.error.is_none() {
@@ -1209,7 +1340,7 @@ impl Preview {
         let mut video_clicked=false;
         if let Some(texture)=&self.texture {
             let uv=egui::Rect::from_min_max(egui::pos2(if self.flip_x{1.0}else{0.0},if self.flip_y{1.0}else{0.0}),egui::pos2(if self.flip_x{0.0}else{1.0},if self.flip_y{0.0}else{1.0}));
-            let available=egui::vec2(ui.available_width(),ui.available_height().max(1.0));let native=self.info.as_ref().and_then(|info|info.video).map_or(texture.size_vec2(),|[w,h]|egui::vec2(w as f32,h as f32));
+            let available=egui::vec2(ui.available_width(),ui.available_height().max(1.0));let pixels=self.info.as_ref().and_then(|info|info.video).map_or(texture.size_vec2(),|[w,h]|egui::vec2(w as f32,h as f32));let native=display_size(pixels,self.display_aspect);
             let free=self.scale_mode=="free";
             let (canvas,response)=ui.allocate_exact_size(available,if free{egui::Sense::drag()}else{egui::Sense::click()});
             let mut zoom=match self.scale_mode.as_str(){
@@ -1263,7 +1394,7 @@ impl Preview {
             }
             painter.image(texture.id(),image_rect,uv,egui::Color32::WHITE);
             if free && response.dragged_by(egui::PointerButton::Primary){ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);}
-            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
+            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.display_aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
         }
         else if self.info.as_ref().is_some_and(|info|info.video.is_some()) {
             let size=egui::vec2(ui.available_width(),ui.available_height().max(1.0));
@@ -1280,7 +1411,7 @@ impl Preview {
             paint_large_play(ui,button_rect,color);
             video_clicked=button.clicked();
             }
-            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
+            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.display_aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
         }
         else if self.waveform.is_none() {ui.label(crate::localization::tr("音频播放"));}
             (video_clicked,previous_audio,wave_seek)
@@ -1295,8 +1426,10 @@ impl Preview {
             pressed && consumed
         });
         let mut keyboard_target = None;
-        let mut keyboard_volume_changed = false;
-        if !ui.ctx().wants_keyboard_input() && ui.input(|input| input.focused)
+        let mut keyboard_volume_changed = television_volume_changed;
+        let keyboard_editing=if self.playlist_sources.is_some(){text_input_active(ui.ctx())}else{ui.ctx().wants_keyboard_input()};
+        if !keyboard_editing && ui.input(|input| input.focused)
+            && !(self.playlist_sources.is_some() && ui.ctx().memory(|memory|memory.any_popup_open()))
             && self.info.as_ref().is_some_and(|info| info.gif.is_none())
         {
             let (seek_steps, volume_steps, seeking, adjusting_volume) = ui.input_mut(|input| {
@@ -1348,7 +1481,7 @@ impl Preview {
             self.keyboard_seek_hint = None;
             self.keyboard_volume_hint = None;
         }
-        let mut toggle=video_clicked || space_toggle;let mut stop=false;let mut next=false;let mut seek=wave_seek.as_ref().is_some_and(|gesture|gesture.finished);
+        let mut toggle=video_clicked || space_toggle;let mut stop=false;let mut previous=false;let mut next=false;let mut seek=wave_seek.as_ref().is_some_and(|gesture|gesture.finished);
         let screen=ui.clip_rect();
         if fullscreen && controls_visible {
             egui::Area::new(egui::Id::new("fullscreen_video_scale")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_TOP,egui::vec2(screen.center().x-ui.ctx().screen_rect().center().x,screen.top()+12.0)).show(ui.ctx(),|ui|{
@@ -1357,6 +1490,7 @@ impl Preview {
         }
         let mut transport=|ui:&mut egui::Ui| {ui.horizontal(|ui| {
             let playing=self.is_playing();
+            if self.playlist_mode{previous=ui.add_enabled_ui(self.playlist_previous_available,|ui|transport_button(ui,crate::icons::Icon::Previous,crate::localization::tr("上一项"))).inner;}
             toggle|=transport_button(ui,if playing{crate::icons::Icon::Pause}else{crate::icons::Icon::Play},crate::localization::tr(if playing{"暂停"}else{"播放"}));
             if self.playlist_mode{next=transport_button(ui,crate::icons::Icon::Next,crate::localization::tr("下一项"));}
             else{stop=transport_button(ui,crate::icons::Icon::Stop,crate::localization::tr("停止"));}
@@ -1364,8 +1498,9 @@ impl Preview {
                 volume_control(ui,path,&mut self.volume,&mut self.remembered_volume,&mut self.volume_hover,Some(keyboard_volume_changed));
             }
             if let Some(job)=&self.playback {job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);}
+
             let video=self.has_video();
-            let (rect,response)=ui.allocate_exact_size(egui::vec2((ui.available_width()-if video{28.0+ui.spacing().item_spacing.x}else{0.0}).max(1.0),28.0),egui::Sense::click_and_drag());
+            let (rect,response)=ui.allocate_exact_size(egui::vec2((ui.available_width()-if video{28.0+ui.spacing().item_spacing.x}else{0.0}-if self.playlist_sources.is_some(){self.source_menu_width()+ui.spacing().item_spacing.x}else{0.0}-if self.playback.as_ref().is_some_and(|job|job.control.receive_rate.is_some()){108.0+ui.spacing().item_spacing.x}else{0.0}).max(1.0),28.0),egui::Sense::click_and_drag());
             ui.painter().rect_filled(rect,3.0,ui.visuals().extreme_bg_color);
             if duration>0.0 {let mut fill=rect;fill.max.x=rect.left()+rect.width()*(position/duration) as f32;ui.painter().rect_filled(fill,3.0,ui.visuals().selection.bg_fill);
                 if response.drag_started(){let playing=self.is_playing();self.pause();self.frame_job=None;self.seek_drag=Some((self.position,playing));}
@@ -1393,6 +1528,8 @@ impl Preview {
                 let current=self.current_frame.map_or(0,|frame|frame+1);
                 let total=self.frame_times.as_ref().map_or_else(||"—".to_owned(),|times|times.len().to_string());
                 format!("{}(f{current}) / {}(f{total})",time(position),time(duration))
+            }else if self.playlist_mode && self.network.is_some() && duration<=0.0 {
+                format!("{} · {}",crate::localization::tr("网络流（时长未知）"),time(position))
             }else{format!("{} / {}",time(position),time(duration))};
             ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,time_label,egui::FontId::proportional(13.0),ui.visuals().text_color());
             if gif.is_some() {
@@ -1403,6 +1540,11 @@ impl Preview {
                     response.on_hover_text(gif_progress_label(hovered,duration,frame+1,times.len(),Some(delay)));
                 }
             } else {response.on_hover_text(crate::localization::tr("点击或拖动跳转"));}
+            if let Some(meter)=self.playback.as_ref().and_then(|job|job.control.receive_rate.as_ref()) {
+                ui.add_sized([108.0,28.0],egui::Label::new(egui::RichText::new(format!("↓ {}",meter.label())).monospace()).halign(egui::Align::Max).truncate())
+                    .on_hover_text(crate::localization::tr("媒体接收速率：最近 3 秒读取的编码媒体数据，合计音视频接收进程；不含协议开销，不代表整机网速。"));
+            }
+            self.source_menu(ui);
             if video && fullscreen_button(ui,fullscreen){set_fullscreen(ui.ctx(),!fullscreen);}
         });};
         if fullscreen {
@@ -1451,6 +1593,7 @@ impl Preview {
             self.play(ui.ctx(),path);
         }else if hls {self.stop_playback();}else{self.seek_frame(ui.ctx(),path);}}
         if toggle {if self.is_playing(){self.pause();}else{if duration>0.0 && self.position>=duration{self.position=0.0;self.gif_loop.completed=0;}self.play(ui.ctx(),path);}}
+        if previous {self.playlist_previous=true;}
         if next {self.playlist_next=true;}
         if stop {self.gif_loop.completed=0;self.initial_seek=None;self.stop_playback();self.position=0.0;self.current_frame=None;self.frame_job=None;if hls {self.texture=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}else if self.frame_times.is_some(){self.seek_frame(ui.ctx(),path);}else if let Some(info)=self.info.as_ref().filter(|info|info.video.is_some()){self.frame_job=Some(decode_frame(info,path,0,None,self.cache.clone(),&self.decoder,self.subtitles.render(),ui.ctx()));}}
         {
@@ -1509,6 +1652,9 @@ impl Preview {
         }
         self.stop_playback();
         // Keep the visible preview until the first decoded frame replaces it.
+        if self.playlist_mode && self.network.is_some() && self.info.as_ref().is_some_and(|info| info.duration<=0.0) {
+            self.position=0.0;
+        }
         let source = path;
         if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(if let Some(source)=self.trim.sequence_source(){start_sequence_playback(source,self.position,first,self.cache.clone(),self.trim_preview_end,ctx)}else{start(info,source,self.position,first,self.volume,&self.decoder,self.selected_audio,self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),self.trim_preview_end,ctx)});self.started=None;}
     }
@@ -1528,7 +1674,13 @@ fn trim_playback_segment(ranges: &[(f64, f64)], position: f64, manual: bool) -> 
     Some((index, *range, target))
 }
 
-fn display_menu(ui:&mut egui::Ui,flip_x:&mut bool,flip_y:&mut bool) {
+fn display_menu(ui:&mut egui::Ui,aspect:&mut u8,flip_x:&mut bool,flip_y:&mut bool) {
+    ui.menu_button(crate::localization::tr("比例"),|ui|{
+        crate::theme::menu_no_wrap(ui);
+        for (value,label) in [(0,crate::localization::tr("原始")),(1,"16:9"),(2,"4:3")] {
+            if ui.selectable_value(aspect,value,label).clicked(){ui.close_menu();}
+        }
+    });
     ui.menu_button(crate::localization::tr("镜像"),|ui| {
         crate::theme::menu_no_wrap(ui);
         ui.checkbox(flip_x,crate::localization::tr("左右镜像"));
@@ -1723,7 +1875,7 @@ pub(crate) fn time(seconds:f64)->String {let ms=(seconds.max(0.0)*1000.0).round(
 struct WaveJob {control:Arc<Control>,receiver:mpsc::Receiver<Result<Vec<Vec<f32>>,String>>}
 struct IndexJob {control:Arc<Control>,receiver:mpsc::Receiver<Result<Vec<f64>,String>>}
 struct FrameJob {control:Arc<Control>,receiver:mpsc::Receiver<Result<(usize,egui::ColorImage),String>>}
-fn frame_control()->Arc<Control> {Arc::new(Control {stop:AtomicBool::new(false),volume:AtomicU32::new(0),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(true),paused:AtomicBool::new(false),pause_at:Mutex::new(None)})}
+fn frame_control()->Arc<Control> {Arc::new(Control {stop:AtomicBool::new(false),volume:AtomicU32::new(0),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(true),paused:AtomicBool::new(false),pause_at:Mutex::new(None),receive_rate:None})}
 fn cancel_frame_task(control:&Control) {
     control.stop.store(true,Ordering::Relaxed);
     let children=std::mem::take(&mut *control.children.lock().unwrap());
@@ -1814,7 +1966,7 @@ impl Drop for WaveJob {fn drop(&mut self){
     std::thread::spawn(move||{for mut child in children {let _=child.kill();let _=child.wait();}});
 }}
 fn waveform(info:&Info,path:&Path,ctx:&egui::Context)->WaveJob {
-    let control=Arc::new(Control{stop:AtomicBool::new(false),volume:AtomicU32::new(0),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(true),paused:AtomicBool::new(false),pause_at:Mutex::new(None)});
+    let control=frame_control();
     let worker=control.clone();let channels=info.channels;let duration=info.duration;let ffmpeg=info.ffmpeg.clone();let path=path.to_owned();let ctx=ctx.clone();
     let (tx,receiver)=mpsc::channel();
     std::thread::spawn(move|| {
@@ -2301,9 +2453,54 @@ fn ruler_time(seconds:f64,step:f64)->String {
     let clock=if seconds>=3600.0{&full[..8]}else{&full[3..8]};
     if step<1.0 {format!("{clock}.{}",&full[9..12])}else{clock.to_owned()}
 }
+fn cycled_source(selected:usize,sources:&[(usize,String)],direction:i32)->Option<usize>{
+    if sources.len()<=1 || direction==0{return None;}
+    let current=sources.iter().position(|(index,_)|*index==selected).unwrap_or(0);
+    let next=if direction<0{if current==0{sources.len()-1}else{current-1}}else{(current+1)%sources.len()};
+    Some(sources[next].0)
+}
+fn display_size(pixels:egui::Vec2,aspect:u8)->egui::Vec2 {
+    match aspect {1=>egui::vec2(pixels.y*16.0/9.0,pixels.y),2=>egui::vec2(pixels.y*4.0/3.0,pixels.y),_=>pixels}
+}
 fn fit_scale(native:egui::Vec2,available:egui::Vec2)->f32 {(available.x/native.x).min(available.y/native.y)}
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn television_arrows_work_with_a_focused_card_and_do_not_seek(){
+        let ctx=egui::Context::default();let mut preview=super::Preview::for_playlist(0.0,false);
+        preview.set_playlist_sources(Some((2,vec![(2,"first".into()),(7,"second".into())])));
+        let _=ctx.run(egui::RawInput{focused:true,events:vec![egui::Event::Key{key:egui::Key::ArrowRight,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}],..Default::default()},|ctx|{
+            ctx.memory_mut(|memory|memory.request_focus(egui::Id::new("channel_card")));
+            egui::CentralPanel::default().show(ctx,|ui|{preview.television_keyboard(ui);});
+        });
+        assert!(preview.take_playlist_next());assert!(preview.keyboard_seek.is_none());
+        let _=ctx.run(egui::RawInput{focused:true,events:vec![egui::Event::Key{key:egui::Key::ArrowLeft,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::CTRL}],..Default::default()},|ctx|{
+            egui::CentralPanel::default().show(ctx,|ui|{preview.television_keyboard(ui);});
+        });
+        assert_eq!(preview.take_playlist_source(),Some(7));
+    }
+    #[test]
+    fn television_sources_cycle_in_both_directions_and_ignore_single_source(){
+        let sources=vec![(2,"a".into()),(7,"b".into()),(11,"c".into())];
+        assert_eq!(super::cycled_source(2,&sources,-1),Some(11));
+        assert_eq!(super::cycled_source(11,&sources,1),Some(2));
+        assert_eq!(super::cycled_source(7,&sources,1),Some(11));
+        assert_eq!(super::cycled_source(7,&sources,-1),Some(2));
+        assert_eq!(super::cycled_source(2,&sources[..1],1),None);
+        assert_eq!(super::cycled_source(2,&[],1),None);
+    }
+    #[test]
+    fn playlist_network_reuses_inputs_without_file_history_or_format_discovery() {
+        let path=std::path::Path::new("https://example.org/channel.m3u8?token=a%2Fb&x=1+2");
+        let mut preview=super::Preview::for_playlist(0.0,true);
+        preview.set_playlist_network(path);
+        let (input,audio)=preview.network.as_ref().unwrap();
+        assert_eq!(input.path,path);assert!(input.hls);assert!(audio.is_none());
+        assert!(preview.playlist_mode);assert!(!preview.discover_network);assert!(preview.history_file.is_none());
+        assert!(preview.autoplay_pending);assert_eq!(preview.position,0.0);
+        preview.set_playlist_previous_available(true);assert!(preview.playlist_previous_available);
+        preview.playlist_previous=true;assert!(preview.take_playlist_previous());assert!(!preview.take_playlist_previous());
+    }
     #[test]
     fn trim_playback_prioritizes_ranges_and_respects_manual_exceptions() {
         let keep = [(40.0, 60.0)];
@@ -2487,6 +2684,17 @@ mod tests {
         let tall=egui::vec2(1080.0,1920.0);let size=tall*fit_scale(tall,bounds);
         assert!((size.y-600.0).abs()<0.001);assert!(size.x<800.0);
         assert_eq!(time(3661.123),"01:01:01.123");
+    }
+    #[test]
+    fn display_aspect_composes_with_fit_and_preserves_free_zoom_and_pan(){
+        let pixels=egui::vec2(720.0,576.0);
+        assert_eq!(display_size(pixels,0),pixels);
+        assert_eq!(display_size(pixels,1),egui::vec2(1024.0,576.0));
+        assert_eq!(display_size(pixels,2),egui::vec2(768.0,576.0));
+        let wide=display_size(pixels,1);assert_eq!(wide*fit_scale(wide,egui::vec2(800.0,600.0)),egui::vec2(800.0,450.0));
+        let mut preview=Preview::default();preview.scale_mode="free".into();preview.zoom=Some(0.75);preview.pan=egui::vec2(20.0,-10.0);
+        preview.set_display_aspect(1);assert_eq!(preview.scale_mode,"free");assert_eq!(preview.zoom,Some(0.75));assert_eq!(preview.pan,egui::vec2(20.0,-10.0));
+        let replacement=Preview::for_network(None,false,Some(&preview));assert_eq!(replacement.display_aspect(),1);
     }
 }
 

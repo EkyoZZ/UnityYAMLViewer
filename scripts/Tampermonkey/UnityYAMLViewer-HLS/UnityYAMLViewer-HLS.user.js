@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UnityYAMLViewer · HLS 嗅探助手
 // @namespace    https://github.com/EkyoZZ/UnityYAMLViewer
-// @version      1.0.9
+// @version      1.0.10
 // @description  发现 HLS 地址，复制链接、在原在线工具或 UnityYamlViewer 中打开；脚本不直接下载视频。
 // @author       UnityYAMLViewer contributors
 // @license      MIT
@@ -82,6 +82,7 @@
     const uri = `unityyamlviewer://open?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer.href)}`;
     lastAppUrl = url;
     launchHelp.hidden = false;
+    launchHelp.open = false;
     if (uri.length > 32000) { message.textContent = '地址过长，请复制后在软件中粘贴打开。'; return; }
     message.textContent = '已请求打开软件；浏览器询问时，请允许打开外部应用。';
     try { location.assign(uri); }
@@ -182,12 +183,12 @@
   function init() {
     if (!document.body || document.getElementById(panelId)) return;
     const style = document.createElement('style');
-    style.textContent = `#${panelId}{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:420px;max-width:calc(100vw - 32px);background:rgba(32,36,44,.3);color:#eee;border:1px solid #667;border-radius:7px;font:13px sans-serif;text-align:left}#${panelId} summary{cursor:pointer;padding:8px}#${panelId} .uyv-list{max-height:280px;overflow:auto}#${panelId} .uyv-item{padding:8px;border-top:1px solid #556}#${panelId} .uyv-address{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;user-select:text}#${panelId} button{cursor:pointer;margin-right:6px;padding:4px 7px;background:#303b50;color:#fff;border:1px solid #778;border-radius:4px}#${panelId} p{font-size:12px;padding:0 8px;line-height:1.4}`;
+    style.textContent = `#${panelId}{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:420px;max-width:calc(100vw - 32px);background:rgba(32,36,44,.3);color:#eee;border:1px solid #667;border-radius:7px;font:13px sans-serif;text-align:left}#${panelId}>summary{cursor:pointer;padding:8px}#${panelId} .uyv-list{max-height:280px;overflow:auto}#${panelId} .uyv-item{padding:8px;border-top:1px solid #556}#${panelId} .uyv-address{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;user-select:text}#${panelId} button{cursor:pointer;margin-right:6px;padding:4px 7px;background:#303b50;color:#fff;border:1px solid #778;border-radius:4px}#${panelId} p{font-size:12px;padding:0 8px;line-height:1.4}`;
     style.textContent += `#${panelId} button.uyv-online{background:#1f6feb;border-color:#388bfd}#${panelId} button.uyv-online:hover{background:#388bfd}#${panelId} button.uyv-app{background:#238636;border-color:#2ea043}#${panelId} button.uyv-app:hover{background:#2ea043}`;
-    style.textContent += `#${panelId}{box-sizing:border-box;max-height:calc(100vh - 16px);overflow:auto}#${panelId}:not([open]){width:max-content;background:rgba(32,36,44,.3)}#${panelId}:not([open]) .uyv-brand{display:none}#${panelId} summary{white-space:nowrap;user-select:none;touch-action:none;cursor:grab}#${panelId} summary:active{cursor:grabbing}`;
+    style.textContent += `#${panelId}{box-sizing:border-box;max-height:calc(100vh - 16px);overflow:auto}#${panelId}:not([open]){width:max-content;background:rgba(32,36,44,.3)}#${panelId}:not([open]) .uyv-brand{display:none}#${panelId}>summary{white-space:nowrap;user-select:none;touch-action:none;cursor:grab}#${panelId}>summary:active{cursor:grabbing}`;
     style.textContent += `#${panelId}[open]{width:var(--uyv-expanded-width,360px)}#${panelId} .uyv-actions{display:flex;gap:6px;flex-wrap:wrap}#${panelId} .uyv-actions button{margin-right:0;flex-shrink:0;white-space:nowrap}`;
-    style.textContent += `#${panelId} .uyv-launch-help{padding:0 8px 8px}#${panelId} .uyv-launch-help[hidden]{display:none}#${panelId} .uyv-launch-help p{padding:0}#${panelId} .uyv-launch-help a{display:inline-block;text-decoration:none;padding:4px 7px;background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:4px}`;
-    style.textContent += `#${panelId} summary{display:flex;align-items:center;gap:6px}#${panelId} summary::before{content:'▶';font-size:10px}#${panelId}[open] summary::before{content:'▼'}#${panelId} summary::-webkit-details-marker{display:none}#${panelId} summary .uyv-page-open{margin:0 0 0 auto;flex-shrink:0;white-space:nowrap}#${panelId}:not([open]) .uyv-page-open{display:none}`;
+    style.textContent += `#${panelId} .uyv-launch-help{padding:0 8px 8px}#${panelId} .uyv-launch-help[hidden]{display:none}#${panelId} .uyv-launch-help>summary{cursor:pointer;user-select:none}#${panelId} .uyv-launch-help p{padding:0}#${panelId} .uyv-launch-help a{display:inline-block;text-decoration:none;padding:4px 7px;background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:4px}`;
+    style.textContent += `#${panelId}>summary{display:flex;align-items:center;gap:6px}#${panelId}>summary::before{content:'▶';font-size:10px}#${panelId}[open]>summary::before{content:'▼'}#${panelId}>summary::-webkit-details-marker{display:none}#${panelId}>summary .uyv-page-open{margin:0 0 0 auto;flex-shrink:0;white-space:nowrap}#${panelId}:not([open]) .uyv-page-open{display:none}`;
     style.textContent += `#${panelId} .uyv-count{color:#e58b8b}`;
     document.head.appendChild(style);
     panel = document.createElement('details');
@@ -209,11 +210,13 @@
     list.className = 'uyv-list';
     message = document.createElement('p');
     message.textContent = '播放网页视频后可发现更多地址；受登录、跨域或播放器环境限制的请求可能无法捕获。';
-    launchHelp = document.createElement('div');
+    launchHelp = document.createElement('details');
     launchHelp.className = 'uyv-launch-help';
     launchHelp.hidden = true;
+    const helpSummary = document.createElement('summary');
+    helpSummary.textContent = '没有打开？';
     const helpText = document.createElement('p');
-    helpText.textContent = '没有打开？最低需要 Windows 版 UnityYAMLViewer v1.3.4。请下载 v1.3.4 或更高版本，解压并运行一次，再回到本页重试。脚本无法判断是否安装或唤起成功。';
+    helpText.textContent = '最低需要 Windows 版 UnityYAMLViewer v1.3.4。请下载 v1.3.4 或更高版本，解压并运行一次，再回到本页重试。脚本无法判断是否安装或唤起成功。';
     const download = document.createElement('a');
     download.textContent = '下载 UnityYAMLViewer';
     download.href = DOWNLOAD_URL;
@@ -224,7 +227,7 @@
     helpActions.append(download, button('重新打开', () => {
       if (lastAppUrl) openInApp(lastAppUrl);
     }, 'uyv-app'));
-    launchHelp.append(helpText, helpActions);
+    launchHelp.append(helpSummary, helpText, helpActions);
     panel.append(header, list, message, launchHelp);
     document.body.appendChild(panel);
     panel.addEventListener('toggle', fitExpandedWidth);

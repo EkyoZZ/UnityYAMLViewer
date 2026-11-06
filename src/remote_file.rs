@@ -42,6 +42,37 @@ pub(crate) fn decode_pasted_unicode(text: &str) -> String {
 }
 fn cache_root() -> PathBuf { crate::app_cache::network_root() }
 pub fn is_cached(path: &Path) -> bool { path.starts_with(cache_root()) || path.starts_with(std::env::temp_dir().join("UnityYAMLViewer-network")) }
+fn origin_key(input:&str)->Option<String>{
+    use sha2::{Digest,Sha256};
+    let mut url=reqwest::Url::parse(input).ok()?;url.set_fragment(None);
+    Some(format!("{:x}",Sha256::digest(url.as_str().as_bytes())))
+}
+pub(crate) fn playlist_origin(path:&Path)->Option<String>{
+    if !is_cached(path){return None;}
+    let mut bytes=Vec::new();std::fs::File::open(path.parent()?.join("playlist-origin.key")).ok()?.take(65).read_to_end(&mut bytes).ok()?;
+    (bytes.len()==64 && bytes.iter().all(u8::is_ascii_hexdigit)).then(||String::from_utf8(bytes).ok()).flatten()
+}
+fn download_name(encoded: &str) -> String {
+    let input=encoded.as_bytes();let mut bytes=Vec::with_capacity(input.len());let mut index=0;
+    while index<input.len() {
+        if input[index]==b'%' && index+2<input.len() {
+            let digit=|byte:u8| (byte as char).to_digit(16).map(|value|value as u8);
+            if let Some(value)=digit(input[index+1]).zip(digit(input[index+2])).map(|(a,b)|a*16+b) {
+                bytes.push(value);index+=3;continue;
+            }
+        }
+        bytes.push(input[index]);index+=1;
+    }
+    let decoded=String::from_utf8(bytes).unwrap_or_else(|_|encoded.to_owned());
+    let name:String=decoded.chars().map(|ch|if ch.is_control() || "<>:\"/\\|?*".contains(ch){'_'}else{ch}).take(160).collect();
+    let name=name.trim_end_matches([' ','.']);
+    if name.is_empty(){"download".into()}else{name.to_owned()}
+}
+pub(crate) fn file_label(path: &Path) -> String {
+    // Decode only cached display labels, once; keep cache paths and signed URLs unchanged.
+    let name=path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+    if is_cached(path){download_name(&name)}else{name.into_owned()}
+}
 fn hls_url(input: &str) -> Option<reqwest::Url> {
     if !input.starts_with("https://") && !input.starts_with("http://") { return None; }
     let url = reqwest::Url::parse(input).ok()?;
@@ -53,6 +84,12 @@ fn hls_url(input: &str) -> Option<reqwest::Url> {
 }
 
 pub fn is_hls(path: &Path) -> bool { path.to_str().and_then(hls_url).is_some() }
+
+fn hls_response(url: &str, mime: &str) -> bool {
+    if reqwest::Url::parse(url).is_ok_and(|url| url.path().to_ascii_lowercase().ends_with(".m3u")) { return false; }
+    hls_url(url).is_some() || matches!(mime,
+        "application/vnd.apple.mpegurl" | "application/x-mpegurl" | "audio/mpegurl" | "audio/x-mpegurl")
+}
 
 pub fn direct_video(input: &str) -> Option<PathBuf> {
     let url = reqwest::Url::parse(input).ok()?;
@@ -129,8 +166,7 @@ fn download(input: &str) -> Result<Opened, String> {
     let mime = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
         .unwrap_or("").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
     let url = response.url().as_str();
-    let hls = hls_url(url).is_some() || matches!(mime.as_str(),
-        "application/vnd.apple.mpegurl" | "application/x-mpegurl" | "audio/mpegurl" | "audio/x-mpegurl");
+    let hls = hls_response(url, &mime);
     if hls || mime.starts_with("video/") || direct_video(url).is_some() {
         return Ok(Opened::Video { path: PathBuf::from(url), hls });
     }
@@ -145,9 +181,9 @@ fn download(input: &str) -> Result<Opened, String> {
         return Ok(Opened::Webpage { page, hls });
     }
     let candidate = response.url().path_segments().and_then(|mut parts| parts.next_back()).unwrap_or("download");
-    let mut name: String = candidate.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).take(160).collect();
-    if name.is_empty() { name = "download".into(); }
-    let mut path = PathBuf::from(&name);
+    let mut name:String=candidate.chars().map(|ch|if ch.is_control() || "<>:\"/\\|?*".contains(ch){'_'}else{ch}).take(160).collect();
+    if name.is_empty(){name="download".into();}
+    let mut path = PathBuf::from(name);
     if !supported(&path) {
         let extension = match mime.as_str() {
             "application/pdf" => "pdf", "image/gif" => "gif", "image/svg+xml" => "svg", "image/png" => "png", "image/jpeg" => "jpg", "image/webp" => "webp", "image/bmp" => "bmp",
@@ -181,10 +217,11 @@ fn download(input: &str) -> Result<Opened, String> {
         Ok(())
     })();
     if let Err(error) = result { let _ = std::fs::remove_file(&partial); let _ = std::fs::remove_dir(&root); return Err(error); }
+    if crate::playlist::is_playlist(&path){if let Some(key)=origin_key(input){let _=std::fs::write(root.join("playlist-origin.key"),key);}}
     Ok(Opened::File(path))
 }
 fn supported(path: &Path) -> bool {
-    crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_office_document(path) || crate::asset_viewer::is_text(path)
+    crate::playlist::is_playlist(path) || crate::media_preview::is_media(path) || crate::asset_viewer::is_image(path) || crate::asset_viewer::is_office_document(path) || crate::asset_viewer::is_text(path)
         || crate::model_preview::is_model(path)
         || matches!(path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str(), "unity" | "prefab" | "asset" | "controller" | "anim" | "mat")
 }
@@ -192,6 +229,35 @@ fn supported(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_playlist_origin_ignores_cache_paths_and_fragments_but_keeps_query_values(){
+        assert_eq!(origin_key("https://EXAMPLE.org/list.m3u#one"),origin_key("https://example.org/list.m3u#two"));
+        assert_ne!(origin_key("https://example.org/list.m3u?key=A"),origin_key("https://example.org/list.m3u?key=a"));
+        assert_eq!(origin_key("https://example.org/list.m3u").unwrap().len(),64);
+    }
+
+    #[test]
+    fn cached_names_decode_once_without_decoding_playback_urls(){
+        assert_eq!(download_name("%E5%9B%BD%E5%86%85%E7%94%B5%E8%A7%86202509.m3u"),"国内电视202509.m3u");
+        assert_eq!(download_name("a+b%2520c.m3u"),"a+b%20c.m3u");
+        assert_eq!(download_name("%2e%2e%2Fchannels.m3u"),".._channels.m3u");
+        assert_eq!(download_name("%2e%2e"),"download");
+        assert_eq!(download_name("bad%FF.m3u"),"bad%FF.m3u");
+        assert_eq!(file_label(Path::new("local%20name.m3u")),"local%20name.m3u");
+    }
+
+    #[test]
+    fn recognizes_m3u_as_a_playlist_instead_of_plain_text(){
+        assert!(supported(Path::new("%E5%9B%BD%E5%86%85%E7%94%B5%E8%A7%86.m3u")));
+        assert!(supported(Path::new("channels.M3U")));
+        assert!(supported(Path::new("channels.m3u8")));
+        for mime in ["text/plain", "audio/x-mpegurl", "application/vnd.apple.mpegurl"] {
+            assert!(!hls_response("https://example.org/channels.M3U?token=a%2Fb",mime));
+        }
+        assert!(hls_response("https://example.org/live.m3u8?token=a%2Fb","text/plain"));
+        assert!(hls_response("https://example.org/live","application/vnd.apple.mpegurl"));
+    }
 
     #[test]
     fn pasted_unicode_preserves_url_encoding_and_only_decodes_once() {

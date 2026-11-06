@@ -3,6 +3,7 @@ use std::{collections::HashMap, path::{Path, PathBuf}, time::{Duration, Instant}
 use serde::{Deserialize, Serialize};
 use eframe::egui;
 use crate::{localization::tr, media_preview::Preview};
+mod iptv;
 
 const MAX_DOCUMENT: u64 = 8 * 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
@@ -10,9 +11,27 @@ pub fn is_playlist(path: &Path) -> bool {
     matches!(path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase().as_str(), "m3u" | "m3u8")
         && !crate::remote_file::is_hls(path)
 }
-#[derive(Clone, Debug)]
-pub struct Entry { pub path: PathBuf, pub title: String }
+#[derive(Clone, Debug, Default)]
+pub struct Entry { pub path: PathBuf, pub title: String, metadata:iptv::Metadata }
+fn network_path(path: &Path) -> bool {
+    crate::network_video::playback_url(path).is_some()
+}
+fn remote_reference(path: &Path) -> bool { path.to_str().is_some_and(|text|text.contains("://") && !text.starts_with("file://")) }
+fn unavailable_error(path: &Path) -> String {
+    error(if remote_reference(path){"此条目链接无效或协议暂不支持。"}else{"列表中的媒体文件不存在"})
+}
+fn entry_tooltip(entry: &Entry) -> String {
+    let text=format!("{}\n{}",entry.title,entry.path.display());
+    if available(&entry.path){text}else{format!("{text}\n{}",unavailable_error(&entry.path))}
+}
+fn available(path: &Path) -> bool { network_path(path) || path.is_file() }
+fn entry_preview(path: &Path, position: f64, autoplay: bool) -> Preview {
+    let mut preview = Preview::for_playlist(if network_path(path) { 0.0 } else { position }, autoplay);
+    if network_path(path) { preview.set_playlist_network(path); }
+    preview
+}
 fn media_path(path:&Path)->PathBuf {
+    if remote_reference(path) { return path.to_owned(); }
     let path=std::fs::canonicalize(path).unwrap_or_else(|_|path.to_owned());
     #[cfg(windows)] {
         let text=path.to_string_lossy();
@@ -24,7 +43,26 @@ fn media_path(path:&Path)->PathBuf {
 fn title(path: &Path) -> String { path.file_stem().unwrap_or_default().to_string_lossy().into_owned() }
 fn error(key: &str) -> String { tr(key).into() }
 
+fn extinf_separator(value: &str) -> Option<(&str,&str)> {
+    let mut quote=None;
+    for (index,ch) in value.char_indices() {
+        if let Some(active)=quote {if ch==active{quote=None;}}
+        else if matches!(ch,'\''|'"'){quote=Some(ch);}
+        else if ch==','{return Some((&value[..index],&value[index+1..]));}
+    }
+    None
+}
+
+#[cfg(test)]
+fn extinf_title(value: &str) -> Option<String> {
+    iptv::extinf(value).1
+}
+
+#[cfg(test)]
 pub fn read(path: &Path) -> Result<Vec<Entry>, String> {
+    read_document(path).map(|(entries,_)|entries)
+}
+fn read_document(path: &Path) -> Result<(Vec<Entry>,String), String> {
     if std::fs::metadata(path).map_err(|e| e.to_string())?.len() > MAX_DOCUMENT { return Err(error("播放列表文件过大")); }
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let text = match std::str::from_utf8(&bytes) {
@@ -37,24 +75,25 @@ pub fn read(path: &Path) -> Result<Vec<Entry>, String> {
     };
     let mut entries = Vec::new();
     let mut pending_title = None;
+    let mut pending_metadata=iptv::Metadata::default();let mut header="#EXTM3U".to_owned();
     for line in text.trim_start_matches('\u{feff}').lines() {
         let line = line.trim();
         if line.starts_with("#EXT-X-") { return Err(error("暂不支持 HLS 流媒体播放列表")); }
+        if line.starts_with("#EXTM3U"){header=line.to_owned();}
         if let Some(value) = line.strip_prefix("#EXTINF:") {
-            pending_title = value.split_once(',').map(|(_, title)| title.trim().to_owned());
+            (pending_metadata,pending_title)=iptv::extinf(value);
         } else if !line.is_empty() && !line.starts_with('#') {
-            if line.contains("://") && !line.starts_with("file://") { return Err(error("播放列表目前只支持本地媒体路径")); }
             let item = if line.starts_with("file://") {
                 reqwest::Url::parse(line).ok().and_then(|url|url.to_file_path().ok()).ok_or_else(||error("播放列表路径包含无效字符"))?
             }else{PathBuf::from(line)};
-            let item = if item.is_absolute() { item } else { path.parent().unwrap_or(Path::new(".")).join(item) };
+            let item = if remote_reference(&item) || item.is_absolute() { item } else { path.parent().unwrap_or(Path::new(".")).join(item) };
             if entries.len() >= MAX_ENTRIES { return Err(error("播放列表条目过多")); }
             let display = pending_title.take().filter(|s| !s.is_empty()).unwrap_or_else(|| title(&item));
-            entries.push(Entry { path:media_path(&item), title: display });
+            entries.push(Entry { path:media_path(&item), title: display,metadata:std::mem::take(&mut pending_metadata) });
         }
     }
     if entries.is_empty() { return Err(error("播放列表为空")); }
-    Ok(entries)
+    Ok((entries,header))
 }
 #[cfg(windows)]
 fn decode_legacy(bytes: &[u8]) -> Result<String, String> {
@@ -94,15 +133,19 @@ fn relative(base: &Path, target: &Path) -> PathBuf {
     result
 }
 pub fn write(path: &Path, entries: &[Entry], overwrite: bool) -> Result<(), String> {
+    write_document(path,entries,"#EXTM3U",overwrite)
+}
+fn write_document(path:&Path,entries:&[Entry],header:&str,overwrite:bool)->Result<(),String>{
     if entries.is_empty() || entries.len() > MAX_ENTRIES { return Err(error("播放列表为空或条目过多")); }
-    let mut text = String::from(if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("m3u")){"\u{feff}#EXTM3U\n"}else{"#EXTM3U\n"});
+    if !header.starts_with("#EXTM3U") || header.contains(['\r','\n']){return Err(error("播放列表属性包含无效字符"));}
+    let mut text=format!("{}{header}\n",if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("m3u")){"\u{feff}"}else{""});
     for item in entries {
         let name = item.title.replace(['\r', '\n'], " ");
-        let mut item_path = relative(path.parent().unwrap_or(Path::new(".")), &item.path);
+        let mut item_path = if remote_reference(&item.path) { item.path.clone() } else { relative(path.parent().unwrap_or(Path::new(".")), &item.path) };
         if item_path.to_string_lossy().starts_with('#'){item_path=Path::new(".").join(item_path);}
         let value = item_path.to_str().ok_or_else(|| error("无法保存非 Unicode 路径"))?;
         if value.contains(['\r', '\n']) || value.starts_with('#') { return Err(error("播放列表路径包含无效字符")); }
-        text.push_str(&format!("#EXTINF:-1,{name}\n{value}\n"));
+        text.push_str(&format!("#EXTINF:-1{},{name}\n{value}\n",item.metadata.render()?));
     }
     if text.len() as u64 > MAX_DOCUMENT { return Err(error("播放列表文件过大")); }
     // Write completely before replacement. A new destination is created exclusively.
@@ -182,22 +225,25 @@ fn migrate_skip(value:&str)->String {
 #[serde(default)]
 struct State {
     item: PathBuf, index:usize, identity:Option<crate::media_history::Identity>, position:f64,
+    channel_key:Option<String>,source_index:usize,
     mode:u8, numbers:bool, episodes:bool, intro:String, outro:String, width:f32, height_ratio:f32, open:bool, completed:bool,
 }
-impl Default for State {fn default()->Self {Self {item:PathBuf::new(),index:0,identity:None,position:0.0,mode:0,numbers:true,episodes:false,intro:"0".into(),outro:"0".into(),width:280.0,height_ratio:0.5,open:true,completed:false}}}
+impl Default for State {fn default()->Self {Self {item:PathBuf::new(),index:0,identity:None,position:0.0,channel_key:None,source_index:0,mode:0,numbers:true,episodes:false,intro:"0".into(),outro:"0".into(),width:280.0,height_ratio:0.5,open:true,completed:false}}}
 fn state_path(path:&Path)->Option<PathBuf> {
     use sha2::{Digest,Sha256};
-    let path=std::fs::canonicalize(path).unwrap_or_else(|_|path.to_owned()).to_string_lossy().into_owned();
-    let key=if cfg!(windows){path.to_lowercase()}else{path};
+    let key=if let Some(origin)=crate::remote_file::playlist_origin(path){format!("remote:{origin}")}else{
+        let path=std::fs::canonicalize(path).unwrap_or_else(|_|path.to_owned()).to_string_lossy().into_owned();
+        if cfg!(windows){path.to_lowercase()}else{path}
+    };
     Some(crate::app_cache::root()?.join("playlist_state").join(format!("{:x}.json",Sha256::digest(key.as_bytes()))))
 }
 fn progress_path(path:&Path)->Option<PathBuf>{let settings=state_path(path)?;Some(crate::app_cache::root()?.join("playlist_positions").join(settings.file_name()?))}
 #[derive(Serialize,Deserialize)]
-struct Progress {item:PathBuf,index:usize,identity:Option<crate::media_history::Identity>,position:f64,completed:bool}
+struct Progress {item:PathBuf,index:usize,identity:Option<crate::media_history::Identity>,position:f64,completed:bool,#[serde(default)]channel_key:Option<String>,#[serde(default)]source_index:usize}
 fn store_state(path:&Path,state:&State)->Result<(),String>{
     let _guard=crate::app_cache::mutation_guard();
-    let mut settings=state.clone();settings.item=PathBuf::new();settings.index=0;settings.identity=None;settings.position=0.0;settings.completed=false;
-    let progress=Progress{item:state.item.clone(),index:state.index,identity:state.identity.clone(),position:state.position,completed:state.completed};
+    let mut settings=state.clone();settings.item=PathBuf::new();settings.index=0;settings.identity=None;settings.position=0.0;settings.completed=false;settings.channel_key=None;settings.source_index=0;
+    let progress=Progress{item:state.item.clone(),index:state.index,identity:state.identity.clone(),position:state.position,completed:state.completed,channel_key:state.channel_key.clone(),source_index:state.source_index};
     for (destination,data) in [(state_path(path),serde_json::to_vec(&settings)),(progress_path(path),serde_json::to_vec(&progress))]{
         let destination=destination.ok_or_else(||"APPDATA is unavailable".to_owned())?;
         std::fs::create_dir_all(destination.parent().unwrap()).map_err(|e|e.to_string())?;
@@ -225,13 +271,18 @@ pub fn flush_writes(){let(tx,rx)=std::sync::mpsc::channel();if state_writer().se
 fn load_state(path:&Path)->State {
     let mut state:State=state_path(path).filter(|p|std::fs::metadata(p).is_ok_and(|m|m.len()<65536)).and_then(|p|std::fs::read(p).ok()).and_then(|v|serde_json::from_slice(&v).ok()).unwrap_or_default();
     if let Some(progress)=progress_path(path).filter(|p|std::fs::metadata(p).is_ok_and(|m|m.len()<65536)).and_then(|p|std::fs::read(p).ok()).and_then(|v|serde_json::from_slice::<Progress>(&v).ok()) {
-        state.item=progress.item;state.index=progress.index;state.identity=progress.identity;state.position=progress.position;state.completed=progress.completed;
+        state.item=progress.item;state.index=progress.index;state.identity=progress.identity;state.position=progress.position;state.completed=progress.completed;state.channel_key=progress.channel_key;state.source_index=progress.source_index;
     }
     state
 }
 
 fn restore_entry(entries:&[Entry],item:&Path,index:usize)->Option<usize>{
     if entries.get(index).is_some_and(|e|e.path==item){Some(index)}else{entries.iter().position(|e|e.path==item)}
+}
+fn restore_channel(entries:&[Entry],view:&iptv::View,state:&State)->Option<usize>{
+    let channel=view.channels.iter().find(|channel|Some(&channel.key)==state.channel_key.as_ref())?;
+    channel.sources.iter().copied().find(|index|entries[*index].path==state.item)
+        .or_else(||channel.sources.get(state.source_index).copied()).or_else(||channel.sources.first().copied())
 }
 fn shuffle_order(count:usize,current:usize,first:bool,random:&mut u64)->Vec<usize>{
     let mut order:Vec<_>=(0..count).filter(|i|!first||*i!=current).collect();
@@ -245,26 +296,34 @@ pub struct Session {
     entries:Vec<Entry>, state:State, current:usize, preview:Option<Preview>, identity:Option<crate::media_history::Identity>,
     saved:Instant, error:Option<String>, last_prompt:bool, finished:bool, dirty:bool, scroll_current:bool,
     arrow_last_motion:Option<f64>,ctx:Option<egui::Context>,writes:Vec<std::sync::mpsc::Receiver<Result<(),String>>>, document_identity:Option<crate::media_history::Identity>, initial_pending:bool, shuffle:Vec<usize>, shuffle_started:bool, random:u64, edit:bool, drag:Option<usize>,
+    header:String,tv:iptv::View,tv_stale:bool,logos:iptv::Logos,source_choices:HashMap<String,PathBuf>,
+    save_as:Option<(PathBuf,Option<crate::media_history::Identity>)>,saved_copy:Option<PathBuf>,
 }
 impl Session {
     pub fn open(path:&Path)->Result<Self,String> {
-        let entries=read(path)?;let mut state=load_state(path);
+        let (entries,header)=read_document(path)?;let tv=iptv::View::new(&entries);let mut state=load_state(path);
         state.intro=migrate_skip(&state.intro);state.outro=migrate_skip(&state.outro);
         state.width=if state.width.is_finite(){state.width.clamp(180.0,700.0)}else{280.0};state.mode=state.mode.min(2);
-        let current=restore_entry(&entries,&state.item,state.index).unwrap_or(0);
-        let changed=!state.item.as_os_str().is_empty() && entries[current].path!=state.item;
+        let restored=restore_channel(&entries,&tv,&state);
+        let candidate=restored.or_else(||restore_entry(&entries,&state.item,state.index)).unwrap_or(0);
+        let current=if tv.detected && !tv.entry_channel.contains_key(&candidate){tv.channels.first().map_or(candidate,|channel|channel.sources[0])}else{candidate};
+        let changed=restored.is_none() && !state.item.as_os_str().is_empty() && entries[current].path!=state.item;
         let identity=crate::media_history::Identity::read(&entries[current].path);
         if identity!=state.identity || changed || !state.position.is_finite(){state.position=0.0;state.completed=false;}
         if changed {state.position=0.0;}
-        let preview=identity.as_ref().map(|_|Preview::for_playlist(state.position,!state.completed));
-        let error=if identity.is_none(){Some(error("列表中的媒体文件不存在"))}else if changed{Some(error("上次播放条目已移除，已选择第一项"))}else{None};
-        Ok(Self {arrow_last_motion:None,ctx:None,writes:Vec::new(),document_identity:crate::media_history::Identity::read(path),entries,state,current,preview,identity,saved:Instant::now(),error,last_prompt:false,finished:false,dirty:false,scroll_current:true,initial_pending:true,shuffle:Vec::new(),shuffle_started:false,random:std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64,edit:false,drag:None})
+        if network_path(&entries[current].path) { state.position=0.0;state.completed=false; }
+        if state_path(path).is_none_or(|settings| !settings.exists()) && entries.iter().any(|entry|remote_reference(&entry.path)) { state.numbers=false; }
+        let preview=available(&entries[current].path).then(||entry_preview(&entries[current].path,state.position,!state.completed));
+        let error=if !available(&entries[current].path){Some(unavailable_error(&entries[current].path))}else if changed{Some(error("上次播放条目已移除，已选择第一项"))}else{None};
+        Ok(Self {header,tv,tv_stale:false,logos:Default::default(),source_choices:HashMap::new(),save_as:None,saved_copy:None,arrow_last_motion:None,ctx:None,writes:Vec::new(),document_identity:crate::media_history::Identity::read(path),entries,state,current,preview,identity,saved:Instant::now(),error,last_prompt:false,finished:false,dirty:false,scroll_current:true,initial_pending:true,shuffle:Vec::new(),shuffle_started:false,random:std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64,edit:false,drag:None})
     }
     pub fn has_video(&self)->bool {self.preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(!audio(&self.entries[self.current].path),Preview::has_video)}
     pub fn request_playback(&mut self){if let Some(p)=&mut self.preview{p.request_playback();self.finished=false;self.initial_pending=true;self.state.completed=false;}}
     pub fn save(&mut self,path:&Path) {
         self.state.item=self.entries[self.current].path.clone();self.state.index=self.current;self.state.identity=self.identity.clone();
-        self.state.position=self.preview.as_ref().map_or(0.0,Preview::playlist_position);
+        self.state.position=if network_path(&self.entries[self.current].path) { 0.0 } else { self.preview.as_ref().map_or(0.0,Preview::playlist_position) };
+        self.state.channel_key=self.tv.entry_channel.get(&self.current).map(|channel|self.tv.channels[*channel].key.clone());
+        self.state.source_index=self.tv.entry_channel.get(&self.current).and_then(|channel|self.tv.channels[*channel].sources.iter().position(|index|self.entries[*index].path==self.entries[self.current].path)).unwrap_or(0);
         let(tx,rx)=std::sync::mpsc::channel();
         if state_writer().send(StateJob::Save(path.to_owned(),self.state.clone(),tx,self.ctx.clone())).is_ok(){self.writes.push(rx);}else{self.error=Some(error("播放列表记录保存失败"));}
         self.poll_writes();
@@ -275,17 +334,113 @@ impl Session {
     }
     fn save_document(&mut self,path:&Path)->bool {
         if crate::media_history::Identity::read(path)!=self.document_identity{self.error=Some(error("列表文件已被外部修改，请重新打开后再编辑"));return false;}
-        match write(path,&self.entries,true){Ok(())=>{self.dirty=false;self.edit=false;self.document_identity=crate::media_history::Identity::read(path);true},Err(e)=>{self.error=Some(e);false}}
+        match write_document(path,&self.entries,&self.header,true){Ok(())=>{self.dirty=false;self.edit=false;self.document_identity=crate::media_history::Identity::read(path);true},Err(e)=>{self.error=Some(e);false}}
+    }
+    fn start_save_as(&mut self,path:&Path){
+        let directory=if crate::remote_file::is_cached(path){std::env::var_os("USERPROFILE").map(PathBuf::from).map(|path|path.join("Downloads"))}else{path.parent().map(Path::to_owned)};
+        let mut dialog=rfd::FileDialog::new().set_file_name(crate::remote_file::file_label(path)).add_filter("M3U / M3U8",&["m3u","m3u8"]);
+        if let Some(directory)=directory{dialog=dialog.set_directory(directory);}
+        if let Some(mut destination)=dialog.save_file(){
+            if !destination.extension().is_some_and(|ext|ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8")){destination.set_extension("m3u8");}
+            let identity=crate::media_history::Identity::read(&destination);let exists=destination.exists();
+            self.save_as=Some((destination,identity));
+            if !exists{self.finish_save_as(path);}
+        }
+    }
+    fn finish_save_as(&mut self,path:&Path){
+        let Some((destination,expected))=self.save_as.clone() else{return;};
+        if crate::media_history::Identity::read(&destination)!=expected{self.error=Some(error("列表文件已被外部修改，请重新打开后再编辑"));self.save_as=None;return;}
+        let result=if media_path(&destination)==media_path(path){
+            if self.save_document(path){Ok(())}else{return;}
+        }else{write_document(&destination,&self.entries,&self.header,expected.is_some())};
+        match result {Ok(())=>{
+            self.save(path);let (sender,receiver)=std::sync::mpsc::channel();
+            if state_writer().send(StateJob::Save(destination.clone(),self.state.clone(),sender,self.ctx.clone())).is_ok(){self.writes.push(receiver);}
+            self.saved_copy=Some(destination);self.save_as=None;
+        },Err(error)=>self.error=Some(error)}
+    }
+    fn refresh_tv(&mut self){if self.tv_stale{self.tv=iptv::View::new(&self.entries);self.tv_stale=false;}}
+    fn channel_source(&self,channel:usize)->usize {
+        if self.tv.entry_channel.get(&self.current)==Some(&channel){return self.current;}
+        let channel=&self.tv.channels[channel];
+        self.source_choices.get(&channel.key).and_then(|path|channel.sources.iter().copied().find(|index|self.entries[*index].path==*path))
+            .or_else(||channel.sources.iter().copied().find(|index|available(&self.entries[*index].path))).unwrap_or(channel.sources[0])
+    }
+    fn television(&self)->bool{self.tv.detected && !self.edit}
+    fn tv_panel(&mut self,ui:&mut egui::Ui,path:&Path)->Option<usize>{
+        for notice in &self.tv.notices{ui.small(notice);}
+        let active=self.tv.entry_channel.get(&self.current).copied();let mut selected=None;
+        egui::ScrollArea::vertical().auto_shrink([false,true]).id_salt(("iptv_channels",path)).max_height(ui.available_height().max(50.0)).show(ui,|ui|{
+            for group in &self.tv.groups{
+                let channels=self.tv.visible(Some(group));
+                let name=if group.is_empty(){tr("未分组")}else{group};
+                let width=ui.available_width().max(1.0);
+                let id=egui::Id::new(("iptv_group",self.tv.instance,path,group));
+                let mut state=egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(),id,false);
+                let (header,response)=ui.allocate_exact_size(egui::vec2(width,30.0),egui::Sense::click());
+                if response.clicked(){state.toggle(ui);}
+                let visuals=ui.style().interact(&response);
+                ui.painter().rect_filled(header,3.0,visuals.bg_fill);
+                ui.painter().rect_stroke(header,3.0,visuals.bg_stroke,egui::StrokeKind::Inside);
+                let mut text=egui::text::LayoutJob::simple(format!("{name} ({})",channels.len()),egui::FontId::proportional(14.0),visuals.text_color(),(width-36.0).max(1.0));
+                text.wrap.max_rows=1;
+                let text=ui.fonts(|fonts|fonts.layout_job(text));
+                ui.painter().galley(header.center()-text.size()*0.5,text,visuals.text_color());
+                let arrow=egui::Rect::from_center_size(egui::pos2(header.right()-13.0,header.center().y),egui::vec2(12.0,12.0));
+                crate::icons::paint(ui,if state.is_open(){crate::icons::Icon::TriangleDown}else{crate::icons::Icon::TriangleRight},arrow,visuals.text_color());
+                state.store(ui.ctx());
+                if !state.is_open(){continue;}
+                let grid=iptv::CardGrid::new(width,channels.len());
+                let (bounds,_)=ui.allocate_exact_size(egui::vec2(width,grid.height),egui::Sense::hover());
+                for (slot,index) in channels.into_iter().enumerate(){
+                    let channel=&self.tv.channels[index];let selected_channel=active==Some(index);
+                    let enabled=channel.sources.iter().any(|index|available(&self.entries[*index].path));
+                    let rect=grid.card(bounds.min,slot);
+                    let response=ui.interact(rect,id.with(index),egui::Sense::click());
+                    if self.scroll_current && selected_channel{response.scroll_to_me(Some(egui::Align::Center));}
+                    if response.clicked(){selected=Some(index);}
+                    let visuals=ui.style().interact_selectable(&response,selected_channel);
+                    ui.painter().rect_filled(rect,4.0,visuals.bg_fill);
+                    ui.painter().rect_stroke(rect,4.0,visuals.bg_stroke,egui::StrokeKind::Inside);
+                    let image_rect=egui::Rect::from_min_size(rect.min+egui::vec2(6.0,4.0),egui::vec2(64.0,38.0));
+                    if ui.is_rect_visible(rect){
+                        if let Some(texture)=self.logos.get(ui,&channel.logos){
+                            let pixels=texture.size_vec2();let scale=(image_rect.width()/pixels.x).min(image_rect.height()/pixels.y);
+                            let target=egui::Rect::from_center_size(image_rect.center(),pixels*scale);
+                            ui.painter().image(texture.id(),target,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
+                        }else{ui.painter().text(image_rect.center(),egui::Align2::CENTER_CENTER,"—",egui::FontId::proportional(24.0),ui.visuals().weak_text_color());}
+                    }
+                    let color=if enabled{visuals.text_color()}else{ui.visuals().error_fg_color};
+                    let text_rect=egui::Rect::from_min_max(rect.min+egui::vec2(3.0,45.0),rect.max-egui::vec2(3.0,3.0));
+                    let mut text=egui::text::LayoutJob::simple(channel.title.clone(),egui::FontId::proportional(13.0),color,text_rect.width());text.wrap.max_rows=1;
+                    let text=ui.fonts(|fonts|fonts.layout_job(text));
+                    ui.painter().with_clip_rect(text_rect.intersect(ui.clip_rect())).galley(text_rect.center()-text.size()*0.5,text,color);
+                    response.on_hover_text(&channel.title);
+                }
+            }
+        });
+        selected.map(|channel|self.channel_source(channel))
     }
     pub fn deactivate(&mut self,path:&Path){if let Some(p)=&mut self.preview{p.deactivate();}self.save(path);}
     fn switch(&mut self,index:usize,path:&Path)->bool{
         if index>=self.entries.len(){return false;}
-        if !self.entries[index].path.is_file(){self.error=Some(format!("{}: {}",tr("列表中的媒体文件不存在"),self.entries[index].path.display()));return false;}
+        if !available(&self.entries[index].path){self.error=Some(format!("{}: {}",unavailable_error(&self.entries[index].path),self.entries[index].path.display()));return false;}
+        if let Some(channel)=self.tv.entry_channel.get(&self.current){self.source_choices.insert(self.tv.channels[*channel].key.clone(),self.entries[self.current].path.clone());}
+        let aspect=self.preview.as_ref().map_or(0,Preview::display_aspect);
         self.deactivate(path);self.current=index;self.identity=crate::media_history::Identity::read(&self.entries[index].path);
-        let start=if self.state.episodes&&!audio(&self.entries[index].path){parse_time(&self.state.intro).unwrap_or(0.0)}else{0.0};
-        self.preview=Some(Preview::for_playlist(start,true));self.initial_pending=true;self.finished=false;self.state.completed=false;self.last_prompt=false;self.error=None;self.scroll_current=true;self.save(path);true
+        let start=if self.state.episodes&&!self.tv.detected&&!network_path(&self.entries[index].path)&&!audio(&self.entries[index].path){parse_time(&self.state.intro).unwrap_or(0.0)}else{0.0};
+        let mut preview=entry_preview(&self.entries[index].path,start,true);preview.set_display_aspect(aspect);
+        if let Some(channel)=self.tv.entry_channel.get(&index){self.source_choices.insert(self.tv.channels[*channel].key.clone(),self.entries[index].path.clone());}
+        self.preview=Some(preview);self.initial_pending=true;self.finished=false;self.state.completed=false;self.last_prompt=false;self.error=None;self.scroll_current=!self.tv.detected;self.save(path);true
     }
     fn next(&mut self,path:&Path,is_audio:bool,manual:bool) {
+        if self.television(){
+            let next=self.tv.entry_channel.get(&self.current).map_or(0,|index|index+1);
+            if next<self.tv.channels.len(){let source=self.channel_source(next);self.switch(source,path);}else{
+                if let Some(preview)=&mut self.preview{preview.pause();}self.finished=true;self.state.completed=true;self.last_prompt=true;self.save(path);
+            }
+            return;
+        }
         if is_audio && self.state.mode==2 && !manual {self.switch(self.current,path);return;}
         if is_audio && self.state.mode==1 {
             if self.shuffle.is_empty(){self.shuffle=shuffle_order(self.entries.len(),self.current,!self.shuffle_started,&mut self.random);self.shuffle_started=true;}
@@ -297,17 +452,31 @@ impl Session {
         }
     }
     fn panel(&mut self,ui:&mut egui::Ui,path:&Path){
+        self.refresh_tv();
         ui.add_space(8.0);
-        ui.horizontal(|ui|{ui.label(path.file_name().unwrap_or_default().to_string_lossy());ui.menu_image_button(egui::Image::new(egui::include_image!("../assets/icons/wrench.svg")).fit_to_exact_size(egui::vec2(16.0,16.0)).tint(ui.visuals().text_color()),|ui|{
+        ui.horizontal(|ui|{let name=crate::remote_file::file_label(path);let width=(ui.available_width()-28.0-ui.spacing().item_spacing.x).max(1.0);ui.add_sized([width,ui.spacing().interact_size.y],egui::Label::new(&name).halign(egui::Align::Min).truncate()).on_hover_text(name);ui.menu_image_button(egui::Image::new(egui::include_image!("../assets/icons/wrench.svg")).fit_to_exact_size(egui::vec2(16.0,16.0)).tint(ui.visuals().text_color()),|ui|{
             if ui.button(tr(if self.edit{"退出编辑"}else{"编辑列表"})).clicked(){self.edit=!self.edit;ui.close_menu();}
-            if ui.button(tr("添加文件")).clicked(){if let Some(files)=rfd::FileDialog::new().pick_files(){for file in files {if crate::media_preview::is_media(&file)&&self.entries.len()<MAX_ENTRIES{self.entries.push(Entry{title:title(&file),path:media_path(&file)});self.dirty=true;}}}ui.close_menu();}
+            if ui.button(tr("添加文件")).clicked(){if let Some(files)=rfd::FileDialog::new().pick_files(){for file in files {if crate::media_preview::is_media(&file)&&self.entries.len()<MAX_ENTRIES{self.entries.push(Entry {title:title(&file),path:media_path(&file),metadata:Default::default()});self.dirty=true;self.tv_stale=true;}}}ui.close_menu();}
             if ui.button(tr("保存列表")).clicked(){self.save_document(path);ui.close_menu();}
+            if ui.button(tr("另存为")).clicked(){self.start_save_as(path);ui.close_menu();}
         });});
+        if let Some((destination,_))=self.save_as.clone(){
+            ui.small(destination.display().to_string());ui.colored_label(ui.visuals().warn_fg_color,tr("同名文件已存在，覆盖将替换原列表内容"));
+            ui.horizontal(|ui|{if ui.button(tr("覆盖")).clicked(){self.finish_save_as(path);}if ui.button(tr("取消")).clicked(){self.save_as=None;}});
+        }
+        if let Some(destination)=&self.saved_copy{
+            ui.small(tr("已另存为：{0}").replace("{0}",&destination.display().to_string()));
+            if ui.small_button(tr("打开列表")).clicked(){ui.ctx().data_mut(|data|data.insert_temp(egui::Id::new("playlist_open"),destination.clone()));}
+        }
         if self.dirty {ui.small(tr("列表修改尚未保存"));}
         if self.state.completed{ui.small(tr("列表已播放完毕，可点击条目重新播放"));}
+        if self.television(){
+            if let Some(index)=self.tv_panel(ui,path){self.shuffle.clear();self.shuffle_started=false;self.switch(index,path);}
+            self.scroll_current=false;return;
+        }
         let is_audio=self.preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(audio(&self.entries[self.current].path),|p|!p.has_video());
-        if !is_audio {ui.horizontal(|ui|{ui.label(tr("显示方式"));ui.selectable_value(&mut self.state.numbers,true,tr("编号"));ui.selectable_value(&mut self.state.numbers,false,tr("名称"));});}
-        let bottom=if is_audio{40.0}else{130.0};
+        if !is_audio && !self.tv.detected {ui.horizontal(|ui|{ui.label(tr("显示方式"));ui.selectable_value(&mut self.state.numbers,true,tr("编号"));ui.selectable_value(&mut self.state.numbers,false,tr("名称"));});}
+        let bottom=if self.tv.detected{0.0}else if is_audio{40.0}else{130.0};
         let mut select=None;let mut remove=None;let mut reorder=None;
         egui::ScrollArea::vertical().auto_shrink([false,true]).id_salt(("playlist_entries",path)).max_height((ui.available_height()-bottom).max(50.0)).show(ui,|ui|{
             if !is_audio && self.state.numbers && !self.edit {
@@ -315,40 +484,42 @@ impl Session {
                 egui::Grid::new(("playlist_numbers",path)).spacing(egui::vec2(4.0,4.0)).show(ui,|ui|{
                     for (index,item) in self.entries.iter().enumerate(){
                         let mut label=egui::RichText::new((index+1).to_string());
-                        if !item.path.is_file(){label=label.color(ui.visuals().error_fg_color);}
+                        if !available(&item.path){label=label.color(ui.visuals().error_fg_color);}
                         let response=ui.add_sized([50.0,44.0],egui::Button::new(label).selected(index==self.current));
                         if self.scroll_current&&index==self.current{response.scroll_to_me(Some(egui::Align::Center));}
                         if response.clicked(){select=Some(index);}
-                        response.on_hover_text(format!("{}\n{}",item.title,item.path.display()));if (index+1)%columns==0{ui.end_row();}
+                        response.on_hover_text(entry_tooltip(item));if (index+1)%columns==0{ui.end_row();}
                     }
                 });
             }else{
                 for (index,item) in self.entries.iter_mut().enumerate(){ui.horizontal(|ui|{
-                    let text=if !is_audio&&self.state.numbers{(index+1).to_string()}else{item.title.clone()};
+                    let text=if !is_audio&&self.state.numbers&&!self.tv.detected{(index+1).to_string()}else{item.title.clone()};
                     let width=(ui.available_width()-if self.edit{80.0}else{0.0}).max(30.0);
                     let mut label=egui::RichText::new(text);
-                    if !item.path.is_file(){label=label.color(ui.visuals().error_fg_color);}
-                    let response=ui.add_sized([width,30.0],egui::Button::new(label).selected(index==self.current).sense(egui::Sense::click_and_drag()).truncate());
+                    if !available(&item.path){label=label.color(ui.visuals().error_fg_color);}
+                    let response=ui.allocate_ui_with_layout(egui::vec2(width,30.0),egui::Layout::left_to_right(egui::Align::Center),|ui|
+                        ui.add(egui::Button::new(label).min_size(egui::vec2(width,30.0)).selected(index==self.current).sense(egui::Sense::click_and_drag()).truncate())).inner;
                     if self.scroll_current&&index==self.current{response.scroll_to_me(Some(egui::Align::Center));}
                     if response.clicked(){select=Some(index);}
                     if self.edit && response.drag_started(){self.drag=Some(index);}
                     if self.edit && ui.input(|i|i.pointer.any_released()) && response.contains_pointer(){if let Some(from)=self.drag.take(){reorder=Some((from,index));}}
-                    let response=response.on_hover_text(format!("{}\n{}",item.title,item.path.display()));
-                    response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);ui.label(tr("显示名称"));if ui.text_edit_singleline(&mut item.title).changed(){self.dirty=true;}});
+                    let response=response.on_hover_text(entry_tooltip(item));
+                    response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);ui.label(tr("显示名称"));if ui.text_edit_singleline(&mut item.title).changed(){self.dirty=true;self.tv_stale=true;}});
                     if self.edit {if ui.small_button("↑").clicked()&&index>0{reorder=Some((index,index-1));}if ui.small_button("−").on_hover_text(tr("移除条目，不删除文件")).clicked(){remove=Some(index);}}
                 });}
             }
         });if self.state.open{self.scroll_current=false;}
         if let Some(index)=select {self.shuffle.clear();self.shuffle_started=false;self.switch(index,path);}
-        if let Some((from,to))=reorder{let item=self.entries.remove(from);self.entries.insert(to,item);self.current=if self.current==from{to}else if from<self.current&&to>=self.current{self.current-1}else if from>self.current&&to<=self.current{self.current+1}else{self.current};self.dirty=true;self.shuffle.clear();self.shuffle_started=false;}
-        if let Some(index)=remove {if self.entries.len()>1{if index==self.current{let next=if index+1<self.entries.len(){index+1}else{index-1};if !self.switch(next,path){return;}}self.entries.remove(index);if self.current>index{self.current-=1;}self.dirty=true;self.shuffle.clear();self.shuffle_started=false;}}
+        if let Some((from,to))=reorder{let item=self.entries.remove(from);self.entries.insert(to,item);self.current=if self.current==from{to}else if from<self.current&&to>=self.current{self.current-1}else if from>self.current&&to<=self.current{self.current+1}else{self.current};self.dirty=true;self.tv_stale=true;self.shuffle.clear();self.shuffle_started=false;}
+        if let Some(index)=remove {if self.entries.len()>1{if index==self.current{let next=if index+1<self.entries.len(){index+1}else{index-1};if !self.switch(next,path){return;}}self.entries.remove(index);if self.current>index{self.current-=1;}self.dirty=true;self.tv_stale=true;self.shuffle.clear();self.shuffle_started=false;}}
+        if self.tv.detected{return;}
         ui.add_space((ui.available_height()-bottom).max(0.0));
         ui.separator();
         if is_audio {ui.horizontal(|ui|{ui.label(tr("播放模式"));egui::ComboBox::from_id_salt(("playlist_mode",path)).selected_text(tr(["顺序播放","随机播放","单曲循环"][self.state.mode as usize])).show_ui(ui,|ui|{for (i,name) in ["顺序播放","随机播放","单曲循环"].iter().enumerate(){if ui.selectable_value(&mut self.state.mode,i as u8,tr(name)).changed(){self.shuffle.clear();self.shuffle_started=false;}}});});}
         else {
             let position=self.preview.as_ref().filter(|p|p.playlist_duration().is_some()).map(Preview::playlist_position).filter(|v|v.is_finite()&&*v>=0.0);
             let duration=self.preview.as_ref().and_then(Preview::playlist_duration).filter(|v|v.is_finite()&&*v>0.0);
-            ui.horizontal(|ui|{ui.checkbox(&mut self.state.episodes,tr("跳过片头片尾"));if ui.button(tr("重置")).clicked(){self.state.intro="0".into();self.state.outro="0".into();}});ui.add_enabled_ui(self.state.episodes,|ui|{
+            ui.horizontal(|ui|{ui.add_enabled(duration.is_some(),egui::Checkbox::new(&mut self.state.episodes,tr("跳过片头片尾")));if ui.add_enabled(duration.is_some(),egui::Button::new(tr("重置"))).clicked(){self.state.intro="0".into();self.state.outro="0".into();}});ui.add_enabled_ui(self.state.episodes&&duration.is_some(),|ui|{
             egui::Grid::new(("episode_seconds_compact",path)).spacing(egui::vec2(4.0,4.0)).show(ui,|ui|{
                 ui.label(tr("跳过片头"));ui.horizontal(|ui|{
                     ui.spacing_mut().item_spacing.x=2.0;
@@ -365,6 +536,7 @@ impl Session {
         });}
     }
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path,fullscreen:bool){
+        self.refresh_tv();
         self.ctx=Some(ui.ctx().clone());
         self.poll_writes();
         let old_settings=(self.state.mode,self.state.numbers,self.state.episodes,self.state.intro.clone(),self.state.outro.clone(),self.state.open,self.state.width,self.state.height_ratio);
@@ -380,16 +552,20 @@ impl Session {
         let (arrow_now,arrow_pointer,arrow_moved)=ui.input(|input|(input.time,input.pointer.hover_pos(),input.events.iter().any(|event|matches!(event,egui::Event::PointerMoved(_)))));
         if arrow_moved&&arrow_pointer.is_some_and(|pos|self.preview.as_ref().and_then(Preview::canvas_rect).is_some_and(|rect|rect.contains(pos))){self.arrow_last_motion=Some(arrow_now);}
         let mut preview=self.preview.take();
-        if !fullscreen{ui.horizontal_wrapped(|ui|{crate::asset_viewer::file_context_menu(&ui.heading(media_path.file_name().unwrap_or_default().to_string_lossy()),&media_path);if let Some(p)=&mut preview{if let Some(bytes)=p.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}p.header_controls(ui,&media_path);}if preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(audio(&media_path),|p|!p.has_video()){ui.label(tr(["顺序播放","随机播放","单曲循环"][self.state.mode as usize]));}if let Some(p)=&mut preview{p.trim_entry_button(ui,&media_path);}});}
+        let sources=if self.television(){self.tv.entry_channel.get(&self.current).map(|channel|{let channel=&self.tv.channels[*channel];let selected=channel.sources.iter().copied().find(|index|self.entries[*index].path==self.entries[self.current].path).unwrap_or(channel.sources[0]);(selected,channel.sources.iter().map(|index|(*index,self.entries[*index].path.to_string_lossy().into_owned())).collect())})}else{None};
+        let previous=if self.television(){self.tv.entry_channel.get(&self.current).is_some_and(|channel|*channel>0)}else{self.current>0};
+        if let Some(preview)=&mut preview { preview.set_playlist_previous_available(previous);preview.set_playlist_sources(sources); }
+        if !fullscreen{ui.horizontal_wrapped(|ui|{if network_path(&media_path){ui.heading(&self.entries[self.current].title);}else{crate::asset_viewer::file_context_menu(&ui.heading(media_path.file_name().unwrap_or_default().to_string_lossy()),&media_path);}if let Some(p)=&mut preview{if let Some(bytes)=p.file_size(){ui.small(if bytes<1048576{format!("({:.1} KiB)",bytes as f64/1024.0)}else{format!("({:.2} MiB)",bytes as f64/1048576.0)});}p.header_controls(ui,&media_path);}if preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(audio(&media_path),|p|!p.has_video()){ui.label(tr(["顺序播放","随机播放","单曲循环"][self.state.mode as usize]));}if !network_path(&media_path){if let Some(p)=&mut preview{p.trim_entry_button(ui,&media_path);}}});}
         let max_height=(bounds.height()-136.0).max(1.0);
         let min_height=240.0_f32.min(max_height);
         let ratio=if self.state.height_ratio.is_finite(){self.state.height_ratio}else{0.5};
         let floating_height=(bounds.height()*ratio).clamp(min_height,max_height);
         let floating_rect=(fullscreen&&panel_width>6.0).then(||egui::Rect::from_center_size(egui::pos2(bounds.right()-panel_width/2.0,bounds.center().y),egui::vec2(panel_width,floating_height)));
+        let playback_bounds=ui.available_rect_before_wrap();
         if let Some(rect)=floating_rect.filter(|_|controls_visible){ui.ctx().data_mut(|data|data.insert_temp(egui::Id::new("media_overlay_exclusion"),rect.expand2(egui::vec2(24.0,0.0))));}
         if let Some(p)=&mut preview{p.set_overlay_interactive(self.arrow_last_motion.is_some_and(|last|arrow_now-last<1.0)&&controls_visible);p.set_sidebar_width(if fullscreen{0.0}else{panel_width});p.show(ui,&media_path);}else{ui.label(tr("列表中的媒体文件不存在"));}
         let player_rect=preview.as_ref().and_then(Preview::canvas_rect).unwrap_or_else(||{
-            let available=ui.available_rect_before_wrap();egui::Rect::from_min_max(available.min,egui::pos2(available.right()-panel_width,available.bottom()-32.0))
+            egui::Rect::from_min_max(playback_bounds.min,egui::pos2((playback_bounds.right()-panel_width).max(playback_bounds.left()+1.0),(playback_bounds.bottom()-32.0).max(playback_bounds.top()+1.0)))
         });
         ui.ctx().data_mut(|data|data.remove::<egui::Rect>(egui::Id::new("media_overlay_exclusion")));
         let panel_rect=if fullscreen{floating_rect}else{preview.as_ref().and_then(Preview::sidebar_rect).or_else(||(panel_width>6.0).then(||egui::Rect::from_min_max(egui::pos2(player_rect.right()+6.0,player_rect.top()),egui::pos2(bounds.right(),player_rect.bottom()))))};
@@ -437,10 +613,12 @@ impl Session {
         }
         let mut advance=false;let is_audio=self.preview.as_ref().filter(|p|p.playlist_duration().is_some()).map_or(audio(&media_path),|p|!p.has_video());
         let manual_next=self.preview.as_mut().is_some_and(Preview::take_playlist_next);
+        let manual_previous=self.preview.as_mut().is_some_and(Preview::take_playlist_previous);
+        let manual_source=self.preview.as_mut().and_then(Preview::take_playlist_source).filter(|index|self.television() && self.tv.entry_channel.get(index)==self.tv.entry_channel.get(&self.current));
         if let Some(p)=&mut self.preview {
             let ended=p.take_playlist_end();
-            if !manual_next {
-            let range=if self.state.episodes&&p.has_video(){parse_time(&self.state.intro).zip(parse_time(&self.state.outro))}else{Some((0.0,0.0))};
+            if !manual_next && !manual_previous && manual_source.is_none() {
+            let range=if self.state.episodes&&!self.tv.detected&&p.playlist_duration().is_some_and(|duration|duration>0.0)&&p.has_video(){parse_time(&self.state.intro).zip(parse_time(&self.state.outro))}else{Some((0.0,0.0))};
             if range.is_none(){p.pause();self.error=Some(error("片头片尾设置无效，请检查秒数与媒体时长"));}
             else if p.playlist_duration()==Some(0.0)&&range.is_some_and(|(_,outro)|outro>0.0){p.pause();self.error=Some(error("媒体时长未知，无法跳过片尾"));}
             else if let Some(duration)=p.playlist_duration().filter(|d|*d>0.0) {
@@ -449,22 +627,27 @@ impl Session {
                 else if !self.finished && !p.playlist_failed(){
                     if self.error.as_deref()==Some(tr("片头片尾设置无效，请检查秒数与媒体时长")){self.error=None;}
                     let (intro,outro)=range.unwrap();
-                    if self.initial_pending {self.initial_pending=false;if self.state.episodes && p.has_video() && p.playlist_position()<intro{p.playlist_seek(ui.ctx(),&media_path,intro);}}
+                    if self.initial_pending {self.initial_pending=false;if self.state.episodes && !self.tv.detected && p.has_video() && p.playlist_position()<intro{p.playlist_seek(ui.ctx(),&media_path,intro);}}
                     let at_outro=outro>0.0&&p.playlist_playing()&&p.playlist_position()>=duration-outro;
                     if ended||at_outro {p.pause();self.finished=true;advance=true;}
                 }
             }else if ended&&!self.finished {self.finished=true;advance=true;}
         }
         }
-        if manual_next{self.next(path,is_audio,true);}else if advance{self.next(path,is_audio,false);}
+        if let Some(index)=manual_source {self.switch(index,path);}else if manual_previous {
+            let previous=if self.television(){self.tv.entry_channel.get(&self.current).and_then(|channel|channel.checked_sub(1)).map(|channel|self.channel_source(channel))}else{self.current.checked_sub(1)};
+            if let Some(previous)=previous {
+                self.shuffle.clear();self.shuffle_started=false;self.switch(previous,path);
+            }
+        }else if manual_next{self.next(path,is_audio,true);}else if advance{self.next(path,is_audio,false);}
         if self.finished&&self.preview.as_ref().is_some_and(Preview::playlist_playing){
             self.finished=false;self.state.completed=false;
-            if self.state.episodes&&self.has_video(){if let Some(p)=&mut self.preview{let intro=parse_time(&self.state.intro).unwrap_or(0.0);if p.playlist_position()<intro{p.playlist_seek(ui.ctx(),&media_path,intro);}}}
+            if self.state.episodes&&!self.tv.detected&&self.preview.as_ref().and_then(Preview::playlist_duration).is_some_and(|duration|duration>0.0)&&self.has_video(){if let Some(p)=&mut self.preview{let intro=parse_time(&self.state.intro).unwrap_or(0.0);if p.playlist_position()<intro{p.playlist_seek(ui.ctx(),&media_path,intro);}}}
         }
         let changed=old_settings!=(self.state.mode,self.state.numbers,self.state.episodes,self.state.intro.clone(),self.state.outro.clone(),self.state.open,self.state.width,self.state.height_ratio);
         if changed || (was_playing&&!self.preview.as_ref().is_some_and(Preview::playlist_playing)) || self.saved.elapsed()>Duration::from_secs(10){self.save(path);}
         if let Some(e)=&self.error {egui::Area::new(ui.id().with("playlist_error")).order(egui::Order::Foreground).fixed_pos(player_rect.left_top()+egui::vec2(12.0,70.0)).show(ui.ctx(),|ui|{egui::Frame::popup(ui.style()).show(ui,|ui|{ui.set_max_width((player_rect.width()-30.0).max(40.0));ui.colored_label(ui.visuals().warn_fg_color,e);});});}
-        if self.last_prompt {egui::Area::new(ui.id().with("playlist_last_episode")).order(egui::Order::Foreground).pivot(egui::Align2::CENTER_CENTER).fixed_pos(player_rect.center()).show(ui.ctx(),|ui|{egui::Frame::popup(ui.style()).inner_margin(20.0).show(ui,|ui|{ui.label(tr("已是最后一集"));if ui.button(tr("确定")).clicked(){self.last_prompt=false;}});});}
+        if self.last_prompt {egui::Area::new(ui.id().with("playlist_last_episode")).order(egui::Order::Foreground).pivot(egui::Align2::CENTER_CENTER).fixed_pos(player_rect.center()).show(ui.ctx(),|ui|{egui::Frame::popup(ui.style()).inner_margin(20.0).show(ui,|ui|{ui.label(tr(if self.television(){"已是最后一个频道"}else{"已是最后一集"}));if ui.button(tr("确定")).clicked(){self.last_prompt=false;}});});}
         ui.allocate_rect(bounds,egui::Sense::hover());
     }
 }
@@ -483,7 +666,7 @@ impl Creator {
         let cancel=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));self.job_stop=Some(cancel.clone());
         std::thread::spawn(move||{let result=(||{let mut entries=Vec::new();for entry in std::fs::read_dir(directory).map_err(|e|e.to_string())?{if cancel.load(std::sync::atomic::Ordering::Relaxed){return Ok(Vec::new());}let entry=entry.map_err(|e|e.to_string())?;let path=entry.path();if !entry.file_type().map_err(|e|e.to_string())?.is_file()||audio(&path)!=is_audio||!crate::media_preview::is_media(&path){continue;}
             let stem=title(&path);if prefix.as_ref().is_some_and(|p|!stem.starts_with(p)){continue;}
-            let display=prefix.as_ref().and_then(|p|stem.strip_prefix(p)).filter(|s|!s.is_empty()).unwrap_or(&stem).to_owned();entries.push(Entry{path:media_path(&path),title:display});if entries.len()>MAX_ENTRIES{return Err(error("播放列表条目过多"));}}
+            let display=prefix.as_ref().and_then(|p|stem.strip_prefix(p)).filter(|s|!s.is_empty()).unwrap_or(&stem).to_owned();entries.push(Entry {path:media_path(&path),title:display,metadata:Default::default()});if entries.len()>MAX_ENTRIES{return Err(error("播放列表条目过多"));}}
             entries.sort_by(|a,b|natural_cmp(&a.path.to_string_lossy(),&b.path.to_string_lossy()).then_with(||a.path.cmp(&b.path)));Ok(entries)})();let _=tx.send(result);ctx.request_repaint();});
     }
     fn commit(&mut self){if let Some(path)=self.pending.take(){
@@ -569,12 +752,102 @@ impl Lists {
     pub fn dirty(&self,path:&Path)->bool{self.sessions.get(path).is_some_and(|s|s.dirty)}
     pub fn dirty_paths(&self)->Vec<PathBuf>{self.sessions.iter().filter(|(_,s)|s.dirty).map(|(p,_)|p.clone()).collect()}
     pub fn resolve_dirty(&mut self,path:&Path,save:bool)->bool{self.sessions.get_mut(path).is_none_or(|s|{if save{s.save_document(path)}else{s.dirty=false;true}})}
-    pub fn in_use(&self)->Vec<PathBuf>{self.sessions.values().flat_map(|s|s.entries.iter().map(|e|e.path.clone())).collect()}
+    pub fn in_use(&self)->Vec<PathBuf>{
+        let mut paths:Vec<_>=self.sessions.values().flat_map(|session|session.entries.iter().map(|entry|entry.path.clone())).collect();
+        for path in self.sessions.keys(){if crate::remote_file::is_cached(path){if let Some(directory)=path.parent(){paths.push(directory.to_owned());}}}
+        paths
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_group_stays_visible_during_probe_and_after_source_error(){
+        let workspace=Workspace::new();let path=workspace.0.join("channels.m3u");
+        std::fs::write(&path,"#EXTM3U\n#EXTINF:-1 tvg-id=\"A\" group-title=\"Group A\",Channel A\nhttps://example.invalid/a.m3u8\n#EXTINF:-1 tvg-id=\"B\" group-title=\"Group A\",Channel B\nhttps://example.invalid/b.m3u8\n").unwrap();
+        let mut session=Session::open(&path).unwrap();let ctx=egui::Context::default();
+        let _pending=session.preview.as_mut().unwrap().test_probe_pending();
+        let render=|session:&mut Session,time:f64|{
+            ctx.run(egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(900.0,600.0))),time:Some(time),..Default::default()},|ctx|{
+                egui::CentralPanel::default().show(ctx,|ui|session.show(ui,&path,false));
+            })
+        };
+        let _=render(&mut session,0.0);
+        for (time,error) in [(1.0,false),(2.0,true)]{
+            if error{session.preview.as_mut().unwrap().test_probe_error();}
+            let output=render(&mut session,time);
+            assert!(output.shapes.iter().any(|shape|match &shape.shape{
+                egui::Shape::Text(text) if text.galley.job.text=="Group A (2)"=>{
+                    text.pos.x>500.0 && shape.clip_rect.intersects(egui::Rect::from_min_size(text.pos,text.galley.size()))
+                }
+                _=>false,
+            }),"group is missing or clipped, error={error}");
+        }
+    }
+
+    #[test]
+    fn television_groups_merge_exact_ids_and_keep_all_exported_metadata(){
+        let workspace=Workspace::new();let source=workspace.0.join("source.m3u");
+        let header=r#"#EXTM3U x-tvg-url="https://example.org/epg.gz""#;
+        let url="https://example.org/cctv1.m3u8?token=a%2Fb&x=1+2";
+        let rows=format!(r#"{header}
+#EXTINF:-1 tvg-id="CCTV-1" tvg-name="CCTV1" group-title="🕘️更新时间",2026-10-12 11:25:50
+{url}
+#EXTINF:-1 tvg-id="CCTV-1" tvg-logo="https://example.org/logo,a.png" group-title="央视" custom="keep",频道一
+{url}
+#EXTINF:-1,tvg-id="CCTV-1" tvg-logo="https://example.org/other.png" group-title="综合",频道一备用
+rtsp://[2001:db8::1]/channel.smil
+#EXTINF:-1 tvg-id="CCTV-1" group-title="央视",重复源
+{url}
+#EXTINF:-1 tvg-id="DIFFERENT" group-title="央视",频道一
+rtp://239.94.0.31:5140
+"#);
+        std::fs::write(&source,&rows).unwrap();let (entries,loaded_header)=read_document(&source).unwrap();
+        let view=iptv::View::new(&entries);assert!(view.detected);assert_eq!(view.channels.len(),2);assert_eq!(view.notices,vec!["2026-10-12 11:25:50"]);
+        assert_eq!(view.channels[0].title,"频道一");assert_eq!(view.channels[0].sources,vec![1,2]);
+        assert_eq!(view.channels[0].groups,vec!["央视","综合"]);assert_eq!(view.visible(Some("综合")),vec![0]);
+        assert_ne!(iptv::View::new(&entries).instance,view.instance);
+        let mut state=State::default();state.channel_key=Some("id:CCTV-1".into());state.source_index=1;state.item=PathBuf::from("https://expired.example.org/old");
+        assert_eq!(restore_channel(&entries,&view,&state),Some(2));
+        state.item=entries[1].path.clone();assert_eq!(restore_channel(&entries,&view,&state),Some(1));
+        let old=serde_json::json!({"item":"movie.mp4","index":1,"identity":null,"position":12.0,"completed":false});
+        let old:Progress=serde_json::from_value(old).unwrap();assert!(old.channel_key.is_none());assert_eq!(old.source_index,0);
+        let directory=workspace.0.join("copy");std::fs::create_dir(&directory).unwrap();let copy=directory.join("copy.m3u8");
+        write_document(&copy,&entries,&loaded_header,false).unwrap();
+        assert_eq!(std::fs::read_to_string(&source).unwrap(),rows);
+        let (roundtrip,roundtrip_header)=read_document(&copy).unwrap();assert_eq!(roundtrip_header,header);assert_eq!(roundtrip.len(),5);
+        for (before,after) in entries.iter().zip(&roundtrip){assert_eq!(before.title,after.title);assert_eq!(before.path,after.path);assert_eq!(before.metadata,after.metadata);}
+        assert!(write_document(&copy,&entries,&loaded_header,false).is_err());
+    }
+
+    #[test]
+    fn save_as_rebases_local_paths_and_plain_lists_keep_their_view(){
+        let workspace=Workspace::new();let media=workspace.0.join("movie.mp4");std::fs::write(&media,b"fixture").unwrap();
+        let entries=vec![Entry{path:media_path(&media),title:"本地影片".into(),metadata:Default::default()}];
+        assert!(!iptv::View::new(&entries).detected);
+        let target=workspace.0.join("copies");std::fs::create_dir(&target).unwrap();let copy=target.join("list.m3u8");
+        write_document(&copy,&entries,"#EXTM3U",false).unwrap();
+        assert_eq!(read(&copy).unwrap()[0].path,entries[0].path);
+        assert!(std::fs::read_to_string(&copy).unwrap().contains(".."));
+        assert!(iptv::Metadata::parse("tvg-id=\"a\" custom='b, c'").render().unwrap().contains("custom=\"b, c\""));
+    }
+
+    #[test]
+    fn iptv_names_follow_attributes_instead_of_using_tvg_id_or_logo(){
+        let sample=r#"-1,tvg-id="频道编号" tvg-name="别名" tvg-logo="https://example.org/logo,a.png" group-title="其他,分组",重温经典"#;
+        assert_eq!(extinf_title(sample).as_deref(),Some("重温经典"));
+        assert_eq!(extinf_title(r#"-1 tvg-id="编号" tvg-logo="https://example.org/a,b.png",重温经典"#).as_deref(),Some("重温经典"));
+        assert_eq!(extinf_title("-1,龙猫, 1988").as_deref(),Some("龙猫, 1988"));
+        assert_eq!(extinf_title("-1, CCTV1 ").as_deref(),Some("CCTV1"));
+        assert_eq!(extinf_title(r#"-1,tvg-id="仅参数""#),None);
+        assert_eq!(extinf_title(r#"-1,tvg-id="编号", "#),None);
+        let workspace=Workspace::new();let list=workspace.0.join("频道.m3u");
+        let url="https://example.org/live.m3u8?token=a%2Fb";
+        std::fs::write(&list,format!("#EXTM3U\n#EXTINF:{sample}\n{url}\n")).unwrap();
+        let entries=read(&list).unwrap();assert_eq!(entries[0].title,"重温经典");assert_eq!(entries[0].path.to_str(),Some(url));
+    }
     #[test] fn times_and_natural_order(){assert_eq!(parse_time("300"),Some(300.0));assert_eq!(parse_time("0"),Some(0.0));assert_eq!(parse_time("2:00"),None);assert_eq!(migrate_skip("75:59"),"4559");assert_eq!(migrate_skip("2:00"),"120");assert_eq!(migrate_skip("2:60"),"2:60");assert_eq!(skip_time(300.9),"300");assert_eq!(parse_time("2:60"),None);assert_eq!(parse_time("-1:00"),None);assert!(natural_cmp("第2集","第10集").is_lt());assert_eq!(candidate_prefix(Path::new("宫崎骏_龙猫.mp4")),"宫崎骏_");}
 
     struct Workspace(PathBuf);
@@ -589,27 +862,60 @@ mod tests {
     #[test]
     fn portable_roundtrip_and_overwrite_protection(){
         let workspace=Workspace::new();let media=workspace.0.join("宫崎骏_龙猫 1988.mp4");std::fs::write(&media,b"fixture").unwrap();
-        let list=workspace.0.join("电影.m3u8");let entries=vec![Entry {path:media.clone(),title:"龙猫, 1988".into()}];
+        let list=workspace.0.join("电影.m3u8");let entries=vec![Entry {path:media.clone(),title:"龙猫, 1988".into(),metadata:Default::default()}];
         write(&list,&entries,false).unwrap();
         let document=std::fs::read_to_string(&list).unwrap();assert!(document.contains("#EXTINF:-1,龙猫, 1988"));assert!(document.contains("宫崎骏_龙猫 1988.mp4"));assert!(!document.contains(workspace.0.to_str().unwrap()));
         let loaded=read(&list).unwrap();assert_eq!(loaded[0].path,media_path(&media));assert_eq!(loaded[0].title,"龙猫, 1988");
         assert!(write(&list,&entries,false).is_err());assert_eq!(std::fs::read_to_string(&list).unwrap(),document);
-        write(&list,&[Entry {path:media,title:"新标题".into()}],true).unwrap();assert_eq!(read(&list).unwrap()[0].title,"新标题");
+        write(&list,&[Entry {path:media,title:"新标题".into(),metadata:Default::default()}],true).unwrap();assert_eq!(read(&list).unwrap()[0].title,"新标题");
     }
 
     #[test]
-    fn rejects_hls_urls_and_invalid_utf8_but_keeps_missing_entries(){
+    fn rejects_hls_manifests_and_invalid_utf8_but_keeps_missing_entries(){
         let workspace=Workspace::new();let list=workspace.0.join("test.m3u8");
-        for text in ["#EXTM3U\n#EXT-X-TARGETDURATION:10\nsegment.ts\n","#EXTM3U\nhttps://example.invalid/movie.mp4\n"] {std::fs::write(&list,text).unwrap();assert!(read(&list).is_err());}
+        std::fs::write(&list,"#EXTM3U\n#EXT-X-TARGETDURATION:10\nsegment.ts\n").unwrap();assert!(read(&list).is_err());
         std::fs::write(&list,[0xff,0xfe]).unwrap();assert!(read(&list).is_err());
         std::fs::write(&list,"\u{feff}#EXTM3U\n#EXTINF:-1,缺失条目\nmissing.mp4\n").unwrap();let entries=read(&list).unwrap();assert_eq!(entries.len(),1);assert_eq!(entries[0].title,"缺失条目");assert!(!entries[0].path.exists());
     }
 
     #[test]
+    fn keeps_rtp_rtsp_ipv6_and_broken_channels_without_losing_the_list(){
+        let workspace=Workspace::new();let list=workspace.0.join("组播.m3u");
+        let paths=["rtp://239.94.0.31:5140","rtp://[ff15::1234]:5140","rtsp://[2001:db8::1]/PLTV/channel.smil",
+            "rtsp://182.139.235.40/PLTV/88888 ... 000003751359_0.smil","ftp://example.org/movie.mp4"];
+        let document=paths.iter().enumerate().map(|(index,url)|format!("#EXTINF:-1,频道{index}\n{url}\n")).collect::<String>();
+        std::fs::write(&list,format!("#EXTM3U\n{document}")).unwrap();let entries=read(&list).unwrap();
+        assert_eq!(entries.len(),5);
+        for (index,entry) in entries.iter().enumerate(){assert_eq!(entry.path.to_str(),Some(paths[index]));assert_eq!(available(&entry.path),index<3);}
+        assert!(entry_tooltip(&entries[3]).contains(tr("此条目链接无效或协议暂不支持。")));
+        write(&list,&entries,true).unwrap();let loaded=read(&list).unwrap();
+        for (before,after) in entries.iter().zip(&loaded){assert_eq!(before.path,after.path);assert_eq!(before.title,after.title);}
+    }
+
+    #[test]
+    fn network_channels_keep_titles_signed_urls_and_local_paths_on_save(){
+        let workspace=Workspace::new();let list=workspace.0.join("频道.m3u");
+        let source="http://pili-live-hls.example.org/tv/ztv.m3u8?token=a%2Fb%26c&x=1+2";
+        let second="https://example.org/live/channel?id=123";
+        std::fs::write(&list,format!("\u{feff}#EXTM3U\n#EXTINF:-1 tvg-id=\"ztv\",卓尼综合\n{source}\n#EXTINF:-1,第二频道\n{second}\n#EXTINF:-1,本地影片\nmovie.mp4\n")).unwrap();
+        let entries=read(&list).unwrap();assert_eq!(entries.len(),3);
+        assert_eq!(entries[0].title,"卓尼综合");assert_eq!(entries[0].path.to_str(),Some(source));
+        assert_eq!(entries[1].path.to_str(),Some(second));assert_eq!(entries[2].path,workspace.0.join("movie.mp4"));
+        assert!(available(&entries[0].path));assert!(!available(&entries[2].path));
+        assert_eq!(entry_preview(&entries[0].path,80.0,false).playlist_position(),0.0);
+        assert_eq!(entry_preview(&entries[2].path,80.0,false).playlist_position(),80.0);
+        write(&list,&entries,true).unwrap();let loaded=read(&list).unwrap();
+        for (before,after) in entries.iter().zip(&loaded){assert_eq!(before.title,after.title);assert_eq!(before.path,after.path);}
+        for invalid in ["ftp://example.org/live", "http://", "javascript://example.org/live", "https://example.org/\r\nheader"] {
+            assert!(!network_path(Path::new(invalid)),"{invalid:?}");
+        }
+    }
+
+    #[test]
     fn hash_filename_and_relative_subfolders(){
         let workspace=Workspace::new();let folder=workspace.0.join("媒体");std::fs::create_dir(&folder).unwrap();let item=folder.join("#片名.mp4");std::fs::write(&item,b"x").unwrap();
-        let list=workspace.0.join("test.m3u8");write(&list,&[Entry {path:item.clone(),title:"片名".into()}],false).unwrap();assert_eq!(read(&list).unwrap()[0].path,media_path(&item));
-        let hash=workspace.0.join("#同目录.mp4");std::fs::write(&hash,b"x").unwrap();write(&list,&[Entry {path:hash.clone(),title:"带井号".into()}],true).unwrap();assert_eq!(read(&list).unwrap()[0].path,media_path(&hash));
+        let list=workspace.0.join("test.m3u8");write(&list,&[Entry {path:item.clone(),title:"片名".into(),metadata:Default::default()}],false).unwrap();assert_eq!(read(&list).unwrap()[0].path,media_path(&item));
+        let hash=workspace.0.join("#同目录.mp4");std::fs::write(&hash,b"x").unwrap();write(&list,&[Entry {path:hash.clone(),title:"带井号".into(),metadata:Default::default()}],true).unwrap();assert_eq!(read(&list).unwrap()[0].path,media_path(&hash));
     }
 
     #[test]
@@ -620,7 +926,7 @@ mod tests {
             let round=shuffle_order(8,current,false,&mut random);let mut unique=round.clone();unique.sort_unstable();assert_eq!(unique,(0..8).collect::<Vec<_>>());assert_ne!(round.last(),Some(&current));
         }
         assert!(shuffle_order(1,0,true,&mut random).is_empty());assert_eq!(shuffle_order(1,0,false,&mut random),vec![0]);
-        let items=vec![Entry{path:PathBuf::from("movie-b.mp4"),title:"B".into()},Entry{path:PathBuf::from("movie-a.mp4"),title:"A".into()},Entry{path:PathBuf::from("movie-a.mp4"),title:"A again".into()}];
+        let items=vec![Entry {path:PathBuf::from("movie-b.mp4"),title:"B".into(),metadata:Default::default()},Entry {path:PathBuf::from("movie-a.mp4"),title:"A".into(),metadata:Default::default()},Entry {path:PathBuf::from("movie-a.mp4"),title:"A again".into(),metadata:Default::default()}];
         assert_eq!(restore_entry(&items,Path::new("movie-a.mp4"),0),Some(1));assert_eq!(restore_entry(&items,Path::new("movie-a.mp4"),2),Some(2));assert_eq!(restore_entry(&items,Path::new("removed.mp4"),0),None);
     }
 

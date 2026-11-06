@@ -297,7 +297,7 @@ impl ViewerApp {
         let title_path = if self.folder_preview_path.as_deref() == Some(path) {
             self.folder_preview_root.as_deref().unwrap_or(path)
         } else { path };
-        title_path.file_name().unwrap_or(title_path.as_os_str()).to_string_lossy().into_owned()
+        remote_file::file_label(title_path)
     }
     fn displayed_tab_group_key(&self, path: &std::path::Path) -> String {
         if self.folder_preview_path.as_deref() == Some(path) {
@@ -2844,6 +2844,16 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度及不同编码、码率的音轨。"));
                         ui.label(localization::tr("• 播放页可定位本地缓存，完成的缓存任务也可定位文件。"));
                         ui.label(localization::tr("• 网页视频播放携带提取到的会话信息，并优先复用已下载文件。"));
+                        ui.label(localization::tr("• YouTube 提取改进运行时查找，登录验证失败时提供会话与运行时提示。"));
+                        ui.label(localization::tr("• 播放列表支持网络频道和上一项，未知时长时禁用进度拖动及片头片尾跳过。"));
+                        ui.label(localization::tr("• 播放列表新增 RTP／RTSP 和 IPv6 地址支持，坏链接单独提示，中文名称正常显示。"));
+                        ui.label(localization::tr("• 画面可按原始、16:9 或 4:3 显示，与窗口适配和自由缩放叠加。"));
+                        ui.label(localization::tr("• 电视和电台列表按组展示台标卡片，同频道多个源可切换。"));
+                        ui.label(localization::tr("• 播放列表可另存为，保留频道参数与所有来源。"));
+                        ui.label(localization::tr("• 台标可本地缓存，并记住上次观看的频道与来源。"));
+                        ui.label(localization::tr("• 频道列表使用平铺分组和对齐网格，读取中或报错时仍可选台。"));
+                        ui.label(localization::tr("• 电视台模式左右键切频道，Ctrl+左右键循环切源。"));
+                        ui.label(localization::tr("• 网络播放底部显示媒体接收速率，便于比较频道和来源。"));
                         ui.add_space(8.0);
                         ui.label(RichText::new("1.3.3").strong());
                         ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度和语言。"));

@@ -685,11 +685,34 @@ impl Drop for CookieCopy {
     fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
 }
 
+fn javascript_runtimes(command: &mut Command, tool: &Path) {
+    let mut directories = Vec::new();
+    if let Some(parent) = tool.parent() { directories.push(parent.to_owned()); }
+    if let Some(paths) = std::env::var_os("PATH") { directories.extend(std::env::split_paths(&paths)); }
+    // A runtime may have been installed after this application was started.
+    #[cfg(windows)]
+    for paths in media_tools::fresh_windows_paths() { directories.extend(std::env::split_paths(&paths)); }
+    for runtime in ["deno", "node"] {
+        let executable = if cfg!(windows) { format!("{runtime}.exe") } else { runtime.to_owned() };
+        let path = directories.iter().filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join(&executable)).find(|path| path.is_file());
+        if let Some(path) = path {
+            let mut argument = std::ffi::OsString::from(format!("{runtime}:"));
+            argument.push(path);
+            command.arg("--js-runtimes").arg(argument);
+        } else if runtime == "node" {
+            // Keep yt-dlp's own lookup as a fallback; Deno is enabled by default.
+            command.args(["--js-runtimes", "node"]);
+        }
+    }
+}
+
 fn extractor(tool: &Path, browser_session: Option<&Session>) -> Result<(Command, Option<CookieCopy>), String> {
     let mut command = media_tools::command(tool);
     command.args(["--ignore-config", "--no-update", "--no-plugin-dirs", "--no-cache-dir", "--no-playlist",
         "--playlist-items", "1", "--socket-timeout", "20", "--retries", "1", "--fragment-retries", "1",
-        "--abort-on-unavailable-fragments", "--encoding", "utf-8", "--no-progress", "--js-runtimes", "node"]);
+        "--abort-on-unavailable-fragments", "--encoding", "utf-8", "--no-progress"]);
+    javascript_runtimes(&mut command, tool);
     let cookies = match browser_session {
         Some(Session::Browser(browser)) => {
             command.args(["--cookies-from-browser", browser]);
@@ -719,12 +742,18 @@ fn command_error(stderr: &[u8]) -> String {
         tr("无法解密所选浏览器的 Cookie。可改用能播放该视频的 Firefox 会话，或选择仅含目标站点 Cookie 的文件。")
     } else if stderr.contains("[Douyin]") && stderr.contains("Fresh cookies") {
         tr("抖音要求有效的浏览器会话，暂时无法分析此视频。")
+    } else if stderr.contains("[youtube]") && (stderr.contains("Sign in to confirm you’re not a bot")
+        || stderr.contains("Sign in to confirm you're not a bot")) {
+        tr("YouTube 要求登录验证。请先在浏览器中确认该视频可播放，再在视频提取中选择“使用浏览器会话”或目标站点的 Cookie 文件，重新分析；仍可能受站点限制。")
     } else {
         tr("网络加载失败")
     };
+    let runtime_help = if stderr.contains("No supported JavaScript runtime could be found") {
+        format!("\n{}", tr("未找到受支持的 JavaScript 运行时。YouTube 提取需要 Deno 2.3+ 或 Node.js 22+；请安装并加入 PATH，或放在 yt-dlp 同目录后重试。安装运行时不能代替登录验证。"))
+    } else { String::new() };
     let mut lines: Vec<_> = stderr.trim().lines().collect();
     lines.dedup();
-    format!("{summary}\n{}", lines.join("\n").chars().take(2000).collect::<String>())
+    format!("{summary}{runtime_help}\n{}", lines.join("\n").chars().take(2000).collect::<String>())
 }
 
 fn run_transfer(command: &mut Command, selector: &str, progress: &Arc<Mutex<TransferProgress>>, cancel: &AtomicBool) -> Result<(), String> {
@@ -1057,6 +1086,20 @@ mod tests {
             .map(str::to_owned);
         assert_eq!(available_session_browsers(&names).collect::<Vec<_>>(), vec![0, 1]);
         assert_eq!(available_session_browsers(&[]).count(), 0);
+    }
+
+    #[test]
+    fn youtube_auth_and_runtime_errors_keep_both_remedies() {
+        for apostrophe in ["'", "’"] {
+            let message = format!("WARNING: [youtube] No supported JavaScript runtime could be found.\nERROR: [youtube] FH9or9yR-CA: Sign in to confirm you{apostrophe}re not a bot.");
+            let error = command_error(message.as_bytes());
+            assert!(error.contains(tr("YouTube 要求登录验证。请先在浏览器中确认该视频可播放，再在视频提取中选择“使用浏览器会话”或目标站点的 Cookie 文件，重新分析；仍可能受站点限制。")));
+            assert!(error.contains("Deno 2.3+"));
+            assert!(error.contains("Node.js 22+"));
+            assert!(error.contains("FH9or9yR-CA"));
+        }
+        assert!(command_error(b"ERROR: HTTP Error 403").starts_with(tr("网络加载失败")));
+        assert!(!command_error(b"ERROR: HTTP Error 403").contains("Deno"));
     }
 
     #[test]

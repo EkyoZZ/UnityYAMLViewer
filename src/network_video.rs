@@ -6,6 +6,19 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+pub(crate) fn playback_url(path: &Path) -> Option<reqwest::Url> {
+    let text=path.to_str()?;
+    if text.chars().any(|ch|ch.is_whitespace() || ch.is_control()) { return None; }
+    let url=reqwest::Url::parse(text).ok()?;
+    if !matches!(url.scheme(),"http"|"https"|"rtp"|"rtsp") || url.host_str().is_none() { return None; }
+    if url.scheme()=="rtp" && (url.port().is_none_or(|port|port==0) || !url.username().is_empty() || url.password().is_some()) { return None; }
+    Some(url)
+}
+
+pub(crate) fn is_realtime(path: &Path) -> bool {
+    playback_url(path).is_some_and(|url|matches!(url.scheme(),"rtp"|"rtsp"))
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Input {
     pub path: PathBuf,
@@ -38,6 +51,21 @@ impl Input {
     pub fn options(&self, command: &mut Command) {
         if self.local {
             return;
+        }
+        if let Some(url)=playback_url(&self.path) {
+            match url.scheme() {
+                "rtp" => {
+                    command.args(["-protocol_whitelist","rtp,udp","-rw_timeout","15000000","-timeout","15000000"]);
+                    return;
+                }
+                "rtsp" => {
+                    command.args(["-protocol_whitelist","rtsp,rtp,udp,tcp,http,https,tls,crypto",
+                        "-rtsp_transport","tcp+udp+udp_multicast","-rtsp_flags","prefer_tcp",
+                        "-rw_timeout","15000000","-timeout","15000000"]);
+                    return;
+                }
+                _ => {}
+            }
         }
         command.args([
             "-protocol_whitelist",
@@ -452,6 +480,25 @@ pub(crate) fn cached_source(url: &str) -> Option<Source> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rtp_rtsp_and_ipv6_use_their_own_protocol_options(){
+        for address in ["rtp://239.94.0.31:5140","rtp://[ff15::1234]:5140","rtsp://example.org/channel.smil","rtsp://[2001:db8::1]:554/channel.smil"] {
+            let path=PathBuf::from(address);assert!(is_realtime(&path));
+            let input=Input::new(path);assert!(!input.hls);
+            let mut command=Command::new("ffprobe");input.options(&mut command);
+            let args:Vec<_>=command.get_args().map(|arg|arg.to_string_lossy().into_owned()).collect();
+            assert!(args.windows(2).any(|pair|pair==["-timeout","15000000"]));
+            if address.starts_with("rtp:"){assert!(args.windows(2).any(|pair|pair==["-protocol_whitelist","rtp,udp"]));}
+            else{assert!(args.windows(2).any(|pair|pair==["-rtsp_transport","tcp+udp+udp_multicast"]));}
+        }
+        for invalid in ["rtp://239.94.0.31","rtp://239.94.0.31:0","rtsp://host/88888 ... file.smil","rtsp://host/\nfile","ftp://example.org/file"] {
+            assert!(playback_url(Path::new(invalid)).is_none(),"{invalid}");
+        }
+        let mut command=Command::new("ffprobe");Input::new(PathBuf::from("https://[2001:db8::1]/live.m3u8")).options(&mut command);
+        assert!(!command.get_args().any(|arg|arg=="-rtsp_transport"));
+        assert!(playback_url(Path::new("https://[2001:db8::1]/live.m3u8")).is_some());
+    }
 
     #[test]
     fn reuses_picture_across_languages_and_audio_across_resolutions() {
