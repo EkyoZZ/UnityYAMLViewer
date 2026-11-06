@@ -1,128 +1,91 @@
 # Unity YAML Viewer
 
-**不打开 Unity，也能查看资源、编辑属性和预览材质。**
-
+**不打开 Unity，也能查看资源、编辑属性和预览材质。**  
 Inspect Unity assets, edit properties and preview materials without opening Unity.
 
 [中文](#中文) · [English](#english) · [下载 Windows x64 / Download](https://github.com/EkyoZZ/UnityYAMLViewer/releases/latest)
 
 ## 中文
 
-### ✨ 已支持
+### 已支持
 
 **Unity 相关**
 
-- **资源查看**：层级与 Inspector 视图，支持 `.prefab`、`.unity`、`.asset` 及资源引用定位。
-- **目录浏览**：多根目录树、独立忽略规则与自动恢复，复用预览页签并保留修改，不影响最近打开记录。
-- **属性编辑**：编辑已识别的属性，支持校验、保存和撤销。
-- **材质与 Shader**：节点、2D / 3D 及部分 Shader 单步预览。
-- **场景与动画**：场景、模型、动画、Spine 和部分粒子效果预览；Spine 支持动态播放与预乘 Alpha 切换。
-- **多图浏览**：同目录缩略图、方向键切图与位置计数，切图保留旧画面并预加载相邻图片，可设置默认浏览模式与适应窗口。
-- **图片工具**：缩放、通道预览与图片信息，支持九宫格、Sprite Border、序列拆分合成、去底色及多格式导出；支持清理 PNG 冗余 Alpha 和 iTXt，多图浏览和 `pngopt` 指令都支持批量优化 PNG。
+- **资源查看与编辑**：浏览 Prefab、Scene、Asset 的层级和引用，编辑已识别属性，支持校验、保存与撤销。
+- **材质与场景预览**：查看材质及 Shader 节点，预览场景、模型、动画、Spine 和部分粒子效果。
+- **目录与图片浏览**：多根目录、同目录缩略图和快捷切图，自动恢复目录并保留页签修改。
+- **图片工具**：查看通道与图片信息，支持九宫格、Sprite Border、序列拆分合成、去底色、多格式导出及 PNG 批量优化。
 
 **附加工具**
 
-- **Markdown 与 RTF 富文本**：原生直读，支持常用 HTML 标签与富文本格式。Windows 上可在独立窗口设置 RTF 文字和段落格式、插入图片与表格，并分页查看。
-- **文本阅读**：文本、代码与 Shader 支持高亮、复制及字号和间距调整。
-- **组件管理**：按需安装 FFmpeg、LibreOffice、PDFium 和 yt-dlp，支持进度查看、自动检测与手动指定路径。yt-dlp 可手动检查更新。
+- **文档阅读与编辑**：文本和代码高亮；Markdown／RTF 原生直读，支持常用 HTML 与富文本。Windows RTF 支持独立编辑、图片和表格。
+- **文件与表格预览**：预览 PDF、办公文档及常见图片；编辑 CSV／TSV／PSV，或只读查看 XLS／XLSX／ODS，支持查找复制与固定行列编号。
+- **音视频工具**：多文件编辑、转码、队列或合并导出，支持多音轨、字幕和序列输出；工程可保存续编、打包分享。
+- **网络视频**：查找网页 HLS 或提取播放，支持格式选择、下载、缓存复用与任务进度；Windows 提供浏览器嗅探助手及安装引导。
+- **四方连续图**：提取最小循环，多图案错位排列，实时预览并导出 PNG。
+- **日常与组件管理**：多页签、最近记录、文件定位与关联、深浅主题、七语言和在线更新；按需安装组件，支持检测与手动路径。
 
-- **四方连续图**：提取最小循环、多图案错位排列、实时编辑与 PNG 导出。
-- **音视频工具**：支持多文件编辑、画布调整、缩放与转码，可合并导出或按队列分别导出，支持多音轨、字幕及 GIF／视频／PNG 序列输出。音频／视频工程可保存续编，并打包素材分享。
-- **网络视频**：扫描网页 HLS 或通过 yt-dlp 提取播放，Windows 可由独立油猴脚本唤起；支持地址与音视频格式选择、下载及手动缓存复用，后台任务中心查看进度和结果。
-- **文本表格**：CSV / TSV / PSV 查看与单元格编辑，支持查找、类型与必填检查、固定行列编号及冻结首行。
-- **电子表格**：XLS / XLSX / ODS 只读预览，支持多工作表切换、查找复制、公式／缓存结果与冻结表头。
-- **文件预览**：PDF、Word／PowerPoint、OpenDocument、RTF、SVG、GIF、ICO、受限 PSD 及常见文本；办公文档可在 LibreOffice 编辑，转换预览的文档支持另存为 PDF。
-- **文件关联**：启动时自动更新 Windows 关联名称与独立文件图标登记，由用户选择默认程序；内容缩略图仍由系统处理。
-- **日常操作**：多文件页签、最近记录、文件定位、深浅主题、七种语言、在线更新与内置第三方组件下载管理。
+### 快速开始
 
-### 🚀 快速开始
-
-1. 下载 Windows x64 程序，直接运行。
-2. 拖入文件或目录，或从文件菜单打开；Unity 资源尽量保留在原工程目录中，便于解析引用。
-3. 选择对象查看属性，启用编辑模式后修改并保存。
+1. 下载 Windows x64 程序并运行，拖入文件或目录。
+2. Unity 资源尽量保留在原工程目录中，便于解析引用。
+3. 选择对象查看属性，需要修改时启用编辑模式。
 
 [使用指南](docs/user-guide.md#中文) · [详细功能与限制](docs/feature-reference.md#中文) · [命令行参考](docs/command-line.md)
 
-### ⚠️ 待支持与当前限制
+### 待支持与当前限制
 
-- 图片去水印入口未开放；序列工具的去底色仍可使用。
-
-- 目录浏览不跟随符号链接或目录联接；多图浏览不递归子目录，不包含 GIF／SVG。
-- ICO／PSD 只读且不提供图片编辑工具；ICO 不切换内部尺寸，PSD 仅支持 8 位 RGB／灰度、Raw／RLE，最大 8192 × 8192，不支持图层编辑或 ICC 色彩管理。
-- 不支持 Unity 二进制序列化；未知属性和原始 YAML 保持只读。
-- 场景、Spine、粒子和 Shader 兼容性有限，不能完整替代 Unity 渲染；不支持节点连线编辑或 Shader 生成。
-- 不支持自由多轨剪辑、PDF 或 Office 内置编辑；暂不支持加密文档、宏格式及苹果办公格式。
-- 电子表格不重算公式或还原样式、合并与图表；冻结设置仅能读取 XLSX，无法读取时可冻结首行。Word／演示文档按转换后的 PDF 预览，字体与排版可能不同，不支持文字选择或搜索。
-- Word／演示文档预览需要 LibreOffice 和 PDFium，电子表格内置读取；音视频需要相应第三方组件，可指定组件路径，无需修改 PATH。连续图不自动修补接缝；九宫格原位替换会覆盖文件，建议先预览或使用 `--dry-run`。
-
-### 🛠️ 源码构建
-
-安装稳定版 [Rust](https://www.rust-lang.org/tools/install)，在项目目录运行：
-
-```powershell
-cargo run --release
-```
-
-Windows 产物：`target/release/unity_yaml_viewer.exe`。提交修改前可运行 `cargo check`。
+- Unity 二进制序列化、未知属性编辑、节点连线编辑和 Shader 生成尚不支持；场景等预览不能完整替代 Unity 渲染。
+- PDF／Office 内置编辑、自由多轨剪辑、加密文档、宏格式和苹果办公格式尚不支持。办公文档可在 LibreOffice 中编辑，表格预览不重算公式或还原完整样式。
+- Word／演示文档预览需要 LibreOffice 和 PDFium；媒体处理、网页提取分别需要 FFmpeg、yt-dlp。浏览器助手不传 Cookie，部分站点或受保护视频无法播放。
+- 目录和图片浏览、ICO／PSD 兼容范围有限；图片去水印未开放，连续图不自动修补接缝。
+- 原位覆盖会修改源文件，撤销不是永久备份；九宫格替换前请预览或使用 `--dry-run`。
 
 ## English
 
-### ✨ Supported features
+### Supported features
 
 **Unity features**
 
-- **Asset browsing**: Hierarchy and Inspector views for `.prefab`, `.unity` and `.asset` files, with reference navigation.
-- **Folder browsing**: Multiple roots, per-folder ignore rules and automatic restore, with a reusable preview tab that preserves edits without changing recent files.
-- **Property editing**: Edit recognized properties with validation, saving and undo.
-- **Materials and shaders**: Node views, 2D / 3D previews and step previews for supported shaders.
-- **Scenes and animation**: Preview scenes, models, animation, Spine and supported particle effects; Spine includes animation playback and a premultiplied-alpha toggle.
-- **Image browsing**: Folder thumbnails, arrow-key navigation and position counters, with smooth image switching, adjacent-image preloading and configurable browsing / fit-to-window defaults.
-- **Image tools**: Zoom, channel views and image information; nine-slice, Sprite Border, sequence splitting / composition, background removal and export; cleanup of redundant PNG Alpha and iTXt metadata, with batch optimization in image browsing or via `pngopt`.
+- **Asset browsing and editing**: Inspect Prefab, Scene and Asset hierarchies and references; edit recognized properties with validation, saving and undo.
+- **Materials and scenes**: View material and Shader nodes; preview scenes, models, animation, Spine and supported particle effects.
+- **Folders and images**: Browse multiple roots and same-folder thumbnails, switch images quickly, and restore folders while retaining tab edits.
+- **Image tools**: Inspect channels and image information; use nine-slice, Sprite Border, sequence splitting/composition, background removal, format export and batch PNG optimization.
 
 **Additional tools**
 
-- **Markdown and RTF rich text**: Direct previews with support for common HTML tags and rich-text formatting. On Windows, format text and paragraphs, insert images and tables, and navigate RTF pages in a separate editor.
-- **Text reading**: Highlighting, copying, and adjustable font size and spacing for text, code and Shader files.
-- **Component management**: Install FFmpeg, LibreOffice, PDFium and yt-dlp on demand, with progress display, automatic detection and manual paths. yt-dlp supports manual update checks.
+- **Documents**: Highlight text and code; read Markdown/RTF directly with common HTML and rich-text support. Edit RTF with images and tables on Windows.
+- **Files and tables**: Preview PDFs, Office documents and common images; edit CSV/TSV/PSV or read XLS/XLSX/ODS, with search, copy and fixed row/column coordinates.
+- **Audio and video**: Edit multiple files, transcode, export queues or merged media, and work with tracks, subtitles and sequences; save projects or package them for sharing.
+- **Online video**: Find webpage HLS or extract videos, choose formats, download, reuse caches and track tasks; Windows includes browser assistant installation guidance.
+- **Seamless repeats**: Extract repeat tiles, arrange motifs with offsets, preview live and export PNG.
+- **Everyday tools and components**: Tabs, recent files, file locations and associations, light/dark themes, seven languages and updates; install components on demand, detect them or set paths manually.
 
-- **Seamless repeats**: Extract repeat tiles, arrange multiple motifs with offsets, edit live and export PNG.
-- **Audio and video**: Multi-file editing, canvas adjustments, scaling and transcoding, with merged or separate queue exports, multiple audio tracks, subtitles and GIF / video / PNG sequence output. Save audio/video projects to resume editing or package them with media for sharing.
-- **Online video**: Find HLS in page source or extract videos with yt-dlp; a separate userscript can launch the app on Windows. Choose addresses and media formats, download or explicitly cache for reuse, and track progress in Background Tasks.
-- **Text tables**: View and edit CSV / TSV / PSV cells with search, type / required-cell checks, fixed coordinates and first-row freezing.
-- **Spreadsheets**: Read-only XLS / XLSX / ODS previews with worksheet tabs, search / copy, formulas / cached results and header freezing.
-- **File previews**: PDF, Word / PowerPoint, OpenDocument, RTF, SVG, GIF, ICO, limited PSD and common text files; Office documents can open in LibreOffice, and converted previews can be saved as PDF.
-- **File associations**: Startup automatically updates the Windows app name and separate file icon registration; users choose the default app. Content thumbnails remain managed by Windows.
-- **Everyday tools**: File tabs, recent files, file locations, light / dark themes, seven languages, updates and built-in third-party component downloads.
+### Quick start
 
-### 🚀 Quick start
-
-1. Download and run the Windows x64 executable.
-2. Drop a file or folder into the window, or open it from the File menu. Keep Unity assets inside their original project so references can be resolved.
-3. Select an object to inspect its properties; enable Edit Mode to make and save changes.
+1. Download and run the Windows x64 app, then drop in files or folders.
+2. Keep Unity assets inside their original project to resolve references.
+3. Select an object to inspect properties; enable Edit Mode to make changes.
 
 [User guide](docs/user-guide.md#english) · [Detailed features and limitations](docs/feature-reference.md#english) · [CLI reference](docs/command-line.md)
 
-### ⚠️ Pending support and limitations
+### Pending support and limitations
 
-- The image watermark-removal entry is unavailable; background removal in sequence tools remains available.
+- Unity binary serialization, editing unknown properties, node connections and Shader generation are unsupported. Previews do not fully reproduce Unity rendering.
+- Built-in PDF/Office editing, free multitrack editing, encrypted documents, macro formats and Apple office formats are unsupported. Office files can open in LibreOffice; spreadsheet previews do not recalculate formulas or reproduce full formatting.
+- Word/presentation previews require LibreOffice and PDFium; media processing and webpage extraction require FFmpeg and yt-dlp respectively. The browser assistant does not transfer cookies; some sites or protected videos may not play.
+- Folder/image browsing and ICO/PSD compatibility have limits. Image watermark removal is unavailable; repeat tools do not repair seams automatically.
+- In-place replacement changes source files; undo is not a permanent backup. Preview nine-slice replacements first or use `--dry-run`.
 
-- Folder browsing skips symbolic links and junctions; image browsing is non-recursive and excludes GIF / SVG.
-- ICO / PSD are read-only without image editing tools. ICO has no size selector; PSD supports only 8-bit RGB / grayscale, Raw / RLE, up to 8192 × 8192, without layer editing or ICC color management.
-- Unity binary serialization is unsupported. Unknown properties and raw YAML remain read-only.
-- Scene, Spine, particle and shader compatibility is partial and does not fully reproduce Unity rendering. Node connection editing and shader generation are unsupported.
-- Free multitrack editing, built-in PDF / Office editing, encrypted documents, macro-enabled formats and Apple office formats are unsupported.
-- Spreadsheets do not recalculate formulas or reproduce styles, merges or charts. Original freeze settings can only be read from XLSX, otherwise first-row freezing is available. Word / presentation previews use converted PDFs; fonts and layout may differ, and text selection / search is unavailable.
-- Word / presentation previews require LibreOffice and PDFium; spreadsheets use a built-in reader. Media needs the relevant third-party components; custom paths work without changing PATH. Seamless repeats do not repair seams automatically. Nine-slice replacement overwrites files; preview first or use `--dry-run`.
+## 源码构建 / Build from source
 
-### 🛠️ Build from source
-
-Install stable [Rust](https://www.rust-lang.org/tools/install), then run:
+安装稳定版 [Rust](https://www.rust-lang.org/tools/install) 后运行 / Install stable Rust, then run:
 
 ```powershell
 cargo run --release
 ```
 
-Windows output: `target/release/unity_yaml_viewer.exe`. Run `cargo check` before submitting changes.
+Windows 产物 / Output: `target/release/unity_yaml_viewer.exe`。编译检查 / Compile check: `cargo check`。
 
 ## License
 

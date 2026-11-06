@@ -270,6 +270,14 @@ impl Manager {
         crate::native_window::Window::new(tr("第三方支持")).id(egui::Id::new("third_party_window")).open(&mut self.open).default_width(560.0).default_height(500.0).show(ctx,|ui|{
             self.ffmpeg.show(ui);
             ui.separator();self.yt_dlp.show(ui);
+            ui.separator();
+            crate::theme::section_heading(ui, tr("网页浏览器HLS嗅探助手"));
+            ui.label(tr("需要先安装油猴插件,再安装此脚本"));
+            ui.horizontal_wrapped(|ui| {
+                ui.hyperlink_to(tr("安装油猴插件"), "https://www.tampermonkey.net/");
+                ui.add_space(12.0);
+                ui.hyperlink_to(tr("安装脚本"), "https://greasyfork.org/zh-CN/scripts/604041-unityyamlviewer-hls-%E5%97%85%E6%8E%A2%E5%8A%A9%E6%89%8B");
+            });
             ui.separator();self.pdfium.show(ui);
             ui.separator();self.libreoffice.show(ui);
         });

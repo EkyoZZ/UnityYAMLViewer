@@ -2835,15 +2835,20 @@ impl eframe::App for ViewerApp {
                     ScrollArea::vertical().auto_shrink([false, true]).max_height(280.0).show(ui, |ui| {
                         ui.label(RichText::new(APP_VERSION).strong());
                         ui.label(localization::tr("• Windows 支持由独立油猴脚本嗅探 HLS 并唤起软件播放。"));
+                        ui.label(localization::tr("• 第三方支持提供油猴助手安装引导与脚本页面入口。"));
                         ui.label(localization::tr("• 打开 URL 可查找网页源码中的 HLS，多个结果可逐项选择播放。"));
                         ui.label(localization::tr("• 播放页缓存进度使用紧凑文字显示，并可取消。"));
                         ui.label(localization::tr("• 粘贴链接时还原 Unicode 转义，保留百分号编码。"));
                         ui.label(localization::tr("• 打开 URL 无法识别文件时尝试提取视频，成功后自动播放。"));
                         ui.label(localization::tr("• 方向键调音量时显示居中百分比提示，松键后 0.2 秒消失。"));
                         ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度及不同编码、码率的音轨。"));
-                        ui.label(localization::tr("• 手动缓存后自动切换本地播放，分离的画面和音轨可独立复用。"));
                         ui.label(localization::tr("• 播放页可定位本地缓存，完成的缓存任务也可定位文件。"));
                         ui.label(localization::tr("• 网页视频播放携带提取到的会话信息，并优先复用已下载文件。"));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("1.3.3").strong());
+                        ui.label(localization::tr("• 视频直链和网页提取共用播放页，可选清晰度和语言。"));
+                        ui.label(localization::tr("• 手动缓存后自动切换本地播放，分离的画面和音轨可独立复用。"));
+                        ui.label(localization::tr("• 视频提取下载可复用缓存，播放优先使用对应的已下载文件。"));
                         ui.label(localization::tr("• 后台任务中心显示视频缓存、下载和音视频导出进度，图标提示新结果。"));
                         ui.label(localization::tr("• 音视频编辑支持列表排序、逐条导出和居中等比补边合并，弹窗内可查看后台任务。"));
                         ui.label(localization::tr("• 音视频列表移除后可用 Ctrl+Z 恢复条目及编辑设置，撤销记录仅在当前窗口保留。"));
@@ -2856,6 +2861,10 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• yt-dlp 复用已验证的安装路径与版本，文件变化或重新检测时才再次验证。"));
                         ui.label(localization::tr("• 再次点击打开 URL、视频提取或格式支持时，已有窗口回到前台。"));
                         ui.add_space(8.0);
+                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
+                            self.show_older_history = !self.show_older_history;
+                        }
+                        if self.show_older_history {
                         ui.label(RichText::new("1.3.2").strong());
                         ui.label(localization::tr("• 新增 pngopt 指令，批量优化 PNG 并输出逐文件结果。指令用法随界面语言切换。"));
                         ui.label(localization::tr("• RTF 支持独立窗口编辑、插入静态图片和另存为，保存当前文档后自动刷新预览。"));
@@ -2868,10 +2877,6 @@ impl eframe::App for ViewerApp {
                         ui.label(localization::tr("• 第三方支持可按需安装 yt-dlp，并手动检查更新。"));
                         ui.label(localization::tr("• 减少窗口重绘时重复更新图标和位置。重绘时复用 Markdown 预处理结果。"));
                         ui.add_space(8.0);
-                        if ui.button(crate::localization::tr(if self.show_older_history { "收起历史版本" } else { "查看更多历史" })).clicked() {
-                            self.show_older_history = !self.show_older_history;
-                        }
-                        if self.show_older_history {
                         ui.label(RichText::new("1.3.1").strong());
                         ui.label(localization::tr("• 自动安装固定版本的 FFmpeg，减少因版本差异导致的音视频导出失败。手动安装可选经用户导出验证的 8.1。"));
                         ui.add_space(8.0);

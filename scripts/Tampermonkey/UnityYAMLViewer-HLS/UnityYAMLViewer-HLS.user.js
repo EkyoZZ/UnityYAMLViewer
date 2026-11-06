@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UnityYAMLViewer · HLS 嗅探助手
 // @namespace    https://github.com/EkyoZZ/UnityYAMLViewer
-// @version      1.0.6
+// @version      1.0.9
 // @description  发现 HLS 地址，复制链接、在原在线工具或 UnityYamlViewer 中打开；脚本不直接下载视频。
 // @author       UnityYAMLViewer contributors
 // @license      MIT
@@ -15,10 +15,11 @@
 (() => {
   'use strict';
   const TOOL_URL = 'https://weiruankeji2025.github.io/ffmpeg/';
+  const DOWNLOAD_URL = 'https://github.com/EkyoZZ/UnityYAMLViewer/releases';
   const seen = new Set();
   const pending = [];
   const panelId = 'uyv-hls-helper';
-  let list, badge, panel, message;
+  let list, badge, count, panel, message, launchHelp, lastAppUrl;
   function record(value, force = false) {
     try {
       const url = new URL(String(value), location.href);
@@ -79,9 +80,12 @@
     const referer = new URL(location.href);
     referer.hash = '';
     const uri = `unityyamlviewer://open?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer.href)}`;
+    lastAppUrl = url;
+    launchHelp.hidden = false;
     if (uri.length > 32000) { message.textContent = '地址过长，请复制后在软件中粘贴打开。'; return; }
-    message.textContent = '已请求打开软件。首次使用请先运行新版软件，并允许浏览器打开外部应用。';
-    location.assign(uri);
+    message.textContent = '已请求打开软件；浏览器询问时，请允许打开外部应用。';
+    try { location.assign(uri); }
+    catch { message.textContent = '浏览器未能发出打开请求，请检查外部应用权限，或下载软件并运行一次后重试。'; }
   }
   function append(url) {
     const item = document.createElement('div');
@@ -97,7 +101,7 @@
     }, 'uyv-online'), button('在 UnityYamlViewer 中打开', () => openInApp(url), 'uyv-app'));
     item.append(address, actions);
     list.appendChild(item);
-    badge.textContent = `HLS ${seen.size}`;
+    count.textContent = String(seen.size);
     fitExpandedWidth();
   }
   function fitExpandedWidth() {
@@ -182,13 +186,18 @@
     style.textContent += `#${panelId} button.uyv-online{background:#1f6feb;border-color:#388bfd}#${panelId} button.uyv-online:hover{background:#388bfd}#${panelId} button.uyv-app{background:#238636;border-color:#2ea043}#${panelId} button.uyv-app:hover{background:#2ea043}`;
     style.textContent += `#${panelId}{box-sizing:border-box;max-height:calc(100vh - 16px);overflow:auto}#${panelId}:not([open]){width:max-content;background:rgba(32,36,44,.3)}#${panelId}:not([open]) .uyv-brand{display:none}#${panelId} summary{white-space:nowrap;user-select:none;touch-action:none;cursor:grab}#${panelId} summary:active{cursor:grabbing}`;
     style.textContent += `#${panelId}[open]{width:var(--uyv-expanded-width,360px)}#${panelId} .uyv-actions{display:flex;gap:6px;flex-wrap:wrap}#${panelId} .uyv-actions button{margin-right:0;flex-shrink:0;white-space:nowrap}`;
+    style.textContent += `#${panelId} .uyv-launch-help{padding:0 8px 8px}#${panelId} .uyv-launch-help[hidden]{display:none}#${panelId} .uyv-launch-help p{padding:0}#${panelId} .uyv-launch-help a{display:inline-block;text-decoration:none;padding:4px 7px;background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:4px}`;
     style.textContent += `#${panelId} summary{display:flex;align-items:center;gap:6px}#${panelId} summary::before{content:'▶';font-size:10px}#${panelId}[open] summary::before{content:'▼'}#${panelId} summary::-webkit-details-marker{display:none}#${panelId} summary .uyv-page-open{margin:0 0 0 auto;flex-shrink:0;white-space:nowrap}#${panelId}:not([open]) .uyv-page-open{display:none}`;
+    style.textContent += `#${panelId} .uyv-count{color:#e58b8b}`;
     document.head.appendChild(style);
     panel = document.createElement('details');
     panel.id = panelId;
     const header = document.createElement('summary');
     badge = document.createElement('span');
-    badge.textContent = 'HLS 0';
+    count = document.createElement('span');
+    count.className = 'uyv-count';
+    count.textContent = '0';
+    badge.append('HLS ', count);
     const pageOpen = button('在 UnityYamlViewer 中解析', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -200,7 +209,23 @@
     list.className = 'uyv-list';
     message = document.createElement('p');
     message.textContent = '播放网页视频后可发现更多地址；受登录、跨域或播放器环境限制的请求可能无法捕获。';
-    panel.append(header, list, message);
+    launchHelp = document.createElement('div');
+    launchHelp.className = 'uyv-launch-help';
+    launchHelp.hidden = true;
+    const helpText = document.createElement('p');
+    helpText.textContent = '没有打开？最低需要 Windows 版 UnityYAMLViewer v1.3.4。请下载 v1.3.4 或更高版本，解压并运行一次，再回到本页重试。脚本无法判断是否安装或唤起成功。';
+    const download = document.createElement('a');
+    download.textContent = '下载 UnityYAMLViewer';
+    download.href = DOWNLOAD_URL;
+    download.target = '_blank';
+    download.rel = 'noopener noreferrer';
+    const helpActions = document.createElement('div');
+    helpActions.className = 'uyv-actions';
+    helpActions.append(download, button('重新打开', () => {
+      if (lastAppUrl) openInApp(lastAppUrl);
+    }, 'uyv-app'));
+    launchHelp.append(helpText, helpActions);
+    panel.append(header, list, message, launchHelp);
     document.body.appendChild(panel);
     panel.addEventListener('toggle', fitExpandedWidth);
     window.addEventListener('resize', fitExpandedWidth);

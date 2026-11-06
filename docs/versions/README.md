@@ -4,6 +4,7 @@
 
 | 版本 | 记录 |
 | --- | --- |
+| 1.3.4 | [网页 HLS 助手、播放修正与缓存体验（发布准备完成，未发布）](1.3.4.md) · [发布说明](../releases/1.3.4.md) |
 | 1.3.3 | [音视频工程、队列合并与显式网络缓存（已正式发布）](1.3.3.md) · [发布说明](../releases/1.3.3.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.3) |
 | 1.3.2 | [HLS、网页视频提取、RTF 编辑与 PNG 工具（已正式发布）](1.3.2.md) · [发布说明](../releases/1.3.2.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.2) |
 | 1.3.1 | [固定 FFmpeg 安装版本与手动安装建议（已正式发布）](1.3.1.md) · [发布说明](../releases/1.3.1.md) |

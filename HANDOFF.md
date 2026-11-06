@@ -1,4 +1,32 @@
-# 当前发布：1.3.3（已正式发布）
+# 1.3.4 发布准备交接
+
+- 状态：文档与本地候选已准备，用户自行提交 Git 后另行通知发布。尚未创建 v1.3.4 标签、GitHub Release 或上传附件；本轮未提交或推送。
+- 发布说明：[docs/releases/1.3.4.md](docs/releases/1.3.4.md)。公开正文采用“更新内容”“安装嗅探助手”“使用限制”，不复制发布准备与验证交接段。Release 显示标题仅 v1.3.4。
+- 候选：target/releases/v1.3.4/UnityYAMLViewer-v1.3.4-windows-x64.exe，30,860,288 字节，SHA-256：A3CCBCC9D9309CCD40237E9DAFF03636E617F397687B9133887FA992DA4B7F45；已核对与用户测试通过的 target/release/unity_yaml_viewer.exe 完全一致。本轮只复制现有产物，没有重新编译。
+- 构建日志：target/hls-install-links-release-build.log；核验：target/hls-install-links-release-verification.json；发布准备核验：target/v1.3.4-release-preparation.json。target 下文件被 Git 忽略，提交源码不会包含候选程序。
+- 验证：用户确认当前安装入口、间距及此前嗅探功能通过；其他验证范围与历史事实见 docs/versions/1.3.4.md，未将反馈扩大为全站点、全浏览器、七语言或关于窗口折叠全面回归。README 已按能力概览精简，中英文保持对应。
+- 后续收到用户发布通知时：先核对用户最终提交及远程提交、版本号、候选大小和哈希、代码是否又有变化，再按明确授权创建标签和发布。若构建输入变化，不沿用未经验证的新产物；重新构建仍需明确授权并检查占用。独立脚本与在线 Greasy Fork 不自动同步，不宣称线上脚本版本已更新。
+
+- 发布准备自查：版本记录、索引和发布说明链接有效；README 中英文能力条目对应，未加入版本或发布流程分节；node --check 和 git diff --check 通过。发布候选哈希与用户测试产物一致。源码准备快照 target/v1.3.4-prepared-source-manifest.json 记录 225 项当前构建输入，供用户提交后比对；此快照不是编译器生成的构建来源证明。
+
+以下保留此前开发、构建与验证的时间记录；相关未构建或待验证描述按当时状态理解。
+
+# 当前开发：1.3.4（尚未正式发布）
+
+- 2026-11-06，用户确认最新 1.3.4 本地产物测试没有问题，包括第三方支持的安装链接与间距，以及此前的嗅探功能。确认对象为 target/release/unity_yaml_viewer.exe，SHA-256：A3CCBCC9D9309CCD40237E9DAFF03636E617F397687B9133887FA992DA4B7F45。按用户反馈记录本次验证通过；未逐项提供测试步骤，不扩展为所有站点、浏览器、七语言、窄窗口或关于窗口折叠均已全面回归。以下相关待验证描述保留各次修改当时状态，以本次用户确认的范围为准；尚未正式发布，未更新 GitHub 附件。
+
+- 2026-11-06，安装链接与间距修改完成本地构建：用户明确授权，构建前确认程序未运行、目标文件独占访问通过；cargo build --release --locked --offline 成功（45.70 秒）。产物 target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.4，大小 30860288 字节，SHA-256：A3CCBCC9D9309CCD40237E9DAFF03636E617F397687B9133887FA992DA4B7F45。已包含安装油猴插件链接及与安装脚本之间的额外间距；仅保留 spine38 的 158 项既有警告。日志 target/hls-install-links-release-build.log，核验 target/hls-install-links-release-verification.json。未自动运行程序；实际间距、换行及链接打开待验证，未正式发布或更新 GitHub 附件。以下未重建描述保留此前时点事实。
+
+- 2026-11-06，第三方支持的网页浏览器 HLS 嗅探助手增加“安装油猴插件”链接，指向 https://www.tampermonkey.net/，位于“安装脚本”之前；两链接按顺序同行排列，额外增加 12 点间距，空间不足允许换行。新增七语言翻译；关于窗口已有安装引导摘要涵盖此项，核对后沿用。实际界面间距、窄窗口换行及浏览器打开待运行验证；此前构建不包含本次修改。cargo check --locked --offline、七语言完整性核对及 git diff --check 通过，仅保留 spine38 既有警告；未重建可执行程序。
+
+- 2026-11-06，用户明确授权编译；构建前确认程序未运行、目标文件独占访问通过。cargo build --release --locked --offline 成功（1 分 10 秒），文件/产品版本 1.3.4 / 1.3.4，大小 30802944 字节，SHA-256：26B695F535392828CF13078AD8F3CD9B60E9BC72E2310210C33E7F49D438A464。产物 target/release/unity_yaml_viewer.exe；构建日志 target/v1.3.4-release-build.log，核验 target/v1.3.4-release-verification.json。仅保留 spine38 的 158 项既有警告；未自动运行程序，实际界面、脚本安装链接及关于窗口折叠待验证，尚未正式发布，未更新 GitHub 附件。
+
+以下为本次构建之前的修改与验证历史，未构建描述仅代表当时时点。
+
+- 2026-11-06，源码版本升级为 1.3.4，Cargo.toml / Cargo.lock 同步。1.3.3 正式发布后的变更与验证记录迁移至 docs/versions/1.3.4.md，版本索引与关于窗口同步；原构建版本及哈希不改写。第三方支持新增油猴助手安装引导及用户指定的 Greasy Fork 入口。本轮未生成新版程序、未修改 GitHub Release 或附件。
+- 2026-11-06，本轮验证：cargo check --locked --offline 通过，仅保留 spine38 的 158 项既有警告；git diff --check、记录迁移、正式版摘要保留、历史顺序/重开重置代码及七语言完整性静态核对通过。未构建应用；实际界面与链接点击待运行验证。
+
+- 下列为归入 1.3.4 的历史本地修改与产物记录；产物当时仍标为 1.3.3，不代表 1.3.4 构建结果。
 
 - 2026-11-06，独立油猴助手 1.0.6：展开标题栏仅 HLS 数量＋绿色软件按钮，标题按钮发送当前网页让软件分析，列表按钮仍发送媒体地址。折叠最小态和两态半透明保持，按钮与拖动/折叠隔离；Node 语法及模拟参数/点击检查通过，实际浏览器待验证。仅脚本/文档修改，无需编译应用。
 
@@ -47,6 +75,8 @@
 - 2026-11-06，发布后 Cookie 传递修正本地构建：补传 yt-dlp cookies 到 FFmpeg，保留域名/路径作用域，探测、播放和手动缓存共用；cargo check --tests --locked --offline、2 项针对性测试通过。用户授权且构建前进程/目标文件占用复查通过，Release 构建成功（31.13 秒）。产物 target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,707,200 字节，SHA-256：10D5F129D292E5346E7B9DA1ED37E1196AAD34A10F418CD7D22198FCBF2CB270。日志 target/playback-cookie-check.log、target/playback-cookie-tests.log、target/playback-cookie-release-build.log。仅保留 spine38 警告；TikTok DNS 解析失败，需用户通过“视频提取 → 重新分析 → 不下载直接播放”验证，不能宣称 403 已解决。七语言关于摘要已更新，GUI 待验证；未更新 GitHub 附件或历史候选副本。
 
 - 2026-11-05，发布后警告清理本地构建：用户明确授权，检查程序未运行且目标可独占访问后，cargo build --release --locked --offline 成功，耗时 42.62 秒。产物 target/release/unity_yaml_viewer.exe，文件/产品版本 1.3.3，30,615,552 字节，SHA-256：436EC0FB87DF4EB105EE12958D4A96410B137AF687DFE90A91E4BCABCA913164。项目自身 3 项代码警告已消除，仅保留 spine38 的 158 项警告；日志 target/warning-cleanup-release-build.log。未运行 GUI 验证，未更新已发布附件及 target/releases 下历史候选副本。
+
+# 当前正式发布：1.3.3（已正式发布）
 
 - 正式发布：用户确认 1.3.3 新增内容验证通过并明确授权发布；远程 master 与本地提交 cd776fd41cc061e7c308d92f5d53feb727c8e351 一致。225 项候选输入中排除 1 个不参与构建的 Python 字节码缓存，其余与提交无实质差异，155 项仅换行格式不同。未重新编译。先创建草稿，上传 30,748,160 字节附件并核对 GitHub SHA-256 为 DE80D78C2A1EC3C8D7AC3CDBF73CEC5047D047A7E44316EBC2927C8CF67B4BDA，再于北京时间 2026-11-05 22:31:05 正式发布 v1.3.3（Release ID 435309872），标题仅版本号、非预发布、latest API 确认为最新稳定版。证据 target/v1.3.3-publish-audit.json、target/v1.3.3-release-asset.json、target/v1.3.3-published.json。以下待验证/未发布表述保留开发阶段史实，不代表当前发布状态。
 

@@ -2,6 +2,8 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
+- [1.3.4：网页 HLS 助手、播放修正与缓存体验（发布准备完成，未发布）](docs/versions/1.3.4.md) · [发布说明](docs/releases/1.3.4.md)
+
 - [1.3.3：音视频工程、队列合并与显式网络缓存（已正式发布）](docs/versions/1.3.3.md) · [发布说明](docs/releases/1.3.3.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.3)
 
 - [1.3.2：HLS、网页视频提取、RTF 编辑与 PNG 工具（已正式发布）](docs/versions/1.3.2.md) · [发布说明](docs/releases/1.3.2.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.2)
