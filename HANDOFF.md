@@ -1,3 +1,23 @@
+# 1.3.5 最新发布候选已重建（未正式发布）
+
+- 2026-11-06，索引式关于历史改造完成本地构建：用户明确授权，编译前确认程序未运行、目标 EXE 独占访问通过。cargo build --release --locked --offline 成功（53.64 秒），文件／产品版本均为 1.3.5，31095296 字节，SHA-256：B85D5494321C768F78F2BA064010D860DA05E57A2C5531D32EAD93E667202CD3。包含 index.json 控制版本顺序、默认显示数量及重开时折叠状态，以及 27 版七语言历史文档；仅保留 spine38 158 项既有警告。日志 target/v1.3.5-history-index-release-build.log，核验 target/v1.3.5-history-index-release-verification.json；target/releases/v1.3.5 下候选 EXE 与 SHA256SUMS.txt 已同步，附件副本哈希一致。258 项输入快照 target/v1.3.5-prepared-source-manifest.json 已更新，仅供提交后比较，不是编译器来源证明。未自动运行、未提交或发布；关于窗口实际语言切换／展开／重开仍待 GUI 验证。以下未重建及旧产物描述保留当时时点事实。
+
+# 1.3.5 候选需要重建
+
+- 索引方案最终验证：index.json 按明确顺序列出 27 版，默认显示前 2 版且每次打开收起旧历史；当前首两版为 1.3.5／1.3.4。索引加载及校验的 cargo check --tests --locked --offline 通过（13.16 秒，target/about-history-files-check.log），按索引再次核对 1,323 条七语言文本与迁移前完全一致。未生成新的 EXE，实际 GUI 待验证。
+
+- 文档驱动历史验证：cargo check --tests --locked --offline 通过（target/about-history-files-check.log），仅保留 spine38 158 项及 egui_commonmark 1 项既有警告；git diff --check 通过。迁移基线 target/about-history-migration-baseline.json 与 27 份文档逐项比较，1,323 条七语言文本完全一致。未执行测试或生成新的 EXE；原候选需重建，GUI 切换／折叠待验证。
+
+- 2026-11-06，关于更新历史改为文档驱动：将 main.rs 中 27 个版本的摘要及通用翻译表中对应的 189 行翻译迁入 docs/about-history/<版本号>.md，每文件包含七语言小节；逐项比对 1,323 条语言文本与原内容一致。index.json 统一管理版本顺序、默认显示数量及重开时的展开状态；build.rs 按索引校验并加载，索引首版必须匹配 Cargo.toml。界面只保留统一显示逻辑，语言切换即时选择对应小节，默认显示当前及上一版，其余历史统一折叠，重开恢复折叠的逻辑保留。格式与维护规则写入目录 README 及 AGENTS.md。不解析任意 Markdown／HTML，也不依赖外部文件随 EXE 分发。此前 1.3.5 EXE 不含本次修改，原发布候选需重新编译后替换；七语言切换及关于折叠实际 GUI 仍待验证。
+
+# 1.3.5 发布准备完成（尚未正式发布）
+
+- 2026-11-06，用户明确授权编译及准备发布。构建前确认程序未运行、目标 EXE 可独占访问；cargo build --release --locked --offline 成功（47.96 秒），文件／产品版本 1.3.5，31,088,640 字节，SHA-256：5B1E37F38AC4A09F5D3C152961592A3870FF55407D43A6C4EBC0051041A2C6F4。日志 target/v1.3.5-release-build.log，核验 target/v1.3.5-release-verification.json；附件副本 target/releases/v1.3.5/UnityYAMLViewer-v1.3.5-windows-x64.exe 与原产物哈希一致。发布说明 docs/releases/1.3.5.md 及索引已整理；未自动运行、未提交／推送／打标签或创建 GitHub Release。保留 spine38 158 项既有警告，实际界面待用户验证；此前未构建描述保留当时状态。
+
+# 当前开发：1.3.5（未正式发布）
+
+- 2026-11-06，版本升为 1.3.5，发布后记录迁入 docs/versions/1.3.5.md；同步索引、CHANGELOG 及关于七语言摘要顺序。历史产物信息保留。本轮不生成 EXE，最近本地产物仍为 1.3.4；关于界面待验证。
+
 # 当前发布：1.3.4（已正式发布）
 
 - 2026-11-06，小卡片本地构建完成：用户明确授权，测试及 Release 前均确认程序未运行、目标独占访问通过；卡片列数/对齐回归测试 1 项通过。Release 离线构建成功（45.04 秒），仅 spine38 既有警告。产物 target/release/unity_yaml_viewer.exe，版本 1.3.4，31,085,056 字节，SHA-256：9E9153A3EACF9C4FD864EF500526B0FA014D92F279BE715E581F718CBD5C1193。日志 target/iptv-small-cards-tests.log、target/iptv-small-cards-release-build.log，核验 target/iptv-small-cards-release-verification.json。已包含 76×70 卡片，实际默认三列待用户验证；未自动运行、未更新发布附件。下文未重建为此前时点记录。

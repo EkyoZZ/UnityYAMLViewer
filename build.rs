@@ -1,5 +1,9 @@
+#[path = "build_support/about_history.rs"]
+mod about_history;
+
 #[cfg(target_os = "windows")]
 fn main() {
+    about_history::generate();
     use ico::{IconDir, IconDirEntry, IconImage, ResourceType};
     use std::{env, fs::File, path::PathBuf};
 
@@ -61,4 +65,4 @@ fn main() {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn main() {}
+fn main() { about_history::generate(); }
