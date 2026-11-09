@@ -4,7 +4,7 @@
 
 | 版本 | 记录 |
 | --- | --- |
-| 1.3.5 | [电视／电台列表、多源切换与播放体验（发布准备）](1.3.5.md) · [发布说明](../releases/1.3.5.md) |
+| 1.3.5 | [电视／电台列表、多源切换与播放体验（已正式发布）](1.3.5.md) · [发布说明](../releases/1.3.5.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.5) |
 | 1.3.4 | [网页 HLS 助手、播放修正与缓存体验（已正式发布）](1.3.4.md) · [发布说明](../releases/1.3.4.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.4) |
 | 1.3.3 | [音视频工程、队列合并与显式网络缓存（已正式发布）](1.3.3.md) · [发布说明](../releases/1.3.3.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.3) |
 | 1.3.2 | [HLS、网页视频提取、RTF 编辑与 PNG 工具（已正式发布）](1.3.2.md) · [发布说明](../releases/1.3.2.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.2) |

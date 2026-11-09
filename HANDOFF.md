@@ -1,3 +1,7 @@
+# 当前发布：1.3.5（已正式发布）
+
+- 正式发布：用户确认 Git 已提交并明确授权发布；本地与远程 master 均为 3e192b9559222301dbd94d7187d7008300264574，258 项准备构建输入逐字节未改变，附件哈希与最新已核验产物一致，未重新编译。北京时间 2026-11-06 12:35:09 发布 v1.3.5，Release ID 436481768，显示标题仅 v1.3.5，非草稿、非预发布，latest API 确认为最新稳定版，标签指向已核对。附件 UnityYAMLViewer-v1.3.5-windows-x64.exe，31095296 字节，SHA-256：B85D5494321C768F78F2BA064010D860DA05E57A2C5531D32EAD93E667202CD3，GitHub 返回大小及 digest 核验通过。证据 target/v1.3.5-published-verification.json、target/v1.3.5-published.json、target/v1.3.5-release-asset.json。下文未发布、需重建及旧产物记录保留当时时点事实；不扩大实际运行验证范围。
+
 # 1.3.5 最新发布候选已重建（未正式发布）
 
 - 2026-11-06，索引式关于历史改造完成本地构建：用户明确授权，编译前确认程序未运行、目标 EXE 独占访问通过。cargo build --release --locked --offline 成功（53.64 秒），文件／产品版本均为 1.3.5，31095296 字节，SHA-256：B85D5494321C768F78F2BA064010D860DA05E57A2C5531D32EAD93E667202CD3。包含 index.json 控制版本顺序、默认显示数量及重开时折叠状态，以及 27 版七语言历史文档；仅保留 spine38 158 项既有警告。日志 target/v1.3.5-history-index-release-build.log，核验 target/v1.3.5-history-index-release-verification.json；target/releases/v1.3.5 下候选 EXE 与 SHA256SUMS.txt 已同步，附件副本哈希一致。258 项输入快照 target/v1.3.5-prepared-source-manifest.json 已更新，仅供提交后比较，不是编译器来源证明。未自动运行、未提交或发布；关于窗口实际语言切换／展开／重开仍待 GUI 验证。以下未重建及旧产物描述保留当时时点事实。
