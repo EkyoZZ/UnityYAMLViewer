@@ -50,7 +50,14 @@ impl Tracks {
                         let title=stream["tags"]["title"].as_str().unwrap_or("").to_owned();
                         let language=stream["tags"]["language"].as_str().unwrap_or("und");
                         let name=crate::media_preview::audio_language_name(&title,language);
-                        let language=LANGUAGES.iter().find(|(_,label)|Some(*label)==name).map_or(language,|(code,_)|*code).to_owned();
+                        let filename_language = if subtitle && language == "und" && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("srt")) {
+                            match Path::new(path.file_stem().unwrap_or_default()).extension().and_then(|ext| ext.to_str()) {
+                                Some("zh") => Some("cmn"),
+                                Some("en") => Some("eng"),
+                                _ => None,
+                            }
+                        } else { None };
+                        let language=filename_language.unwrap_or_else(||LANGUAGES.iter().find(|(_,label)|Some(*label)==name).map_or(language,|(code,_)|*code)).to_owned();
                         tracks.push(Track{path:path.clone(),index,subtitle,codec:stream["codec_name"].as_str().unwrap_or("").to_owned(),language,title,enabled:true,default:stream["disposition"]["default"]==1,forced:stream["disposition"]["forced"]==1});
                     }
                 }
@@ -72,6 +79,10 @@ impl Tracks {
             for (subtitle,label) in [(false,"添加音轨"),(true,"添加字幕")] {
                 if ui.add_enabled(!subtitle||subtitle_allowed,egui::Button::new(tr(label))).clicked(){
                     let dialog=rfd::FileDialog::new();
+                    let dialog=match path.parent().filter(|parent| subtitle && !parent.as_os_str().is_empty()) {
+                        Some(parent)=>dialog.set_directory(parent),
+                        None=>dialog,
+                    };
                     let dialog=if subtitle{dialog.add_filter(tr("字幕"),&["srt","ass","ssa","vtt","mkv","mp4","mov","ts"])}else{dialog.add_filter(tr("音轨"),&["wav","mp3","aac","m4a","flac","ogg","opus","mp4","mkv","mov","avi","ts"])};
                     if let Some(paths)=dialog.pick_files(){self.start(paths,Some(subtitle),None,ui.ctx());}
                 }

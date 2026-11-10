@@ -700,6 +700,8 @@ impl Creator {
     }
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path,preview:&mut Preview){
         let bounds=ui.available_rect_before_wrap();
+        let video=preview.has_video();
+        let mut toggle=false;
         let top = ui.horizontal_wrapped(|ui| {
             crate::asset_viewer::file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()), path);
             if let Some(bytes) = preview.file_size() {
@@ -707,10 +709,9 @@ impl Creator {
                     else { format!("({:.2} MiB)", bytes as f64 / 1048576.0) });
             }
             preview.header_controls(ui, path);
-            preview.trim_entry_button(ui, path);
-            if ui.button(tr("播放列表")).clicked() {
-                self.open = !self.open;
-                if self.open && self.entries.is_empty() { self.scan(ui.ctx()); }
+            if !video {
+                preview.trim_entry_button(ui, path);
+                if ui.button(tr("播放列表")).clicked() { self.toggle_panel(ui.ctx()); }
             }
         }).response;
         let fraction=ui.ctx().animate_bool(ui.id().with("playlist_creator_open"),self.open);
@@ -718,7 +719,15 @@ impl Creator {
         self.width=self.width.clamp(min_width,max_width);
         let width=self.width;
         preview.set_sidebar_width((width+6.0)*fraction);
-        preview.show(ui,path);
+        if video {
+            preview.show_with_video_actions(ui,path,Some(&mut |ui|toggle=ui.button(tr("播放列表")).clicked()));
+        } else {
+            preview.show(ui,path);
+        }
+        if toggle {
+            self.toggle_panel(ui.ctx());
+            ui.ctx().request_repaint();
+        }
         if fraction>0.01 {if let (Some(player),Some(panel))=(preview.canvas_rect(),preview.sidebar_rect()){
             let divider=egui::Rect::from_min_max(egui::pos2(player.right(),player.top()),egui::pos2(player.right()+6.0,player.bottom()));
             let handle=ui.interact(divider,ui.id().with("creator_resize"),egui::Sense::drag());
@@ -728,6 +737,10 @@ impl Creator {
         }}
         if let Some(list)=self.ready.take(){let position=preview.playlist_position();let entry=self.entries.iter().position(|e|media_path(&e.path)==media_path(path)).unwrap_or(0);let mut state=State::default();state.index=entry;state.item=media_path(&self.entries[entry].path);state.identity=crate::media_history::Identity::read(&state.item);state.position=if state.item==media_path(path){position}else{0.0};state.numbers=!self.prefix_mode;if let Err(e)=store_state(&list,&state){crate::media_history::report_error(&e);}ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("playlist_created"),(path.to_owned(),list)));}
         ui.allocate_rect(bounds.union(top.rect),egui::Sense::hover());
+    }
+    fn toggle_panel(&mut self,ctx:&egui::Context){
+        self.open = !self.open;
+        if self.open && self.entries.is_empty() { self.scan(ctx); }
     }
 }
 

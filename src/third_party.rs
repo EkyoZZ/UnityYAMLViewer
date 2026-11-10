@@ -16,14 +16,18 @@ pub fn request_open(ctx:&egui::Context) {
 pub fn take_open_request(ctx:&egui::Context)->bool {
     ctx.data_mut(|data|data.remove_temp::<bool>(egui::Id::new("third_party_manager_request"))).unwrap_or(false)
 }
+pub(crate) fn component_status_badge(ui:&mut egui::Ui,installed:bool){
+    let color=if installed{if ui.visuals().dark_mode{egui::Color32::from_rgb(80,210,120)}else{egui::Color32::from_rgb(20,125,55)}}else{if ui.visuals().dark_mode{egui::Color32::from_rgb(245,100,100)}else{egui::Color32::from_rgb(185,35,35)}};
+    egui::Frame::new().stroke(egui::Stroke::new(1.0_f32,color)).corner_radius(3).inner_margin(egui::Margin::symmetric(6,2)).show(ui,|ui|{
+        ui.label(egui::RichText::new(tr(if installed{"已安装"}else{"未安装"})).color(color));
+    });
+}
+
 pub(crate) fn component_header_actions(ui:&mut egui::Ui,name:&str,installed:Option<bool>,busy:bool,install:Option<(&str,bool)>,extra:impl FnOnce(&mut egui::Ui))->(bool,bool){
     ui.horizontal_wrapped(|ui|{
         crate::theme::section_heading(ui, name);
         if let Some(installed)=installed{
-            let color=if installed{if ui.visuals().dark_mode{egui::Color32::from_rgb(80,210,120)}else{egui::Color32::from_rgb(20,125,55)}}else{if ui.visuals().dark_mode{egui::Color32::from_rgb(245,100,100)}else{egui::Color32::from_rgb(185,35,35)}};
-            egui::Frame::new().stroke(egui::Stroke::new(1.0_f32,color)).corner_radius(3).inner_margin(egui::Margin::symmetric(6,2)).show(ui,|ui|{
-                ui.label(egui::RichText::new(tr(if installed{"已安装"}else{"未安装"})).color(color));
-            });
+            component_status_badge(ui,installed);
         }
         let mut install_clicked=false;
         if let Some((label,enabled))=install{
@@ -37,7 +41,7 @@ pub(crate) fn component_header_actions(ui:&mut egui::Ui,name:&str,installed:Opti
 const RELEASE_API:&str="https://api.github.com/repos/bblanchon/pdfium-binaries/releases/latest";
 const DOWNLOAD_PREFIX:&str="https://github.com/bblanchon/pdfium-binaries/releases/download/";
 const DOWNLOAD_LIMIT:u64=64*1024*1024;
-fn component_root()->Result<PathBuf,String> {
+pub(crate) fn component_root()->Result<PathBuf,String> {
     crate::app_cache::root().and_then(|path|path.parent().map(|parent|parent.join("UnityYAMLViewer-components"))).ok_or_else(||tr("无法确定组件目录").to_owned())
 }
 fn valid_folder(folder:&str)->bool {folder.starts_with("pdfium-") && folder.len()<160 && folder.bytes().all(|value|value.is_ascii_alphanumeric()||value==b'-')}
@@ -258,7 +262,7 @@ impl LibreOfficeSettings {
     }
 }
 #[derive(Default)]
-pub struct Manager {open:bool,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings,yt_dlp:yt_dlp::Settings}
+pub struct Manager {open:bool,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings,yt_dlp:yt_dlp::Settings,sensevoice:crate::auto_subtitle::Installer,opus_mt:crate::subtitle_translation::Installer}
 impl Manager {
     pub fn is_open(&self)->bool{self.open}
     pub fn open(&mut self,ctx:&egui::Context){if !self.is_open(){self.ffmpeg.refresh(ctx);}self.open=true;crate::native_window::wake(ctx,egui::Id::new("third_party_window"));}
@@ -269,6 +273,8 @@ impl Manager {
         if !self.open{return;}
         crate::native_window::Window::new(tr("第三方支持")).id(egui::Id::new("third_party_window")).open(&mut self.open).default_width(560.0).default_height(500.0).show(ctx,|ui|{
             self.ffmpeg.show(ui);
+            ui.separator();self.sensevoice.show(ui);
+            ui.separator();self.opus_mt.show(ui);
             ui.separator();self.yt_dlp.show(ui);
             ui.separator();
             crate::theme::section_heading(ui, tr("网页浏览器HLS嗅探助手"));

@@ -740,16 +740,16 @@ pub fn show_trim_windows(ctx:&egui::Context) {
     TRIM_EDITORS.with(|editors| { editors.borrow_mut().retain(|path, editor| editor.show(ctx, path)); });
 }
 
-pub struct Preview { subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_previous:bool,playlist_previous_available:bool,playlist_sources:Option<(usize,Vec<(usize,String)>)>,playlist_source_pick:Option<usize>,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
+pub struct Preview { subtitle_translation:crate::subtitle_translation::Translator, auto_subtitle:crate::auto_subtitle::Generator, subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_previous:bool,playlist_previous_available:bool,playlist_sources:Option<(usize,Vec<(usize,String)>)>,playlist_source_pick:Option<usize>,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
     waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,display_aspect:u8,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64>,keyboard_seek:Option<f64>,keyboard_seek_hint:Option<(f64,Instant)>,keyboard_volume_hint:Option<Instant> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_previous:false,playlist_previous_available:false,playlist_sources:None,playlist_source_pick:None,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),display_aspect:0,zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {subtitle_translation:Default::default(),auto_subtitle:Default::default(),subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_previous:false,playlist_previous_available:false,playlist_sources:None,playlist_source_pick:None,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),display_aspect:0,zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
 impl Preview {
     fn refresh_subtitles(&mut self,ctx:&egui::Context,path:&Path){
         let Some(info)=&self.info else{return;};
         if info.video.is_none()||info.gif.is_some(){return;}
         let language=info.audio_tracks.iter().find(|track|Some(track.index)==self.selected_audio).and_then(|track|track.language_name);
-        self.subtitles.poll(&info.subtitles,language,ctx);
+        self.subtitles.poll(&info.subtitles,language,(!self.network_tab).then_some(path),ctx);
         self.subtitles.style_window(ctx,path);
         if self.subtitle_revision!=self.subtitles.revision {
             let playing=self.is_playing();let position=self.position_now();
@@ -960,6 +960,10 @@ impl Preview {
         let duration=self.info.as_ref().map_or(0.0,|info|info.duration);
         let label=if self.info.as_ref().is_some_and(|info|info.video.is_some()){"视频编辑"}else{"音频编辑"};
         if ui.add_enabled(duration>0.0,egui::Button::new(crate::localization::tr(label))).clicked() {
+            self.open_trim_editor(ui,path,duration);
+        }
+    }
+    fn open_trim_editor(&mut self,ui:&egui::Ui,path:&Path,duration:f64) {
             self.autoplay_pending=false;self.initial_seek=None;self.stop_playback();
             self.playlist_ended=false;self.playlist_next=false;
             let key=std::fs::canonicalize(path).unwrap_or_else(|_|path.to_owned());
@@ -970,7 +974,6 @@ impl Preview {
                 });
             });
             crate::native_window::wake(ui.ctx(),egui::Id::new(("media_trim",&key)));
-        }
     }
     fn detached_trim_player(&self,duration:f64)->Self {
         let mut player=Self::default();
@@ -1175,9 +1178,18 @@ impl Preview {
         }
     }
     pub fn show(&mut self,ui:&mut egui::Ui,path:&Path) {
+        self.show_with_video_actions(ui,path,None);
+    }
+
+    pub(crate) fn show_with_video_actions(&mut self,ui:&mut egui::Ui,path:&Path,mut video_actions:Option<&mut dyn FnMut(&mut egui::Ui)>) {
         let hls = self.network.is_some() || crate::remote_file::is_hls(path);
+        if let Some((subtitle, track)) = self.auto_subtitle.poll(path) {
+            let language = self.info.as_ref().and_then(|info| info.audio_tracks.iter()
+                .find(|audio| Some(audio.index) == self.selected_audio)).and_then(|audio| audio.language_name);
+            self.subtitles.generated(path, subtitle, language, Some(track) == self.selected_audio, ui.ctx());
+        }
+        if let Some(subtitle)=self.subtitle_translation.poll(path){self.subtitles.load_external(subtitle,ui.ctx());}
         if !hls { self.refresh_subtitles(ui.ctx(),path); }
-        self.subtitles.status(ui);
         self.canvas_rect=None;self.sidebar_rect=None;self.overlay_rect=None;
         let fullscreen=is_fullscreen(ui.ctx());
         let external_exclusion=ui.ctx().data(|data|data.get_temp::<egui::Rect>(egui::Id::new("media_overlay_exclusion")));
@@ -1263,6 +1275,7 @@ impl Preview {
             }
         }
         let previous_audio=self.selected_audio;
+        let mut edit_video=false;
         let mut position=self.seek_drag.map_or(self.position_now(),|seek|seek.0);if duration>0.0 {position=position.min(duration);}
         if !fullscreen {if let Some(info)=&self.info {if let Some([w,h])=info.video {
             ui.horizontal_wrapped(|ui| {
@@ -1270,6 +1283,11 @@ impl Preview {
                 let fps=info.reported_fps.map_or_else(||tr("未知").to_owned(),|fps|format!("{fps:.2} fps"));
                 ui.small(format!("{}: {} · {w} × {h} · {fps}",tr("视频信息"),info.video_codec));
                 ui.push_id("video_header_details",|ui|details_menu(ui,info));
+                self.subtitles.header(ui,&info.subtitles);
+                if let Some(actions)=video_actions.as_mut(){
+                    edit_video=ui.add_enabled(duration>0.0,egui::Button::new(tr("视频编辑"))).clicked();
+                    actions(ui);
+                }
             });
             if info.gif.is_none() {ui.horizontal_wrapped(|ui| {
                 let tr=crate::localization::tr;
@@ -1281,6 +1299,21 @@ impl Preview {
                     ui.small(format!("{}. {language} · {} · {rate} · {channels}",track.ordinal,track.codec)).on_hover_text(&track.label);
                 }else {ui.small(tr(if info.audio_tracks.is_empty(){"没有音轨"}else{"关闭音频"}));}
                 ui.push_id("audio_header_details",|ui|details_menu(ui,info));
+                if !hls && !self.network_tab && path.is_file() {
+                    if let Some(track) = self.selected_audio.or_else(|| info.audio_tracks.iter()
+                        .find(|track| track.default).or_else(|| info.audio_tracks.first()).map(|track| track.index)) {
+                        if let Some(subtitle) = self.auto_subtitle.show(ui, path, &info.ffmpeg, track) {
+                            if subtitle == path.with_extension("srt") {
+                                self.subtitles.load_external(subtitle, ui.ctx());
+                            } else {
+                                let language = info.audio_tracks.iter().find(|audio| audio.index == track)
+                                    .and_then(|audio| audio.language_name);
+                                self.subtitles.generated(path, subtitle, language, true, ui.ctx());
+                            }
+                        }
+                    }
+                    self.subtitle_translation.show(ui,path,&info.ffmpeg,self.subtitles.translation_source());
+                }
             });}
         }else if info.audio {
             let tr=crate::localization::tr;
@@ -1298,6 +1331,7 @@ impl Preview {
                 audio_menu(ui,info,&mut self.selected_audio,self.network_tab);
             });
         }}}
+        if edit_video {self.open_trim_editor(ui,path,duration);}
         if let Some(job)=&self.playback {job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);let fps=self.info.as_ref().map_or(30.0,|i|i.fps);ui.ctx().request_repaint_after(Duration::from_secs_f64((0.5/fps).clamp(0.001,0.03)));}
         if self.info.as_ref().is_some_and(|i|i.video.is_none()) {
             paint_level_meter(ui,self.waveform.as_deref(),position,duration,&mut self.meter_trails);
@@ -1887,7 +1921,11 @@ fn index_frames(info:&Info,path:&Path,ctx:&egui::Context)->IndexJob {
     let control=frame_control();let worker=control.clone();let ffprobe=info.ffprobe.clone();let start_time=info.start_time;let path=path.to_owned();let ctx=ctx.clone();let (tx,receiver)=mpsc::channel();
     std::thread::spawn(move|| {
         let result=(|| {
-            let mut child=command(ffprobe).args(["-v","error","-select_streams","V:0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","csv=p=0"]).arg(path).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e|e.to_string())?;
+            let cache=crate::video_frame_index::key(&path,start_time);
+            if let Some(times)=cache.as_deref().and_then(crate::video_frame_index::load) {
+                if crate::video_frame_index::key(&path,start_time)==cache { return Ok(times); }
+            }
+            let mut child=command(ffprobe).args(["-v","error","-select_streams","V:0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","csv=p=0"]).arg(&path).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e|e.to_string())?;
             let stdout=child.stdout.take().ok_or("无法读取视频帧索引")?;let mut children=worker.children.lock().unwrap();if worker.stop.load(Ordering::Relaxed){let _=child.kill();let _=child.wait();return Err("Cancelled".into());}children.push(child);drop(children);
             let mut times=Vec::new();
             for line in std::io::BufReader::new(stdout).lines() {
@@ -1897,9 +1935,16 @@ fn index_frames(info:&Info,path:&Path,ctx:&egui::Context)->IndexJob {
                 let time=line.split(',').next().and_then(|s|s.parse::<f64>().ok()).filter(|t|t.is_finite()).ok_or("视频帧缺少有效时间戳，无法精确逐帧定位")?;
                 if times.last().is_some_and(|previous|time-start_time<*previous){return Err("视频时间戳不连续，无法精确逐帧定位".into());}
                 times.push(time-start_time);
-                if times.len()>1_000_000 {return Err("视频帧索引超过 1,000,000 帧预算".into());}
+                if times.len()>crate::video_frame_index::MAX_FRAMES {return Err("视频帧索引超过 1,000,000 帧预算".into());}
             }
-            if times.is_empty(){return Err("没有可索引的视频帧".into());}Ok(times)
+            let mut child=worker.children.lock().unwrap().pop().ok_or("Cancelled")?;
+            let status=child.wait().map_err(|error|error.to_string())?;
+            if !status.success() || times.is_empty(){return Err("没有可索引的视频帧".into());}
+            if let Some(cache)=cache.filter(|cache| !worker.stop.load(Ordering::Relaxed)
+                && crate::video_frame_index::key(&path,start_time).as_ref()==Some(cache)) {
+                crate::video_frame_index::save(&cache,&times);
+            }
+            Ok(times)
         })();let _=tx.send(result);ctx.request_repaint();
     });IndexJob {control,receiver}
 }

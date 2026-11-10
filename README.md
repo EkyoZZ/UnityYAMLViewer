@@ -20,7 +20,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 
 - **文档阅读与编辑**：文本和代码高亮；Markdown／RTF 原生直读，支持常用 HTML 与富文本。Windows RTF 支持独立编辑、图片和表格。
 - **文件与表格预览**：预览 PDF、办公文档及常见图片；编辑 CSV／TSV／PSV，或只读查看 XLS／XLSX／ODS，支持查找复制与固定行列编号。
-- **音视频工具**：多文件编辑、转码、队列或合并导出，支持本地播放列表、多音轨、字幕、序列输出与画面比例；工程可保存续编、打包分享。
+- **音视频工具**：多文件编辑、转码、队列或合并导出，支持本地播放列表、多音轨、字幕、序列输出与画面比例；工程可保存续编、打包分享。支持同目录字幕的自动生成、语言匹配与离线中英翻译。
 - **网络视频**：频道列表支持分组、台标和多源切换；网页 HLS 或视频提取支持格式选择、下载与缓存，Windows 提供浏览器助手。
 - **四方连续图**：提取最小循环，多图案错位排列，实时预览并导出 PNG。
 - **日常与组件管理**：多页签、最近记录、文件定位与关联、深浅主题、七语言和在线更新；按需安装组件，支持检测与手动路径。
@@ -56,7 +56,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 
 - **Documents**: Highlight text and code; read Markdown/RTF directly with common HTML and rich-text support. Edit RTF with images and tables on Windows.
 - **Files and tables**: Preview PDFs, Office documents and common images; edit CSV/TSV/PSV or read XLS/XLSX/ODS, with search, copy and fixed row/column coordinates.
-- **Audio and video**: Edit multiple files, transcode, export queues or merged media, and use local playlists, tracks, subtitles, sequences and display ratios; save projects or package them for sharing.
+- **Audio and video**: Edit multiple files, transcode, export queues or merged media, and use local playlists, tracks, subtitles, sequences and display ratios; save projects or package them for sharing. Generate matching subtitles alongside local videos and translate them between Chinese and English offline.
 - **Online video**: Channel lists support groups, logos and multiple sources; webpage HLS and video extraction support format selection, downloads and caching, with a browser assistant on Windows.
 - **Seamless repeats**: Extract repeat tiles, arrange motifs with offsets, preview live and export PNG.
 - **Everyday tools and components**: Tabs, recent files, file locations and associations, light/dark themes, seven languages and updates; install components on demand, detect them or set paths manually.

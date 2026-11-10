@@ -1,4 +1,4 @@
-//! Progress is reported by the built-in downloader, never inferred from CLI output.
+//! Shared status for component downloads and installation.
 use std::{sync::{Arc,Mutex},time::Instant};
 use eframe::egui;
 use crate::localization::tr;
@@ -28,6 +28,11 @@ impl Shared{
         ui.small(format!("{}: {} s",tr("已等待"),s.started.elapsed().as_secs()));
         if s.cancel{ui.small(tr("正在取消下载…"));}
         if let Some(line)=s.lines.back(){ui.add(egui::Label::new(line).wrap());}
+        drop(s);
+        self.show_log(ui);
+    }
+    pub(crate) fn show_log(&self,ui:&mut egui::Ui){
+        let Ok(s)=self.0.lock()else{return;};
         if !s.lines.is_empty(){egui::CollapsingHeader::new(tr("查看安装日志")).show(ui,|ui|{egui::ScrollArea::vertical().max_height(160.0).stick_to_bottom(true).show(ui,|ui|{for line in &s.lines{ui.add(egui::Label::new(line).wrap().selectable(true));}});});}
     }
 }

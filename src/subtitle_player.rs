@@ -39,13 +39,80 @@ fn system_font_families()->&'static [String] {
     FONTS.get_or_init(installed_font_families)
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Source {pub path:PathBuf,pub ordinal:usize,pub label:String,pub default:bool,pub text:bool,pub language:Option<&'static str>}
 pub struct Asset(PathBuf);
 impl Drop for Asset{fn drop(&mut self){let _=std::fs::remove_file(&self.0);}}
-#[derive(Clone)]
-pub struct Style {font:String,size:f32,color:egui::Color32,outline:bool,outline_size:f32,outline_color:egui::Color32,shadow:bool,shadow_size:f32,shadow_color:egui::Color32,margin_x:u32,margin_y:u32}
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Style {
+    font:String,
+    size:f32,
+    #[serde(with="style_color")]
+    color:egui::Color32,
+    outline:bool,
+    outline_size:f32,
+    #[serde(with="style_color")]
+    outline_color:egui::Color32,
+    shadow:bool,
+    shadow_size:f32,
+    #[serde(with="style_color")]
+    shadow_color:egui::Color32,
+    margin_x:u32,
+    margin_y:u32,
+}
 impl Default for Style{fn default()->Self{Self{font:String::new(),size:24.0,color:egui::Color32::WHITE,outline:true,outline_size:2.0,outline_color:egui::Color32::BLACK,shadow:false,shadow_size:2.0,shadow_color:egui::Color32::BLACK,margin_x:20,margin_y:20}}}
+mod style_color {
+    use eframe::egui::Color32;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(color:&Color32, serializer:S)->Result<S::Ok,S::Error>{
+        color.to_array().serialize(serializer)
+    }
+
+    pub fn deserialize<'de,D: Deserializer<'de>>(deserializer:D)->Result<Color32,D::Error>{
+        let [r,g,b,a]=<[u8;4]>::deserialize(deserializer)?;
+        Ok(Color32::from_rgba_premultiplied(r,g,b,a))
+    }
+}
+
+fn style_path()->Option<PathBuf>{
+    crate::last_open_dir_config_path().map(|path|path.with_file_name("subtitle_style.json"))
+}
+
+fn style_preference()->&'static std::sync::Mutex<Style>{
+    static STYLE:std::sync::OnceLock<std::sync::Mutex<Style>>=std::sync::OnceLock::new();
+    STYLE.get_or_init(||{
+        let mut style:Style=style_path().and_then(|path|std::fs::read(path).ok())
+            .and_then(|bytes|serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        style.size=style.size.clamp(8.0,120.0);
+        style.outline_size=style.outline_size.clamp(0.0,12.0);
+        style.shadow_size=style.shadow_size.clamp(0.0,12.0);
+        style.margin_x=style.margin_x.min(300);
+        style.margin_y=style.margin_y.min(300);
+        std::sync::Mutex::new(style)
+    })
+}
+
+fn save_style(style:&Style)->Result<(),String>{
+    let mut preference=style_preference().lock().unwrap();
+    let path=style_path().ok_or_else(||"APPDATA is unavailable".to_owned())?;
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|error|error.to_string())?;
+    let bytes=serde_json::to_vec_pretty(style).map_err(|error|error.to_string())?;
+    let temporary=path.with_extension(format!("{}.tmp",std::process::id()));
+    let result=(||{
+        use std::io::Write;
+        let mut file=std::fs::File::create(&temporary).map_err(|error|error.to_string())?;
+        file.write_all(&bytes).and_then(|_|file.sync_all()).map_err(|error|error.to_string())?;
+        drop(file);
+        crate::playlist::replace(&temporary,&path)
+    })();
+    if result.is_err(){let _=std::fs::remove_file(&temporary);}
+    result?;
+    *preference=style.clone();
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct Render {asset:Arc<Asset>,style:Style}
 impl Render{
@@ -85,36 +152,130 @@ mod tests{
     }
 }
 #[derive(Default)]
-pub struct Subtitles {pub revision:u64,asset:Option<Arc<Asset>>,selected:Option<Source>,external:Vec<Source>,job:Option<mpsc::Receiver<Result<Arc<Asset>,String>>>,initialized:bool,style:Style,draft:Style,settings_open:bool,font_search:String,error:Option<String>,manual_required:bool,manual_override:bool,needs_follow:bool}
+pub struct Subtitles {pub revision:u64,asset:Option<Arc<Asset>>,selected:Option<Source>,external:Vec<Source>,sidecars:Vec<Source>,next_scan:Option<std::time::Instant>,job:Option<mpsc::Receiver<Result<Arc<Asset>,String>>>,initialized:bool,style:Style,draft:Style,style_error:Option<String>,settings_open:bool,font_search:String,error:Option<String>,manual_required:bool,manual_override:bool,needs_follow:bool}
 impl Subtitles {
-    pub fn session_copy(&self)->Self{Self{revision:1,asset:self.asset.clone(),selected:self.selected.clone(),external:self.external.clone(),initialized:true,style:self.style.clone(),manual_override:self.manual_override,manual_required:self.manual_required,..Default::default()}}
+    pub fn session_copy(&self)->Self{Self{revision:1,asset:self.asset.clone(),selected:self.selected.clone(),external:self.external.clone(),sidecars:self.sidecars.clone(),initialized:true,style:self.style.clone(),manual_override:self.manual_override,manual_required:self.manual_required,..Default::default()}}
     pub fn render(&self)->Option<Render>{Some(Render{asset:self.asset.clone()?,style:self.style.clone()})}
+    pub(crate) fn translation_source(&self)->Option<Source>{
+        self.selected.as_ref().filter(|source|source.text&&!crate::subtitle_translation::is_translation(&source.path)).cloned()
+    }
     pub fn follow_audio(&mut self,language:Option<&str>,sources:&[Source],ctx:&egui::Context){
         if self.manual_override{return;}
         let matches:Vec<_>=sources.iter().chain(self.external.iter()).filter(|s|s.text&&s.language.is_some()&&s.language!=Some("未标注语言")&&s.language.as_deref()==language&&language.is_some()).cloned().collect();
         let chosen=if matches.len()==1{matches.first()}else{
             let defaults:Vec<_>=matches.iter().filter(|s|s.default).collect();if defaults.len()==1{defaults.first().copied()}else{None}
         };
-        if let Some(source)=chosen{
+        let originals=self.sidecars.iter().filter(|source|!crate::subtitle_translation::is_translation(&source.path));
+        let sidecar=originals.clone().find(|source|source.default)
+            .or_else(|| {
+                let mut candidates=originals.clone();
+                let first=candidates.next()?;
+                candidates.next().is_none().then_some(first)
+            })
+            .or_else(|| {
+                let mut matches=originals.filter(|source|language.is_some_and(|language|
+                    source.language==Some(language) ||
+                    crate::auto_subtitle::language_code(Some(language)).is_some_and(|code|
+                        crate::auto_subtitle::language_code(source.language)==Some(code))));
+                let first=matches.next()?;
+                matches.next().is_none().then_some(first)
+            });
+        if let Some(source)=sidecar.or(chosen){
             self.manual_required=false;
             if !self.selected.as_ref().is_some_and(|s|s.path==source.path&&s.ordinal==source.ordinal){self.load(source.clone(),ctx);}
         }else{
-            self.manual_required=!sources.is_empty()||!self.external.is_empty();
-            if self.manual_required{self.asset=None;self.selected=None;self.job=None;self.revision+=1;}
+            self.manual_required=!sources.is_empty()||!self.external.is_empty()||!self.sidecars.is_empty();
+            if self.selected.take().is_some(){self.asset=None;self.job=None;self.revision+=1;}
         }
     }
-    pub fn status(&self,ui:&mut egui::Ui){
-        if self.manual_required {ui.colored_label(ui.visuals().warn_fg_color,tr("未能匹配音轨语言字幕，请右键打开字幕菜单手动选择或加载外挂字幕。"));}
+    pub fn header(&mut self,ui:&mut egui::Ui,sources:&[Source]){
+        if !self.sidecars.is_empty() || !self.external.is_empty() || !sources.is_empty() {
+            ui.small(tr("字幕"));
+            let current=self.selected.as_ref().map_or_else(||tr("关闭字幕"),|source|source.label.as_str());
+            egui::ComboBox::from_id_salt("video_header_subtitle")
+                .selected_text(current)
+                .show_ui(ui,|ui|self.menu_contents(ui,sources));
+        }
         if let Some(error)=&self.error{ui.colored_label(ui.visuals().error_fg_color,error);}
     }
-    pub fn poll(&mut self,sources:&[Source],language:Option<&str>,ctx:&egui::Context){
-        if !self.initialized {self.initialized=true;self.follow_audio(language,sources,ctx);}
-        if self.needs_follow{self.needs_follow=false;self.follow_audio(language,sources,ctx);}
+    pub fn status(&self,ui:&mut egui::Ui){
+        if self.manual_required {
+            ui.colored_label(ui.visuals().warn_fg_color,tr("未能匹配音轨语言字幕，请右键打开字幕菜单手动选择或加载外挂字幕。"));
+        }
+        if let Some(error)=&self.error{ui.colored_label(ui.visuals().error_fg_color,error);}
+    }
+    pub fn poll(&mut self,sources:&[Source],language:Option<&str>,local_video:Option<&Path>,ctx:&egui::Context){
+        {
+            let preference=style_preference().lock().unwrap();
+            if self.style!=*preference{
+                self.style=preference.clone();
+                self.revision+=1;
+            }
+        }
+        let mut changed=false;
+        if let Some(path)=local_video {
+            let now=std::time::Instant::now();
+            let interval=std::time::Duration::from_secs(2);
+            if self.next_scan.is_none_or(|next|now>=next){
+                self.next_scan=Some(now+interval);
+                changed=self.discover_sidecars(path);
+            }
+            ctx.request_repaint_after(interval);
+        }
+        if !self.initialized || self.needs_follow || changed {
+            self.initialized=true;
+            self.needs_follow=false;
+            if changed && self.selected.as_ref().is_some_and(|source|!source.path.is_file()) {
+                self.manual_override=false;
+            }
+            self.follow_audio(language,sources,ctx);
+        }
         if let Some(job)=&self.job{match job.try_recv(){
             Ok(result)=>{self.job=None;match result{Ok(asset)=>{self.asset=Some(asset);self.revision+=1;},Err(error)=>self.error=Some(error)}},
             Err(mpsc::TryRecvError::Disconnected)=>{self.job=None;self.error=Some(tr("字幕加载失败").to_owned());},
             Err(mpsc::TryRecvError::Empty)=>ctx.request_repaint_after(std::time::Duration::from_millis(100))
         }}
+    }
+    fn discover_sidecars(&mut self,path:&Path)->bool{
+        let Some(stem)=path.file_stem().and_then(|stem|stem.to_str()) else{return false;};
+        let directory=path.parent().filter(|parent|!parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let mut sidecars:Vec<_>=std::fs::read_dir(directory).into_iter().flatten().filter_map(Result::ok)
+            .filter_map(|entry|{
+                let label=entry.file_name().into_string().ok()?;
+                let (name,extension)=label.rsplit_once('.')?;
+                if !extension.eq_ignore_ascii_case("srt") || !name.get(..stem.len())?.eq_ignore_ascii_case(stem) {
+                    return None;
+                }
+                let suffix=&name[stem.len()..];
+                let default=suffix.is_empty();
+                let language=if default {None} else {
+                    let suffix=suffix.strip_prefix('.').filter(|suffix|!suffix.is_empty())?;
+                    let tag=suffix.rsplit('.').next()?;
+                    crate::media_preview::audio_language_name(tag,"und").filter(|name|*name!="未标注语言")
+                };
+                let path=path.with_file_name(&label);
+                path.is_file().then_some(Source{path,ordinal:0,label,default,text:true,language})
+            }).collect();
+        sidecars.sort_by(|a,b|b.default.cmp(&a.default).then_with(||a.label.cmp(&b.label)));
+        if sidecars==self.sidecars{return false;}
+        self.external.retain(|source|!sidecars.iter().any(|sidecar|sidecar.path==source.path));
+        self.sidecars=sidecars;
+        true
+    }
+    fn source_choice(&mut self,ui:&mut egui::Ui,source:Source){
+        let selected=self.selected.as_ref().is_some_and(|s|s.path==source.path&&s.ordinal==source.ordinal);
+        if ui.add_enabled(source.text,egui::SelectableLabel::new(selected,&source.label)).clicked(){
+            self.manual_override=true;self.manual_required=false;self.load(source,ui.ctx());ui.close_menu();
+        }
+    }
+    pub(crate) fn generated(&mut self,video:&Path,path:PathBuf,language:Option<&str>,current_track:bool,ctx:&egui::Context){
+        self.discover_sidecars(video);
+        if !current_track {return;}
+        if let Some(source)=self.sidecars.iter().find(|source|source.path==path).cloned(){
+            self.manual_override=crate::auto_subtitle::language_code(language)!=crate::auto_subtitle::language_code(source.language);
+            self.manual_required=false;
+            self.load(source,ctx);
+        }
     }
     fn load(&mut self,source:Source,ctx:&egui::Context){
         self.asset=None;self.selected=Some(source.clone());self.error=None;self.revision+=1;
@@ -134,29 +295,33 @@ impl Subtitles {
             })();let _=tx.send(result);ctx.request_repaint();
         });
     }
+    pub(crate) fn load_external(&mut self,path:PathBuf,ctx:&egui::Context){
+        let stem=path.file_stem().unwrap_or_default().to_string_lossy();
+        let language=stem.split(['.','_','-',' ']).rev().find_map(|part|crate::media_preview::audio_language_name(part,"und").filter(|name|*name!="未标注语言"));
+        let source=Source{label:path.file_name().unwrap_or_default().to_string_lossy().to_string(),path,ordinal:0,default:false,text:true,language};
+        if !self.external.iter().chain(&self.sidecars).any(|s|s.path==source.path){self.external.push(source.clone());}
+        self.manual_override=true;self.manual_required=false;self.load(source,ctx);
+    }
     pub fn menu(&mut self,ui:&mut egui::Ui,sources:&[Source]){
-        ui.menu_button(tr("字幕"),|ui|{
-            crate::theme::menu_no_wrap(ui);
-            if ui.checkbox(&mut self.manual_override,tr("手动选择字幕（关闭语言跟随）")).changed(){self.manual_required=false;self.needs_follow=!self.manual_override;}
-            if ui.selectable_label(self.selected.is_none(),tr("关闭字幕")).clicked(){self.manual_override=true;self.manual_required=false;self.selected=None;self.asset=None;self.job=None;self.revision+=1;ui.close_menu();}
-            let choices:Vec<_>=sources.iter().chain(self.external.iter()).cloned().collect();
-            for source in choices{
-                let selected=self.selected.as_ref().is_some_and(|s|s.path==source.path&&s.ordinal==source.ordinal);
-                if ui.add_enabled(source.text,egui::SelectableLabel::new(selected,&source.label)).clicked(){self.manual_override=true;self.manual_required=false;self.load(source,ui.ctx());ui.close_menu();}
-            }
-            if sources.iter().any(|s|!s.text){ui.small(tr("图像字幕暂不支持播放器显示；可加载文字外挂字幕。"));}
-            if ui.button(tr("加载外挂字幕")).clicked(){
-                if let Some(path)=rfd::FileDialog::new().add_filter(tr("字幕"),&["srt","ass","ssa","vtt"]).pick_file(){
-                    let stem=path.file_stem().unwrap_or_default().to_string_lossy();let language=stem.split(['.','_','-',' ']).rev().find_map(|part|crate::media_preview::audio_language_name(part,"und").filter(|name|*name!="未标注语言"));
-                    let source=Source{label:path.file_name().unwrap_or_default().to_string_lossy().to_string(),path,ordinal:0,default:false,text:true,language};
-                    if !self.external.iter().any(|s|s.path==source.path){self.external.push(source.clone());}
-                    self.manual_override=true;self.manual_required=false;self.load(source,ui.ctx());
-                }ui.close_menu();
-            }
-            if ui.button(tr("字幕样式")).clicked(){self.draft=self.style.clone();self.font_search.clear();self.settings_open=true;ui.close_menu();}
-            if self.job.is_some(){ui.spinner();}
-            if let Some(error)=&self.error{ui.colored_label(ui.visuals().error_fg_color,error);}
-        });
+        ui.menu_button(tr("字幕"),|ui|self.menu_contents(ui,sources));
+    }
+    fn menu_contents(&mut self,ui:&mut egui::Ui,sources:&[Source]){
+        crate::theme::menu_no_wrap(ui);
+        if ui.checkbox(&mut self.manual_override,tr("手动选择字幕（关闭语言跟随）")).changed(){self.manual_required=false;self.needs_follow=!self.manual_override;}
+        if ui.selectable_label(self.selected.is_none(),tr("关闭字幕")).clicked(){self.manual_override=true;self.manual_required=false;self.selected=None;self.asset=None;self.job=None;self.revision+=1;ui.close_menu();}
+        if ui.button(tr("字幕样式")).clicked(){self.draft=self.style.clone();self.style_error=None;self.font_search.clear();self.settings_open=true;ui.close_menu();}
+        let choices:Vec<_>=sources.iter().chain(self.sidecars.iter()).chain(self.external.iter()).cloned().collect();
+        for source in choices{
+            self.source_choice(ui,source);
+        }
+        if sources.iter().any(|s|!s.text){ui.small(tr("图像字幕暂不支持播放器显示；可加载文字外挂字幕。"));}
+        if ui.button(tr("加载外挂字幕")).clicked(){
+            if let Some(path)=rfd::FileDialog::new().add_filter(tr("字幕"),&["srt","ass","ssa","vtt"]).pick_file(){
+                self.load_external(path,ui.ctx());
+            }ui.close_menu();
+        }
+        if self.job.is_some(){ui.spinner();}
+        if let Some(error)=&self.error{ui.colored_label(ui.visuals().error_fg_color,error);}
     }
     pub fn style_window(&mut self,ctx:&egui::Context,path:&Path){
         if !self.settings_open{return;}
@@ -181,6 +346,7 @@ impl Subtitles {
             ui.horizontal(|ui|{ui.checkbox(&mut s.shadow,tr("投影"));ui.add_enabled_ui(s.shadow,|ui|{ui.add(egui::DragValue::new(&mut s.shadow_size).range(0.0..=12.0));ui.color_edit_button_srgba(&mut s.shadow_color);});});
             ui.horizontal(|ui|{ui.label(tr("水平边距"));ui.add(egui::DragValue::new(&mut s.margin_x).range(0..=300));});
             ui.horizontal(|ui|{ui.label(tr("底部边距"));ui.add(egui::DragValue::new(&mut s.margin_y).range(0..=300));});
+            if let Some(error)=&self.style_error{ui.colored_label(ui.visuals().error_fg_color,error);}
             ui.separator();
             ui.horizontal(|ui| {
                 let font=egui::FontId::proportional(16.0);
@@ -194,7 +360,12 @@ impl Subtitles {
                 if ui.add_sized([widths[2],32.0],egui::Button::new(egui::RichText::new(labels[2]).size(16.0))).clicked() {self.draft=Style::default();self.font_search.clear();}
             });
         });
-        if apply{self.style=self.draft.clone();self.revision+=1;open=false;}
+        if apply {
+            match save_style(&self.draft) {
+                Ok(())=>{self.style=self.draft.clone();self.revision+=1;open=false;}
+                Err(error)=>self.style_error=Some(error),
+            }
+        }
         if cancel{open=false;}
         self.settings_open=open;
     }
