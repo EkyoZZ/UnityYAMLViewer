@@ -3526,3 +3526,21 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 
 - 北京时间 2026-11-04 20:48:45 发布 [v1.3.2](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.2)，Release ID 433912470。标签指向 fa5a6bf9a92247df9dc542ea16c4617b34ab709c，已核验为最新正式版。
 - Windows x64 附件 UnityYAMLViewer-v1.3.2-windows-x64.exe，29324800 字节。上传状态及 GitHub 附件校验值已核对，sha256:c33d69c0a466edc29ef40ffee2ee464220783ee7d08e86a1271123218f5f600a。用户已确认发布前验证通过，抖音视频提取不支持。
+
+
+## 2026-11-11 实时原文字幕源码交接
+
+- SenseVoice 五语言共用模型列出与安装入口；Zipformer 首批中英双语 INT8 模型按需下载。视频页 / 画面右键切换实时识别引擎；复用播放 PCM，分句 / 流式覆盖显示，识别队列过载停止字幕而不阻塞播放。源码详见 src/live_subtitle.rs、src/live_subtitle.py、src/auto_subtitle.* 与 src/media_preview.rs。
+- python -B tests/test_live_subtitle_worker.py：6 项通过；模型版本 / 路径、分包、尾段及端点使用模拟对象验证，不代表真实模型已加载。Rust 两项回归用例仅 cargo check --tests --locked --offline 编译检查通过（target/live-subtitle-check.log），未运行测试或构建新 EXE。Python 语法、七语言文案 / 当前关于摘要、默认两版历史索引及 git diff --check 通过。
+- 当前实时输出仅原文，不保存、不实时翻译；Zipformer 本轮模型仅中英。实际下载 / CPU 速度 / 多语言识别质量、YouTube 和频道、暂停跳转换引擎、叠加样式、关于历史交互均待运行验证。未更改发布状态或附件；既有 EXE 不包含本轮修改。
+
+
+## 2026-11-11 字幕缓存 / 回放与投影补充
+
+- 实时识别现在自动写入应用缓存 live_subtitles 下的独立 JSONL / SRT，会话元数据与草稿 / 最终结果分明；提供定位和 SRT 导出。相同媒体身份、轨道、语言、引擎 / 模型版本可复用已确认片段并跳过覆盖 PCM 包。HLS 仅在正时长且有 ENDLIST 的媒体清单校验后跨会话复用；失败或未知直播不复用。未实现自动比较 / 合并 / 校正，不缓存音频、不覆盖原字幕。
+- 字幕投影增加 -12..12 的 X/Y 独立偏移，兼容旧单值，原字幕不改写；实时覆盖样式仍独立。具体限制、容量及验证见 docs/versions/1.3.5.md 和双语指南。
+- Python 8 项通过，Rust 新增用例仅编译检查通过：target/live-subtitle-cache-check.log；未生成新 EXE。真实模型、HLS 回放 / 重开、缓存清理与导出、投影四方向及关于窗口交互仍待运行验证。
+
+
+## 2026-11-11 实时字幕 / 缓存与投影 Release 构建
+- 2026-11-11，用户明确授权编译实时字幕 / 缓存与投影版：构建前确认 unity_yaml_viewer 未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（1 分 02 秒），仅保留 spine38 既有 158 项警告。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.3.5，31,592,960 字节，SHA-256：D1A0CA3A3CE34C08C29FD6626AABE407C4EBAF40EC2DFE410AAC597D74BABBCC。构建日志 target/live-subtitle-release-build.log。未自动启动、未发布或更新附件；真实 SenseVoice / Zipformer、实时字幕缓存与 HLS 回放复用、投影 X/Y、七语言及关于窗口交互仍待运行验证。此前“未生成 EXE”描述为当时状态。

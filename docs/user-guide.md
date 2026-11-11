@@ -535,3 +535,45 @@ In an editor, Ctrl+Z restores removed list items with their former position and 
 ### Video canvas and fill color
 
 Canvas Size crops or extends the video area, up to 8192 pixels per side. X/Y describe its origin relative to the source; negative values extend left/up. Extending does not stretch the source image; new areas use Fill Color. Drag inside to move the canvas, edges to resize one dimension, and corners proportionally. Reset Range restores source dimensions and zero offset without changing separate picture scaling. Fill Color supports the picker and #RRGGBB or #RGB input.
+
+
+## 实时语音字幕 / Live speech subtitles
+
+视频播放页“实时字幕”可启用本地识别并切换引擎；全屏时从画面右键菜单进入。音频来自当前播放音轨，本地视频、网络视频和频道复用播放器音频，不额外请求媒体连接。需要已安装 FFmpeg 和 sherpa-onnx 运行库。
+
+- SenseVoice：普通话、英语、日语、韩语、粤语全部列出，共用约 240 MB 模型，安装一次即可全部使用。可在“第三方支持”安装运行库并点击“安装 / 校验语言模型”，也可在首次识别时下载模型。识别语言由用户选择，短句停顿后显示；持续讲话约 6 秒分段。
+- Zipformer：本轮提供约 198 MB 的 INT8 中英双语流式模型，连续更新当前识别文字。它同时识别中英，不强制只识别其中一种；此模型不包含日语、韩语或粤语。可在同一组件窗口按需安装，首次启用也会下载。
+- 模型准备完成后从当前播放位置开始，不补识别下载期间已经播放的内容。暂停时停止提供新音频，已经提交的短段可能稍后出字；跳转、重建播放、换音轨及关闭时清除旧会话，换引擎或语言也会重新开始。识别明显跟不上时停止字幕并提示，音频播放不等待识别。
+- 实时字幕为原文显示，会自动缓存并可导出 SRT，不包含实时翻译或双语生成；已有字幕文件的离线中英翻译仍独立使用。实时字幕覆盖层使用独立显示样式；若已有文字字幕重叠，可先关闭原有字幕轨。只处理开启之后实际播放的内容，不是整片转写或原有字幕的替代备份。
+
+Open **Live subtitles** on the video playback page; in fullscreen, use the video context menu. Local videos, online videos and channels reuse decoded audio from the selected playback track without opening another media connection. FFmpeg and the sherpa-onnx runtime are required.
+
+- **SenseVoice** lists Mandarin, English, Japanese, Korean and Cantonese. All five share one model of about 240 MB. Install the runtime and use **Install / verify language model** in Third-party Support, or download on first recognition. Select the source language; phrases appear after a pause, with continuous speech segmented at about six seconds.
+- **Zipformer** currently offers an INT8 Chinese/English bilingual streaming model of about 198 MB. It updates the current utterance continuously and recognizes both languages rather than forcing one. This model excludes Japanese, Korean and Cantonese. Install it from the component window or download on first use.
+- Recognition begins at the current playback position after model preparation; audio played during downloads is not recovered. Pausing stops new input, although pending phrases may arrive later. Seeking, restarting playback, changing tracks, closing, or changing engines/languages resets the session. If recognition falls behind, subtitles stop with a message while audio playback continues.
+- Live output displays source-language text, automatically caches recognition, and supports SRT export; live translation and bilingual output are not yet included. Existing offline Chinese/English subtitle-file translation remains separate. The live overlay has its own display style; disable an existing subtitle track if text overlaps. Only audio played after enabling recognition is processed.
+
+
+### 实时字幕缓存与回放 / Live subtitle caching and replay
+
+每次识别独立保存 UTF-8 JSONL 记录和 SRT：记录媒体指纹、音轨、源语言、识别引擎及模型版本、媒体时间码和接收时间。JSONL 保留临时与最终结果，SRT 只追加已确认句子。“定位实时字幕缓存”打开最近一次会话的记录，“导出实时字幕 SRT”另存该会话的已确认字幕，不覆盖已有字幕文件；切换引擎、语言、音轨或跳转后形成独立会话，不把不同时间线直接拼接。可将导出的 SRT 与整片生成字幕人工对比；自动比对、合并、校正暂未实现，也不自动改写原字幕。没有缓存原始音频。
+
+同一文件身份（路径、大小、修改时间）或已确认结束的 HLS 媒体清单、相同音轨 / 语言 / 引擎 / 模型下，回到已确认字幕区间时优先按媒体时间显示缓存，并跳过完全落在这些区间的重复识别音频包。未覆盖区间继续识别，跨缓存区间时重置识别时间基准。仅缓存当前实际播放并确认的片段，不宣称整片已完成；沉默空隙或句子边界仍可能需要处理。已识别区间起播时可暂不启动识别模型。
+
+HLS 点播复用要求正时长，且在最多 1 MiB、4 秒超时的媒体清单检查中确认 `#EXT-X-ENDLIST`，使用完整来源地址散列及清单内容指纹；来源或清单改变则不复用。直播、未结束 / 无法读取 / 需额外 Cookie 的清单、只有主清单而未取得结束标记的情况仅记录本次识别，不跨会话自动复用。该检查只在启用实时字幕后后台额外读取一次清单，普通播放不等待，不重复下载媒体音频。签名 URL 改变可能产生新缓存，当前不去除鉴权参数推测同一内容。
+
+缓存位于应用缓存目录的 `live_subtitles`，每会话最多 64 MiB；回读最多最近 128 会话、累计 64 MiB、10,000 句。达到上限或写入失败会提示并停止实时识别，不阻塞音频。设置中的缓存清理可删除这些记录，正在写入的会话受保护；缓存不作为永久备份，需保留时请导出 SRT。
+
+Each recognition session saves UTF-8 JSONL evidence and an SRT file with media identity, audio track, source language, engine/model version, media timestamps and receipt times. JSONL retains drafts and finalized results; SRT appends finalized cues only. **Locate live subtitle cache** opens the latest session; **Export live subtitles as SRT** saves that session’s finalized cues without overwriting existing files. Seeking or changing engine, language or track creates a separate session. Compare exports with full-file subtitles manually; automatic comparison, merging and correction are not implemented. Original audio is not cached.
+
+For matching local file identity (path, size and modification time), or a verified finite HLS media playlist, and matching track/language/engine/model, replay displays finalized cached cues at their media timestamps and skips recognition packets wholly inside those intervals. Uncovered intervals are recognized normally; recognizer timing resets across skipped intervals. Only confirmed, played portions are cached. Silence and cue boundaries may still require processing. Starting inside a cached interval can defer loading the recognition model.
+
+HLS reuse requires positive duration and an `#EXT-X-ENDLIST` media playlist verified with a 1 MiB limit and four-second timeout. The full source address is hashed and combined with a playlist-content fingerprint. Changed sources/playlists, live or unfinished streams, failed checks, additional Cookie requirements, or master playlists without a verified end marker do not reuse earlier sessions. This runs in the background only after enabling live subtitles, adding one manifest request without delaying ordinary playback or downloading media audio again. Changed signed URLs can create separate caches; authentication parameters are retained in the identity.
+
+Caches reside under `live_subtitles` in the application cache. Each session is limited to 64 MiB; replay reads at most 128 recent sessions, 64 MiB total and 10,000 cues. Limits or write failures stop recognition with a message without blocking playback. Settings cache cleanup removes these files while protecting active writers. Export SRT for lasting retention.
+
+### 字幕投影 / Subtitle shadow
+
+字幕样式中的投影支持独立 X/Y 偏移，范围各为 -12 到 12；X 正值向右、Y 正值向下，负值向相反方向。描边仍用一个宽度值。旧版单个投影值会同时迁移到 X/Y，原字幕文件保持不变。此设置用于已有文字字幕的渲染，实时字幕覆盖层仍使用其独立样式。
+
+Subtitle styles provide independent shadow X/Y offsets from -12 to 12: positive X moves right and positive Y moves down. Outline retains a single width. Legacy scalar shadows migrate to both axes without changing source subtitle files. This setting affects existing text-subtitle rendering; the live overlay retains its independent style.

@@ -55,13 +55,14 @@ pub struct Style {
     #[serde(with="style_color")]
     outline_color:egui::Color32,
     shadow:bool,
-    shadow_size:f32,
+    shadow_x:f32,
+    shadow_y:f32,
     #[serde(with="style_color")]
     shadow_color:egui::Color32,
     margin_x:u32,
     margin_y:u32,
 }
-impl Default for Style{fn default()->Self{Self{font:String::new(),size:24.0,color:egui::Color32::WHITE,outline:true,outline_size:2.0,outline_color:egui::Color32::BLACK,shadow:false,shadow_size:2.0,shadow_color:egui::Color32::BLACK,margin_x:20,margin_y:20}}}
+impl Default for Style{fn default()->Self{Self{font:String::new(),size:24.0,color:egui::Color32::WHITE,outline:true,outline_size:2.0,outline_color:egui::Color32::BLACK,shadow:false,shadow_x:2.0,shadow_y:2.0,shadow_color:egui::Color32::BLACK,margin_x:20,margin_y:20}}}
 mod style_color {
     use eframe::egui::Color32;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -80,14 +81,42 @@ fn style_path()->Option<PathBuf>{
     crate::last_open_dir_config_path().map(|path|path.with_file_name("subtitle_style.json"))
 }
 
+fn decode_style(bytes:&[u8])->Result<Style,serde_json::Error>{
+    let mut value:serde_json::Value=serde_json::from_slice(bytes)?;
+    if let Some(object)=value.as_object_mut(){
+        if let Some(size)=object.get("shadow_size").cloned(){
+            object.entry("shadow_x").or_insert(size.clone());
+            object.entry("shadow_y").or_insert(size);
+        }
+    }
+    serde_json::from_value(value)
+}
+
+// ASS styles expose only one Shadow value. Override tags provide independent signed axes.
+fn apply_shadow_offsets(text:&str,style:&Style)->String{
+    let (x,y)=if style.shadow{(style.shadow_x,style.shadow_y)}else{(0.0,0.0)};
+    let tags=format!("{{\\xshad{x}\\yshad{y}}}");
+    text.lines().map(|line|{
+        if line.starts_with("Dialogue:") {
+            let mut fields:Vec<_>=line.splitn(10,',').collect();
+            if fields.len()==10 {
+                let body=format!("{tags}{}",fields[9].replace('}',&format!("}}{tags}")));
+                fields.pop();return format!("{},{body}\n",fields.join(","));
+            }
+        }
+        format!("{line}\n")
+    }).collect()
+}
+
 fn style_preference()->&'static std::sync::Mutex<Style>{
     static STYLE:std::sync::OnceLock<std::sync::Mutex<Style>>=std::sync::OnceLock::new();
     STYLE.get_or_init(||{
         let mut style:Style=style_path().and_then(|path|std::fs::read(path).ok())
-            .and_then(|bytes|serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+            .and_then(|bytes|decode_style(&bytes).ok()).unwrap_or_default();
         style.size=style.size.clamp(8.0,120.0);
         style.outline_size=style.outline_size.clamp(0.0,12.0);
-        style.shadow_size=style.shadow_size.clamp(0.0,12.0);
+        style.shadow_x=style.shadow_x.clamp(-12.0,12.0);
+        style.shadow_y=style.shadow_y.clamp(-12.0,12.0);
         style.margin_x=style.margin_x.min(300);
         style.margin_y=style.margin_y.min(300);
         std::sync::Mutex::new(style)
@@ -123,7 +152,7 @@ impl Render{
         let s=&self.style;
         let font=if s.font.trim().is_empty(){"Segoe UI"}else{s.font.trim()};
         let font:String=font.chars().filter(|c|!matches!(c,','|'\''|':'|'['|']'|'\\'|'\n'|'\r')).collect();
-        let style=format!("FontName={font},FontSize={},PrimaryColour={},OutlineColour={},BackColour={},BorderStyle=1,Outline={},Shadow={},MarginL={},MarginR={},MarginV={},Alignment=2",s.size,color(s.color),color(s.outline_color),color(s.shadow_color),if s.outline{s.outline_size}else{0.0},if s.shadow{s.shadow_size}else{0.0},s.margin_x,s.margin_x,s.margin_y);
+        let style=format!("FontName={font},FontSize={},PrimaryColour={},OutlineColour={},BackColour={},BorderStyle=1,Outline={},Shadow={},MarginL={},MarginR={},MarginV={},Alignment=2",s.size,color(s.color),color(s.outline_color),color(s.shadow_color),if s.outline{s.outline_size}else{0.0},0.0,s.margin_x,s.margin_x,s.margin_y);
         format!("setpts=PTS+{position}/TB,subtitles=filename='{path}':force_style='{style}',setpts=PTS-STARTPTS,{base}")
     }
 }
@@ -131,6 +160,23 @@ impl Render{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn legacy_shadow_and_signed_axes_survive_loading(){
+        let legacy=decode_style(br#"{"shadow":true,"shadow_size":4.5}"#).unwrap();
+        assert_eq!((legacy.shadow_x,legacy.shadow_y),(4.5,4.5));
+        let axes=decode_style(br#"{"shadow":true,"shadow_size":4.5,"shadow_x":-3,"shadow_y":0}"#).unwrap();
+        assert_eq!((axes.shadow_x,axes.shadow_y),(-3.0,0.0));
+        assert!(!serde_json::to_string(&axes).unwrap().contains("shadow_size"));
+    }
+    #[test]
+    fn shadow_tags_override_existing_tags_without_losing_text(){
+        let mut style=Style::default();style.shadow=true;style.shadow_x=-3.0;style.shadow_y=5.0;
+        let ass="[Events]\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\shad8}hello, world\n";
+        let output=apply_shadow_offsets(ass,&style);
+        assert!(output.contains("{\\xshad-3\\yshad5}{\\shad8}{\\xshad-3\\yshad5}hello, world"));
+        style.shadow=false;
+        assert!(apply_shadow_offsets(ass,&style).contains("{\\xshad0\\yshad0}"));
+    }
     fn source(language:Option<&'static str>)->Source{Source{path:PathBuf::from("source.mkv"),ordinal:0,label:String::new(),default:false,text:true,language}}
     #[test]
     fn unknown_audio_requests_manual_selection(){
@@ -279,7 +325,7 @@ impl Subtitles {
     }
     fn load(&mut self,source:Source,ctx:&egui::Context){
         self.asset=None;self.selected=Some(source.clone());self.error=None;self.revision+=1;
-        let (tx,rx)=mpsc::channel();self.job=Some(rx);let ctx=ctx.clone();
+        let (tx,rx)=mpsc::channel();self.job=Some(rx);let ctx=ctx.clone();let style=self.style.clone();
         std::thread::spawn(move||{
             let result=(||{
                 let ffmpeg=crate::media_tools::find_tool("ffmpeg").ok_or("FFmpeg unavailable")?;
@@ -291,6 +337,8 @@ impl Subtitles {
                 let asset=Arc::new(Asset(path));
                 let output=crate::media_tools::command(&ffmpeg).args(["-nostdin","-v","error","-y","-i"]).arg(&source.path).args(["-map",&format!("0:s:{}",source.ordinal),"-c:s","ass","-f","ass"]).arg(&asset.0).output().map_err(|e|e.to_string())?;
                 if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).to_string());}
+                let text=std::fs::read_to_string(&asset.0).map_err(|e|e.to_string())?;
+                std::fs::write(&asset.0,apply_shadow_offsets(&text,&style)).map_err(|e|e.to_string())?;
                 Ok(asset)
             })();let _=tx.send(result);ctx.request_repaint();
         });
@@ -343,7 +391,7 @@ impl Subtitles {
                 });
             ui.horizontal(|ui|{ui.label(tr("字号"));ui.add(egui::DragValue::new(&mut s.size).range(8.0..=120.0));ui.color_edit_button_srgba(&mut s.color);});
             ui.horizontal(|ui|{ui.checkbox(&mut s.outline,tr("描边"));ui.add_enabled_ui(s.outline,|ui|{ui.add(egui::DragValue::new(&mut s.outline_size).range(0.0..=12.0));ui.color_edit_button_srgba(&mut s.outline_color);});});
-            ui.horizontal(|ui|{ui.checkbox(&mut s.shadow,tr("投影"));ui.add_enabled_ui(s.shadow,|ui|{ui.add(egui::DragValue::new(&mut s.shadow_size).range(0.0..=12.0));ui.color_edit_button_srgba(&mut s.shadow_color);});});
+            ui.horizontal(|ui|{ui.checkbox(&mut s.shadow,tr("投影"));ui.add_enabled_ui(s.shadow,|ui|{ui.add(egui::DragValue::new(&mut s.shadow_x).prefix("X ").range(-12.0..=12.0)).on_hover_text(tr("水平投影偏移"));ui.add(egui::DragValue::new(&mut s.shadow_y).prefix("Y ").range(-12.0..=12.0)).on_hover_text(tr("垂直投影偏移"));ui.color_edit_button_srgba(&mut s.shadow_color);});});
             ui.horizontal(|ui|{ui.label(tr("水平边距"));ui.add(egui::DragValue::new(&mut s.margin_x).range(0..=300));});
             ui.horizontal(|ui|{ui.label(tr("底部边距"));ui.add(egui::DragValue::new(&mut s.margin_y).range(0..=300));});
             if let Some(error)=&self.style_error{ui.colored_label(ui.visuals().error_fg_color,error);}
@@ -362,7 +410,7 @@ impl Subtitles {
         });
         if apply {
             match save_style(&self.draft) {
-                Ok(())=>{self.style=self.draft.clone();self.revision+=1;open=false;}
+                Ok(())=>{self.style=self.draft.clone();if let Some(source)=self.selected.clone(){self.load(source,ctx);}else{self.revision+=1;}open=false;}
                 Err(error)=>self.style_error=Some(error),
             }
         }

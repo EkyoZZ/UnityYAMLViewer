@@ -39,6 +39,8 @@ mod export_tracks;
 mod subtitle_player;
 mod video_frame_index;
 mod auto_subtitle;
+mod live_subtitle;
+mod live_subtitle_cache;
 mod subtitle_translation;
 mod audio_edit;
 mod media_preview;

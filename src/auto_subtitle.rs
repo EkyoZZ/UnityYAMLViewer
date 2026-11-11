@@ -15,11 +15,11 @@ static COMPONENT_ACCESS: Mutex<()> = Mutex::new(());
 
 const PACKAGE: &str = "sherpa-onnx==2.0.1";
 
-fn component() -> Result<PathBuf, String> {
+pub(crate) fn component() -> Result<PathBuf, String> {
     Ok(crate::third_party::component_root()?.join("sensevoice-sherpa-onnx-2.0.1"))
 }
 
-fn installed() -> bool {
+pub(crate) fn installed() -> bool {
     component().is_ok_and(|path| path.join("ready").is_file() && path.join("sherpa_onnx").is_dir())
 }
 
@@ -149,6 +149,9 @@ pub(crate) struct Installer {
     progress: Shared,
     checking: bool,
     success: Option<&'static str>,
+    model_job: Option<mpsc::Receiver<Result<PathBuf, String>>>,
+    model_progress: Shared,
+    model_error: Option<String>,
 }
 
 impl Installer {
@@ -160,7 +163,7 @@ impl Installer {
         ui.horizontal_wrapped(|ui| {
             crate::theme::section_heading(ui, "SenseVoice");
             crate::third_party::component_status_badge(ui, installed());
-            if ui.add_enabled(self.job.is_none(), egui::Button::new(tr("安装 SenseVoice"))).clicked() {
+            if ui.add_enabled(self.job.is_none() && self.model_job.is_none(), egui::Button::new(tr("安装 SenseVoice"))).clicked() {
                 self.error = None;
                 self.success = None;
                 self.checking = false;
@@ -168,7 +171,7 @@ impl Installer {
                 let progress = self.progress.clone();
                 run(&mut self.job, ui.ctx(), move || install(&progress));
             }
-            if ui.add_enabled(self.job.is_none() && installed(), egui::Button::new(tr("重新检测"))).clicked() {
+            if ui.add_enabled(self.job.is_none() && self.model_job.is_none() && installed(), egui::Button::new(tr("重新检测"))).clicked() {
                 self.error = None;
                 self.success = None;
                 self.checking = true;
@@ -190,7 +193,32 @@ impl Installer {
         if let Some(message) = self.success {
             ui.label(tr(message));
         }
-        ui.small(tr("安装需要 PATH 中的 Python 和 pip。首次生成字幕会下载约 240 MB 的共用模型。"));
+        ui.small(tr("安装运行库需要 PATH 中的 Python 和 pip。"));
+        if let Some(result)=poll(&mut self.model_job) {self.model_error=result.err();}
+        for (engine, label) in [("sensevoice", "SenseVoice"), ("zipformer", "Zipformer")] {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(label);
+                crate::third_party::component_status_badge(ui, crate::live_subtitle::model_installed(engine));
+                if ui.add_enabled(installed() && self.job.is_none() && self.model_job.is_none(),egui::Button::new(tr("安装 / 校验语言模型"))).clicked() {
+                    self.model_error=None;self.model_progress=Shared::default();
+                    let progress=self.model_progress.clone();
+                    run(&mut self.model_job,ui.ctx(),move || {
+                        let _guard=COMPONENT_ACCESS.lock().unwrap();
+                        run_install_command(crate::live_subtitle::worker(engine,"zh","prepare")?,&progress)?;
+                        Ok(component()?)
+                    });
+                }
+            });
+            if engine=="sensevoice" {
+                for (_,label) in LANGUAGES {ui.label(format!("  • {}",tr(label)));}
+                ui.small(tr("五种语言共用一个约 240 MB 模型，安装一次即可全部使用。"));
+            } else {
+                ui.small(tr("中英双语流式模型，约 198 MB；不包含日语、韩语或粤语。"));
+                ui.hyperlink_to(tr("组件来源与许可"),"https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20");
+            }
+        }
+        if self.model_job.is_some() {self.model_progress.show_for(ui,"ASR");ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));}
+        if let Some(error)=&self.model_error {ui.colored_label(ui.visuals().error_fg_color,error);self.model_progress.show_log(ui);}
         ui.hyperlink_to(tr("组件来源与许可"), "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/blob/main/LICENSE");
         ui.hyperlink_to(tr("下载 Python"), "https://www.python.org/downloads/windows/");
         ui.small(tr("使用传统安装器时，勾选 Add Python to PATH 并保留 pip。安装后重启本程序。"));
@@ -229,12 +257,15 @@ impl GenerationStage {
     }
 }
 
-pub(crate) const LANGUAGES: [(&str, &str); 2] = [("zh", "国语"), ("en", "英语")];
+pub(crate) const LANGUAGES: [(&str, &str); 5] = [("zh", "国语"), ("en", "英语"), ("ja", "日语"), ("ko", "韩语"), ("yue", "粤语")];
 
 pub(crate) fn language_code(language: Option<&str>) -> Option<&'static str> {
     match language {
         Some("国语" | "中文") => Some("zh"),
         Some("英语") => Some("en"),
+        Some("日语") => Some("ja"),
+        Some("韩语") => Some("ko"),
+        Some("粤语") => Some("yue"),
         _ => None,
     }
 }

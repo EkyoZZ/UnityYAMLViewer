@@ -6,8 +6,6 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-component, language = sys.argv[1:]
-sys.path.insert(0, component)
 SAMPLE_RATE = 16000
 
 
@@ -55,6 +53,7 @@ def model_file(name, url, limit, sha256=None):
                     raise ValueError(f"Model file exceeds download limit: {name}")
                 digest.update(chunk)
                 staging.write(chunk)
+                print(f"Progress {size} of {limit}", file=sys.stderr, flush=True)
             if size == 0 or (response.headers.get("Content-Length") and
                              size != int(response.headers["Content-Length"])):
                 raise ValueError(f"Incomplete model download: {name}")
@@ -66,7 +65,7 @@ def model_file(name, url, limit, sha256=None):
     return str(destination)
 
 
-def sensevoice():
+def sensevoice_engine(language, max_speech_duration=15.0):
     import sherpa_onnx
 
     release = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
@@ -81,12 +80,17 @@ def sensevoice():
     config = sherpa_onnx.VadModelConfig()
     config.silero_vad.model = model_file("silero_vad.onnx", release + "silero_vad.onnx", 8 * 1024 * 1024)
     config.silero_vad.min_silence_duration = 0.3
-    config.silero_vad.max_speech_duration = 15.0
+    config.silero_vad.max_speech_duration = max_speech_duration
     config.sample_rate = SAMPLE_RATE
     vad = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=60)
     recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
         model=model, tokens=tokens, language=language, num_threads=2, use_itn=True,
     )
+    return recognizer, vad, config.silero_vad.window_size
+
+
+def sensevoice():
+    recognizer, vad, window_size = sensevoice_engine(language)
     cues = []
 
     def drain():
@@ -102,7 +106,7 @@ def sensevoice():
             add_cue(cues, stream.result.text, start, duration)
 
     start_transcribing()
-    for samples in pcm_chunks(config.silero_vad.window_size):
+    for samples in pcm_chunks(window_size):
         vad.accept_waveform(samples)
         drain()
     vad.flush()
@@ -110,5 +114,8 @@ def sensevoice():
     return cues
 
 
-cues = sensevoice()
-print("\nUNITY_SUBTITLE " + json.dumps("".join(cues)))
+if __name__ == "__main__":
+    component, language = sys.argv[1:]
+    sys.path.insert(0, component)
+    cues = sensevoice()
+    print("\nUNITY_SUBTITLE " + json.dumps("".join(cues)))
