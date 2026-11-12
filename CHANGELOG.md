@@ -2,7 +2,7 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
-- [1.3.6：字幕生成／翻译／编辑、Windows 录屏与播放优化（正式版候选已构建，待发布）](docs/versions/1.3.6.md) · [发布说明](docs/releases/1.3.6.md)
+- [1.3.6：字幕生成／翻译／编辑、Windows 录屏与播放优化（已正式发布）](docs/versions/1.3.6.md) · [发布说明](docs/releases/1.3.6.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.6)
 
 - [1.3.5：电视／电台列表、多源切换与播放体验（已正式发布）](docs/versions/1.3.5.md) · [发布说明](docs/releases/1.3.5.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.5)
 

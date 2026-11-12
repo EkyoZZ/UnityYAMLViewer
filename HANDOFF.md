@@ -1,3 +1,11 @@
+# 当前发布：1.3.6（已正式发布）
+
+- 用户明确授权发布到 GitHub。北京时间 2026-11-12 22:16:43 正式发布 v1.3.6，Release ID 443041359，显示标题仅 v1.3.6，非草稿、非预发布，latest API 已确认为最新稳定版。标签指向 3ae9149ebc048883dbd5fb1e7ef9cfeed120f39e；该提交相对构建基准仅增加发布资料，313 项构建输入字节一致，无需重新编译。
+- 已上传 UnityYAMLViewer-v1.3.6-windows-x64.exe（33,457,664 字节）及 SHA256SUMS.txt；GitHub 返回的两个附件大小与 SHA-256 均与本地一致。EXE SHA-256：CF0392D497503E8158C6A425C595E09EDDCBD6F57543EACF6A07D864F54C326D。
+- 发布地址：[v1.3.6](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.6)。公开正文使用已准备的更新内容和已知限制，中央大数字倒计时未显示仍明确保留。
+- 发布前本地／远程 master 一致且工作区干净；用户已提交发布准备资料。未重新编译，未改动 v1.3.5 或其他历史 Release。发布核验：target/v1.3.6-publish-audit.json、target/v1.3.6-upload-verification.json、target/v1.3.6-published.json、target/v1.3.6-published-verification.json。
+- 本轮发布后的状态回填仅修改本地文档，未自动提交／推送；下方准备、迁移及旧版本记录保留当时时点事实。运行验证范围仍以用户已确认的操作及既有测试记录为准。
+
 # 1.3.6 正式版发布准备完成（尚未正式发布）
 
 - 2026-11-12，用户明确授权编译及准备正式版。测试／构建前均确认程序未运行且目标 EXE 独占访问通过；Windows x64 Release 离线构建成功（69.28 秒），文件／产品版本均为 1.3.6；33,457,664 字节，SHA-256：CF0392D497503E8158C6A425C595E09EDDCBD6F57543EACF6A07D864F54C326D。未自动启动程序。
