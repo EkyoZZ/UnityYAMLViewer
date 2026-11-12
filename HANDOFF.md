@@ -1,4 +1,14 @@
-# 当前开发：1.3.6（尚未构建此版号／未发布）
+# 1.3.6 正式版发布准备完成（尚未正式发布）
+
+- 2026-11-12，用户明确授权编译及准备正式版。测试／构建前均确认程序未运行且目标 EXE 独占访问通过；Windows x64 Release 离线构建成功（69.28 秒），文件／产品版本均为 1.3.6；33,457,664 字节，SHA-256：CF0392D497503E8158C6A425C595E09EDDCBD6F57543EACF6A07D864F54C326D。未自动启动程序。
+- 主程序 target/release/unity_yaml_viewer.exe；候选 target/releases/v1.3.6/UnityYAMLViewer-v1.3.6-windows-x64.exe。已核对二者哈希一致、PE 为 AMD64，文件／产品版本为 1.3.6；同目录 SHA256SUMS.txt 和 release-notes.md 已准备。
+- 录屏 PCM 2 项、共用错误日志 1 项针对性测试全部通过。日志 target/v1.3.6-pcm-tests.log、target/v1.3.6-error-log-tests.log；构建日志 target/v1.3.6-release-build.log，核验 target/v1.3.6-release-verification.json。仅保留 spine38 既有 158 项及 VideoSettings::configure 未使用警告。
+- 构建源码提交 2e56d71875afb7d6beb15468487afa1422e7ab5f；313 项构建输入快照 target/v1.3.6-prepared-source-manifest.json 已保存且构建前后相同。后续提交发布资料后仍需按快照核对；快照不作为编译器来源证明。
+- 发布说明 docs/releases/1.3.6.md，版本状态与索引已同步。公开正文仅包含更新内容和使用限制；Release 显示标题仅 v1.3.6，计划为正式稳定版。
+- 用户已确认录屏修复与已体验操作通过；中央大数字倒计时未看到，按要求暂不调整并在发布说明披露。没有把测试／构建成功当作所有设备或新 GUI 全面验证。
+- 尚未提交本轮文档／推送、创建标签或 GitHub Release，也未上传附件。当前正式发布记录仍为 v1.3.5；不得仅因候选构建成功改为“已正式发布”。以下交接保留各自时点事实。
+
+# 1.3.6 版本迁移交接（当时尚未构建此版号）
 
 - 2026-11-12，按用户要求将 Cargo.toml／Cargo.lock 升至 1.3.6，并将 v1.3.5 标签之后的开发记录迁入 docs/versions/1.3.6.md。1.3.5 版本记录以 7089dc2 的发布核验补记为基线，关于摘要恢复 v1.3.5 标签内容；正式发布资料、标签、附件和哈希不变。
 - 1.3.6 包含字幕生成／实时识别／翻译／缓存／独立编辑、字幕样式与导出优化、GPU 播放和图片预览改进、Windows 录屏与共用 error.log。最终范围及暂缓事项见版本记录；Moonshine／OPUS-MT 仅保留历史开发事实，已不提供入口。
