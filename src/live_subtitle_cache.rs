@@ -13,6 +13,8 @@ use std::{
 const LIMIT: usize = 64 * 1024 * 1024;
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Cue {
+    #[serde(default)]
+    pub language:Option<String>,
     pub start: f64,
     pub end: f64,
     pub text: String,
@@ -41,7 +43,7 @@ pub(crate) fn key(
                 engine,
                 language,
                 identity,
-                "sherpa-onnx==2.0.1",
+                "sherpa-onnx==2.0.1/segmentation-v2",
                 if engine == "sensevoice" {
                     "2365baeacb507f821a0c8120fcee3d484dba7a07"
                 } else {
@@ -188,6 +190,7 @@ pub(crate) fn load(key: &str) -> Replay {
                 continue;
             }
             cues.push(Cue {
+                language:event.language,
                 start: event.start,
                 end: event.end,
                 text: event.text,
@@ -281,6 +284,7 @@ impl Cache {
         engine: &str,
         language: &str,
         identity: Option<&str>,
+        ahead: bool,
     ) -> Result<Self, String> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = crate::app_cache::root()
@@ -316,8 +320,8 @@ impl Cache {
         let file_identity = crate::media_history::Identity::read(source);
         let metadata = serde_json::json!({"kind":"session","schema":1,"created_unix_ms":now(),"source_key":source_key,
             "local_path":file_identity.as_ref().map(|_|canonical.to_string_lossy()),"file_identity":file_identity,"audio_stream_index":track,
-            "engine":engine,"language":language,"runtime":"sherpa-onnx==2.0.1","model":if engine=="sensevoice" {"sensevoice-int8-2024-07-17"}else{"zipformer-zh-en-98590b7ed6443e77b714204da2757d75e1a642f4"},
-            "time_base":"media_seconds","coverage":"played_audio_only","automatic_correction":false,"reuse_identity":identity});
+            "engine":engine,"language":language,"runtime":"sherpa-onnx==2.0.1/segmentation-v2","model":if engine=="sensevoice" {"sensevoice-int8-2024-07-17"}else{"zipformer-zh-en-98590b7ed6443e77b714204da2757d75e1a642f4"},
+            "time_base":"media_seconds","coverage":if ahead {"lookahead_audio"}else{"played_audio_only"},"automatic_correction":false,"reuse_identity":identity});
         let mut cache = Self {
             json,
             srt,

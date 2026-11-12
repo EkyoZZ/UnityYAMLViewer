@@ -10,7 +10,7 @@ impl Track {
     pub fn subtitle_encoder(&self,container:usize)->Option<&'static str>{
         let text=matches!(self.codec.as_str(),"subrip"|"ass"|"ssa"|"webvtt"|"mov_text"|"text");
         match container {
-            0|3|7 if text=>Some("mov_text"),1 if text=>Some("webvtt"),2 if text=>Some("srt"),
+            0|3|7 if text=>Some("mov_text"),1 if text=>Some("webvtt"),2 if matches!(self.codec.as_str(),"ass"|"ssa")=>Some("ass"),2 if text=>Some("srt"),
             2 if matches!(self.codec.as_str(),"dvd_subtitle"|"hdmv_pgs_subtitle")=>Some("copy"),
             6 if self.codec=="dvb_subtitle"=>Some("copy"),_=>None
         }
@@ -128,6 +128,17 @@ impl Tracks {
 mod tests{
     use super::*;
     #[test]
+    fn ass_clipping_retains_headers_tags_layers_and_commas(){
+        let text="[Script Info]\nPlayResX: 1920\n[V4+ Styles]\nStyle: Fancy,Arial,40\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 3,0:00:01.00,0:00:04.00,Fancy,A,10,20,30,,{\\pos(20,30)\\fad(100,200)}hello,world\nDialogue: 0,0:00:08.00,0:00:09.00,Fancy,,0,0,0,,outside\n";
+        let clipped=clip_ass(text,2.0,3.0);
+        assert!(clipped.contains("Style: Fancy,Arial,40"));
+        assert!(clipped.contains("Dialogue: 3,0:00:00.00,0:00:02.00,Fancy,A,10,20,30,,{\\pos(20,30)\\fad(100,200)}hello,world"));
+        assert!(!clipped.contains("outside"));
+        let mut track=Track{path:PathBuf::new(),index:0,subtitle:true,codec:"ass".into(),language:"und".into(),title:String::new(),enabled:true,default:false,forced:false};
+        assert_eq!(track.subtitle_encoder(2),Some("ass"));assert_eq!(track.subtitle_encoder(0),Some("mov_text"));
+        track.codec="subrip".into();assert_eq!(track.subtitle_encoder(2),Some("srt"));
+    }
+    #[test]
     fn clips_overlapping_cues_and_rebases_times(){
         let text="1\r\n00:00:00,100 --> 00:00:01,600\r\nfirst\r\n\r\n2\r\n00:00:02,000 --> 00:00:03,000\r\noutside\r\n";
         let clipped=clip_subtitle(text,0.4,1.1);
@@ -175,6 +186,32 @@ pub(crate) fn clip_subtitle(text:&str,start:f64,duration:f64)->String{
     result
 }
 
+pub(crate) fn clip_ass(text:&str,start:f64,duration:f64)->String {
+    let mut output=String::new();
+    for line in text.lines(){
+        if let Some(body)=line.strip_prefix("Dialogue:") {
+            let mut fields:Vec<String>=body.splitn(10,',').map(str::to_owned).collect();
+            if fields.len()!=10 {continue;}
+            let parse=|value:&str|->Option<f64>{let parts:Vec<_>=value.trim().split(':').collect();if parts.len()!=3{return None;} Some(parts[0].parse::<f64>().ok()?*3600.0+parts[1].parse::<f64>().ok()?*60.0+parts[2].parse::<f64>().ok()?)};
+            let (Some(a),Some(b))=(parse(&fields[1]),parse(&fields[2]))else{continue;};
+            let a=(a-start).max(0.0);let b=(b-start).min(duration);
+            if b<=a||a>=duration{continue;}
+            let format=|time:f64|{let cs=(time*100.0).round() as u64;format!("{}:{:02}:{:02}.{:02}",cs/360000,cs/6000%60,cs/100%60,cs%100)};
+            fields[1]=format(a);fields[2]=format(b);
+            output.push_str(&format!("Dialogue:{}\n",fields.join(",")));
+        }else{output.push_str(line);output.push('\n');}
+    }
+    output
+}
+
+pub(crate) fn burn_filter(path:&Path,start:f64)->String {
+    // FFmpeg filtergraph and option escaping are separate layers.
+    let normalized=path.to_string_lossy().replace('\\',"/");
+    let option:String=normalized.chars().map(|c|if matches!(c,'\\'|':'|'\'')||c.is_whitespace(){format!("\\{c}")}else{c.to_string()}).collect();
+    let value:String=option.chars().map(|c|if matches!(c,'\\'|'\''|'['|']'|','|';')||c.is_whitespace(){format!("\\{c}")}else{c.to_string()}).collect();
+    format!("setpts=PTS-STARTPTS+{start}/TB,subtitles=filename={value},setpts=PTS-STARTPTS")
+}
+
 pub fn configure(cmd:&mut std::process::Command,tracks:&[Track],source:&Path,container:usize,start:f64,duration:f64,ffmpeg:&Path,temp:&Path)->Result<TemporaryInputs,String>{
     if container!=9&&tracks.iter().any(|t|t.enabled&&!t.supported(container)){return Err("Container cannot retain selected tracks".to_owned());}
     let selected:Vec<_>=tracks.iter().filter(|t|t.enabled&&t.supported(container)).collect();
@@ -183,12 +220,13 @@ pub fn configure(cmd:&mut std::process::Command,tracks:&[Track],source:&Path,con
     let mut temporary=TemporaryInputs(Vec::new());
     let mut subtitle_inputs=std::collections::HashMap::new();
     for (index,track) in selected.iter().enumerate().filter(|(_,t)|t.subtitle&&t.subtitle_encoder(container)!=Some("copy")) {
-        let output=command(ffmpeg).args(["-nostdin","-v","error","-i"]).arg(&track.path).args(["-map",&format!("0:{}",track.index),"-c:s","srt","-f","srt","pipe:1"]).output().map_err(|e|e.to_string())?;
+        let format=if track.subtitle_encoder(container)==Some("ass"){"ass"}else{"srt"};
+        let output=command(ffmpeg).args(["-nostdin","-v","error","-i"]).arg(&track.path).args(["-map",&format!("0:{}",track.index),"-c:s",format,"-f",format,"pipe:1"]).output().map_err(|e|e.to_string())?;
         if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).to_string());}
         let text=String::from_utf8(output.stdout).map_err(|e|e.to_string())?;
-        let text=clip_subtitle(&text,start,duration);
-        if text.is_empty(){return Err(format!("{}: {} #{}",tr("所选片段没有此字幕的有效内容，请取消该轨道后导出。"),track.path.display(),track.index));}
-        let path=temp.with_extension(format!("subtitle-{index}.srt"));
+        let text=if format=="ass"{clip_ass(&text,start,duration)}else{clip_subtitle(&text,start,duration)};
+        if text.is_empty()||(format=="ass"&&!text.lines().any(|line|line.starts_with("Dialogue:"))){return Err(format!("{}: {} #{}",tr("所选片段没有此字幕的有效内容，请取消该轨道后导出。"),track.path.display(),track.index));}
+        let path=temp.with_extension(format!("subtitle-{index}.{format}"));
         let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map_err(|e|e.to_string())?;
         temporary.0.push(path.clone());
         use std::io::Write;
@@ -201,6 +239,18 @@ pub fn configure(cmd:&mut std::process::Command,tracks:&[Track],source:&Path,con
             cmd.args(["-ss",&start.to_string(),"-t",&duration.to_string(),"-i"]).arg(&track.path);
             inputs.push(track.path.clone());
         }
+    }
+    if container==2 && selected.iter().any(|track|track.subtitle_encoder(container)==Some("ass")) {
+        for track in selected.iter().filter(|track|track.subtitle_encoder(container)==Some("ass")) {
+            if !inputs.contains(&track.path){cmd.arg("-i").arg(&track.path);inputs.push(track.path.clone());}
+        }
+
+        for (index,path) in inputs.iter().enumerate(){
+            if path==source || selected.iter().any(|track|track.path==*path && track.subtitle_encoder(container)==Some("ass")) {
+                cmd.args(["-map",&format!("{index}:t?")]);
+            }
+        }
+        cmd.args(["-c:t","copy"]);
     }
     cmd.args(["-map","0:V:0"]);
     let mut audio=0;let mut subtitle=0;

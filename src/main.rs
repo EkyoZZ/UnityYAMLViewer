@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod update_history;
+mod error_log;
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -33,13 +34,19 @@ mod media_trim;
 mod media_edit_queue;
 mod video_crop;
 mod video_extract;
+mod screen_record;
 mod background_tasks;
 mod network_video;
 mod export_tracks;
 mod subtitle_player;
+mod subtitle_document;
+mod subtitle_wrap;
 mod video_frame_index;
 mod auto_subtitle;
 mod live_subtitle;
+mod live_translation;
+mod ai_runtime;
+mod subtitle_lookahead;
 mod live_subtitle_cache;
 mod subtitle_translation;
 mod audio_edit;
@@ -217,6 +224,7 @@ struct ViewerApp {
     url_hls_candidates: Vec<String>,
     url_hls_page: String,
     video_extract: video_extract::Window,
+    screen_record: screen_record::Recorder,
     stream_titles: std::collections::HashMap<PathBuf, String>,
     url_error: Option<String>,
     url_job: Option<(String, mpsc::Receiver<Result<remote_file::Opened, String>>)>,
@@ -1603,6 +1611,10 @@ impl ViewerApp {
 }
 
 impl eframe::App for ViewerApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // Transparent tool viewports paint their own background and shadow.
+        [0.0; 4]
+    }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.assets.cancel_network_downloads();
         self.assets.pause_media();
@@ -1620,6 +1632,9 @@ impl eframe::App for ViewerApp {
             self.open_url_input(url, ctx);
         }
         native_window::track_main_window(ctx);
+        if let Some(path)=self.screen_record.show(ctx) {
+            media_preview::open_recorded_video_editor(path,ctx);
+        }
         if let Some(source) = self.video_extract.show(ctx, self.third_party.is_open()) {
             let recent = source.url.clone();
             self.open_network_video(source, recent, true);
@@ -1808,6 +1823,10 @@ impl eframe::App for ViewerApp {
                         }
                         if ui.button(localization::tr("视频提取")).clicked() {
                             self.video_extract.open(ctx);
+                            ui.close_menu();
+                        }
+                        if ui.button(localization::tr("录屏")).clicked() {
+                            self.screen_record.open();
                             ui.close_menu();
                         }
                         ui.menu_button(crate::localization::tr("最近打开"), |ui| {
@@ -2754,7 +2773,7 @@ impl eframe::App for ViewerApp {
                         in_use.extend(media_preview::trim_files_in_use());
                         if let Ok(executable) = std::env::current_exe() { in_use.push(executable); }
                         if let Some(directory) = self.updater.staged.as_ref().and_then(|path| path.parent()) { in_use.push(directory.to_owned()); }
-                        let busy = self.url_job.is_some() || self.updater.downloading || self.assets.network_downloads_active() || self.video_extract.busy() || background_tasks::active(ui.ctx())
+                        let busy = self.url_job.is_some() || self.updater.downloading || self.assets.network_downloads_active() || self.video_extract.busy() || self.screen_record.busy() || background_tasks::active(ui.ctx())
                             || ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("asset_catalog_loading"))).unwrap_or(false);
                         self.cache_panel.show(ui, in_use, busy);
                     });
@@ -4655,19 +4674,21 @@ fn show_game_object_properties(ui:&mut egui::Ui,text:&str) {
 }
 
 fn main() -> eframe::Result {
+    error_log::init();
     if let Some(code) = command_line::dispatch_pngopt() { std::process::exit(code); }
     if let Some(code)=asset_viewer::nine_slice::cli::dispatch() {std::process::exit(code);}
     let (command_inbox, startup_paths) = match command_line::start() {
         Ok(command_line::Startup::Primary(inbox, paths)) => (inbox, paths),
         Ok(command_line::Startup::Forwarded) => return Ok(()),
         Err(error) => {
+            error_log::error("startup/command_line", &error);
             rfd::MessageDialog::new().set_title("Unity YAML Viewer")
                 .set_description(format!("无法打开命令行请求：{error}"))
                 .set_level(rfd::MessageLevel::Error).show();
             return Ok(());
         }
     };
-    eframe::run_native(
+    let result = eframe::run_native(
         "Unity YAML Viewer",
         eframe::NativeOptions {
             renderer: eframe::Renderer::Glow,
@@ -4695,7 +4716,9 @@ fn main() -> eframe::Result {
             if app.settings.auto_check_updates { app.updater.check(&creation_context.egui_ctx, false); }
             Ok(Box::new(app))
         }),
-    )
+    );
+    if let Err(error) = &result { error_log::error("application", error); }
+    result
 }
 
 fn application_icon() -> Arc<egui::IconData> {

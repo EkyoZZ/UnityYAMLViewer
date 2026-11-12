@@ -443,7 +443,7 @@ fn themed_confirmation(
             menu: null(),
             name: name.as_ptr(),
         };
-        unsafe { RegisterClassW(&class) != 0 }
+        unsafe { RegisterClassW((&class as *const WindowClass).cast()) != 0 }
     }) {
         return None;
     }

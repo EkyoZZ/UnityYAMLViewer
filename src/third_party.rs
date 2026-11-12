@@ -262,7 +262,7 @@ impl LibreOfficeSettings {
     }
 }
 #[derive(Default)]
-pub struct Manager {open:bool,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings,yt_dlp:yt_dlp::Settings,sensevoice:crate::auto_subtitle::Installer,opus_mt:crate::subtitle_translation::Installer}
+pub struct Manager {open:bool,ai:crate::ai_runtime::Controls,ffmpeg:crate::media_tools::DecoderSettings,pdfium:PdfiumSettings,libreoffice:LibreOfficeSettings,yt_dlp:yt_dlp::Settings,sensevoice:crate::auto_subtitle::Installer,translation:crate::subtitle_translation::Installer}
 impl Manager {
     pub fn is_open(&self)->bool{self.open}
     pub fn open(&mut self,ctx:&egui::Context){if !self.is_open(){self.ffmpeg.refresh(ctx);}self.open=true;crate::native_window::wake(ctx,egui::Id::new("third_party_window"));}
@@ -273,8 +273,9 @@ impl Manager {
         if !self.open{return;}
         crate::native_window::Window::new(tr("第三方支持")).id(egui::Id::new("third_party_window")).open(&mut self.open).default_width(560.0).default_height(500.0).show(ctx,|ui|{
             self.ffmpeg.show(ui);
+            ui.separator();self.ai.show(ui);
             ui.separator();self.sensevoice.show(ui);
-            ui.separator();self.opus_mt.show(ui);
+            ui.separator();self.translation.show(ui);
             ui.separator();self.yt_dlp.show(ui);
             ui.separator();
             crate::theme::section_heading(ui, tr("网页浏览器HLS嗅探助手"));

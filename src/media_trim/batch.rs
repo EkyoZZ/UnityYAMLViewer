@@ -28,6 +28,9 @@ impl Default for MergeSettings {
 }
 
 impl MergeSettings {
+    pub(crate) fn burn_subtitle(&self)->Option<&Path>{self.video.burn_subtitle.as_deref()}
+    pub(crate) fn set_burn_subtitle(&mut self,path:Option<PathBuf>){self.video.burn_subtitle=path;}
+
     pub(crate) fn validate_project(&self) -> Result<(), String> {
         super::EditState::from_merge(self.video.clone(), self.audio.clone()).validate()?;
         if self.size.iter().any(|n| *n < 2 || *n > 8192 || *n % 2 != 0) {
@@ -207,6 +210,10 @@ pub(crate) fn export_queue(
         return Ok(());
     };
     if let Some(settings) = &merge {
+        if first.video && settings.video.container==2 && plans.iter().any(|plan|plan.tracks.iter().any(|track|track.enabled&&track.subtitle&&matches!(track.codec.as_str(),"ass"|"ssa"))) {
+            return Err(tr("ASS 特效字幕请使用单项或队列导出，合并导出暂不保留其样式。").into());
+        }
+
         if first.video && settings.video.container >= 9 {
             return Err(tr("合并模式请选择普通视频格式，GIF 和 PNG 序列可用队列导出。").into());
         }
@@ -715,6 +722,10 @@ fn encode_merge_piece(
             "{},scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:flags=lanczos,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=0x{r:02X}{g:02X}{b:02X},setsar=1",
             encoding.spatial_filter("lanczos")
         );
+        let filter=if let Some(path)=plan.video_settings.burn_subtitle.as_ref().or(settings.video.burn_subtitle.as_ref()) {
+            if !path.is_file(){return Err(format!("Subtitle file unavailable: {}",path.display()));}
+            format!("{},{}",crate::export_tracks::burn_filter(path,plan.start),filter)
+        }else{filter};
         encoding.configure_with_filter(&mut cmd, Some(&filter));
         if encoding.use_two_pass() {
             let prefix = target.with_extension("pass");

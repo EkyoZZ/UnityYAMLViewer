@@ -90,6 +90,9 @@ impl Task {
     }
 
     pub fn finish(self, outcome: Outcome) {
+        if let Outcome::Failed(error) = &outcome {
+            crate::error_log::error("background_task", format!("{} / {}: {error}", self.entry.kind, self.entry.name));
+        }
         *self.entry.state.lock().unwrap() = State::Finished {
             outcome,
         };
@@ -101,6 +104,7 @@ impl Drop for Task {
     fn drop(&mut self) {
         let mut state = self.entry.state.lock().unwrap();
         if matches!(*state, State::Running(_)) {
+            crate::error_log::error("background_task", format!("{} / {}: task interrupted", self.entry.kind, self.entry.name));
             *state = State::Finished {
                 outcome: Outcome::Failed(tr("后台任务已中断").into()),
             };

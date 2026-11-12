@@ -1898,8 +1898,6 @@ dependencies = [
 [[package]]
 name = "glutin-winit"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85edca7075f8fc728f28cb8fbb111a96c3b89e930574369e3e9c27eb75d3788f"
 dependencies = [
  "cfg_aliases",
  "glutin",
@@ -5016,7 +5014,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "unity_yaml_viewer"
-version = "1.3.5"
+version = "1.3.6"
 dependencies = [
  "ab_glyph",
  "arboard",
@@ -5028,6 +5026,7 @@ dependencies = [
  "ico",
  "image",
  "libloading",
+ "log",
  "png 0.18.1",
  "pulldown-cmark",
  "quick-xml 0.42.0",
@@ -5044,6 +5043,7 @@ dependencies = [
  "sha2",
  "tokio",
  "ufbx",
+ "windows 0.54.0",
  "winres",
  "zip 2.4.2",
 ]

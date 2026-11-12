@@ -224,7 +224,7 @@ struct ParagraphFormat {
 
 #[link(name = "user32")]
 unsafe extern "system" {
-    fn RegisterClassW(class: *const WindowClass) -> u16;
+    fn RegisterClassW(class: *const std::ffi::c_void) -> u16;
     fn CreateWindowExW(
         ex: u32,
         class: *const u16,
@@ -892,7 +892,7 @@ fn run(
                 menu: std::ptr::null(),
                 name: class_name.as_ptr(),
             };
-            if unsafe { RegisterClassW(&class) } == 0 {
+            if unsafe { RegisterClassW((&class as *const WindowClass).cast()) } == 0 {
                 Err(std::io::Error::last_os_error().to_string())
             } else {
                 Ok(())

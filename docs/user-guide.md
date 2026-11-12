@@ -478,6 +478,10 @@ Vert, Frag and helpers use named, typed boundary inputs wired to internal operat
 
 ### 音视频编辑列表
 
+视频编辑暂停时，左／右方向键后退／前进一帧；时间轴缩放后，Ctrl+左／右方向键每次向对应方向平移五帧，不改变播放位置。
+
+In the video editor, Left/Right steps backward/forward one frame while paused. On a zoomed timeline, Ctrl+Left/Right pans the view by five frames without changing the playback position.
+
 编辑窗口左上角的列表图标用于展开或收起侧栏，旁边的后台任务中心与主窗口共享进度和结果。展开后可点“添加文件…”或拖入同类音视频文件，点击整张卡片切换编辑，按住左上角的双横线手柄拖动排序，右上角叉号用于移除条目。每条独立保留裁切范围、画面处理和导出设置。同一路径在一个列表中保留一项。
 
 - “队列”模式按列表顺序分别导出。“另存为”选择输出目录，自动给同名成品增加编号。列表只有一条时仍使用原来的文件保存对话框。
@@ -544,14 +548,14 @@ Canvas Size crops or extends the video area, up to 8192 pixels per side. X/Y des
 - SenseVoice：普通话、英语、日语、韩语、粤语全部列出，共用约 240 MB 模型，安装一次即可全部使用。可在“第三方支持”安装运行库并点击“安装 / 校验语言模型”，也可在首次识别时下载模型。识别语言由用户选择，短句停顿后显示；持续讲话约 6 秒分段。
 - Zipformer：本轮提供约 198 MB 的 INT8 中英双语流式模型，连续更新当前识别文字。它同时识别中英，不强制只识别其中一种；此模型不包含日语、韩语或粤语。可在同一组件窗口按需安装，首次启用也会下载。
 - 模型准备完成后从当前播放位置开始，不补识别下载期间已经播放的内容。暂停时停止提供新音频，已经提交的短段可能稍后出字；跳转、重建播放、换音轨及关闭时清除旧会话，换引擎或语言也会重新开始。识别明显跟不上时停止字幕并提示，音频播放不等待识别。
-- 实时字幕为原文显示，会自动缓存并可导出 SRT，不包含实时翻译或双语生成；已有字幕文件的离线中英翻译仍独立使用。实时字幕覆盖层使用独立显示样式；若已有文字字幕重叠，可先关闭原有字幕轨。只处理开启之后实际播放的内容，不是整片转写或原有字幕的替代备份。
+- 实时字幕可显示原文，开启M2M100实时翻译后可选仅译文或原文／译文双语；自动缓存与SRT导出目前仍只保存识别原文，字幕文件翻译独立使用。实时字幕覆盖层使用独立显示样式；若已有文字字幕重叠，可先关闭原有字幕轨。只处理开启之后实际播放的内容，不是整片转写或原有字幕的替代备份。
 
 Open **Live subtitles** on the video playback page; in fullscreen, use the video context menu. Local videos, online videos and channels reuse decoded audio from the selected playback track without opening another media connection. FFmpeg and the sherpa-onnx runtime are required.
 
 - **SenseVoice** lists Mandarin, English, Japanese, Korean and Cantonese. All five share one model of about 240 MB. Install the runtime and use **Install / verify language model** in Third-party Support, or download on first recognition. Select the source language; phrases appear after a pause, with continuous speech segmented at about six seconds.
 - **Zipformer** currently offers an INT8 Chinese/English bilingual streaming model of about 198 MB. It updates the current utterance continuously and recognizes both languages rather than forcing one. This model excludes Japanese, Korean and Cantonese. Install it from the component window or download on first use.
 - Recognition begins at the current playback position after model preparation; audio played during downloads is not recovered. Pausing stops new input, although pending phrases may arrive later. Seeking, restarting playback, changing tracks, closing, or changing engines/languages resets the session. If recognition falls behind, subtitles stop with a message while audio playback continues.
-- Live output displays source-language text, automatically caches recognition, and supports SRT export; live translation and bilingual output are not yet included. Existing offline Chinese/English subtitle-file translation remains separate. The live overlay has its own display style; disable an existing subtitle track if text overlaps. Only audio played after enabling recognition is processed.
+- Live output supports source text or M2M100 translated/bilingual display. Recognition caching and SRT export still contain source text only; subtitle-file translation remains separate. The live overlay has its own display style; disable an existing subtitle track if text overlaps. Only audio played after enabling recognition is processed.
 
 
 ### 实时字幕缓存与回放 / Live subtitle caching and replay
@@ -577,3 +581,341 @@ Caches reside under `live_subtitles` in the application cache. Each session is l
 字幕样式中的投影支持独立 X/Y 偏移，范围各为 -12 到 12；X 正值向右、Y 正值向下，负值向相反方向。描边仍用一个宽度值。旧版单个投影值会同时迁移到 X/Y，原字幕文件保持不变。此设置用于已有文字字幕的渲染，实时字幕覆盖层仍使用其独立样式。
 
 Subtitle styles provide independent shadow X/Y offsets from -12 to 12: positive X moves right and positive Y moves down. Outline retains a single width. Legacy scalar shadows migrate to both axes without changing source subtitle files. This setting affects existing text-subtitle rendering; the live overlay retains its independent style.
+
+
+实时字幕优先按短停顿断句，连续讲话按时间和长度分段；临时文字会等连续识别结果一致后更新。画面按左右边距自动换行，最多显示两排，极长文本显示最新尾部，缓存仍保留完整识别结果。生成的长字幕按标点或单词边界拆分，分段时间按文字长度估算，不等同逐字时间对齐；模型误识别出的重复词不自动删除。
+
+Live subtitles segment at short pauses, with duration/length limits for continuous speech. Partial text waits for agreement between consecutive hypotheses. Text wraps inside screen margins to at most two rows; exceptionally long text shows its latest tail while the full result remains cached. Generated long cues split at punctuation or word boundaries using proportional estimated timing, not word-level alignment. Repetitions recognized by the model are not automatically deleted.
+
+
+### 点播提前识别与翻译组件重试 / VOD lookahead and installation retries
+
+SenseVoice 的“点播提前识别字幕”默认启用，适用于本地有正时长的视频和已经确认 ENDLIST 的 HLS 点播。独立 FFmpeg 进程从当前播放位置解码后续音轨，在后台为识别器提供最多约 20 秒领先音频；结果写缓存，画面只按媒体时间显示对应确认字幕。暂停可继续补足这段窗口，跳转、换音轨、引擎或关闭会取消旧解码与识别会话；首次加载、跳至未缓存位置或识别慢于播放时仍可能暂时缺字幕，不保证零延迟。HLS 此模式会增加独立音轨读取的网络与解码开销，可关闭该选项；关闭后和直播一样复用播放 PCM，按句延迟显示。Zipformer 保持原有流式处理。提前识别片段也属于缓存内容，可能尚未被观看，不代表整片识别完成。
+
+M2M100 安装包括 Python 运行库、INT8 模型下载、校验及加载验证。下载到100%不代表安装完成；失败保留断点文件，最多重试三次，续传响应须验证，模型须通过固定大小及SHA-256校验。下载缓存位于组件目录 `m2m100-418m-ct2-int8-1/downloads`。网络失败仍需恢复连接，日志使用UTF-8。
+
+SenseVoice enables **Recognize VOD subtitles ahead** by default for finite local videos and HLS VOD with a verified ENDLIST. A separate FFmpeg process decodes the selected audio from the current position, feeding recognition up to about 20 seconds ahead. Results enter the cache and finalized cues display only at their media times. Pausing can fill the bounded window; seeking, track/engine changes and closing cancel the old session. Startup, uncached seeks and recognition slower than playback may still cause missing or late cues. HLS lookahead adds independent audio/network decoding; disable it to reuse playback PCM with phrase latency, as for live streams. Zipformer retains streaming processing. Cached lookahead may include content not yet watched and does not imply full-file completion.
+
+M2M100 installs the Python runtime, downloads the INT8 model, verifies checksums and checks loading. A 100% download is not installation completion. Downloads retry up to three times and retain validated resumable partials in `m2m100-418m-ct2-int8-1/downloads`. Network connectivity is required for installation; logs use UTF-8.
+
+
+字幕左右边距限定文字可用宽度，实时字幕以实际可见画面为范围，长词也会在框内折行。过小窗口会限制边距以保留最小文本区域。播放器的字幕样式优先于 ASS 单句边距、绝对定位及禁止换行设置；原字幕文件不改动，内嵌在视频像素中的字幕不受样式设置影响。
+
+Horizontal margins constrain subtitle text width. Live text uses the visible video area and wraps long words inside the box. Very small windows clamp margins to retain a minimal text area. Player styles take priority over ASS per-cue margins, absolute positioning and disabled wrapping. Source subtitle files stay unchanged; text burned into video pixels is unaffected.
+
+
+### M2M100 翻译与资源 / M2M100 translation and resource use
+
+字幕翻译仅使用M2M100 418M INT8（CTranslate2），界面开放中文、英语、日语、韩语间12个直接翻译方向，不含粤语。源语言从字幕信息预填，未知时需确认。在第三方支持安装，运行库位于M2M100专用目录；不再提供OPUS-MT安装和翻译入口。
+
+M2M100 从 JustFrederik 的社区 Fairseq 转换包固定版本下载，模型及分词 / 配置 / 词表 / 说明合计 494,252,337 字节，约 494 MB（471 MiB）；安装保留同等大小下载缓存以支持重试，模型和下载缓存合计约 1 GB，另加共享 Python 运行库，建议预留 2 GiB 硬盘空间。无需下载约 1.94 GB 原始权重或安装 Torch / Transformers 来转换。各文件固定大小和 SHA-256 校验，通过 CTranslate2 CPU INT8 加载及分词器检查后才发布到安装目录。来源标明社区转换，原模型 MIT；真实翻译质量与加载兼容性仍需本机验证。
+
+第三方支持显示运行内存预算 1–3 GiB，属于保守估算而非实测占用，输入长度、词表和线程都会影响结果。Windows 可在执行后显示最近安装校验或翻译进程的峰值工作集（不是整机内存、不是保证下次相同）。每次字幕翻译使用独立 Python 进程，父进程等待退出后保存结果；不会在主程序里常驻翻译模型，任务进程退出后模型占用由系统回收。模型文件和下载缓存留在硬盘供下次使用，重新翻译需要重新加载；持续任务中内存保持占用。
+
+翻译菜单选择源／目标语言，可选双语。输出使用 `.m2m100-ja-to-zh.srt` 等后缀，双语加 `.bilingual`，原文在上、译文在下并保留时间码。已有旧译文不删除，仍识别其语言方向后缀。超过512分词token的单句会报错要求先拆分。此菜单用于字幕文件翻译；实时翻译在实时字幕行单独开启，尚无自动校正。
+
+M2M100 418M INT8 (CTranslate2) is the sole subtitle translation model. The UI enables 12 direct directions among Chinese, English, Japanese and Korean, without Cantonese or pivoting. Confirm unknown source languages yourself. Install it through third-party support; the runtime lives in the M2M100 component directory. OPUS-MT installation and translation entries have been removed.
+
+The pinned community Fairseq conversion by JustFrederik totals 494,252,337 bytes, about 494 MB (471 MiB), including tokenizer, configuration, vocabulary and model card. Retained download files plus installed model total about 1 GB, excluding shared Python runtime; reserve 2 GiB. No 1.94 GB original weights, Torch or Transformers conversion are required. Fixed sizes/SHA-256 checks and CPU INT8/tokenizer loading precede installation publication. The source is identified as a community conversion of the MIT-licensed model; real translation quality and loading compatibility still need local validation.
+
+The component UI budgets 1–3 GiB RAM as an estimate, not a measurement. Windows can display the last installation-check or translation process peak working set, not total system memory or a promise for future tasks. Translation runs in a dedicated Python process, which exits before the parent saves output; the GUI does not retain the model. Process exit releases its model memory through the OS. Model files and retained downloads remain on disk; subsequent tasks reload them.
+
+Choose source/target languages and optional bilingual output. Filenames use suffixes such as `.m2m100-ja-to-zh.srt`, with `.bilingual` for source-then-translation output and unchanged timing. Existing legacy translations remain readable. Cues exceeding 512 input tokens fail explicitly. This menu translates subtitle files; live translation has separate live-subtitle controls. Automatic correction is not included.
+
+
+### 字幕位置及长句换行 / Subtitle placement and long lines
+
+字幕样式中的“字幕位置”可选顶部或底部，下方边距名称随之切换；旧设置默认底部。投影 X/Y 显示为输入框外标签。位置与边距应用于文字字幕，实时层沿用位置和边距，其字体和背景仍独立。文字字幕边距采用 ASS 脚本坐标，随画面缩放；实时层边距采用界面逻辑像素，两种渲染的数值不代表相同物理像素距离。
+
+无空格中文等长句不再只依赖 libass 自动换行：临时字幕根据脚本宽度、两侧边距、字号及字体测量插入明确换行；Windows 使用系统字体测量并保留字形回退 / 加粗余量，其他系统采用保守宽度估算。原有显式换行与格式标签保留，单句字体 / 字号 / 横向缩放服从播放器设置以免测量和实际宽度不一致。其他窗口同步样式也会重建临时字幕，避免残留旧边距；原字幕文件不改写。
+
+**Subtitle position** selects top or bottom, with a matching edge-margin label. Existing settings default to bottom. Shadow X/Y labels are outside the numeric inputs. Text subtitles and the live layer share position and margins, while live fonts/background remain separate. Text-subtitle margins use scaled ASS script coordinates; live margins use UI logical pixels, so equal numbers do not guarantee equal physical distances.
+
+Unspaced long text no longer depends solely on libass automatic wrapping. Temporary subtitle text receives explicit breaks based on script width, margins, font size and measured glyph widths. Windows uses system-font measurements with fallback/bold headroom; other platforms use conservative estimates. Existing explicit breaks and formatting tags remain, while per-cue font/size/scaling follow player settings so measured and rendered widths agree. Cross-window style synchronization rebuilds temporary subtitles rather than retaining old margins. Original subtitle files remain unchanged.
+
+
+### 统一样式、原生 ASS 与字幕导出 / Unified style, native ASS and export
+
+“字幕样式”顶部提供两种模式，默认“统一样式”：字体、位置、边距和显式换行服从播放器设置，适合普通文字字幕。选择“原生 ASS”后，跳过播放器的字体 / 定位 / 换行重写和强制样式；直接加载 UTF-8 ASS 文件时复制原内容作为临时渲染副本，保留样式表、定位、移动、淡入淡出、卡拉 OK、旋转 / 缩放等标签。SSA、内嵌文字字幕及其他格式仍经 FFmpeg 转成 ASS，效果受转换、libass 版本和本机字体影响；不包含安装字幕字体或保证全部特效。原生模式由字幕文件控制排版，播放器边距不强制生效；实时字幕覆盖层仍独立，不以 ASS 标签渲染。
+
+已载入文字字幕后，从字幕菜单的“导出当前字幕”选择 SRT 或 ASS。SRT 主要保存文字和时间码，无法保留 ASS 动画和布局。ASS 在统一模式下固化当前播放器样式及换行，在原生模式下保留临时副本的原生内容；采用 `.export.srt` / `.export.ass` 作为默认名字，另存不覆盖已有文件，成功后可定位文件。自动生成和翻译的默认输出仍为 SRT，生成后载入即可另存 ASS；实时缓存导出仍为 SRT。导出是字幕文件，不将字幕烧录进视频，也不嵌入字体。
+
+样式窗口已打开时，再从任意字幕入口点击“字幕样式”会唤醒同一窗口，保留未应用的草稿和字体搜索；关闭后重新打开才从当前已应用样式初始化。特效预设、逐字高亮编辑器与 ASS 标签编辑器尚未实现，当前支持播放与保留已有 ASS 标签。
+
+The style window offers **Unified style** by default, using player fonts, placement, margins and explicit wrapping. **Native ASS** skips player font/position/wrapping rewrites and forced styles. UTF-8 ASS files are copied directly into a temporary rendering file, preserving style tables, movement, fades, karaoke, rotation/scaling and other tags. SSA, embedded and other text formats still pass through FFmpeg conversion; effects depend on conversion, libass and installed fonts. Font installation and complete effect compatibility are not guaranteed. Native layout is controlled by the subtitle file rather than enforced margins; the live overlay remains separate.
+
+After loading text subtitles, use **Export current subtitles** in the subtitle menu to choose SRT or ASS. SRT primarily retains text/timing, not ASS animation/layout. Unified ASS export bakes current player styles and wrapping; native ASS export keeps the temporary file’s native content. Defaults use `.export.srt` / `.export.ass`, existing files are not overwritten, and successful output can be located. Generation and translation still default to SRT; load their output to export ASS. Live-cache export remains SRT. Export does not burn subtitles into video or embed fonts.
+
+Invoking the style window again refocuses the existing window while preserving pending edits and font search. Reopening after closing initializes from the applied style. Effect presets, a karaoke editor and an ASS tag editor are not implemented; current support plays and preserves existing ASS tags.
+
+
+统一样式的文字字幕边距明确采用“脚本单位”，不是百分比，也不是固定屏幕像素。脚本高度沿用字幕值（普通转换常为 288），宽度按当前视频比例校正；例如 16:9 视频采用 512×288 脚本，横向显示宽度为 744 像素时，20 单位约合 29 像素。播放器缩放时实际像素距离随之变化。原生 ASS 保留文件自身的脚本坐标；实时覆盖层仍以界面逻辑像素解释同一设置数值。
+
+Explicit wrapping now matches the unified ASS canvas aspect to the video while retaining script height. Margins are script units, not percentages or fixed screen pixels: a 16:9 video with a 512×288 script displayed 744 pixels wide gives about 29 displayed pixels for a 20-unit horizontal margin. Native ASS retains its original canvas; the live overlay still uses UI logical pixels. Font measurement uses GDI cell height rather than EM height, with bold measurement and a small rasterization allowance to avoid overly narrow CJK lines.
+
+
+样式窗口中的文字字幕修改会在停止输入约 180 ms 后预览（后台重新生成字幕，可能短暂刷新画面）；播放页显示“预览（尚未保存）”及当前预览模式。“应用”才保存为全局设置，“取消”或直接关闭恢复当前已保存样式。重复呼出保留草稿；导出当前字幕使用当时已生成的预览资产及对应样式。实时语音覆盖层仍只读取已保存的边距 / 位置，不预览该窗口的草稿。
+
+Text-subtitle style changes preview after about 180 ms without further edits, rebuilding subtitles in the background and potentially briefly refreshing the picture. The playback header identifies the mode and unsaved preview. Apply saves globally; Cancel or closing restores the saved style. Reopening preserves the draft, and exporting snapshots the prepared preview asset and its style. The live speech overlay still reads saved placement/margins rather than the dialog draft.
+
+
+### 长字幕分时显示 / Long subtitle paging
+
+统一样式会将超过两行容量的单行纯文本字幕优先按标点拆段，依次显示。每段至少1秒；没有逐字时间戳时按文字长度估算切换点，未保证逐字同步。显式多行、双语或ASS特效保留原分段，源文件不变。
+
+Unified style pages long plain single-line cues into at most two lines per page, preferring punctuation. Each page needs at least one second. Without word timestamps, transitions are estimated from text length. Explicit multiline, bilingual and ASS effects keep their original segmentation; source files remain unchanged.
+
+生成字幕也会按停顿、标点、视觉长度和目标时长拆段，并保存到SRT；实时最终字幕复用同一分段。SenseVoice连续识别段最长6秒。段内时间为长度估算，已有字幕与缓存需重新生成才能获得新分段。
+
+Subtitle generation also segments speech by pauses, punctuation, visual length and target duration, saving the result to SRT. Final live cues share this segmentation. Continuous SenseVoice recognition segments are capped at six seconds. Internal timing is estimated from text length; existing subtitles and caches require regeneration to receive the new segmentation.
+
+
+### 视频导出 ASS / ASS video export
+
+“添加字幕”可添加ASS／SSA。单项或队列导出选择MKV时保留ASS样式、定位与特效标签，并复制相关输入的字体附件；其他容器仍按其支持的文字字幕格式转换。字体未随输入提供时依赖播放器已安装字体。裁剪会重设字幕时间；跨片段起点的动画／卡拉OK可能从裁剪后的事件起点重新计时。多片段合并到MKV暂不接受ASS轨道，请使用单项／队列导出，或取消该字幕轨道并选择烧录。
+
+视频设置中的“烧录 ASS 字幕”选择外部ASS，按源视频绝对时间对齐，先渲染字幕再裁剪／缩放画面，因此画面裁剪也会裁掉对应字幕像素。烧录不可关闭，内嵌字幕仍按轨道列表独立导出；不需要重复字幕时取消该轨道。普通视频、双遍编码及合并片段支持烧录；GIF和PNG序列暂不支持。烧录依赖FFmpeg的libass和系统字体，不自动收集外部字体。所选ASS作为工程资产保存并随工程打包，保存后修改外部ASS不会改变已保存工程中的副本。
+
+Add ASS/SSA through “Add subtitles”. Individual or queued MKV exports retain ASS styles, positions and effect tags and copy attachments from the relevant inputs. Other containers convert to their supported text subtitle format. Fonts absent from attachments depend on the player’s installed fonts. Clipping rebases event times; animation or karaoke crossing the trim start may restart relative to the clipped event. Merging ASS tracks into MKV is not yet supported: use individual/queue export or deselect the track and burn it in.
+
+“Burn ASS subtitles” selects an external ASS file aligned to source video times. Rendering occurs before crop/scale, so cropping also cuts subtitle pixels. Burned subtitles cannot be disabled; embedded tracks are exported independently. Deselect unwanted duplicate subtitle tracks. Regular video, two-pass encoding and merged pieces support burn-in; GIF and PNG sequences do not. Burn-in requires FFmpeg libass and installed fonts; external fonts are not collected automatically. The selected ASS is saved as a project asset and included in project packages, so later edits to the external file do not change the saved copy.
+
+
+### 实时字幕翻译开关 / Live translation controls
+
+实时字幕行依次显示名称、设置图标、启用开关；开启后追加“翻译:”目标语言下拉菜单、翻译开关、“显示源字幕”开关。均使用设置界面的开关样式。模型准备及错误提示放在整行其他按钮之后；不显示逐句“正在翻译”及转圈提示，窄窗口可自然换行。设置菜单保留识别引擎、识别语言、提前识别与缓存操作；Zipformer中英混合识别需明确选择翻译源语言，不自动猜测语言。M2M100支持中英日韩，不支持粤语；源目标相同时原样显示。
+
+翻译仅提交已确认短句及当前点播缓存字幕，不翻译不断修订的临时结果。每个活跃会话使用独立常驻Python进程，模型只加载一次；队列最多一个等待请求和一个处理中请求，忙时重试最新短句，不保证保留全部中间译文。最多保留128项内存译文，不写磁盘。原文独立即时更新，译文保持底部，双语时原文上移。较早译文短暂保留时标记“稍早译文”，不会把原文回滚成旧句；不启用翻译时保留原显示方式。原文默认显示；关闭“显示源字幕”后等待期间可能暂时无字幕。原文保留最多两行的现有规则；译文按宽度自然换行，实际多行高度向上推原文，超出安全区仍裁切。背景使用50%不透明度。关闭翻译、关闭实时字幕、切换目标／源语言、切换识别会话或关闭播放器会结束旧翻译进程，释放模型内存；再次启用需重新加载。翻译失败会停止翻译并显示错误，原文识别继续；需先在第三方支持安装M2M100。
+
+The row contains the live-subtitle label, settings icon and enable switch. Enabling adds the translation target selector, translation switch and source-text switch, using the settings switch style. Model preparation and error notices follow all other row controls; per-phrase translation progress text and spinners are hidden. Narrow windows may wrap. Settings retain recognition, lookahead and cache controls. Zipformer bilingual recognition requires an explicit translation source language. M2M100 supports Chinese, English, Japanese and Korean, without Cantonese; identical source and target languages display unchanged text.
+
+Only finalized phrases or currently visible cached VOD cues are submitted. Each active session uses a dedicated persistent Python process with one model load, one active request and at most one queued request. Busy sessions retry the latest phrase; intermediate translations may be skipped. Up to 128 translations stay in memory only. Source text updates independently. Translation remains at the bottom with source above in bilingual mode. Retained earlier translations are marked and never replace the current source sentence. Disabling translation preserves the original source-only display. Source text is shown by default; translation-only mode may show nothing while waiting. Source text keeps its existing two-row limit. Translation wraps naturally and its actual height pushes the source upward, with no reserved blank rows or extra block gap; overflow is clipped to the safe area. Background opacity is 50%. Disabling translation or recognition, changing source/target/session or closing the player terminates the old process and releases its model memory. Failures stop translation while source recognition continues. Install M2M100 through third-party support first.
+
+
+### 字幕 AI 计算设置 / Shared subtitle AI compute settings
+
+第三方支持提供“优先使用GPU”（默认开）和“CPU回退线程”（默认2，范围1～4），统一用于新启动的字幕生成、实时识别、文件翻译和实时翻译；运行中的任务需停止再启动才读取新设置。设置持久化于组件目录ai-runtime.json，不做全核自动占满。Windows下Python字幕任务采用较低进程优先级及被动等待，给播放器留出资源；线程数不是CPU占用百分比硬限制。
+
+GPU优先表示验证后使用，不表示所有独立显卡可用。M2M100使用NVIDIA CUDA INT8混合精度，先执行实际短句预热验证，缺动态库／驱动不兼容／推理失败时回退CPU；实时设置菜单显示实际后端及回退原因。AMD／Intel GPU尚未接入。SenseVoice／Zipformer还需要CUDA版sherpa-onnx及相应ONNX Runtime；当前常规安装包缺少CUDA provider，仍使用CPU并记录原因。共享偏好不会把CPU引擎自动变成GPU引擎。
+
+“安装／补齐GPU运行库”在独立组件目录ai-gpu-runtime安装固定版本cuBLAS、CUDA Runtime及cuDNN，不安装显卡驱动或整个CUDA Toolkit，不替换现有识别引擎。Windows下载约1.3GB，建议至少4GiB空闲，安装后验证DLL可加载再标记就绪；这不代表所有模型GPU推理都验证通过。组件用于本程序，不修改系统PATH。GPU运行仍可能占用部分CPU及显存，不能保证所有机器视频播放不卡顿。
+
+Third-party support provides Prefer GPU (default on) and CPU fallback threads (default 2, range 1–4), shared by newly started generation, live recognition and file/live translation tasks. Restart an active task to apply changes. Preferences are stored in ai-runtime.json in the components directory. Windows Python tasks use below-normal priority and passive waiting; the thread limit is not a hard CPU-percentage cap.
+
+GPU preference requires actual engine support. M2M100 uses NVIDIA CUDA mixed INT8 precision after a real warmup translation; unavailable libraries or failed inference fall back to CPU. Live settings display the actual backend and fallback reason. AMD/Intel GPU backends are not integrated. SenseVoice/Zipformer also need CUDA-enabled sherpa-onnx/ONNX Runtime; the current standard package lacks that provider and continues on CPU. A preference cannot turn a CPU engine into a GPU build.
+
+Install/repair GPU runtime installs pinned cuBLAS, CUDA Runtime and cuDNN packages into the isolated ai-gpu-runtime component directory, without installing drivers, the full CUDA Toolkit or a replacement recognition engine. Windows downloads total about 1.3 GB; reserve at least 4 GiB. DLL loading is checked before marking libraries ready, separately from model validation. System PATH is unchanged. GPU execution still uses some CPU and VRAM; smooth playback is not guaranteed on every machine.
+
+
+GPU运行库补齐会先校验，库完整时不重装；损坏需修复时若文件被使用会提示先关闭字幕任务，不会强制结束进程。实际修复在暂存目录安装并校验后替换，避免pip直接覆盖已用DLL。实时翻译启用后显示实际GPU／CPU标记，悬停可查看后端和回退原因；GPU优先开关本身不代表GPU已经使用。
+
+GPU runtime repair validates first and skips intact libraries. If repair is needed while files are in use, it asks you to stop subtitle tasks without forcibly ending processes. Repairs install and validate staged files before replacement. Live translation displays its actual GPU/CPU backend; hover for details and fallback reasons. GPU preference alone does not mean GPU execution is active.
+
+
+“适应窗口”播放会按启动播放时窗口的物理像素缩小预览帧，减少高分辨率画面的转换和上传开销；原尺寸／自由缩放保持源分辨率，切换显示模式会重启解码。调整窗口大小后在下次启动播放时更新预览尺寸。源文件和导出分辨率不变；4K窗口或原尺寸模式仍可能有较高开销。
+
+Fit-to-window playback bounds preview frames by the physical window size when playback starts, reducing conversion/upload work. Original-size and free-scale modes retain source resolution; switching modes restarts decoding. Window resizes apply at the next playback start. Source files and export resolution remain unchanged; 4K windows and original-size mode may still incur high overhead.
+
+
+### 视频 GPU 显示 / GPU video display
+
+普通播放复用程序已有Glow渲染系统，常见8位SDR的YUV420P、NV12等来源由FFmpeg输出统一YUV420平面，通过GPU三张单通道纹理及着色器转换显示，不再在CPU逐帧构造RGBA图片并交给egui上传。视频信息行出现“YUV · GPU”表示正在使用该显示路径，这与翻译模型的GPU／CPU标记不同。egui继续绘制控件、实时字幕及覆盖层；镜像、缩放、拖动和可见范围裁切保持可用。
+
+输入颜色矩阵／范围优先按视频信息指定；缺失时高清按BT.709、标清按BT.601，yuvj按全范围，其余默认限幅。FFmpeg归一化成BT.709限幅，GPU按对应规则显示。HDR、BT.2020、10位等未支持YUV的内容保留RGBA解码，再由RGBA着色器显示；透明视频、GIF／图片序列、暂停逐帧定位和编辑预览也可走共享GPU显示。GPU不可用时才用egui图片纹理兼容路径。着色器失败会回退兼容解码。不能将此功能理解成HDR色调映射或所有像素格式直通。
+
+当前仍通过FFmpeg管道读回YUV并上传GPU，还不是硬解码纹理共享或零拷贝。4K25fps下YUV420原始帧约311MB/s，RGBA约829MB/s；这是数据量估算，不是CPU降幅或速度保证。适应窗口的尺寸限制仍可进一步减少预览数据，源文件和导出分辨率不变。GPU视频资源复用已有上下文并在渲染系统退出时清理。
+
+Normal playback reuses the existing Glow renderer. Common 8-bit SDR sources such as YUV420P and NV12 are normalized by FFmpeg to planar YUV420, uploaded as three single-channel textures and converted by a GPU shader, avoiding per-frame CPU RGBA image construction and egui image uploads. “YUV · GPU” in video information identifies this display path, separately from the translation backend indicator. Egui retains controls and subtitle overlays; mirroring, scaling, panning and clipping remain available.
+
+Source matrix/range metadata is preferred. Missing metadata defaults to BT.709 for HD or BT.601 for SD; yuvj is full-range and other sources default to limited range. FFmpeg normalizes to limited-range BT.709 for the shader. HDR, BT.2020, 10-bit and other unsupported YUV content retain RGBA decoding and use RGBA shaders. Alpha video, GIF/image sequences, frame seeking and editor previews also use shared GPU display. Egui image textures remain as fallback when GPU rendering is unavailable. Shader failures fall back to compatibility decoding. This does not add HDR tone mapping or native handling of every pixel format.
+
+Frames are still read back through FFmpeg’s pipe and uploaded: hardware-decoder texture sharing and zero-copy are not implemented. At 4K25, raw YUV420 is about 311 MB/s versus 829 MB/s for RGBA; these are payload estimates, not promised CPU or speed improvements. Fit-to-window sizing can further reduce preview traffic without changing source/export resolution. Video GPU resources share the existing context and shutdown lifecycle.
+
+
+图片主预览默认“平滑显示”：放大使用双线性采样，缩小配合mipmap，避免普通图片一直使用最近邻导致轮廓阶梯。“像素显示”使用最近邻，适合放大检查像素块；选项按当前图片保留，原图、导出和像素取样数据不变。平滑纹理的mipmap额外占用约三分之一显存，不能保证与Photoshop的缩放算法完全一致。
+
+Main image previews default to Smooth: bilinear magnification and mipmapped minification avoid nearest-neighbor stair-stepping. Pixelated mode retains nearest sampling for inspecting individual pixels. The mode is per image and does not alter originals, exports or sampled pixel values. Smooth mipmaps add roughly one third to texture memory and are not guaranteed to match Photoshop’s resampling exactly.
+
+图片缩放百分比按屏幕物理像素计算，100%表示一个源像素对应一个屏幕物理像素，而非一个系统缩放后的逻辑点；适应窗口的百分比会随DPI变化。绘制起点对齐物理像素。
+
+Image zoom percentages use physical screen pixels: 100% means one source pixel per physical pixel, rather than one scaled UI point. Fit percentages therefore depend on DPI; image origins are aligned to physical pixels.
+
+YUV播放预缩放采用Lanczos与精确舍入，输出色度位置统一到中心；GPU输出保留稳定空间抗色带抖动，不是画面模糊或帧间随机噪声。它不能消除源视频本身的隔行、压缩条纹或所有8位色带。
+
+YUV playback uses Lanczos pre-scaling with accurate rounding and centered chroma. GPU output adds stable spatial dithering to reduce quantization bands, rather than blur or frame-varying noise. It cannot remove interlacing, compression stripes or every 8-bit band already present in the source.
+
+
+### 识别运行库 CPU／GPU 版本 / CPU and GPU recognition runtimes
+
+第三方支持的SenseVoice／Zipformer区域分别显示CPU和GPU运行库安装状态及“安装／校验运行库”，允许只安装一个或同时保留。已有CPU安装默认继续使用CPU；“使用此版本”选择仅影响新启动的生成／实时识别任务，正在运行的会话不自动切换。如果只安装了一个可用版本，则使用该版本。CPU和GPU引擎独立目录，不互相覆盖；两者共用原有SenseVoice和Zipformer模型目录，不重复下载语言模型。
+
+GPU版使用官方固定2.0.1+cuda12.cudnn9安装包，仍需兼容NVIDIA驱动及共享CUDA动态库。选择GPU运行库与“优先使用GPU”不同：GPU包也支持CPU，当GPU优先关闭或模型／provider不兼容时可以回退CPU。安装校验检查包来源目录、CUDA版本标识及接口导入，不等于实际INT8模型GPU推理成功。CPU版开销已满足需求时可继续使用，无需为了GPU更换。
+
+Third-party support lists separate CPU and GPU runtime installation states for SenseVoice/Zipformer. Install either version or keep both, then choose Use this version. Existing CPU installations remain on CPU by default; changes affect newly started recognition/generation tasks, not running sessions. A sole installed runtime is used automatically. Runtime directories are isolated and share the existing model directories.
+
+The GPU package is pinned to the official 2.0.1+cuda12.cudnn9 build and requires compatible NVIDIA drivers and shared CUDA libraries. Runtime selection is distinct from Prefer GPU: GPU builds can still use CPU when the preference is off or the model/provider is incompatible. Installation verifies imports, package directory and CUDA version identity, not actual INT8 GPU inference. Continue using CPU when its overhead is already acceptable.
+
+实时翻译任务不依赖顶部工具栏或右键菜单可见性，全屏隐藏控制栏时仍继续提交确认短句、接收译文并显示。
+
+Live translation task updates run independently of toolbar and menu visibility, continuing finalized-phrase submission and result reception when fullscreen controls are hidden.
+
+
+视频编辑预览现在与普通播放共用YUV／RGBA渲染模块。透明视频保留直通RGBA像素，GPU逐采样点预乘Alpha后再插值，按预乘Alpha方式与棋盘格或所选底色合成；不会将棋盘格写入源视频或导出像素。为避免CPU先缩放直通RGBA造成透明边缘污染，GPU RGBA播放保持源尺寸，由着色器做显示缩放，因此其传输量不会像YUV那样降低。逐帧缓存／图片序列已解码的预乘RGBA也可直接由同一模块显示，缩略图仍可使用小尺寸egui图片。裁剪坐标始终按原视频尺寸计算，不按缩小后的预览纹理计算。已有FFmpeg解码器的透明格式支持范围不因换渲染方式自动扩展；HDR仍未新增专门色调映射。
+
+Editor previews share the normal player’s YUV/RGBA renderer. Straight RGBA alpha video is premultiplied per texel on the GPU before interpolation and composited over the checkerboard or selected matte. The background is never baked into source/export pixels. GPU RGBA playback retains source dimensions to avoid filtering straight-alpha pixels before premultiplication; it therefore does not receive YUV’s transfer-volume savings. Cached premultiplied frames and image sequences use the same module; small UI thumbnails may still use egui images. Crop coordinates use source-video dimensions, not reduced preview textures. Decoder alpha-format support is unchanged and HDR tone mapping is not added.
+
+
+实时SenseVoice默认“自动识别”，通常无需手动指定国语／日语等；模型返回的实际语言会传入翻译和JSON缓存，设置菜单显示识别结果语言。手动语言选项仍可用于纠正或限定识别范围。源语变化会重建翻译会话，可能再次等待模型加载。自动模式和手动语言的识别缓存分开保留；旧缓存缺少语言字段时仅对假名／韩文等明确特征作保守判断，仅汉字无法确认时不自动假定国语，请手动选语或重新识别。粤语仍不作为普通话直接翻译，Zipformer继续使用明确源语设置。该自动选项目前针对实时SenseVoice，不改变整片生成字幕菜单。
+
+Live SenseVoice defaults to Auto-detect. Detected language is passed to translation and JSON caches and displayed in recognition settings; manual language selection remains available. A source-language change rebuilds the translation session and may require model reload. Auto and manual recognition caches remain separate. Legacy cues without language metadata use conservative kana/Hangul detection; ambiguous Han-only text is not silently assumed to be Mandarin. Select a language manually or regenerate those cues. Cantonese is not treated as Mandarin; Zipformer retains explicit source-language selection. This auto option currently applies to live SenseVoice, not the full-file subtitle generation menu.
+
+播放结束时，进度条可停在总时长终点，同时画面保留最后一个有效帧；总时长边界不代表还存在额外一帧。
+At playback end, the progress bar may show the full duration while retaining the last valid frame; the duration endpoint is not an additional decoded frame.
+
+
+点播提前识别开启时，未来约20秒内已确认的字幕也可提前送M2M100翻译，结果先留在内存，到对应媒体时间再显示。当前句优先，任务有界；遇不同源语言边界暂不跨越预翻译。首次加载、首句未结束或识别速度不足仍可能等待，短片并未禁用提前处理，也不保证开头无延迟。未来译文不会提前进入“稍早译文”显示槽。
+
+With VOD lookahead enabled, confirmed cues up to about 20 seconds ahead can be translated by M2M100 and held in memory until their media time. Current cues have priority and requests are bounded; prefetch stops at source-language boundaries. Startup, unfinished first phrases or slow recognition may still cause delays. Short videos are not excluded, and zero startup latency is not guaranteed. Future translations never enter the earlier-translation display slot before their playback time.
+
+### ASS／SSA／SRT／WebVTT 字幕编辑与内嵌字幕提取
+
+播放本地视频并选中外挂 ASS／SSA／SRT／WebVTT 后，点击字幕选择框旁或字幕菜单中的“字幕编辑”。编辑窗口独立播放，初始采用当前视频位置与音轨；重复打开同一字幕会聚焦已有窗口。窗口内可加载其他 ASS／SSA／SRT／WebVTT，但同一个文件不能同时在两个编辑窗口中修改。
+
+编辑仅作用于内存草稿。字幕列表、视频预览、波形和时间轴联动；单击列表选中并显露对应时间轴，双击另将视频跳到该句。开启“跟随播放”可自动选中当前句。拖动字幕块整体平移，拖动两端调整起止；边界附近也可抓取，悬停时加粗并显示横向调整光标。多选后拖动可整体移动，重叠事件分行显示。滚轮缩放，底部全宽浏览进度条横向浏览而不跳视频，与时间轴保留间距；暂停时左右键逐帧，Ctrl+左右键平移五帧。“吸附视频帧”以实际视频帧时间索引为准，尚无索引时不强行吸附。波形按编辑器当前选择的音轨生成，切换音轨后重建。
+
+左上角字幕文件信息行的“横屏布局／竖屏布局”Tab 可随时切换，初次按视频方向选择。竖屏布局将视频与播放控制置于左侧，右侧显示字幕属性、时间轴和列表，可拖动分界线调整视频宽度；横屏布局保留上方视频、右侧属性及下方时间轴和列表。切换保留草稿、选中、播放位置和时间轴缩放。
+
+支持新增、复制、删除、批量提前／延后、查找替换、在指针处拆分和合并相邻字幕。拆分先将原文字复制到两段，按内容需要分别修改；合并要求样式、图层、角色名、边距、效果及注释类型相同。重叠仅提示，不自动消除；复杂动画和卡拉 OK 的相对时间不自动重写。起止时间可以手动输入，或从播放指针设置。可查看时长、字符数与 CPS。批量平移控件在宽度不足时整组换行。时间轴上方固定居中显示播放当前句（区间图标）、播放／暂停、上一帧、下一帧和音量；区间图标在播放按钮左侧，未选中有效字幕时禁用。音轨／语言和当前／总时间留在视频下方，按视频区域居中。
+
+ASS 提供命名样式选择／复制、字体、字号、颜色、描边、阴影、对齐、边距，以及单句图层、角色、效果和注释编辑。文本框保留 ASS 标签，换行对应 `\N`；复杂定位、移动、绘图、动画及卡拉 OK 暂无可视化编辑器。SRT 可编辑文字和时间，ASS 专属项禁用，另存为 ASS 后可用。已有 ASS 的脚本信息、未知段落、样式字段和未修改的事件字段保留；不以播放器的统一样式或自动换行替换源稿。
+
+“保存”或 Ctrl+S 覆盖当前文件；覆盖前保留一份同路径 `.bak`，并检查自加载以来源文件是否改变。发现外部修改时不覆盖，应重新加载或另存到新路径。保存采用同目录暂存后替换，失败保留内存草稿。另存为初次打开时默认 ASS 类型及 .ass 文件名；可切换保存类型。另存为成功后，新文件成为当前编辑目标；原文件保留。关闭窗口或切换来源时，未保存内容提供保存／放弃／取消。支持文档撤销／重做，历史最多 64 步并受约 32 MiB 源文本快照预算限制；聚焦文本框时 Ctrl+Z/Y 由文本框处理。
+
+支持 UTF-8 和带 BOM 的 UTF-16 输入，保存为 UTF-8；其他编码需先转换。文件上限 32 MiB。ASS 事件的 Format 要求 Text 为最后一列，异常结构报错而不静默改写。SRT 位置扩展暂不接受。SRT 保留毫秒精度；转成 ASS 或修改 ASS 时间时按百分之一秒取整。SRT→ASS 使用视频尺寸建立默认脚本，保留常用粗体／斜体／下划线／字体 HTML 标记；复杂嵌套标记不保证完全等效。ASS→SRT 先提示样式／位置／动画等损失，跳过注释和纯绘图事件，并过滤混合事件里的绘图指令；不对图形做 OCR。
+
+选中视频内嵌文字字幕后，在同一字幕菜单点击“提取字幕（ASS）”。默认保存为 ASS，原 ASS／SSA 轨采用复制而非先转 SRT，其他文字轨转换成 ASS；始终按选中的字幕轨序号提取。提取不覆盖已有目标文件，成功后挂载并打开编辑器。图像字幕不支持此入口；MKV 中的字体附件不随字幕提取，缺失字体仍需自行安装。原文件中已经缺失的字体／样式也无法由提取恢复。
+
+“使用草稿烧录…”会把当前草稿固定成独立 ASS 快照，送入已有视频编辑窗口的烧录设置；在视频编辑窗口选择导出。后续字幕编辑、保存或关闭字幕窗口不会改变该快照，重新点击才更新设置。导出任务持有快照直至完成；视频工程保存会嵌入这份烧录字幕。此按钮不直接覆盖原视频。
+
+### ASS/SSA/SRT/WebVTT subtitle editing and embedded extraction
+
+After selecting a local ASS/SSA/SRT/WebVTT subtitle during video playback, choose **Subtitle editor** beside the selector or in its menu. The independent player starts at the current video position and audio track. Reopening the same subtitle focuses its existing window. Loading another file handles unsaved changes first and prevents two windows editing the same file.
+
+Edits affect a memory draft. Single-click a list cue to select it and reveal it in the timeline; double-click also seeks the video. Playback following selects the current cue. Drag blocks to move cues and their edges to change timing; enlarged edge targets highlight and show a horizontal resize cursor on hover. Selected cues move together; overlaps occupy separate rows and are never removed automatically. Wheel zooms; the full-width navigation bar below the timeline pans without seeking, with reserved spacing above it. Left/Right steps while paused, and Ctrl+Left/Right pans five frames. Snapping uses actual frame timestamps when available. Waveforms use the selected audio track and rebuild when it changes.
+
+The **Landscape layout / Portrait layout** tabs at the left of the subtitle file information row switch layouts at any time, initially following the video orientation. Portrait layout puts video and playback controls in a resizable left column, with properties, timeline and list on the right. Landscape layout keeps video above the timeline and list, with properties beside it. Switching preserves the draft, selection, playback position and timeline zoom.
+
+Add, duplicate, delete, find/replace, shift selected cues, split at the playhead and merge adjacent cues. Splitting duplicates the text into both halves for manual redistribution. Merging requires matching styles and event properties. Relative animation/karaoke times are not rewritten. Edit exact times or set them from the playhead, and inspect duration, characters and CPS. A fixed group centered above the timeline contains Play current cue (range icon), Play/Pause, Previous frame, Next frame and Volume. Batch-shift controls wrap together when space is limited. The range icon sits to the left of Play and is disabled without a valid selected cue. Audio/language and current/total time remain centered below the video.
+
+ASS supports named style selection/duplication, font, size, colors, outline, shadow, alignment and margins, plus cue layer, actor, effect and comment properties. The text editor retains raw ASS tags; newlines map to `\N`. Advanced positioning, drawing, animation and karaoke have no visual authoring tools yet. SRT keeps text/timing editing; save as ASS to enable ASS features. Original script metadata, unknown sections and untouched fields survive ASS editing; player styling and automatic wrapping are not written back.
+
+**Save / Ctrl+S** replaces the current file after checking external changes and keeping one `.bak`; a sibling temporary file is written before replacement. Failed saves retain the draft. Successful **Save as** changes the current editing target and preserves the old file. Closing/loading offers Save, Discard or Cancel. Document undo/redo has at most 64 steps and about a 32 MiB source-snapshot budget; a focused text box handles its own Ctrl+Z/Y.
+
+Input accepts UTF-8 or BOM-marked UTF-16; output is UTF-8, with a 32 MiB input limit. Other encodings require conversion first. ASS events require Text as the final Format column; SRT placement extensions are currently rejected. SRT retains milliseconds; ASS conversion/edited times round to centiseconds. SRT→ASS uses video dimensions and basic HTML font/emphasis tags; complex nesting may differ. ASS→SRT warns about lost features, excludes comments/drawing-only cues and removes drawing commands from mixed cues without OCR.
+
+When an embedded text track is selected, **Extract subtitles (ASS)** appears in the same menu. Native ASS/SSA is copied directly; other text codecs convert to ASS. The selected subtitle ordinal is used, existing destination files are preserved, and successful extraction loads the file and opens its editor. Bitmap subtitles and extracting MKV font attachments are unsupported; install missing fonts separately.
+
+**Burn in draft…** sends an immutable ASS snapshot into the existing video editor for export. Further edits, saves or closing the subtitle editor do not alter that snapshot; sending again updates it. Export tasks retain their snapshot and saved video projects embed it. This action does not directly replace the original video.
+
+### 字幕格式与保存范围 / Subtitle formats and saving
+
+| 格式 | 原格式编辑与保存 | 另存转换 |
+|---|---|---|
+| ASS | 保留脚本、样式及事件字段 | ASS、SRT、WebVTT |
+| SSA | 保留 V4 样式、Marked、十进制颜色及旧对齐编号 | SSA、ASS、SRT、WebVTT |
+| SRT | 保留文字和毫秒时间 | SRT、ASS、WebVTT |
+| WebVTT | 保留文件头、STYLE／REGION／NOTE、cue 标识、时间设置及原始文本标签 | WebVTT、ASS、SRT |
+
+加载时优先按内容识别以上四种格式，文件后缀用于无法明确识别时的辅助判断；在加载对话框中可选择所有文件。保存当前文件保持实际识别格式，不因后缀不匹配而暗中转换；另存的默认文件名使用实际格式后缀。其他格式转为旧版 SSA 暂不支持，导入 LRC／TTML／SAMI／MicroDVD 及图像字幕 OCR 也尚未实现。
+
+WebVTT 的 cue 标识与时间行设置可在属性区编辑。修改文字或时间不删除其 CSS、区域或备注；原时间未改时保留短时间写法及时间行格式。拆分／复制出来的新 cue 不沿用旧标识，时间设置仍保留。WebVTT／SRT 中输入的字面 `\N` 按普通文字保存，真实换行仍为文本换行。
+
+WebVTT 原格式保存与预览效果不同：当前 ASS 播放管线仅近似呈现文字和常用强调，不完整还原 CSS、REGION、定位、说话人和逐词时间效果。转为 ASS／SRT 时先提示这些信息的损失，不悄悄覆盖源文件；转成 WebVTT 时，SRT 的字体／删除线等非通用标签会移除并保留文字，相关情况提示损失。SSA 预览将旧对齐编号映射成相同方位，保留写回原编号；描边和阴影共用 BackColour，TertiaryColour 原值保留，AlphaLevel 及阴影透明度按 SSA／libass 兼容规则预览。
+
+同目录字幕发现扩展到 ASS／SSA／SRT／WebVTT；精确同名只有一份时优先加载，存在多种精确同名格式而无法唯一匹配时由下拉菜单手动选择。播放菜单同时保留“提取字幕（ASS）”和“按原格式提取字幕”。后者对内嵌 ASS、SRT 和 WebVTT 使用编码复制；ASS／SSA 家族的流以 ASS 封装提取，但读取时识别实际 V4／V4+ 结构。MP4 mov_text 等当前没有已支持独立原格式的轨道禁用原格式提取，可使用默认 ASS。提取不恢复容器／上游已经丢弃的 WebVTT 全局样式或备注，也不提取字体附件。
+
+| Format | Native editing/saving | Save-as conversion |
+|---|---|---|
+| ASS | Retains script, styles and event fields | ASS, SRT, WebVTT |
+| SSA | Retains V4 styles, Marked, decimal colors and legacy alignment | SSA, ASS, SRT, WebVTT |
+| SRT | Text and millisecond timing | SRT, ASS, WebVTT |
+| WebVTT | Header, STYLE/REGION/NOTE, cue ids/settings and original text tags | WebVTT, ASS, SRT |
+
+Loading identifies these formats from content before using the extension as fallback; the dialog also allows all files. Saving the current file retains its detected format despite a mismatched extension; Save as defaults to the detected format's extension. Converting other formats into legacy SSA, importing LRC/TTML/SAMI/MicroDVD and bitmap OCR remain unsupported.
+
+WebVTT cue identifiers and timing settings have editable fields. Text/timing edits retain CSS, regions and notes; unchanged timing keeps original shorthand and spacing. Split/duplicated cues clear the copied identifier while keeping settings. Literal `\N` in WebVTT/SRT is saved as text rather than turned into a newline.
+
+Native WebVTT preservation does not imply browser-equivalent rendering. The ASS preview provides text/basic emphasis without fully reproducing CSS, REGION, placement, voices or word timing. Conversions warn before losing source features and preserve the source file. SRT font/strikeout markup unsupported by WebVTT is removed while retaining text, with a loss warning. SSA preview maps old alignment codes, uses shared BackColour for outline/shadow, preserves TertiaryColour on disk and follows SSA/libass AlphaLevel/shadow compatibility.
+
+Sidecar discovery now includes all four formats. A unique exact-name file takes priority; ambiguous exact-name formats require manual selection unless language matching is unique. The menu retains default ASS extraction and adds original-format extraction. ASS-family, SRT and WebVTT codecs copy without transcoding; ASS-family streams use ASS packaging and their actual V4/V4+ structure is detected when loaded. Unsupported standalone codecs such as mov_text disable original-format extraction but can convert to ASS. Extraction cannot restore global WebVTT metadata already discarded upstream or recover font attachments.
+
+Format references: [WebVTT specification](https://www.w3.org/TR/webvtt1/) and [libass SSA compatibility handling](https://github.com/libass/libass/blob/master/libass/ass.c).
+
+### 字幕编辑的选中与固定工具栏 / Subtitle selection and fixed controls
+
+- 列表和时间轴共用选中状态：单击列表字幕会高亮对应时间轴字幕，并在需要时横向定位、滚动到对应重叠行；单击时间轴字幕会选中并滚动显示对应列表行。若当前查找条件隐藏了该字幕，会清除查找条件再显示。Ctrl 可添加／取消多选，两边同步；取消最后一项后不保留隐藏的当前选中。
+- 单击只选中，不改变视频播放位置。双击列表字幕会跳到该句起点，同时显示对应时间轴范围；双击时间轴字幕同样定位视频。浏览定位保留时间轴缩放，并在视频首尾钳制范围。编辑窗口初始选中当前时间命中的字幕或邻近下一句。
+- 开启跟随播放时，在播放进入另一条字幕时同步两边选中及列表浏览，时间轴可保留手动浏览范围；多选和文字输入期间不抢占手动选择。手动选中不会在同一句播放期间被逐帧覆盖。
+- 音量使用与普通视频播放相同的按钮和竖向滑条弹窗，按钮可静音／恢复。当前时间／总时长紧接音轨按钮，与播放控件同排；窄窗口可截短显示，悬停查看全文。
+- “选中字幕批量平移”的毫秒值、提前和延后按钮固定在列表工具栏的“跟随播放”后方，不在右侧滚动属性中。没有选中字幕时禁用；窄窗口可在工具栏内换行，字幕列表本体仍单独滚动。
+
+- The list and timeline share selection. Clicking a list row highlights/reveals its cue horizontally and in overlapping lanes; clicking a timeline cue selects and scrolls to its list row. A search hiding that cue is cleared. Ctrl toggles multiple selection in both views; deselecting the last cue leaves no hidden active selection.
+- Single-click selects without seeking video. Double-click seeks to the cue start and reveals its timeline range. Navigation preserves timeline zoom and clamps at video boundaries. A new editor selects the cue at the current position or the nearby next cue.
+- Follow playback synchronizes selection and list navigation when entering another cue; the timeline can retain its manually browsed range. Multiple selection and text input keep priority; manual selection is not overwritten every frame during the same playing cue.
+- Volume reuses normal playback's button and vertical popup, including mute/restore. Current/total time follows the audio-track menu in the same row, with truncation and a full hover label when narrow.
+- Selected-cue shift amount and earlier/later buttons remain in the fixed list toolbar after Follow playback, outside the scrolling properties. They disable without selection and can wrap within the toolbar on narrow windows while the list itself scrolls separately.
+
+### 编辑器独立统一预览样式 / Independent editor preview style
+
+SRT／WebVTT 的顶部工具栏提供“统一预览样式”，位于“使用草稿烧录…”之前。点击打开独立设置窗口，可调整字体、字号、颜色、描边、X／Y 阴影、上下位置及边距；修改后短暂延迟预览，应用后保存，取消或关闭恢复已保存值。重置先恢复默认草稿，需点击应用才记录。重复点击按钮聚焦已打开的设置窗口，不丢弃当前草稿。
+
+编辑器使用自己的 `subtitle_editor_preview_style.json`，与普通播放的 `subtitle_style.json` 分开；初始读取编辑器自己的配置或默认值，不复制普通播放偏好。应用后供其他没有未应用草稿的编辑器预览同步使用，重启后仍恢复。ASS／SSA 保留文档自身样式，不应用这套统一预览。编辑预览仅换行而不把原字幕拆成新的计时事件，字号和边距沿用字幕脚本单位。
+
+这套设置只影响预览，不使字幕文档变为未保存状态，不改变原文、时间或文档样式；保存、另存转换及交给视频编辑器的草稿烧录快照仍按字幕文档生成，不自动烘入预览偏好。需要改变最终 ASS 样式时，应另存 ASS 后编辑文档样式。
+
+交互按用户最终确认保持：单击列表字幕，选中并将对应字幕移入时间轴视野，保留缩放，不跳视频；双击在此基础上定位视频到该句起点。时间轴点击选中对应列表字幕。跟随播放可同步选中和列表浏览，不强制把手动浏览的时间轴拉回播放位置。
+
+For SRT/WebVTT, **Unified preview style** appears in the top toolbar before **Burn in draft…**. It opens independent font, size, color, outline, signed X/Y shadow, position and margin settings. Changes preview after a short delay; Apply saves, Cancel/close restores saved values, and Reset changes only the draft until applied. Reopening focuses the existing window without discarding edits.
+
+The editor stores `subtitle_editor_preview_style.json` independently of normal playback's `subtitle_style.json`. It loads its own saved/default values, never copies normal playback preferences, and retains applied settings across restarts. Other editor previews without pending local changes receive applied values. ASS/SSA keep native document styles. Preview wrapping does not split source cues into new timed events; sizes/margins use subtitle script units.
+
+Preview settings do not mark the subtitle document dirty or alter its text, timing or styles. Save, conversion and burn-in draft handoff still derive from the document, without automatically baking preview preferences. To change final ASS styling, save as ASS and edit document styles.
+
+Final interaction: single-clicking a list cue selects/reveals it in the timeline at the existing zoom without seeking video; double-clicking seeks video to its start. Timeline clicks select the matching list cue. Follow playback may update selection/list navigation without forcing the manually browsed timeline back to playback.
+
+## 录屏 / Screen recording
+
+- 从“文件 → 录屏”进入，默认选择指定区域。十字光标悬停吸附可见窗口，左键单击确认；按住左键拖动则创建矩形，松开确认。右键取消本次选择并恢复原区域；录制前按 Esc 会关闭区域与整个工具条，包括正在画框和已经确认的状态。拖动超过系统容差（至少 4 个物理像素）后暂停吸附，支持四方向与负坐标，最小 16×16，限制在虚拟桌面范围内。
+- 确认后，鼠标进入区域内部显示四向移动箭头，按住左键可整体移动区域而不改变尺寸。四角手柄同时改变宽高，上下边中点只改高度，左右边中点只改宽度；上边中段仍可移动，Ctrl+拖动上边调整顶部。拖动、缩放和输入数值保持同步。来源窗口随后移动不会自动跟随区域。
+- 工具条采用与主程序相同的界面控件和主题：区域／屏幕选择后是圆圈十字“重新选择区域”，再后是主窗口同款设置图标，然后 X、Y、`宽 × 高 px`、红圆开始／方块停止和 × 退出。设置图标打开独立录屏设置窗口，记录参数与快捷键。单屏显示全屏，多屏提供各屏及全部屏幕。工具条优先置于选区下方，不足时尝试上方和左右，避开屏幕外、多屏空隙及任务栏；没有外围空间时才放入屏幕内。
+- 设置包含 1–60 fps、质量、MKV／MP4、鼠标指针、开始前最小化、两个快捷键，以及独立的录屏历史上限（20–50 条，默认 20），可用数值框或同款设置滑条调整。保存跨重启记住，取消放弃未保存修改。默认停止 Ctrl+Shift+F9，进入指定区域 Ctrl+Shift+F8，可通过 Ctrl／Alt／Shift 与功能键或字母数字修改；F12 保留，字母／数字需 Ctrl 或 Alt，两个操作不能相同。系统注册检查全局占用，其他程序的局部快捷键仍可能相同。
+- 点击开始先检查 FFmpeg／FFprobe；缺失列出组件，确定后打开第三方支持，不自动下载安装。通过检查后写入系统配置的用户下载目录，以 `recording-<纳秒时间戳>.mkv/mp4` 命名，不弹保存对话框、不覆盖已有文件。开始前有 3 秒准备时间；当前中央大数字在用户环境中未能显示，暂不依赖数字判断状态。可以用停止按钮或配置的停止快捷键取消。
+- 工具条显示停止快捷键、时间与文件体积。全屏／全部屏幕开始后隐藏，区域录制保留停止按钮；录制时区域、参数及快捷键锁定，线框与区域内部不拦截鼠标。结束后恢复工具条，下方显示本次视频地址及编辑／打开目录按钮；不提供“完成”，用 × 退出。录制中 × 会先正常收尾再退出；Esc 不用于中止正在进行的录制。
+- 重新进入录屏或重新选区时，不在下方展示上次的保存结果。工具条“历史记录”打开独立录屏历史窗口，与主程序“最近打开”分开保存和计数，按成功录制顺序保留最新记录。选中存在的文件可进入视频编辑或打开目录；不存在的标红并禁用这两个操作。红色“移除记录”只移除条目，任何情况下都不删除视频文件；调整上限淘汰旧记录也不删除视频。
+- 绿色线框、选区交互层、工具条和屏幕选择菜单均设置捕获排除，要求 Windows 10 2004+；设置失败禁止开始。实际输出仍需在目标捕获环境核对。可录制默认播放设备的系统声音，不采集麦克风，不支持暂停续录；受保护画面、独占全屏、安全桌面与远程／特殊合成环境不保证兼容。
+- English: Open File → Screen recording to select a region. The crosshair snaps to visible windows; click to confirm or hold the left button to draw a rectangle and release. Right-click cancels the current selection; before recording, Esc closes both region and toolbar, whether drawing or already confirmed. Movement beyond the system tolerance (at least four physical pixels) switches to drawing. All directions and negative origins are supported, with a 16×16 minimum inside the virtual desktop.
+- Inside a confirmed region the pointer becomes a four-way move cursor; left-drag to move without resizing. Corner handles change both dimensions, top/bottom middle handles change height, left/right middle handles change width. The top middle segment still moves the region; Ctrl+drag the top edge adjusts upward. Fields and geometry stay synchronized. The region does not follow subsequent movement of its original window.
+- The toolbar uses the app’s controls/theme: screen selector, circled cross to reselect, the same settings icon as the main window, X/Y, width × height px, red start circle/stop square and × close. Settings opens separately. Choose Fullscreen for one monitor or individual/all screens for multiple monitors. Placement prefers below, then above or beside the region within monitor work areas, falling inside a screen only if no outside space exists.
+- Settings retain 1–60 fps, quality, MKV/MP4, pointer capture, minimization, two shortcuts and a separate recording history limit (20–50, default 20), adjusted with a number field or the standard settings slider. Save persists across restarts; Cancel discards unsaved edits. Default shortcuts are Ctrl+Shift+F9 to stop and Ctrl+Shift+F8 to select a region. Configure Ctrl/Alt/Shift with function keys or letters/digits; F12 is reserved and letters/digits require Ctrl or Alt. Bindings must differ. Registration detects global conflicts but cannot detect another app’s local shortcuts.
+- Start checks FFmpeg/FFprobe; confirming missing components opens Third-party Support without automatically downloading. Output uses the configured Downloads folder and nanosecond timestamp filenames, without a save dialog or overwriting. Recording has a three-second preparation period. The central digits have not appeared in the reported environment, so do not rely on them to judge recording state. Cancel with Stop or its shortcut.
+- The toolbar shows the stop shortcut, elapsed time and file size. Fullscreen/all-screen recording hides it; region recording retains Stop. Recording locks geometry/settings/shortcuts and makes the border/interior click-through. Completion restores the toolbar and shows the current output path plus editor/folder actions below it. There is no Done button; × exits, gracefully finalizing first if recording. Esc does not stop an active recording.
+- Reopening recording or selecting a new region hides the previous completion result. History opens a separate recording history window, with storage/count independent of Recent files. It keeps the newest successful recordings. Select an existing file to edit or open its folder. Missing files appear red and disable these actions. The red Remove entry button only removes metadata; it never deletes a video. Trimming to a new limit likewise keeps all video files.
+- Border, selection interaction layer, toolbar and screen menu use capture exclusion, requiring Windows 10 version 2004+. Failure disables starting; recorded output still needs checking in the target environment. System audio from the default playback device is supported; microphone capture and pause/resume are not. Protected content, exclusive fullscreen, secure desktops and remote/unusual composition environments are not guaranteed compatible.
+
+- 工具条录制按钮前的麦克风形状按钮控制系统声音，默认开启；点击关闭后显示红色禁止标记，保存并记住选择。它不访问麦克风；录制过程中不可切换。采集默认播放设备（多声道转立体声），没有播放内容时保留静音；受保护音频可能无法捕获，更换系统播放设备需停止后重新开始。初始化或中途失败会提示，不悄悄改为无声录制。
+- 工具条输入框和标准下拉框保持较矮并与图标垂直居中；停止提示简写为“停止: 快捷键”，使用正常字号。保存结果紧接工具条，不加分割线。透明圆角及投影由程序绘制。
+- The microphone-shaped button before Record controls system playback audio, enabled by default and remembered. A red prohibition mark means disabled. It never accesses the microphone and is locked during recording. The default output device is captured, downmixed to stereo, with silence during idle playback. Protected audio may be unavailable; stop and restart after changing output devices. Initialization/capture failures are reported rather than silently falling back to silent video.
+- Compact fields and the standard dropdown are vertically centered beside icons. Stop/status text uses the normal font size; saved results follow directly without a divider. Rounded transparent corners and shadows are drawn by the app.
+
+- 工具条按第一排控件实际宽度自动收紧，关闭图标直接绘制圆头矢量交叉线，适应当前显示缩放。长保存路径在原宽度内横向浏览。
+- The toolbar fits the actual width of its first row. Close uses directly drawn vector strokes with rounded ends at the current display scale. Long saved paths scroll horizontally within that width.
+
+## 错误日志 / Error log
+
+- 共用日志为 `%APPDATA%\UnityYAMLViewer\error.log`，UTF-8。每条带本机时间、软件版本、进程及模块；达到约 2 MiB 时轮换为 `error.log.1`，只保留一份旧日志。可用于检查录屏阶段、后台任务失败、运行库通过标准日志接口报告的警告／错误及程序 panic。
+- 录屏错误弹窗置顶并保留至手动关闭，可复制详情或点击“打开日志”；关闭详情后，工具条仍保留简短错误及“查看错误详情”。日志记录声音开关／设备格式、失败接口及错误码、FFmpeg 参数／退出状态／错误输出和目标文件状态，不记录音视频内容。写入日志失败时保留原始录屏错误并提示写入失败。
+- Shared diagnostics are saved as UTF-8 at `%APPDATA%\UnityYAMLViewer\error.log`, with local timestamps, app version, process and module. At roughly 2 MiB, the log rotates to `error.log.1`, retaining one previous file. It covers recording stages, failed background tasks, warnings/errors reported through the runtime logging interface, and Rust panics.
+- Recording errors remain in an always-on-top dialog until dismissed, with Copy error and Open log actions. The toolbar retains a short error and a details button. Diagnostics include audio mode/format, failed API/error code, FFmpeg arguments/exit status/stderr and output-file status, without audio/video content. Log-write failure preserves the original recording error and adds a write-failure message.
+
+- 字幕编辑时间轴下方使用与视频编辑相同的圆角比例滑块：长度代表当前可见时间范围，拖动滑块平移视野，点击空白轨道将滑块移到该处；不改变播放位置。原蓝色填充和条内时间文字移除，波形与浏览条之间仍保留间距。
+- The subtitle timeline uses the same rounded proportional pan thumb as video editing. Its length represents the visible time range; dragging pans the view and clicking the empty track centers the thumb there, without seeking playback. The blue fill and in-bar time text are removed, with spacing retained beneath the waveform.

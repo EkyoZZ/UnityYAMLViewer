@@ -190,8 +190,16 @@ impl ImageBackground {
         *color=Some(rgb);
     }
 }
+// Image zoom is measured in physical screen pixels per source pixel, not UI points.
+fn image_display_rect(center:egui::Pos2,pixels:egui::Vec2,zoom:f32,ppp:f32)->egui::Rect {
+    let ppp=ppp.max(0.01);
+    let rect=egui::Rect::from_center_size(center,pixels*(zoom/ppp));
+    rect.translate(rect.min.round_to_pixels(ppp)-rect.min)
+}
+
 #[derive(Default)]
 struct ImageTab {
+    pixelated: bool,
     zoom_initialized: bool,
     info:image_info::State,
     editor: nine_slice::Editor,
@@ -210,6 +218,10 @@ struct ImageTab {
     pan: egui::Vec2,
 }
 impl ImageTab {
+    fn sampling(&self)->egui::TextureOptions {
+        if self.pixelated {egui::TextureOptions::NEAREST}
+        else {egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear))}
+    }
     fn load(&mut self, path: PathBuf, ctx: egui::Context) {
         let original = self.original.clone();
         let channel = self.channel;
@@ -295,7 +307,7 @@ impl Assets {
                         // A foreground reload/editor owns its own result.
                         if tab.original.is_none()&&tab.pending.is_none()&&tab.texture.is_none(){
                             tab.original=Some(original);
-                            tab.texture=Some(ctx.load_texture(loaded.display().to_string(),display,egui::TextureOptions::NEAREST));
+                            tab.texture=Some(ctx.load_texture(loaded.display().to_string(),display,tab.sampling()));
                         }
                     },
                     Err(_)=>{self.prefetch_skipped.insert(loaded);},
@@ -441,7 +453,7 @@ impl Assets {
             if tab.original.is_none()&&tab.pending.is_none()&&tab.error.is_none(){tab.load(path.clone(),ctx.clone());}
             if let Some(result)=tab.pending.as_ref().and_then(|r|r.try_recv().ok()) {
                 tab.pending=None;
-                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,egui::TextureOptions::NEAREST));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;tab.seamless=Default::default();}}
+                match result {Ok((original,display))=>{tab.original=Some(original);tab.texture=Some(ctx.load_texture(path.display().to_string(),display,tab.sampling()));},Err(error)=>{tab.error=Some(error);tab.editor.open=false;tab.seamless=Default::default();}}
             }
             if let (Some(original),Some(texture))=(&tab.original,&tab.texture) {
                 tab.seamless.show(ctx,path,original);
@@ -714,7 +726,7 @@ impl Assets {
             match result {
                 Ok((original, display)) => {
                     tab.original = Some(original);
-                    tab.texture = Some(ui.ctx().load_texture(path.display().to_string(), display, egui::TextureOptions::NEAREST));
+                    tab.texture = Some(ui.ctx().load_texture(path.display().to_string(), display, tab.sampling()));
                     ui.ctx().request_repaint();
                 }
                 // A speculative size limit must never become a foreground error.
@@ -774,6 +786,10 @@ impl Assets {
                 tab.zoom = (!self.session_image_fit).then_some(1.0);
                 tab.pan = egui::Vec2::ZERO;
             }
+            let mut sampling=if tab.pixelated{"pixel"}else{"smooth"}.to_owned();
+            crate::theme::compact_selector(ui,&mut sampling,[("smooth","平滑显示"),("pixel","像素显示")]);
+            let pixelated=sampling=="pixel";
+            if tab.pixelated!=pixelated {tab.pixelated=pixelated;tab.load(path.to_owned(),ui.ctx().clone());}
             tab.background.controls(ui,&mut tab.background_color);
             if is_browsable_image(path) {
                 self.browser.controls(ui);
@@ -802,8 +818,9 @@ impl Assets {
         let Some(texture) = &tab.texture else { ui.spinner(); return; };
         let size = texture.size_vec2();
         let (canvas, response) = ui.allocate_exact_size(egui::vec2(available.width(),available.height()-strip_height).max(egui::vec2(1.0,1.0)), egui::Sense::drag());
+        let pixels_per_point=ui.ctx().pixels_per_point();
         let mut zoom = tab.zoom.unwrap_or_else(|| {
-            ((canvas.width() - 16.0).max(1.0) / size.x).min((canvas.height() - 16.0).max(1.0) / size.y).clamp(0.01,64.0)
+            (((canvas.width() - 16.0).max(1.0) / size.x).min((canvas.height() - 16.0).max(1.0) / size.y)*pixels_per_point).clamp(0.01,64.0)
         });
         if response.dragged() { tab.pan += ui.input(|input| input.pointer.delta()); }
         if response.hovered() {
@@ -820,15 +837,13 @@ impl Assets {
             }
         }
         let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
-        let rect = egui::Rect::from_center_size(canvas.center() + tab.pan, size * zoom);
-        // Align the origin without changing the requested scale or aspect ratio.
-        let rect = rect.translate(rect.min.round_to_pixels(painter.pixels_per_point()) - rect.min);
+        let rect = image_display_rect(canvas.center()+tab.pan,size,zoom,pixels_per_point);
         let visible = rect.intersect(canvas).intersect(ui.clip_rect());
         if visible.is_positive() {
             if tab.background==ImageBackground::Checkerboard {
                 // At high zoom, one background square covers exactly one source pixel.
                 let aligned = zoom >= 8.0;
-                let cell = if aligned { zoom } else { 12.0 };
+                let cell = if aligned { zoom/pixels_per_point } else { 12.0 };
                 let origin = if aligned { rect.min } else { visible.min };
                 let first = ((visible.min - origin) / cell).floor();
                 let last = ((visible.max - origin) / cell).ceil();
@@ -909,4 +924,25 @@ fn shader_layout(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     }
     append(&text[end..], ui.visuals().text_color());
     job
+}
+
+#[cfg(test)]
+mod physical_image_zoom_tests {
+    use super::*;
+    #[test]
+    fn one_hundred_percent_maps_source_to_physical_pixels_at_all_dpi(){
+        for dpi in [1.0,1.25,1.5,2.0]{
+            let rect=image_display_rect(egui::pos2(312.37,283.19),egui::vec2(863.0,451.0),1.0,dpi);
+            assert!((rect.width()*dpi-863.0).abs()<0.001);
+            assert!((rect.height()*dpi-451.0).abs()<0.001);
+            assert!((rect.left()*dpi-(rect.left()*dpi).round()).abs()<0.001);
+            assert!((rect.top()*dpi-(rect.top()*dpi).round()).abs()<0.001);
+        }
+    }
+    #[test]
+    fn integer_zoom_retains_exact_physical_pixel_blocks(){
+        let rect=image_display_rect(egui::pos2(12.3,45.6),egui::vec2(16.0,24.0),8.0,1.5);
+        assert!((rect.width()*1.5-128.0).abs()<0.001);
+        assert!((rect.height()*1.5-192.0).abs()<0.001);
+    }
 }

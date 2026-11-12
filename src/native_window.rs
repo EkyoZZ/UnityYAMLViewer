@@ -103,7 +103,7 @@ fn monitor_work_area(rect: egui::Rect) -> Option<egui::Rect> {
     #[link(name = "user32")]
     unsafe extern "system" {
         fn MonitorFromRect(rect: *const Rect, flags: u32) -> *mut c_void;
-        fn GetMonitorInfoW(monitor: *mut c_void, info: *mut Info) -> i32;
+        fn GetMonitorInfoW(monitor: *mut c_void, info: *mut c_void) -> i32;
     }
     if !rect.is_finite() {
         return None;
@@ -133,7 +133,7 @@ fn monitor_work_area(rect: egui::Rect) -> Option<egui::Rect> {
     };
     unsafe {
         let monitor = MonitorFromRect(&rect, 2);
-        if monitor.is_null() || GetMonitorInfoW(monitor, &mut info) == 0 {
+        if monitor.is_null() || GetMonitorInfoW(monitor, (&mut info as *mut Info).cast()) == 0 {
             return None;
         }
     }

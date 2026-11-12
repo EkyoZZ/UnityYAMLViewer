@@ -19,6 +19,102 @@ class SplitReads(io.BytesIO):
 
 
 class LiveWorkerTests(unittest.TestCase):
+    def test_generated_long_subtitles_split_without_losing_text(self):
+        helper_spec=importlib.util.spec_from_file_location("auto",Path(__file__).parents[1]/"src/auto_subtitle.py")
+        helper=importlib.util.module_from_spec(helper_spec)
+        helper_spec.loader.exec_module(helper)
+        text="这是很长的字幕，"*20
+        parts=list(helper.timed_parts(text,10.0,22.0))
+        self.assertGreater(len(parts),1)
+        self.assertEqual("".join(p[0] for p in parts),text)
+        self.assertEqual(parts[0][1],10.0)
+        self.assertEqual(parts[-1][2],22.0)
+        self.assertTrue(all(len(p[0])<=32 for p in parts))
+        self.assertTrue(all(a[2]==b[1] for a,b in zip(parts,parts[1:])))
+
+    def test_generated_cues_use_duration_and_sentence_boundaries(self):
+        helper_spec = importlib.util.spec_from_file_location("auto", Path(__file__).parents[1] / "src/auto_subtitle.py")
+        helper = importlib.util.module_from_spec(helper_spec)
+        helper_spec.loader.exec_module(helper)
+        text = "第一句话已经说得很完整了。第二句话接下来继续说明。"
+        parts = list(helper.timed_parts(text, 4.0, 10.0))
+        self.assertGreaterEqual(len(parts), 2)
+        self.assertTrue(parts[0][0].endswith("。"))
+        self.assertEqual("".join(part[0] for part in parts), text)
+        self.assertEqual(parts[0][1], 4.0)
+        self.assertEqual(parts[-1][2], 10.0)
+        self.assertTrue(all(a[2] == b[1] for a, b in zip(parts, parts[1:])))
+        cues = []
+        helper.add_cue(cues, text, 4.0, 6.0)
+        self.assertEqual(len(cues), len(parts))
+        self.assertIn("00:00:04,000 -->", cues[0])
+        self.assertIn("00:00:10,000", cues[-1])
+        continuous = "持续说话没有明显停顿但也应主动拆开方便阅读理解内容"
+        self.assertGreater(len(list(helper.timed_parts(continuous, 0, 18))), 1)
+        self.assertEqual(list(helper.timed_parts("", 0, 1)), [])
+        self.assertEqual(list(helper.timed_parts("文本", 2, 1)), [])
+
+    def test_zipformer_uses_bounded_beam_search(self):
+        import tempfile
+        factory = unittest.mock.Mock(return_value=object())
+        module = SimpleNamespace(OnlineRecognizer=SimpleNamespace(from_transducer=factory))
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parents[1] / "target") as directory, patch.dict(sys.modules, sherpa_onnx=module):
+            helpers = {"model_file": lambda name, *args: name, "asr_recognizer": lambda factory, folder, **kwargs: factory(num_threads=2, provider="cpu", **kwargs)}
+            live.prepare(helpers, Path(directory), "zipformer", "zh")
+        config = factory.call_args.kwargs
+        self.assertEqual(config["decoding_method"], "modified_beam_search")
+        self.assertEqual(config["max_active_paths"], 4)
+        self.assertEqual(config["rule2_min_trailing_silence"], 0.45)
+
+    def test_recognition_runtime_and_model_directories_are_independent(self):
+        import tempfile, os
+        helper_spec=importlib.util.spec_from_file_location("auto_runtime",Path(__file__).parents[1]/"src/auto_subtitle.py")
+        helper=importlib.util.module_from_spec(helper_spec);helper_spec.loader.exec_module(helper)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parents[1]/"target") as directory:
+            model_root=Path(directory)/"models_cpu_location"
+            runtime=Path(directory)/"gpu_runtime"
+            provider=runtime/"sherpa_onnx/lib/onnxruntime_providers_cuda.dll";provider.parent.mkdir(parents=True);provider.touch()
+            factory=unittest.mock.Mock(return_value="recognizer")
+            with patch.dict(os.environ,UNITY_ASR_RUNTIME=str(runtime)),patch.object(helper,"ai_options",return_value={"prefer_gpu":True,"cpu_threads":2,"dll_handles":[]}):
+                result=helper.asr_recognizer(factory,model_root,model="shared-model.onnx")
+            self.assertEqual(result,"recognizer")
+            self.assertEqual(factory.call_args.kwargs["provider"],"cuda")
+            self.assertEqual(factory.call_args.kwargs["model"],"shared-model.onnx")
+            factory.reset_mock()
+            with patch.dict(os.environ,UNITY_ASR_RUNTIME=str(runtime)),patch.object(helper,"ai_options",return_value={"prefer_gpu":False,"cpu_threads":1,"dll_handles":[]}):
+                helper.asr_recognizer(factory,model_root,model="shared-model.onnx")
+            self.assertEqual(factory.call_args.kwargs["provider"],"cpu")
+            self.assertEqual(factory.call_args.kwargs["num_threads"],1)
+
+    def test_sensevoice_forwards_detected_language_to_final_event(self):
+        class Vad:
+            def __init__(self):self.queue=[]
+            def accept_waveform(self,samples):self.queue.append(SimpleNamespace(samples=samples,start=0))
+            def empty(self):return not self.queue
+            @property
+            def front(self):return self.queue[0]
+            def pop(self):self.queue.pop(0)
+            def flush(self):pass
+        result=SimpleNamespace(text="星のあしあと",lang="ja")
+        stream=SimpleNamespace(result=result,accept_waveform=lambda *args:None)
+        recognizer=SimpleNamespace(create_stream=lambda:stream,decode_stream=lambda stream:None)
+        with patch.object(live,"emit") as emit:
+            live.recognize_sensevoice((recognizer,Vad(),1600),[(0.0,[0.0]*1600)])
+        self.assertEqual(emit.call_args.kwargs["language"],"ja")
+        self.assertTrue(emit.call_args.kwargs["final"])
+
+    def test_continuous_zipformer_speech_gets_a_length_endpoint(self):
+        class Stream:
+            def accept_waveform(self,*args):pass
+            def input_finished(self):pass
+        resets=[]
+        recognizer=SimpleNamespace(create_stream=Stream,is_ready=lambda s:False,
+            get_result=lambda s:"长"*49,is_endpoint=lambda s:False,reset=lambda s:resets.append(1))
+        with patch.object(live,"emit") as emit:
+            live.recognize_zipformer(recognizer,[(0.0,[0.0]*1600)])
+        self.assertEqual(len(resets),1)
+        self.assertTrue(emit.call_args.kwargs["final"])
+
     def test_sensevoice_gap_resets_media_origin_after_cache_skip(self):
         class Vad:
             def __init__(self):
@@ -62,7 +158,7 @@ class LiveWorkerTests(unittest.TestCase):
 
     def test_zipformer_preparation_uses_pinned_files_in_separate_directory(self):
         calls = []
-        helpers = {}
+        helpers = {"asr_recognizer": lambda factory, folder, **kwargs: factory(num_threads=2, provider="cpu", **kwargs)}
         def model_file(name, url, limit, digest):
             directory = Path(helpers["component"]) / "models"
             calls.append((name, url, limit, digest))

@@ -13,7 +13,7 @@ The README lists the main features; detailed behavior and limitations are docume
 
 - **自动字幕**：在本地视频播放页选择普通话或英语，通过 SenseVoice 在后台识别当前音轨，生成 UTF-8 .zh.srt 或 .en.srt，保留已有同名文件。旧的 .sensevoice.zh.srt 或 .sensevoice.en.srt 可在字幕菜单加载。字幕以视频主文件名加对应后缀保存到同目录，当前音轨生成完成后自动挂载。播放器自动查找同目录的影片.srt 和影片.任意后缀.srt，优先加载影片.srt。没有精确同名字幕时，唯一候选直接加载，多份候选优先匹配唯一的音轨语言。视频详细信息旁的字幕菜单及右键菜单均可切换候选。视频编辑中的“添加字幕”优先打开视频目录，并可识别 SRT 文件名的语言后缀。缺少所选识别组件时从播放页进入第三方支持安装，需 PATH 中的 Python 和 pip，首次使用对应模型时需要联网。
 
-- **字幕翻译**：播放页选择文字原语字幕，在“自动生成字幕”后点击“翻译字幕”，可选中译英或英译中。单语译文另存为 .zh-to-en.srt 或 .en-to-zh.srt。勾选双语同时输出 .bilingual.srt 版本，中文在上、英文在下，两行共用原字幕时间段。生成的版本均可切换，已有文件保留。OPUS-MT INT8 按方向在第三方支持安装，每个方向首次下载约 289 MB，转换后约 86 MB，共用 Python 运行库。完成安装后离线处理，不发送字幕文本。
+- **字幕翻译**：使用M2M100 INT8离线翻译当前文字字幕，可选中、英、日、韩源语言和目标语言，保持时间码并另存单语或原文／译文双语SRT。组件在第三方支持按需安装；不含粤语；实时字幕行可另开确认短句的实时翻译／双语显示。
 
 - **本地视频帧索引**：首次完成索引后缓存帧时间戳，重新打开同一文件可复用。文件路径、大小或修改时间变化时重新索引。索引缓存最多 128 MiB，可通过缓存清理移除。该缓存不含视频画面。
 
@@ -120,3 +120,51 @@ Icon generation: install Pillow and run `python assets/generate_icons.py`. It pr
 - **固定行列坐标与冻结表头**：表格视图顶部列字母／类型行始终固定，左侧行号始终固定；其余内容纵向／横向滚动，坐标保持对应。独立“冻结表头”不改变“首行为表头”的推断／校验跳过规则。XLSX 可读取到有效冻结窗格时，首次加载／重载沿用其数据冻结行列，允许用户取消；没有可识别设置时开关默认关闭，开启后固定当前数据首行。XLS／ODS／分隔文本暂不读取原冻结元数据，开启时同样使用首行。原冻结行列以文件坐标换算到当前有效数据范围，普通 split 窗格不视为冻结，不把 topLeftCell 滚动位置误当冻结范围。数据文本视图不应用冻结。不额外持久化此查看开关，不把冻结设置写回文件。
 
 - **Fixed coordinates and frozen headers**: Column letters/types stay at the top and row numbers stay at the left, independently of data scrolling. Freeze header does not change validation’s first-row skip option. Readable XLSX frozen rows/columns are applied on initial load/reload and can be disabled; without usable metadata the option starts off and freezes the first displayed data row when enabled. Source freeze metadata is not currently read from XLS/ODS/delimited text, which use the first-row fallback. File coordinates are translated to the displayed used range; plain splits and topLeftCell scroll positions are not treated as freeze counts. Data-text mode does not freeze. No extra preference persistence or document write-back occurs.
+
+## ASS／SSA／SRT／WebVTT 字幕编辑 / Subtitle editing
+
+- 独立内存草稿，ASS 原文结构保留，SRT 毫秒时间；列表、视频、选定音轨波形与多行重叠时间轴联动。支持基础字幕／样式编辑、文档历史、原格式保存与常用文字字幕转换，详细操作见使用指南。
+- 输入限 32 MiB，支持 UTF-8／带 BOM UTF-16，输出 UTF-8；历史限 64 步并按约 32 MiB 源文本快照预算缩减，单份超预算文档仍保留一步。ASS 编辑时间为百分之一秒精度；Format 的 Text 必须最后一列。SRT 位置扩展和其他编码不静默降级。
+- ASS 原样提取以源视频所选字幕序号复制；其他文字轨转 ASS。图像字幕、MKV 字体附件提取及复杂 ASS 特效可视化暂不支持。ASS→SRT 有损提示并过滤绘图，不做 OCR。外部更改冲突阻止覆盖；覆盖保留一份 `.bak`，不是永久版本备份。
+- 草稿烧录传递不可变 ASS 快照，现有视频编辑器／导出持有其生命周期，工程沿用烧录附件嵌入方式。后续编辑不会影响已交出的快照。
+
+- Independent memory drafts retain ASS source structure and SRT millisecond timing. Video, list, selected-track waveform and overlapping timeline rows are linked. Basic cue/style editing, document history, saving and ASS/SRT conversion are available; see the user guide for operations.
+- Input limit: 32 MiB; UTF-8 or BOM-marked UTF-16 in, UTF-8 out. History is capped at 64 steps and about 32 MiB of source snapshots, retaining at least one step. ASS uses centiseconds and requires Text last in event Format. Unsupported SRT placement suffixes/encodings are rejected.
+- Native ASS extraction copies the selected embedded subtitle ordinal; other text tracks convert to ASS. Bitmap subtitles, MKV font attachment extraction and advanced visual ASS effects remain unsupported. SRT conversion warns and filters drawings without OCR. External changes block overwrite; one `.bak` is retained, not permanent version history.
+- Draft burn-in hands an immutable ASS snapshot to existing video editing/export, with lifetime guards and project embedding. Later edits do not alter a handed-off snapshot.
+
+### 扩展字幕格式 / Extended subtitle formats
+
+- ASS／SSA／SRT／WebVTT 可加载、编辑并按检测到的原格式保存；SSA 旧字段／对齐保留，WebVTT 文件头、STYLE／REGION／NOTE、标识与时间设置保留。保存源文件不强制经过 ASS／SRT 转换。
+- 可另存 ASS／SRT／WebVTT，SSA 仅原格式保存及另存；不从其他格式生成旧版 SSA。转换有损时提示。WebVTT 预览不是浏览器排版引擎，CSS、区域、定位、说话人和逐词效果不完整；其他文字格式导入及图像字幕 OCR 尚未实现。
+- 同目录发现包含四种格式，多份精确同名不随意挑选。内嵌 ASS 家族／SRT／WebVTT 提供编码复制的原格式提取，mov_text 等无已支持独立格式时禁用该入口，仍可提取为 ASS；不恢复容器之前已丢弃的元数据。
+- ASS/SSA/SRT/WebVTT support native editing/saving with content detection. Legacy SSA fields and WebVTT header/style/region/note blocks, ids and settings survive native edits. Saving originals does not force an ASS/SRT conversion.
+- Save-as targets are ASS/SRT/WebVTT, plus native SSA when already editing SSA. Converting into legacy SSA, importing other text formats and bitmap OCR are unsupported. Lossy conversions warn; WebVTT preview has limited CSS/region/placement/voice/word-timing fidelity.
+- Sidecar discovery includes all four formats without arbitrarily choosing among ambiguous exact names. Supported embedded text codecs can copy to standalone formats; unsupported standalone codecs retain ASS conversion only. Upstream-discarded metadata cannot be reconstructed.
+
+### 编辑器预览样式隔离 / Editor preview style isolation
+
+- SRT／WebVTT 顶部提供独立统一预览设置，应用后记忆，和普通播放各用一套配置；ASS／SSA 按原文档样式。预览参数不修改文档、不拆分计时事件，也不自动用于保存、转换或烧录。单击列表显露时间轴，双击定位视频，保留缩放。
+- SRT/WebVTT expose independent, persistent unified preview settings in the top toolbar; ASS/SSA retain document styles. Preview parameters do not alter documents, split timed cues or automatically affect saving/conversion/burn-in. Single-click reveals the timeline cue; double-click seeks video, preserving zoom.
+
+## 录屏参数 / Screen recording parameters
+
+- Windows 录屏由 FFmpeg 实时采集并编码 H.264／yuv420p，无序列帧图片缓存。CPU veryfast；高质量／均衡／小体积对应 CRF 18／23／28，默认均衡；帧率 1–60、默认 30。质量模式不保证固定码率或大小，高分辨率／帧率可能增加负载或掉帧。奇数尺寸在右／下补齐为偶数。
+- 默认 MKV，MP4 采用分片写入与两秒关键帧。正常停止仅收尾，不整段重新转码；强制结束／断电仍可能损坏文件，外部 MP4 播放器兼容性需按设备确认。收尾超过 20 秒终止子进程并提示不完整，保留输出供检查。自动使用系统用户下载目录与纳秒时间戳，冲突递增，FFmpeg 同时带不覆盖保护。成功需进程正常退出、收到非零视频帧进度且文件非空。
+- 显示器采用物理坐标与 Windows 设备编号，断开后回退主屏。吸附使用 DWM 可见窗口边界，排除隐藏／最小化窗口、桌面、任务栏及工具自身；单击确认窗口，按住拖动创建矩形。确认后内部移动和八个手柄分别调整位置／双轴／单轴尺寸，最小 16×16，限制在虚拟桌面内。未录制的交互层用于接收框内拖动，开始录制即隐藏该层、锁定线框并穿透鼠标。
+- 工具条与屏幕菜单由主程序界面库绘制，字体、输入框、按钮和主题共用，不再混用系统 EDIT／COMBOBOX／BUTTON。独立窗口创建后校验所属进程，设置并回读 WDA_EXCLUDEFROMCAPTURE 后才显示；区域线框和交互层同样排除捕获。要求 Windows 10 2004+。API 成功不代表实际录制画面已验证，需按目标环境确认。
+- 配置在用户配置目录 screen_record.json，包含参数、两个快捷键及录屏历史条数。全局快捷键采用 RegisterHotKey／MOD_NOREPEAT，启动注册、退出释放；注册或配置写入失败尝试恢复旧绑定，恢复失败禁止开始。该检查不覆盖其他程序只在自身窗口使用的局部键。录制／组件检查期间禁止修改范围与配置，停止键仍可用。
+- 录屏历史独立保存在 screen_record_history.json，20–50 条、默认 20；旧配置未包含该字段时默认 20。仅成功录制入列，最新在前，重复路径移到最前，缺失文件仍保留并标红。移除／去重／上限淘汰只更改历史元数据，不删除视频；不与最近打开记录混合。写入错误在历史窗口提示。
+- 工具条以各显示器工作区避让，完成结果扩展区参与尺寸计算。重新进入或选区后收起上次完成结果，由历史按钮查看。未录制时 Esc 关闭区域／工具条；设置、历史和组件提示打开时不由后台选区层拦截退出。开始前检查 FFmpeg／FFprobe，缺失确认只进入第三方支持，不自动下载。
+- Windows recording captures and encodes H.264/yuv420p directly in FFmpeg without image-sequence caching. CPU veryfast uses CRF 18/23/28 for High quality/Balanced/Small file; default Balanced, 1–60 fps with default 30. Quality mode does not fix bitrate/size; high resolution/rate can increase load or drop frames. Odd dimensions are padded to even values.
+- MKV is the default; fragmented MP4 uses two-second keyframes. Normal stop finalizes without transcoding again; forced termination or power loss may still damage output, and external MP4 compatibility varies. Finalization times out after 20 seconds and preserves output for inspection. Downloads and nanosecond timestamp naming are automatic, with collision advancement and FFmpeg overwrite protection. Success requires normal exit, nonzero frame progress and a nonempty file.
+- Monitor selection uses physical coordinates and Windows device numbers, falling back to the primary screen if removed. Snapping uses DWM visible bounds and excludes hidden/minimized windows, desktop/taskbar and the tool itself. Click confirms a window; dragging creates a rectangle. Confirmed interiors move the region, and eight handles change two dimensions at corners or one dimension at edge centers. Minimum 16×16 within the virtual desktop. The idle interaction layer receives interior dragging; recording hides it and makes the locked frame click-through.
+- The toolbar and screen menu use the app UI library/theme, replacing system EDIT/COMBOBOX/BUTTON controls. Standalone windows are checked for process ownership and WDA_EXCLUDEFROMCAPTURE before showing; border/interaction layers are excluded too. Windows 10 version 2004+ is required. API success alone does not validate recorded pixels in the target capture environment.
+- screen_record.json persists parameters, shortcuts and history limit. RegisterHotKey/MOD_NOREPEAT registers global keys at startup and releases them on exit. Failed registration/writing attempts restoration, and failed restoration disables starting; other apps’ window-local shortcuts are not detected. Recording/component checks lock geometry/configuration but retain the stop key.
+- screen_record_history.json independently keeps 20–50 entries, default 20, including when an old settings file lacks the new field. Successful recordings are newest first; duplicates move to the front, and missing files remain marked red. Removal/deduplication/limit trimming only changes metadata and never deletes videos or alters Recent files. Writing errors appear in History.
+- Placement uses individual monitor work areas and includes the completion area. Reopening or reselecting collapses the previous result, available through History. Before recording, Esc closes region/toolbar; background selection does not intercept exit while settings/history/component dialogs are open. FFmpeg/FFprobe are checked before starting; confirmation of missing components opens Third-party Support without downloading automatically.
+
+- 系统声音默认开启，screen_record.json 记住开关，旧配置缺失时默认开启。Windows WASAPI 共享模式回环只打开默认 eRender/eConsole 播放设备，不访问麦克风；按混音格式采集 PCM／浮点，静音包及没有播放内容时生成静音。有限内存缓冲经本机回环连接实时送给 FFmpeg，AAC 128 kbit/s 立体声，与 H.264 一起写入 MKV／MP4，无独立音频文件缓存。禁用时不打开音频设备并使用 -an。当前不支持指定设备、录制中切换、切换播放设备后自动迁移或麦克风混音；音画同步和设备兼容性待实测。
+- 工具条屏幕列表使用现有 egui ComboBox，无独立菜单窗口；打开列表时临时扩展同一透明视口并裁掉无内容的空白区域。透明清屏、圆角及自绘阴影留出外边距，避免依赖原生窗口阴影或裁掉投影。提示使用 Body 字号，完成区无分割线。
+- System audio defaults on and persists in screen_record.json, including a default for legacy files. WASAPI shared-mode loopback opens only the default eRender/eConsole output endpoint. PCM/float packets and idle silence stream through a bounded local loopback connection to FFmpeg as AAC 128 kbit/s stereo beside H.264, without audio-file caching. Disabling audio opens no audio device and uses -an. Device selection, migration after output changes, live toggling and microphone mixing are not supported. Synchronization/device compatibility require runtime verification.
+- The screen selector uses the existing egui ComboBox in the same transparent viewport; expansion and native clipping reserve space for its popup. Transparent clearing and padded app-drawn shadows replace dependence on native shadows. Hints use Body text and completion has no divider.

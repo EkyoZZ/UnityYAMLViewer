@@ -293,35 +293,52 @@ pub fn preview_toggle(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Reusable labeled switch. Pass a localized label and the caller-owned state.
-/// Returns a normal response with clicked/changed state; supports ui.add_enabled_ui.
+/// Reusable switch sizes. Small follows the text height for inline toolbars.
+#[derive(Clone, Copy)]
+pub enum ToggleSwitchSize { Normal, Small }
+
+/// Content-sized labeled switch; existing callers retain the normal appearance.
 pub fn compact_toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
+    compact_toggle_switch_size(ui,label,value,ToggleSwitchSize::Normal)
+}
+
+pub fn compact_toggle_switch_size(ui:&mut egui::Ui,label:&str,value:&mut bool,size:ToggleSwitchSize) -> egui::Response {
     let font=egui::TextStyle::Button.resolve(ui.style());
-    let width=ui.painter().layout_no_wrap(label.to_owned(),font,ui.visuals().text_color()).size().x+48.0;
-    toggle_switch_width(ui,label,value,width)
+    let text=ui.painter().layout_no_wrap(label.to_owned(),font,ui.visuals().text_color());
+    let rail_height=match size {ToggleSwitchSize::Normal=>24.0,ToggleSwitchSize::Small=>text.size().y.clamp(14.0,18.0)};
+    let rail_width=match size {ToggleSwitchSize::Normal=>40.0,ToggleSwitchSize::Small=>rail_height*1.75};
+    let gap=match size{ToggleSwitchSize::Normal=>8.0,ToggleSwitchSize::Small=>if label.is_empty(){0.0}else{4.0}};
+    let width=text.size().x+rail_width+gap;
+    toggle_switch_width(ui,label,value,width,size)
 }
 
 pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
     let width=ui.available_width().max(48.0);
-    toggle_switch_width(ui,label,value,width)
+    toggle_switch_width(ui,label,value,width,ToggleSwitchSize::Normal)
 }
 
-fn toggle_switch_width(ui:&mut egui::Ui,label:&str,value:&mut bool,width:f32) -> egui::Response {
+fn toggle_switch_width(ui:&mut egui::Ui,label:&str,value:&mut bool,width:f32,size:ToggleSwitchSize) -> egui::Response {
     let color=ui.visuals().text_color();
     let font=egui::TextStyle::Button.resolve(ui.style());
-    let galley=ui.painter().layout(label.to_owned(),font,color,(width-48.0).max(1.0));
-    let height=galley.size().y.max(26.0);
+    let text_height=ui.text_style_height(&egui::TextStyle::Button);
+    let (rail_width,rail_height,padding,gap)=match size{
+        ToggleSwitchSize::Normal=>(40.0,24.0,2.0,8.0),
+        ToggleSwitchSize::Small=>{let h=text_height.clamp(14.0,18.0);(h*1.75,h,1.5,4.0)},
+    };
+    let label_width=(width-rail_width-if label.is_empty(){0.0}else{gap}).max(1.0);
+    let galley=ui.painter().layout(label.to_owned(),font,color,label_width);
+    let height=match size{ToggleSwitchSize::Normal=>galley.size().y.max(26.0),ToggleSwitchSize::Small=>galley.size().y.max(rail_height)};
     let (rect,mut response)=ui.allocate_exact_size(egui::vec2(width,height),egui::Sense::click());
     if response.clicked() {*value=!*value;response.mark_changed();}
     response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Checkbox,ui.is_enabled(),*value,label));
-    let rail=egui::Rect::from_center_size(egui::pos2(rect.right()-20.0,rect.center().y),egui::vec2(40.0,24.0));
+    let rail=egui::Rect::from_center_size(egui::pos2(rect.right()-rail_width*0.5,rect.center().y),egui::vec2(rail_width,rail_height));
     let fill=if *value {rgb(45,125,250)} else if ui.visuals().dark_mode {rgb(62,62,66)} else {rgb(175,175,180)};
-    ui.painter().rect_filled(rail,12.0,fill);
+    ui.painter().rect_filled(rail,rail_height*0.5,fill);
     let t=ui.ctx().animate_bool(response.id,*value);
-    let center=egui::pos2(rail.left()+12.0+16.0*t,rail.center().y);
-    ui.painter().circle_filled(center,10.0,if *value {Color32::WHITE} else {rgb(220,220,220)});
+    let center=egui::pos2(rail.left()+rail_height*0.5+(rail_width-rail_height)*t,rail.center().y);
+    ui.painter().circle_filled(center,rail_height*0.5-padding,if *value {Color32::WHITE} else {rgb(220,220,220)});
     ui.painter().galley(egui::pos2(rect.left(),rect.center().y-galley.size().y*0.5),galley,color);
-    if response.has_focus() {ui.painter().rect_stroke(rail.expand(2.0),14.0,Stroke::new(1.0_f32,BLUE),egui::StrokeKind::Outside);}
+    if response.has_focus() {ui.painter().rect_stroke(rail.expand(2.0),rail_height*0.5+2.0,Stroke::new(1.0_f32,BLUE),egui::StrokeKind::Outside);}
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

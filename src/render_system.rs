@@ -4,6 +4,7 @@ use eframe::egui::Color32;
 
 pub(crate) mod scene;
 pub(crate) mod gpu;
+pub(crate) mod video;
 pub(crate) mod shader;
 pub(crate) mod mesh;
 

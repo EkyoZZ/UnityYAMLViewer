@@ -14,6 +14,8 @@ impl Drop for Assets { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0);
 enum Reference { External { absolute:PathBuf, relative:Option<PathBuf> }, Embedded { entry:String } }
 #[derive(Serialize, Deserialize)]
 struct Item {
+    #[serde(default)]
+    burn_subtitle:Option<Reference>,
     #[serde(default="default_enabled")]
     enabled:bool,
     source: Reference,
@@ -25,6 +27,8 @@ struct Item {
 }
 #[derive(Serialize, Deserialize)]
 struct Document {
+    #[serde(default)]
+    merge_burn_subtitle:Option<Reference>,
     format: String,
     version: u32,
     kind: String,
@@ -218,8 +222,10 @@ fn load(path:PathBuf) -> Result<Loaded,String> {
     fs::create_dir(&root).map_err(|e|e.to_string())?;
     let assets=Arc::new(Assets(root));let mut next=0;let mut media=Vec::new();
     let mut document=document;
+    if let Some(reference)=&document.merge_burn_subtitle {let resolved=resolve(reference,&path,&mut archive,&assets,&mut next)?;document.merge_settings.set_burn_subtitle(Some(resolved));}
     for item in &mut document.items {
         item.state.validate()?;
+        if let Some(reference)=&item.burn_subtitle {let resolved=resolve(reference,&path,&mut archive,&assets,&mut next)?;item.state.set_burn_subtitle(Some(resolved));}
         if !item.position.is_finite() || item.position<0.0 || item.tracks.len()!=item.state.tracks.len() {return Err(tr("工程设置无效或格式版本不受支持。").into());}
         let source=resolve(&item.source,&path,&mut archive,&assets,&mut next)?;
         let info=probe(&source,None,None,false)?;
@@ -342,10 +348,12 @@ impl TrimEditor {
                 }else{external(&track.path,parent)}
             }).collect();
             let clip=player.trim.clip().map(|clip|{let entry=format!("assets/audio-{}.wav",items.len());files.push((entry.clone(),clip.path.clone()));clips.push(clip);Reference::Embedded{entry}});
-            items.push(Item{enabled:queue_item.enabled,source,state,tracks,clip,position:player.position_now(),selected_audio:player.selected_audio});
+            let burn_subtitle=state.burn_subtitle().map(|path|{let entry=format!("assets/burn-{}.ass",items.len());files.push((entry.clone(),path.to_owned()));Reference::Embedded{entry}});
+            items.push(Item{burn_subtitle,enabled:queue_item.enabled,source,state,tracks,clip,position:player.position_now(),selected_audio:player.selected_audio});
         }
         if self.players.iter().any(|(path,_)|*path==target) || files.iter().any(|(_,path)|*path==target) {self.queue.error=Some(tr("工程不能覆盖素材文件。").into());return;}
-        let document=Document {format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:if video{"video"}else{"audio"}.into(),active:self.queue.active,expanded:self.queue.expanded,merge:self.queue.merge,merge_settings:self.queue.merge_settings.clone(),items};
+        let merge_burn_subtitle=self.queue.merge_settings.burn_subtitle().map(|path|{let entry="assets/merge-burn.ass".to_owned();files.push((entry.clone(),path.to_owned()));Reference::Embedded{entry}});
+        let document=Document {merge_burn_subtitle,format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:if video{"video"}else{"audio"}.into(),active:self.queue.active,expanded:self.queue.expanded,merge:self.queue.merge,merge_settings:self.queue.merge_settings.clone(),items};
         self.saving_edit_state=self.edit_fingerprint();
         let (tx,rx)=mpsc::channel();self.project_save=Some(rx);self.queue.project_saving=true;
         use crate::background_tasks::{Task,Progress,Outcome,Target};
@@ -366,7 +374,7 @@ impl TrimEditor {
 mod tests {
     use super::*;
     fn document() -> Document {
-        Document{format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:"audio".into(),active:0,expanded:true,merge:false,merge_settings:MergeSettings::default(),items:vec![Item{enabled:true,
+        Document{merge_burn_subtitle:None,format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:"audio".into(),active:0,expanded:true,merge:false,merge_settings:MergeSettings::default(),items:vec![Item{burn_subtitle:None,enabled:true,
             source:Reference::External{absolute:PathBuf::from("missing.wav"),relative:None},state:EditState::fixture(),tracks:vec![],clip:None,position:12.0,selected_audio:Some(0)}]}
     }
     #[test]

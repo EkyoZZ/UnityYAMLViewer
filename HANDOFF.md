@@ -1,3 +1,12 @@
+# 当前开发：1.3.6（尚未构建此版号／未发布）
+
+- 2026-11-12，按用户要求将 Cargo.toml／Cargo.lock 升至 1.3.6，并将 v1.3.5 标签之后的开发记录迁入 docs/versions/1.3.6.md。1.3.5 版本记录以 7089dc2 的发布核验补记为基线，关于摘要恢复 v1.3.5 标签内容；正式发布资料、标签、附件和哈希不变。
+- 1.3.6 包含字幕生成／实时识别／翻译／缓存／独立编辑、字幕样式与导出优化、GPU 播放和图片预览改进、Windows 录屏与共用 error.log。最终范围及暂缓事项见版本记录；Moonshine／OPUS-MT 仅保留历史开发事实，已不提供入口。
+- 用户确认录屏错误修复、其他已体验操作验证通过；中央大数字倒计时没有看到，按要求暂不调整。保留新构建关于界面及未覆盖环境的待验证状态，不宣称全部功能全面回归。
+- 最近本地 EXE 仍为升级前开发版 1.3.5：target/release/unity_yaml_viewer.exe，33,502,720 字节，SHA-256：F4739FB0AC34BD4D4A36B588CD60AD354D67E29CC4D91B56A1669CC3AB21A52F。对应 target/recording-pcm-countdown-timeline-release-verification.json；它与 v1.3.5 正式发布附件不同。本轮不生成新 EXE，不提交／推送、打标签或发布。
+- 关于窗口默认两版为 1.3.6／1.3.5，更早历史默认收起；新摘要具备七语言。下方旧交接、版号与各时点验证结论保留，最新状态以本节和 1.3.6 版本记录为准。
+- 本轮 cargo check --tests --locked --offline 通过（18.64 秒，target/version-1.3.6-check.log）；未运行测试程序。迁移及七语言静态核对通过，28 版索引与默认两版／重开收起逻辑保持，发布后记录完整保留，1.3.5 发布资料与其他历史摘要未改变，原 EXE 哈希不变；证据 target/version-1.3.6-migration/verification.json。git diff --check 通过；新版本关于窗口的实际显示与交互待运行验证。
+
 # 当前发布：1.3.5（已正式发布）
 
 - 正式发布：用户确认 Git 已提交并明确授权发布；本地与远程 master 均为 3e192b9559222301dbd94d7187d7008300264574，258 项准备构建输入逐字节未改变，附件哈希与最新已核验产物一致，未重新编译。北京时间 2026-11-06 12:35:09 发布 v1.3.5，Release ID 436481768，显示标题仅 v1.3.5，非草稿、非预发布，latest API 确认为最新稳定版，标签指向已核对。附件 UnityYAMLViewer-v1.3.5-windows-x64.exe，31095296 字节，SHA-256：B85D5494321C768F78F2BA064010D860DA05E57A2C5531D32EAD93E667202CD3，GitHub 返回大小及 digest 核验通过。证据 target/v1.3.5-published-verification.json、target/v1.3.5-published.json、target/v1.3.5-release-asset.json。下文未发布、需重建及旧产物记录保留当时时点事实；不扩大实际运行验证范围。
@@ -3538,9 +3547,242 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 ## 2026-11-11 字幕缓存 / 回放与投影补充
 
 - 实时识别现在自动写入应用缓存 live_subtitles 下的独立 JSONL / SRT，会话元数据与草稿 / 最终结果分明；提供定位和 SRT 导出。相同媒体身份、轨道、语言、引擎 / 模型版本可复用已确认片段并跳过覆盖 PCM 包。HLS 仅在正时长且有 ENDLIST 的媒体清单校验后跨会话复用；失败或未知直播不复用。未实现自动比较 / 合并 / 校正，不缓存音频、不覆盖原字幕。
-- 字幕投影增加 -12..12 的 X/Y 独立偏移，兼容旧单值，原字幕不改写；实时覆盖样式仍独立。具体限制、容量及验证见 docs/versions/1.3.5.md 和双语指南。
+- 字幕投影增加 -12..12 的 X/Y 独立偏移，兼容旧单值，原字幕不改写；实时覆盖样式仍独立。具体限制、容量及验证见 docs/versions/1.3.6.md 和双语指南。
 - Python 8 项通过，Rust 新增用例仅编译检查通过：target/live-subtitle-cache-check.log；未生成新 EXE。真实模型、HLS 回放 / 重开、缓存清理与导出、投影四方向及关于窗口交互仍待运行验证。
 
 
 ## 2026-11-11 实时字幕 / 缓存与投影 Release 构建
 - 2026-11-11，用户明确授权编译实时字幕 / 缓存与投影版：构建前确认 unity_yaml_viewer 未运行，目标 EXE 可独占访问。cargo build --release --locked --offline 成功（1 分 02 秒），仅保留 spine38 既有 158 项警告。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.3.5，31,592,960 字节，SHA-256：D1A0CA3A3CE34C08C29FD6626AABE407C4EBAF40EC2DFE410AAC597D74BABBCC。构建日志 target/live-subtitle-release-build.log。未自动启动、未发布或更新附件；真实 SenseVoice / Zipformer、实时字幕缓存与 HLS 回放复用、投影 X/Y、七语言及关于窗口交互仍待运行验证。此前“未生成 EXE”描述为当时状态。
+
+
+## 2026-11-11 点播 SenseVoice 提前识别与 OPUS-MT 安装补充
+
+- 点播提前识别默认启用、SenseVoice 专用，独立 FFmpeg 音轨供给最大约 20 秒领先窗口，确认句仅按媒体时钟显示；暂停可补足窗口，跳转换轨 / 引擎或关闭取消旧任务。HLS 仅 ENDLIST 校验通过后启用，增加网络音轨读取开销，可在实时字幕菜单关闭。首次加载 / 未缓存跳转仍可能缺字幕，未实现预缓冲阻塞播放。
+- OPUS-MT 安装区分运行库和模型阶段，-X utf8 修正日志编码；最多 3 次下载尝试，断点续传 / 200 重下、固定大小 SHA-256 校验、完整 ZIP 留存以复用转换重试。用户截图 10060 是连接超时，未宣称已复现源站或解决网络环境。
+- Python 下载测试 6 项、字幕测试 10 项通过；Rust 媒体时钟窗口与协议用例只编译未运行。cargo check --tests --locked --offline 通过，target/subtitle-lookahead-check.log。未编译新 EXE；真实点播 / HLS / 下载转换及界面仍待验证。
+
+
+## 2026-11-11 字幕边距与可用文字宽度
+
+实时层改用可见画面减去左右边距及文字内边距排版，底边距沿用样式；长词可折行，窄窗口安全限制。临时 ASS 统一每句边距并覆盖 q2 / pos / move / org / an 等定位设置，以播放器全局边距为准；原文件不修改。新增两项回归用例只编译检查，target/subtitle-margins-check.log；首尾字符实际显示与截图复现、全屏 / 缩放待 GUI 验证，未构建新 EXE。
+
+
+## 2026-11-11 字幕边距 / 提前识别 / 安装修正 Release
+
+- 2026-11-11，用户再次明确授权后，编译前检查 unity_yaml_viewer 无运行进程，目标 EXE 可独占访问；cargo build --release --locked --offline 成功（53.26 秒），保留 spine38 既有 158 项警告。此构建包含字幕两排 / 断句、左右边距修正、SenseVoice 点播提前识别与 OPUS-MT 安装续传 / 重试和日志 UTF-8。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.3.5，31,698,944 字节，SHA-256：BAEE96F5B5EE61751DB4170E4FD0A02BEFD253170AC2723E8978F01277AFCA52。日志 target/subtitle-margins-release-build.log。未自动启动、未发布或更新附件；实际首字裁切 / 换行、提前识别同步、真实网络安装及关于窗口交互仍待运行验证。此前未生成 EXE 的表述为各次源码修改时点状态。
+
+
+## 2026-11-11 M2M100 INT8 双模型字幕翻译
+
+保留 OPUS-MT，新增 M2M100 INT8 社区固定版约 494 MB 下载、约 1 GB 持久模型加下载包（另加共用运行库，建议 2 GiB 磁盘）。第三方支持显示估算 1–3 GiB RAM 和可用时的上次模型进程峰值工作集；独立 Python 进程任务后退出，模型文件保留。中英日韩 12 个直接方向，源 / 目标可选，模型文件名隔离，双语 M2M100 原文在上译文在下。仅文件翻译，实时翻译暂未实现。M2M100 6 项 / OPUS 下载 6 项模拟测试通过，Rust 命名回归仅编译检查通过，target/m2m100-check.log。未下载大模型、未实测质量 / 内存 / 加载兼容性，未构建新 EXE。详见当前版本记录。
+
+
+## 2026-11-11 字幕样式后续反馈修正
+
+投影 X/Y 改输入框外标签，增加顶部 / 底部与动态边距，旧配置默认底部。长中文以 Windows 字体测量 + 脚本宽度和边距显式插入硬换行，替代仅 q0 自动换行；原文 / 格式标签保留，内联字号和缩放服从播放器设置。全局样式同步重新生成临时 ASS，避免旧边距残留。系统 FFmpeg 两行中文独立夹具验证底边距20/40及顶部显示，证据 target/subtitle-style-render-verification.json；不是应用运行或原视频验证。Rust 新用例仅编译检查通过，target/subtitle-style-layout-check.log；未生成新 EXE，实际字体 / 大字号 / GUI 待验证。
+
+
+## 2026-11-11 原生 ASS / 导出 / 样式窗口聚焦
+
+统一样式默认保留，新增原生 ASS 模式（UTF-8 外部 ASS 临时原文复制、无播放器重写 / force_style）；当前文字字幕菜单可导出 SRT / ASS，统一 ASS 固化样式，原生保留内容。生成 / 翻译默认 SRT 不变，实时缓存仍 SRT；特效制作预设与标签编辑器未实现。重复呼出同一个样式窗口通过 native_window::wake 前置，保留未应用草稿和搜索。Rust 新回归用例仅编译检查通过：target/ass-mode-export-check.log。实际操作系统聚焦、特效与字体 / 导出往返待实机验证；未构建新 EXE。
+
+
+## 2026-11-11 ASS 模式 / 导出版 Release
+
+- 2026-11-11，用户授权编译 ASS 模式 / 导出版：构建前确认 unity_yaml_viewer 无运行进程且目标 EXE 可独占访问；cargo build --release --locked --offline 成功（1 分 14 秒），仅保留 spine38 既有 158 项警告。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.3.5，31,817,728 字节，SHA-256：77E42D196DCE9DBA27704BD3C343895A9414C1E3CC280F1461B84FB77BDDF3DB。日志 target/ass-mode-release-build.log。包含 M2M100 / OPUS-MT 双翻译模型、字幕样式顶底位置 / 显式换行、原生 ASS / 统一样式、SRT / ASS 导出和样式窗口重复呼出唤醒。本次未自动启动程序、未发布或更新附件；真实模型安装 / 内存与翻译、原视频边距 / 换行、ASS 特效 / 导出及窗口 OS 聚焦仍待实机验证。此前各次“未生成新 EXE”为当时源码修改状态。
+
+
+## 2026-11-11 字幕换行过窄 / 边距单位
+
+边距20明确为ASS脚本单位，非20%或20屏幕像素。统一模式脚本宽度匹配实际视频比例，默认384×288的4:3脚本在16:9视频修正为512×288；原生ASS不变。GDI字宽改正高度cell口径，使用粗体测量加3%余量替代负高度EM加15%。当前机器四中文字符测量由1340降为992（高分辨率单位），Rust新增比例回归仅编译，target/subtitle-width-units-check.log；用户视频实际宽度 / 完整性仍待验证，未编译EXE。
+
+
+## 2026-11-11 字幕宽度 / 单位修正版 Release
+
+- 2026-11-11，用户授权后编译字幕宽度 / 单位修正版：构建前确认程序无运行进程，目标 EXE 独占访问通过；cargo build --release --locked --offline 成功（1 分 00 秒），仅保留 spine38 既有 158 项警告。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.3.5，31,740,928 字节，SHA-256：C288EF00BF1228716E453565E476080132C24D83DEF23B02085FA1E63FCE3DDE。日志 target/subtitle-width-release-build.log。包含脚本比例匹配视频、GDI 字宽口径修正及边距脚本单位说明，保留此前 ASS 模式 / 导出与双翻译模型。未自动启动、未发布或更新附件；实际原视频行宽 / 首尾字完整性与窗口交互仍待用户运行验证。
+
+
+## 2026-11-11 实际 ASS 边距列索引根因与草稿预览
+
+已获用户窗口授权实机确认旧构建“应用”可提交 / 位置可变；发现边距真正根因为 ASS Dialogue 列错一位：应写5/6/7，原写6/7/8，垂直边距写到Effect。已修正并新增精确列断言。用户实际字幕副本 FFmpeg 91.606秒验证底部 y413→278（垂直100），证据 target/subtitle-margin-columns-verification.json；未运行新构建。恢复GUI底部 / 水平10 / 垂直100和原暂停位置，播放器仍开着。
+
+源码新增180ms文字字幕草稿预览，应用保存 / 取消关闭回滚、播放页模式和未保存标识，导出用预览快照；实时层不读取未保存草稿。Rust新回归仅编译检查，target/subtitle-margin-columns-check.log，未构建EXE。后续若授权编译必须重新检查程序占用，不得自动关闭当前程序。
+
+
+## 2026-11-11 边距列修复 / 样式预览版 Release
+
+- 2026-11-11，用户授权编译边距列修复 / 样式预览版：构建前确认播放器未运行且目标 EXE 可独占访问；cargo build --release --locked --offline 成功（59.16 秒），仅保留 spine38 既有 158 项警告。产物 target/release/unity_yaml_viewer.exe，文件 / 产品版本 1.3.5，31,808,000 字节，SHA-256：CC6C99A66E8C4495EE58C8935FDF877420432E3106A0DA9B97BC1414BFDC0C62。日志 target/subtitle-margin-columns-release-build.log。包含 ASS Dialogue 边距字段5/6/7修正及当前文字字幕草稿预览 / 应用保存 / 取消恢复。未自动启动、未发布或更新附件；当前新构建的实际边距及预览交互仍待验证，前述用户字幕副本 FFmpeg 验证与旧构建实机排查不等于此新构建验证。
+
+## 2026-11-11 实时字幕翻译整合版 Release
+
+- 2026-11-11，用户授权编译实时字幕翻译整合版：编译前确认unity_yaml_viewer无运行进程且目标EXE独占访问通过；cargo build --release --locked --offline成功（1分04秒）。产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.5，31975936字节，SHA-256：5764646EC99C5250AE1B8024A76070600CEE4C9D506EABFDAE2199DBDA0183AB。日志target/live-translation-release-build.log。保留spine38既有158项警告，另有VideoSettings::configure未使用警告。包含字幕切换保留画面、播放及生成长句拆段、ASS内嵌／烧录、Zipformer四候选束搜索、移除OPUS-MT并使用M2M专用运行库、实时翻译开关／源字幕显示及行末状态。未自动启动或发布；新构建GUI、实际识别重复改善及持续翻译性能仍待验证。之前系统FFmpeg和模型进程验证不等于完整新应用运行验证。
+
+
+## 2026-11-11 共享 GPU 运行库与低 CPU 偏好
+
+本机已授权安装到 C:/Users/ekyo/AppData/Roaming/UnityYAMLViewer-components/ai-gpu-runtime，三包版本见当前版本记录，ready经4个DLL加载及RTX4060真实M2M GPU推理验证后写入。组件目录ai-runtime.json默认prefer_gpu=true、cpu_threads=2。源码新增第三方统一设置及安装／校验入口，模型任务启动时读取；未构建新EXE。旧运行EXE不会自动使用新配置／DLL搜索路径，需用户后续明确授权编译且先检查占用。当前sherpa-onnx识别包无CUDA provider，继续CPU，不得把补齐库宣称为识别GPU可用。基准／验证证据见target/shared-ai-gpu-verification.json与target/live-translation-cpu-benchmark.json。新增Small开关及隐藏逐句翻译提示也尚未构建。
+
+
+- 2026-11-11，用户明确授权编译共享GPU／Small控件版：构建前确认unity_yaml_viewer未运行且目标EXE独占访问通过；cargo build --release --locked --offline成功（53.09秒）。产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.5，31859712字节，SHA-256：0856F330E75985E7E9764E6FF9B657513EE25398F61BBE1D0C671F1D9858B302。日志target/shared-ai-runtime-release-build.log。包含第三方统一GPU优先／CPU线程设置、GPU动态库补齐入口、M2M100实际预热验证后GPU推理及CPU回退、低后台CPU优先级、Small开关与按文本收窄的语言框、隐藏逐句翻译状态。当前本机共享CUDA库已装并单独验证M2M GPU成功；sherpa识别组件仍缺CUDA provider，保持CPU。编译保留第三方既有警告及VideoSettings::configure未使用警告。未自动启动或发布；新构建界面、长时间实时负载和播放流畅度待运行验证。
+
+
+- 2026-11-11，用户明确授权编译独立原文／译文与GPU修复版：构建前确认播放器未运行且目标EXE独占访问通过；cargo build --release --locked --offline成功（48.82秒）。产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.5，31902208字节，SHA-256：E00D7D803B11E93E74D5A5B03258B04D1E8FF96B372BE23D16733AAB05B9156E。日志target/live-subtitle-lanes-release-build.log。包含原文／译文独立更新、译文底部与双语原文上移、GPU／CPU实际后端标记、GPU库先校验及暂存修复、播放输入解码4线程及滤镜2线程。保留第三方既有警告及VideoSettings::configure未使用警告。未自动启动或发布，实际持续CPU占用与新显示布局待验证；用户继续报告旧运行体验关闭程序CPU4%～7%、开启SenseVoice字幕与翻译约74%，仍未验证纯视频播放基线，不得声称高CPU问题已解决。
+
+
+## 2026-11-11 YUV 视频接入共享渲染系统（源码）
+
+已新增src/render_system/video.rs并复用render_system::Gpu的上下文／回调／销毁，常规SDR播放管道使用Arc<YUV420 Frame>并绕过ColorImage，兼容RGBA留给HDR／透明／编辑等场景。cargo check --tests通过，实际WGL离屏GLSL与FFmpeg平面验证通过，详见当前版本记录。未授权新一轮EXE构建，现有target/release仍是E00D7D803B11E93E74D5A5B03258B04D1E8FF96B372BE23D16733AAB05B9156E版，不包含尺寸优化和YUV渲染改造。后续编译须用户明确授权且先检查程序占用。完整应用CPU改善仍未验证，不能宣称实现零拷贝。
+
+
+- 2026-11-11，用户授权编译期间进一步澄清图片100%显示问题，同轮纳入物理像素倍率修正后重新检查播放器无运行进程及目标EXE独占访问，通过后cargo build --release --locked --offline成功（47.93秒）。最终产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.5，31852032字节，SHA-256：1CA3FAC41C4EC1900B8332320395DC4E44B7244757F2D1DFAD92D5D3C2156E31。日志target/yuv-image-physical-zoom-release-build.log；此前51.61秒首轮日志target/yuv-image-sampling-release-build.log对应未含物理100%修正的中间产物，已被最终构建替换。包含YUV播放共享Glow渲染、按窗口限制预览帧、图片平滑／像素模式及100%物理一对一修正。保留第三方既有警告及VideoSettings::configure未使用警告。未自动启动、未发布；用户原图100%实际对齐、七语言UI、视频CPU占用等仍待运行验证。Rust物理DPI几何用例仅编译检查（target/image-physical-zoom-check.log），不宣称已实机解决全部锯齿。
+
+
+- 2026-11-11，用户明确授权编译YUV画质与紧贴字幕版：编译前确认播放器未运行且目标EXE独占访问通过；cargo build --release --locked --offline成功（47.97秒）。产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.5，31847936字节，SHA-256：D9A8B187B4F1D2E853009D363A4954197A361386943968ACDC4C97C3317CDDAD。日志target/yuv-quality-subtitle-stack-release-build.log。包含YUV Lanczos缩小／色度位置／上传状态及稳定抗色带处理、实时双语按实际行高紧贴堆叠、译文多行推高原文及背景50%不透明度。保留第三方既有警告及VideoSettings::configure未使用警告。未自动启动或发布；用户频道清晰度／淡横线改善、持续CPU占用及实际字幕布局仍待验证，离屏GLSL验证不等于新应用端到端验证。
+
+
+- 2026-11-11，用户明确授权编译自动语种／点播提前翻译／编辑GPU整合版：编译前确认播放器未运行且目标EXE独占访问通过；cargo build --release --locked --offline成功（48.48秒）。产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.5，31920128字节，SHA-256：954187ECC20C444ED5976E6F0F51C1ED127C7FBA9F1879F47C39FC0BAEDEADD4。日志target/auto-language-editor-gpu-release-build.log。包含CPU／GPU识别引擎独立安装与选择、全屏翻译独立更新、编辑及透明RGBA GPU预览、播放终点取帧边界修复、实时SenseVoice默认自动语种与lang元数据贯通、点播未来确认字幕有界提前翻译及防提前显示。保留第三方既有警告及VideoSettings::configure未使用警告。未自动启动或发布；新应用GPU识别包实际安装／推理、全屏、末帧、自动日译中、预翻译和编辑交互仍待运行验证，已有模型／FFmpeg／离屏GL测试不等于完整新应用验证。
+
+## 2026-11-12 字幕编辑与提取源码交接（未重建 EXE）
+
+- 新增 src/subtitle_document.rs、src/media_preview/subtitle_editor.rs：独立 ASS／SRT 编辑窗口、源文档内存草稿、视频／所选音轨波形／时间轴／列表／样式编辑、历史、备份与外部冲突检测、另存互转、不可变草稿烧录交接。subtitle_player 同一菜单新增默认 ASS 原轨提取，选中内嵌 ASS／SSA 使用 copy 保留特效，成功挂载并进入编辑。
+- VideoSettings 以 serde skip 的 Render 引用持有烧录快照，克隆进入现有导出任务；现有视频工程附件逻辑负责嵌入。未替换既有媒体导出流程，不影响本轮之前已有的大量未提交源码变更。
+- cargo check --tests --locked --offline 通过，日志 target/subtitle-editor-check.log；八项新增 Rust 模型用例仅编译。node tests/verify_subtitle_formats.mjs 实际通过，FFmpeg 双字幕轨／ASS 特效保留／绘图转换／字幕像素证据在 target/subtitle-editor-verification/。文案七语言和关于索引静态检查通过；git diff --check 通过。
+- 完整应用界面／保存／时间轴／独立播放及烧录交接、项目恢复仍待新构建运行验证。图像字幕、字体附件提取、高级 ASS 可视化暂不支持。具体范围见 docs/versions/1.3.6.md 和 docs/user-guide.md。本轮没有生成可执行程序、运行 Rust 测试、提交或发布；当前 EXE 不含这些源码修改。
+
+## 2026-11-12 SSA／WebVTT 扩展源码交接（未重建 EXE）
+
+- 四种格式 ASS／SSA／SRT／WebVTT 原格式加载编辑保存，内容优先识别；SSA 旧样式／对齐／颜色与 WebVTT 元数据保留，转换提示损失。WebVTT 预览非浏览器完整排版；生成旧版 SSA、其他文字格式导入与图像 OCR 仍未实现。
+- 播放菜单同时提供默认 ASS 和按原编码 copy 提取（ASS 家族／SRT／WebVTT）。来源 codec 用类型字段传递，mov_text 等禁用原格式按钮。外部四格式同目录发现遇到多份精确同名不任意选择。
+- 新增 tests/verify_subtitle_ssa_webvtt.mjs，实际三轨 MKV 提取及 SSA 顶部对齐渲染验证通过，结果 target/subtitle-ssa-webvtt-verification/result.json。旧提取回归也通过。九项新增 Rust 用例仅编译；cargo check --tests --locked --offline 通过，日志 target/subtitle-ssa-webvtt-check.log。新增文案七语言及关于索引静态核对完成，git diff --check 通过。
+- 实际编辑／保存／窗口提示与关于历史折叠仍待新构建运行验证；当前 EXE 不含本轮源码，未执行构建、Rust 测试程序、提交或发布。
+
+- 2026-11-12，用户明确授权编译字幕编辑／SSA／WebVTT 整合版：编译前确认播放器未运行且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功（73.27 秒）。产物 target/release/unity_yaml_viewer.exe，文件／产品版本 1.3.5，32,747,008 字节，SHA-256：255319BD5CEA7140D0791D16BEC45832D47D65B99E77C1C581159224CCD29924。日志 target/subtitle-editor-ssa-webvtt-release-build.log，核验 target/subtitle-editor-ssa-webvtt-release-verification.json。包含本轮字幕工具栏精简、编辑器方向键、独立内存草稿字幕编辑、基础样式／时间轴／保存互转／烧录快照，以及 SSA／WebVTT 原格式与内嵌字幕提取扩展。保留 spine38 既有 158 项警告及 VideoSettings::configure 未使用警告。未自动启动、提交或发布；完整应用的窗口布局、字幕编辑／保存／转换、原格式提取、烧录交接与七语言界面仍待运行验证。此前“未生成 EXE”描述保留对应源码修改时点事实。
+
+
+- 2026-11-12，用户明确授权编译字幕时间轴全宽进度条版：编译前确认播放器未运行且目标 EXE 独占访问通过；cargo build --release --locked --offline 成功（57.46 秒）。产物 target/release/unity_yaml_viewer.exe，文件／产品版本 1.3.5，32593408 字节，SHA-256：40748BCCD1B3E88DD05C2303B84367A53D64CFD0750CCD5149CD57F5661BA5A7。日志 target/subtitle-timeline-progress-release-build.log，核验 target/subtitle-timeline-progress-release-verification.json。包含字幕时间轴底部全宽进度条、点击／拖动浏览及条内可见时间范围显示。保留 spine38 既有 158 项警告及 VideoSettings::configure 未使用警告。未自动启动、提交或发布；新进度条实际布局及点击／拖动仍待运行验证。此前未重建描述保留对应修改时点事实。
+
+
+- 2026-11-12，用户澄清字幕时间轴底部保留滑块、只需与时间轴同宽。已恢复无填充／无数值的全宽 egui 滑块，七语言关于摘要同步；cargo check --locked --offline 通过（target/subtitle-timeline-wide-slider-check.log），实际界面待验证。本次未重建 EXE，当前已有全宽进度条版产物不含此修正。
+
+
+- 2026-11-12，字幕编辑器补齐播放栏同款音量弹窗／时间同行、列表双击定位时间轴、双向选中及自动滚动（Ctrl 多选同步）、批量平移移到固定列表工具栏。修正播放跟随只改列表 active 与 Ctrl 取消残留高亮。cargo check --tests --locked --offline 通过（target/subtitle-editor-selection-transport-check.log），会话回归用例扩展仅编译。七语言摘要与使用指南同步；实际 GUI 待验证，本轮未重建 EXE，已有程序不含本轮及前述同宽滑块修正。
+
+- 2026-11-12，字幕编辑器新增顶部“统一预览样式”按钮（SRT／WebVTT），独立配置 subtitle_editor_preview_style.json，与普通播放分离。共用控件、不共用偏好；仅预览，不改文档／保存／转换／烧录结果。保持 cue 时间，不沿用普通播放的自动分段计时。用户最终确认单击列表显露时间轴、双击定位视频；播放跟随不强制移动手动时间轴。cargo check --tests --locked --offline 通过（target/subtitle-editor-preview-style-check.log），两项隔离／配置回归用例仅编译；七语言与文档同步。GUI／重启恢复待验证，未重建 EXE。
+
+- 2026-11-12，字幕编辑新增横屏／竖屏布局 Tab，初次按视频方向选择；竖屏视频与播放控制独占左列、编辑区在右侧。扩大起止边界抓取区域并锁定按下起点，保留短字幕中部移动。按用户最终选择保留全宽浏览进度条，固定预留 8 间距＋18 条高，消除滚动区域最小高度造成的挤压。cargo check --tests --locked --offline 通过（target/subtitle-editor-layout-handles-check.log），新增两项用例仅编译；七语言摘要／使用指南同步。实际 GUI 待验证，未重建 EXE；现有 EXE 不含本轮及此前未重建的编辑器修改。
+
+- 2026-11-12：用户明确授权重新编译。构建前通过进程 API 确认程序未运行，并通过目标 EXE 独占访问检查；cargo build --release --locked --offline 成功（1 分 02 秒）。产物 target/release/unity_yaml_viewer.exe，版本 1.3.5，32814592 字节，SHA-256：A67752828EB3F994C69ADC6B9C52CA150BEE6BF60ADD085D32E664915E93D6F7。包含本轮横屏／竖屏布局 Tab、字幕边界抓取及浏览条间距修正，也包含前述未重建的独立预览样式、播放栏和选中定位修改。日志 target/subtitle-editor-layout-release-build.log，核验 target/subtitle-editor-layout-release-verification.json。保留第三方既有警告和 VideoSettings::configure 未使用警告；未自动启动，实际 GUI 仍待验证，未发布。
+
+- 2026-11-12，按用户最终澄清，顶部字幕选择框维持最大 180、展开菜单由最大 320 收窄至 280（逻辑像素），保留截断及名称全文提示。cargo check --locked --offline 通过（target/subtitle-menu-width-check.log），七语言摘要同步，实际 GUI 待验证。本轮未重建 EXE；现有 Release 仍不含此次菜单宽度修改。
+
+- 2026-11-12，实时字幕整组控件与状态从视频信息行移至音频信息行，在自动生成／翻译字幕之后；后台任务调度及右键入口不变。cargo check --locked --offline 通过（target/live-subtitle-audio-row-check.log），七语言关于摘要同步。实际 GUI 待验证，未重建 EXE，现有产物不含此修改及前述菜单最大 280 修改。
+
+- 2026-11-12，布局 Tab 移到字幕文件信息行最左侧；竖屏右侧属性改用独立裁切面板，修复溢出覆盖时间轴。视频列收紧默认边距，右侧属性保留左右 6／底部 4 留白，播放栏缩减内边距。cargo check --locked --offline 通过（target/subtitle-editor-portrait-overlap-check.log），七语言摘要及指南同步；GUI 待验证，未重建 EXE，现有程序不含本轮与此前菜单宽度／实时字幕音频行修改。
+
+- 2026-11-12，用户明确以横屏当前字幕编辑区间距为准。横竖屏属性面板统一采用相同侧面板框架（左右 8、上下 2），替代竖屏单独的左右 6／底部 4；继续保留独立裁切及紧凑视频边距。cargo check --locked --offline 通过（target/subtitle-editor-matching-property-padding-check.log），七语言摘要同步。GUI 待验证，未重建 EXE。
+
+- 2026-11-12，字幕编辑播放当前句（区间图标）／播放暂停／前后逐帧／音量封装成固定控件组，居中放在属性区底部、时间轴上方；当前句图标在播放左侧。视频下方只保留居中的音轨与时间，删除原属性滚动区播放当前句文字按钮。cargo check --tests --locked --offline 通过（target/subtitle-editor-centered-transport-check.log），七语言摘要与指南同步，GUI 待验证。未重建 EXE，当前产物不含本轮及之前源码修改。
+
+- 2026-11-12：用户明确授权编译；构建前确认程序未运行并通过目标 EXE 独占访问检查。cargo build --release --locked --offline 成功（1 分 16 秒）。产物 target/release/unity_yaml_viewer.exe，版本 1.3.5，32815616 字节，SHA-256：7F08FE21D47454446FAB4A8DC5F1390E6E9218C184D70C1DE59640FDDCC1FCB1。包含当前字幕编辑播放控制居中／当前句区间图标、横竖屏属性间距及裁切、文件信息行布局 Tab，以及字幕展开菜单最大 280、实时字幕移至音频信息行等此前未重建修改。日志 target/subtitle-editor-centered-transport-release-build.log，核验 target/subtitle-editor-centered-transport-release-verification.json。保留既有警告；未自动启动，实际 GUI 仍待验证，未发布。
+
+- 2026-11-12，保持播放栏原高并按全部可用高度垂直居中；批量平移四项按整组空间换行；另存为初始文件名统一 .ass，与默认 ASS 类型一致。cargo check --tests --locked --offline 通过（target/subtitle-editor-toolbar-saveas-check.log），七语言摘要同步。实际 GUI 待验证，未重建 EXE，已有 Release 不含这三项修改。
+
+## 2026-11-12：录屏源代码已接入，待新 EXE 运行验证
+
+- 新增 src/screen_record.rs 与“文件 → 录屏”，全屏／多屏／坐标区域直接编码 MKV／MP4，质量／帧率、倒计时、最小化、Ctrl+Shift+F9 停止及完成后选择进入视频编辑；没有系统声音／麦克风／暂停续录／鼠标框选，编码使用 CPU。七语言和当前版本文档同步。
+- cargo check --tests --locked --offline 通过（target/screen-record-check.log）；已有 FFmpeg 的合成视频 MKV／MP4 编码、q 停止、FFprobe 元数据及重复目标哈希保护已实际验证，证据 target/screen-record-validation-20261112-170657/results.json。Rust 回归用例仅编译，未运行测试程序；真实桌面、长期负载、多屏高 DPI、最小化与快捷键、进入编辑及关于历史 GUI 待验证。
+- 本轮未重新生成 EXE、未启动新应用、未发布；此前 target/release 下程序不含本轮录屏。生成可执行程序仍需用户明确确认，届时须重新检查进程及目标占用。保留此前已有工作区修改。
+
+## 2026-11-12：录屏 Release 已编译，未运行／未发布
+
+- 用户明确授权，cargo build --release --locked --offline 成功（1 分 06 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，32833536 字节，SHA-256：1A8341DF7BF9215AC52914FAE0D566029892FABEAC7F34F09C644F751664EFF3。包含录屏及现有工作区修改，日志 target/screen-record-release-build.log、核验 target/screen-record-release-verification.json。
+- 编译前 EXE 独占访问通过；CIM 查询拒绝后脚本未中止即开始编译，随后 Get-Process 确认程序未运行，详见 preflight JSON 与当前版本记录。后续检查脚本应将查询错误视为终止错误，并在构建前完成备用进程检查。实际 GUI 仍待验证；未自动启动、未发布。
+
+## 2026-11-12：录屏交互调整源码完成
+
+- 取消保存对话框，自动写入系统用户下载目录，以纳秒时间戳命名。屏幕菜单按单屏／多屏调整；窗口悬停吸附、左键确认、右键／Esc 取消，绿色线框确认后可移动缩放；不使用按住左键拖框。
+- 悬浮框含坐标、尺寸、红圆开始／红方块停止和停止快捷键；全屏开始后隐藏悬浮框，区域录制保留停止按钮。录制时线框锁定并穿透鼠标。三个原生辅助窗口设置并回读捕获排除，要求 Windows 10 2004+；失败禁用开始。
+- cargo check --tests --locked --offline 通过（target/screen-record-region-check.log），新边界用例仅编译，七语言及关于默认两版／历史收起静态检查通过；文档同步。实际 GUI、混合 DPI／多屏、悬浮交互及视频中完全没有线框／悬浮内容仍待运行验证。此段记录时 EXE 尚未重建，后续构建结果另记；未发布。
+
+## 2026-11-12：悬浮录屏工具条与快捷键设置源码完成，需重建验证
+
+- 录屏入口直接进入窗口吸附区域，十字光标确认后编辑绿色线框。工具条包含模式切换、X/Y/W/H、设置、开始／停止及退出；优先选区下方，按显示器工作区自动避让。齿轮进入独立录屏设置，原大录屏面板不再使用。
+- screen_record.json 保存参数和两个可修改快捷键（默认 Ctrl+Shift+F9 停止、Ctrl+Shift+F8 选区），使用系统全局注册检查占用，取消不保存，注册／写入失败尝试恢复。开始先检查 FFmpeg／FFprobe，缺失确认后进入第三方支持。全屏录制隐藏工具条，结束后恢复并在下方显示路径／编辑／目录；无成功弹窗，错误详情单独提示。
+- cargo check --tests --locked --offline 通过（target/screen-record-toolbar-check.log）；新增设置／快捷键／位置回退用例仅编译，未运行测试程序。七语言及文档同步。尚未生成新 EXE，之前程序不包含本轮和上一轮未重建的交互；实际 GUI、快捷键冲突、持久化与视频捕获排除均待运行验证。未发布。
+- 先前编译占用检查曾发现 target/release/unity_yaml_viewer.exe 正在运行；用户尚未按规则关闭并再次明确授权编译。后续生成 EXE 前必须重新核对授权、进程及目标独占访问，不自动关闭程序。
+
+## 2026-11-12：悬浮录屏工具条 Release 已重建
+
+- 用户再次明确授权；构建前进程检查及 EXE 独占访问均通过。cargo build --release --locked --offline 成功（1 分 04 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33288192 字节，SHA-256：0198B31EB40E736051B996F8B6E30ED5E54346A4D41BE5631C8647A522022676。包含悬浮录屏工具条及前述未重建的录屏交互，连同工作区此前修改。
+- 日志 target/screen-record-toolbar-release-build.log，检查 target/screen-record-toolbar-release-preflight.json，核验 target/screen-record-toolbar-release-verification.json。未自动启动、未发布；实际 GUI、全局快捷键冲突／重启恢复、工具条避让、组件缺失跳转、录制成功内联结果与捕获排除仍待运行验证。
+
+## 2026-11-12：左键拖拽创建录屏区域源码已补，EXE 待重建
+
+- 指定区域按下不再立即确认：单击保留窗口吸附，超过系统容差后按左键拖拽创建矩形，松开留下可编辑线框；支持四方向、负坐标、桌面边界和最小 16×16。拖动时暂停吸附并实时更新尺寸，右键／Esc／丢失捕获恢复原区域，清理所有退出路径的鼠标捕获。
+- cargo check --tests --locked --offline 通过（target/screen-record-drag-check.log）；点击容差和矩形几何回归仅编译，未生成或运行测试程序。七语言和当前版本文档同步。实际鼠标交互、混合 DPI／跨屏及取消／录制输出待运行验证；未重建 EXE、未启动、未发布。此前已编译的 0198B31E… 产物不含本轮拖拽创建。
+
+## 2026-11-12：自绘录屏工具条、框内移动／八手柄、录屏历史源码完成
+
+- 工具条改为主程序 egui 独立无边框视口，去掉系统控件及完成按钮。最终设置入口是主窗口同款 Gear SVG，在圆圈十字后、X/Y 和“宽 × 高 px”前；圆圈十字重新进入窗口吸附／拖拽画框。Esc 录制前退出区域与工具条，录制中仍走停止快捷键。
+- 确认区域后可从内部四向光标拖动移动；四边中点单轴缩放、四角双轴缩放，限制边界并保持对边锚定。录制期间隐藏移动交互层、锁定并穿透线框。工具条／屏幕菜单新视口显示前检查进程归属与捕获排除，真实输出仍待验证。
+- 独立录屏历史默认20、可设20–50；旧设置默认兼容。重新进入或重新选择时收起上次结果。缺失视频标红，存在视频可选中编辑或打开目录。按用户最终取消删除文件的要求，红色按钮仅移除记录，任何历史裁切／移除均不删除视频。
+- cargo check --tests --locked --offline 通过（target/screen-record-region-handles-check.log），新增几何、历史及偏好兼容用例仅编译，未运行测试程序。七语言与双语文档同步，实际 GUI／多屏 DPI／操作手感、历史持久化、捕获排除仍待新版运行验证。未生成新 EXE；此前 0198B31E… 产物不含本轮及前一轮拖拽创建功能，未启动／发布。
+
+## 2026-11-12：自绘工具条／录屏历史 Release 已重建
+
+- 用户明确授权；构建前进程检查与 EXE 独占访问均通过。cargo build --release --locked --offline 成功（1 分 07 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33413632 字节，SHA-256：2508DC1A56C38578A6EB8F7FC6390113B5F842489415B560B1A6D49FA887B2EC。包含主程序自绘录屏工具条、最终设置图标位置、宽×高 px、区域内移动和八手柄、Esc 退出、独立历史记录及此前拖拽选区，连同工作区此前修改。
+- 日志 target/screen-record-custom-toolbar-release-build.log，检查 target/screen-record-custom-toolbar-release-preflight.json，核验 target/screen-record-custom-toolbar-release-verification.json。未自动启动、未发布；实际 GUI／混合 DPI／操作手感、历史重启恢复及视频捕获排除仍待运行验证。
+
+## 2026-11-12：紧凑工具条／透明投影／系统声音源码完成
+
+- 550 逻辑点主体、较矮输入框与标准 ComboBox 居中、Body 提示字号、简写停止快捷键、无结果分割线。同一透明视口显示标准屏幕列表，透明清屏和外边距内自绘阴影避免原生阴影不稳定。
+- 录制前增加系统声音按钮（麦克风图形，默认开启，关闭显示红色禁止，配置持久化）。录制锁定；不采集麦克风。WASAPI 默认播放设备回环，有限缓冲生成静音并流式交给 FFmpeg 编码 AAC 128 kbit/s 立体声。关闭不打开音频设备且没有音轨；错误提示并保留已有视频检查。Windows 0.54 直接依赖复用锁文件版本。
+- cargo check --tests --locked --offline 通过：target/screen-record-audio-check.log。配置兼容用例仅编译，未运行测试程序。七语言和当前版本文档同步，关于默认两版／旧版收起配置保持不变。实际 GUI 透明圆角／投影、混合 DPI／菜单避让、主窗口显示、音频格式兼容、同步与长录制、静音恢复和设备中断、捕获排除待运行验证。
+- 未重建 EXE、未启动／发布。上次 2508DC1A56C38578A6EB8F7FC6390113B5F842489415B560B1A6D49FA887B2EC 的 Release 不包含此轮；如用户授权构建，先重新检查目标程序进程与 EXE 独占访问，禁止自动关闭运行程序。
+
+## 2026-11-12：紧凑录屏工具条与系统声音 Release 已重建
+
+- 用户明确授权后，确认 unity_yaml_viewer 无运行进程、目标 EXE 可独占访问，执行 cargo build --release --locked --offline 成功（约 1 分 08 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33280512 字节；SHA-256：A7BF34CE5A37601344DEE8C5B238F53FF3C8C85452B0AF99D4C033766F66AB9E。
+- 本次产物包含紧凑输入与标准屏幕下拉框、正常字号提示与无分割线结果区、透明圆角及自绘投影调整，以及默认开启并记忆的系统声音开关和 WASAPI 回环采集，连同工作区此前修改。
+- 构建日志 target/screen-record-audio-release-build.log；占用检查 target/screen-record-audio-release-preflight.json；产物核验 target/screen-record-audio-release-verification.json。构建仅有既有 vendor 与 media_trim.configure 未使用警告。未自动启动、未发布；实际音频同步、静音恢复／设备兼容、透明圆角投影及捕获排除仍待运行验证。
+
+## 2026-11-12：外圈黑底修正／历史上限滑条，EXE 待重建
+
+- 用户实拍确认 A7BF34CE… 的工具条外圈黑底仍存在。根因是旧 glutin-winit::finalize_window 清除透明属性，winit 未启用 DWM 透明。vendor/glutin-winit 0.5.0 增加 Windows 保留透明请求的小补丁，通过 Cargo patch 接入；保留 MIT 许可和 LOCAL_PATCHES.md，不修改外部 Cargo 缓存。依据上游 https://github.com/emilk/egui/pull/8423 ，不整体升级 eframe。
+- 录屏设置历史条数改为数值框加主设置同款 theme::slider，20–50、默认 20，保存后生效。关于七语言及指南同步。
+- 待验证：真实透明圆角／阴影、屏幕列表展开、全屏隐藏后恢复、混合 DPI／跨屏、捕获排除及滑条保存取消。此轮不含新 EXE；上一次 A7BF34CE… 不含此修复。后续用户授权构建时须重新检查程序及目标 EXE 占用，不自动关闭程序。
+- 追加工具条收紧与关闭图标调整：按首排实际控件宽度计算主体宽度，保留阴影透明外边距；关闭图标为物理像素对齐的圆头矢量 X。长结果路径在同一宽度内显示，不再撑宽。此轮同样待新版 GUI 验证。
+- 验证：cargo check --locked --offline 通过（target/screen-record-transparency-check.log）；cargo tree 确认 eframe 使用本地 glutin-winit 0.5.0 补丁，原许可及其他原始源码核对一致。七语言摘要、默认两版／重开收起配置和 git diff --check 通过。仅有既有 vendor／缓存及 media_trim.configure 未使用警告；未运行 GUI、未生成新 EXE、未发布。
+
+## 2026-11-12：透明工具条修正／紧凑宽度／矢量关闭按钮 Release 已重建
+
+- 用户明确授权后，确认 unity_yaml_viewer 无运行进程、目标 EXE 可独占访问，cargo build --release --locked --offline 成功（约 59 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33383424 字节；SHA-256：9573870B6095AB9F9C46E25E75C0436F5B6DE502EEBD878198FF8130E94338DE。
+- 本次产物包含 glutin-winit 0.5.0 的 Windows 透明标记修复、按第一排实际控件宽度收紧的工具条、圆头矢量关闭 X、录屏历史上限数值框与主设置同款滑条，连同此前系统声音及工作区修改。
+- 日志 target/screen-record-transparency-release-build.log；占用检查 target/screen-record-transparency-release-preflight.json；产物核验 target/screen-record-transparency-release-verification.json。仅有既有 vendor 与 media_trim.configure 未使用警告。未自动启动、未发布；实际黑边消失／圆角投影、菜单及隐藏恢复、混合 DPI、关闭图标清晰度与宽度、历史上限滑条、声音同步和捕获排除仍待运行验证。
+
+## 2026-11-12：共用 error.log 与录屏故障诊断源码
+
+- 用户要求先记日志并指定 error.log；全软件入口为 error_log::write/error，初始化接标准日志 Warn/Error 与 panic 回溯。启动错误、后台任务失败／中断和录屏阶段已接入。日志 `%APPDATA%\UnityYAMLViewer\error.log`，约 2 MiB 轮换为 error.log.1；未声称全部历史 UI 报错已接入。
+- 录屏日志包含会话 ID、参数、WASAPI 接口／格式／错误码、FFmpeg 参数／PID／stderr／退出状态及文件状态。错误窗置顶且手动关闭前保留，可复制／打开日志；工具条保留错误详情入口。
+- 用户反馈的三秒后停止无文件尚未定位。现有 FFmpeg 合成流输出成功，WASAPI 初始化探针成功（48 kHz 双声道 float32，零数据包）；真实采集未验证。证据在 target/recording-start-diagnostic。按用户“先日志”要求，中央大数字倒计时暂未实现，保留后续待办。
+- 未重建 EXE；上次 9573870B… 不包含日志机制。下一次用户授权编译后须先查占用，再通过新版复现并读取 error.log 定位。未启动／发布。
+- 验证：cargo check --tests --locked --offline 通过（target/screen-record-error-log-check.log），含 UTF-8 追加／轮换／超大日志截断回归用例的编译检查，未生成或运行测试程序。七语言新文案／关于摘要、关于默认两版与折叠设置及 git diff --check 已核对。错误详情显示时暂时隐藏置顶工具条，关闭详情后恢复，防止遮住错误。日志实际写入与 UI 保持仍待新版运行核对。
+
+## 2026-11-12：共用 error.log 诊断版本 Release 已重建
+
+- 用户明确授权后，检查 unity_yaml_viewer 无运行进程且目标 EXE 可独占访问，cargo build --release --locked --offline 成功（约 59 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33509888 字节；SHA-256：08F579F92B19C5ED5DE95C78359FE1BC2265CB15B5BFB224959271F5EEFA2C80。
+- 产物包含共用 error.log、标准运行库警告／错误和 panic、后台任务失败记录，以及录屏会话阶段／声音接口／FFmpeg stderr 与退出信息；录屏错误可持续查看、复制并打开日志，连同此前工作区修改。中央大数字倒计时仍待实现；自动结束且无文件的根因待用本次版本复现并读取日志定位，不宣称修复。
+- 构建日志 target/screen-record-error-log-release-build.log；占用检查 target/screen-record-error-log-release-preflight.json；产物核验 target/screen-record-error-log-release-verification.json。仅有既有 vendor 和 media_trim.configure 未使用警告。未自动启动、未发布；日志实际写入／轮换、错误窗口保持和真实录屏仍待运行验证。
+
+## 2026-11-12：录屏 PCM 暂时不可写修复／中央倒计时／字幕浏览条源码完成
+
+- 用户实测先正常后重录失败；error.log 已明确定位 write PCM 的 10035，WASAPI 初始化与启动正常。改用 8 MiB 有界发送队列和短写偏移，WouldBlock 不作为致命错误、不重复或丢失字节；采集继续，5 秒无写入进展才失败，停止最多 2 秒排空。原失败轮存在 199812 字节部分视频。新版连续重录／同步仍待实测。
+- 中央倒计时已补：独立透明捕获排除窗口显示 3→2→1，截止或取消关闭，工具条去掉固定三秒文字。多屏混合 DPI、实际数字位置及输出排除待验证。
+- 字幕浏览条复用视频／音频同款比例滑块，去蓝色填充及时间文字；保留全宽、间距和只平移不定位播放的操作。
+- cargo check --tests --locked --offline 通过（target/recording-pcm-countdown-timeline-check.log），含新增 PCM 队列回归和字幕间距用例的编译检查，未运行测试程序。七语言与文档同步；未重建 EXE、未启动／发布。上一构建 08F579F9… 不含本轮，用户授权构建后仍需先检查占用。
+
+## 2026-11-12：PCM 10035 修复／中央倒计时／字幕浏览条 Release 已重建
+
+- 用户明确授权后，确认 unity_yaml_viewer 无运行进程、目标 EXE 可独占访问，cargo build --release --locked --offline 成功（约 1 分 09 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33502720 字节；SHA-256：F4739FB0AC34BD4D4A36B588CD60AD354D67E29CC4D91B56A1669CC3AB21A52F。
+- 产物包含录屏 PCM 非阻塞暂时不可写的有界队列重试、区域中央 3→2→1 大数字倒计时，以及字幕／视频编辑共用比例浏览滑块，连同此前 error.log 及工作区修改。未自动启动；连续重录、声音同步、倒计时显示和捕获排除、字幕滑块实际交互仍待运行验证。
+- 构建日志 target/recording-pcm-countdown-timeline-release-build.log；占用检查 target/recording-pcm-countdown-timeline-release-preflight.json；产物核验 target/recording-pcm-countdown-timeline-release-verification.json。仅有既有 vendor 和 media_trim.configure 未使用警告，未发布。

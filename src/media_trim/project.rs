@@ -14,6 +14,9 @@ pub(crate) struct EditState {
 }
 
 impl EditState {
+    pub(crate) fn burn_subtitle(&self)->Option<&Path>{self.video_settings.burn_subtitle.as_deref()}
+    pub(crate) fn set_burn_subtitle(&mut self,path:Option<PathBuf>){self.video_settings.burn_subtitle=path;}
+
     #[cfg(test)]
     pub(crate) fn fixture() -> Self { Self::from_merge(VideoSettings::default(), AudioSettings::default()) }
     pub(super) fn from_merge(video_settings: VideoSettings, settings: AudioSettings) -> Self {

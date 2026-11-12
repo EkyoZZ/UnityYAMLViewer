@@ -26,8 +26,12 @@ fn pack(project:&Path,target:&Path)->Result<(),String> {
     fs::create_dir(&root).map_err(|e|e.to_string())?;let assets=Assets(root);
     let mut next=0;let mut external_files=HashMap::<PathBuf,String>::new();let mut embedded_files=HashMap::<String,PathBuf>::new();
     let mut missing=Vec::new();
+    if let Some(Reference::Embedded{entry})=&document.merge_burn_subtitle {
+        let reference=document.merge_burn_subtitle.as_ref().unwrap();
+        let path=resolve(reference,project,&mut archive,&assets,&mut next)?;embedded_files.insert(entry.clone(),path);
+    }
     for item in &mut document.items {
-        for reference in std::iter::once(&mut item.source).chain(item.tracks.iter_mut()).chain(item.clip.iter_mut()) {
+        for reference in std::iter::once(&mut item.source).chain(item.tracks.iter_mut()).chain(item.clip.iter_mut()).chain(item.burn_subtitle.iter_mut()) {
             match reference.clone() {
                 Reference::External{..}=> {
                     match resolve(reference,project,&mut archive,&assets,&mut next) {
@@ -85,8 +89,8 @@ mod tests {
         let source=root.join("source.wav");fs::write(&source,b"source fixture").unwrap();
         let clip=root.join("edited.wav");fs::write(&clip,b"edited fixture").unwrap();
         let project=root.join("example.uyap");
-        let item=Item{enabled:true,source:external(&source,&root),state:EditState::fixture(),tracks:vec![],clip:Some(Reference::Embedded{entry:"assets/edit.wav".into()}),position:0.0,selected_audio:None};
-        let document=Document{format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:"audio".into(),active:0,expanded:true,merge:false,merge_settings:MergeSettings::default(),items:vec![item]};
+        let item=Item{burn_subtitle:None,enabled:true,source:external(&source,&root),state:EditState::fixture(),tracks:vec![],clip:Some(Reference::Embedded{entry:"assets/edit.wav".into()}),position:0.0,selected_audio:None};
+        let document=Document{merge_burn_subtitle:None,format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:"audio".into(),active:0,expanded:true,merge:false,merge_settings:MergeSettings::default(),items:vec![item]};
         write_archive(&project,&document,&[("assets/edit.wav".into(),clip)]).unwrap();
         let target=root.join("share.zip");pack(&project,&target).unwrap();
         let moved=root.join("recipient");fs::create_dir(&moved).unwrap();

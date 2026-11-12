@@ -20,6 +20,7 @@ const HELPERS: &str = include_str!("auto_subtitle.py");
 pub(crate) fn worker(engine: &str, language: &str, action: &str) -> Result<Command, String> {
     let mut command = auto_subtitle::python()?;
     command
+        .env("UNITY_ASR_RUNTIME",auto_subtitle::runtime()?)
         .args(["-I", "-u", "-c", WORKER, HELPERS])
         .arg(auto_subtitle::component()?)
         .args([engine, language, action]);
@@ -47,10 +48,10 @@ pub(crate) fn model_installed(engine: &str) -> bool {
 
 #[derive(Clone)]
 pub(crate) struct Tap {
-    sender: mpsc::SyncSender<Vec<u8>>,
-    ready: Arc<AtomicBool>,
+    pub(crate) sender: mpsc::SyncSender<Vec<u8>>,
+    pub(crate) ready: Arc<AtomicBool>,
     overloaded: Arc<AtomicBool>,
-    replay: Arc<Vec<crate::live_subtitle_cache::Cue>>,
+    pub(crate) replay: Arc<Vec<crate::live_subtitle_cache::Cue>>,
 }
 impl Tap {
     pub(crate) fn send(&self, timestamp: f64, samples: &[f32]) {
@@ -134,6 +135,8 @@ impl Resampler {
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub(crate) struct Event {
     #[serde(default)]
+    pub(crate) language:Option<String>,
+    #[serde(default)]
     pub(crate) ready: bool,
     #[serde(default)]
     pub(crate) done: bool,
@@ -152,9 +155,11 @@ struct Session {
     tap: Tap,
     events: mpsc::Receiver<Event>,
     paths: crate::live_subtitle_cache::Paths,
+    ahead: Option<crate::subtitle_lookahead::Ahead>,
 }
 impl Drop for Session {
     fn drop(&mut self) {
+        self.ahead = None;
         self.tap.ready.store(false, Ordering::Relaxed);
         let child = self.child.clone();
         std::thread::spawn(move || {
@@ -172,6 +177,7 @@ impl Session {
         track: u64,
         identity: Option<&str>,
         replay: Vec<crate::live_subtitle_cache::Cue>,
+        ahead: bool,
         ctx: &egui::Context,
     ) -> Result<Self, String> {
         if !auto_subtitle::installed() {
@@ -187,6 +193,7 @@ impl Session {
                 language
             },
             identity,
+            ahead,
         )?;
         let paths = cache.paths.clone();
         let replay = Arc::new(replay);
@@ -294,6 +301,7 @@ impl Session {
             tap,
             events,
             paths,
+            ahead: None,
         })
     }
 }
@@ -303,9 +311,14 @@ pub(crate) struct Live {
     enabled: bool,
     engine: usize,
     language: usize,
+    manual_language:bool,
+    finalized_language:Option<String>,
+    replay_language:Option<String>,
     session: Option<Session>,
     error: Option<String>,
     caption: String,
+    finalized:String,
+    translation:crate::live_translation::Translation,
     updated: Option<Instant>,
     last_cache: Option<crate::live_subtitle_cache::Paths>,
     cache_key: Option<String>,
@@ -317,13 +330,20 @@ pub(crate) struct Live {
     identity_checked: bool,
     identity_job: Option<mpsc::Receiver<Option<String>>>,
     verified_identity: Option<String>,
+    disable_lookahead: bool,
+    scheduled: bool,
+    media_position:f64,
 }
 impl Live {
+    fn recognition_language(&self)->&'static str{if self.engine==0&&!self.manual_language{"auto"}else{auto_subtitle::LANGUAGES[self.language].0}}
     pub(crate) fn reset(&mut self) {
         self.session = None;
+        self.translation.reset();
+        self.finalized.clear();self.finalized_language=None;self.replay_language=None;
         self.caption.clear();
         self.updated = None;
         self.replay_caption = None;
+        self.scheduled = false;
     }
     pub(crate) fn attach(
         &mut self,
@@ -336,7 +356,14 @@ impl Live {
         track: u64,
         identity: Option<&str>,
         position: f64,
+        ffmpeg: &Path,
     ) {
+        self.media_position=position;
+        if !self.enabled {
+            *slot.lock().unwrap() = None;
+            return;
+        }
+        self.poll();
         if !self.enabled {
             *slot.lock().unwrap() = None;
             return;
@@ -393,7 +420,7 @@ impl Live {
             "zipformer"
         };
         let language = if self.engine == 0 {
-            auto_subtitle::LANGUAGES[self.language].0
+            self.recognition_language()
         } else {
             "zh-en"
         };
@@ -429,12 +456,15 @@ impl Live {
             }
         }
         self.reusable = identity.is_some();
+        let lookahead =
+            self.engine == 0 && !self.disable_lookahead && self.reusable && duration > position;
+        self.replay_language=self.replay.iter().find(|cue|self.reusable&&cue.start<=position&&position<cue.end).and_then(|cue|cue.language.clone());
         self.replay_caption = self
             .replay
             .iter()
             .find(|c| self.reusable && c.start <= position && position < c.end)
             .map(|c| c.text.clone());
-        if self.session.is_none() && self.replay_caption.is_some() {
+        if self.session.is_none() && self.replay_caption.is_some() && !lookahead {
             return;
         }
         if self.session.is_none() {
@@ -448,7 +478,7 @@ impl Live {
             };
             match Session::start(
                 engine,
-                auto_subtitle::LANGUAGES[self.language].0,
+                self.recognition_language(),
                 source,
                 track,
                 identity,
@@ -457,11 +487,26 @@ impl Live {
                 } else {
                     Vec::new()
                 },
+                lookahead,
                 ctx,
             ) {
-                Ok(session) => {
+                Ok(mut session) => {
                     self.last_cache = Some(session.paths.clone());
-                    *slot.lock().unwrap() = Some(session.tap.clone());
+                    self.scheduled = lookahead;
+                    if lookahead {
+                        *slot.lock().unwrap() = None;
+                        session.ahead = Some(crate::subtitle_lookahead::Ahead::start(
+                            ffmpeg,
+                            source,
+                            input,
+                            track,
+                            position,
+                            duration,
+                            session.tap.clone(),
+                        ));
+                    } else {
+                        *slot.lock().unwrap() = Some(session.tap.clone());
+                    }
                     self.session = Some(session);
                 }
                 Err(error) => {
@@ -470,11 +515,20 @@ impl Live {
                 }
             }
         }
+        if let Some(ahead) = self.session.as_ref().and_then(|s| s.ahead.as_ref()) {
+            ahead.position(position);
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         self.poll();
     }
     pub(crate) fn poll(&mut self) {
         let mut failure = None;
         if let Some(session) = &self.session {
+            if let Some(ahead) = &session.ahead {
+                if let Ok(error) = ahead.errors.try_recv() {
+                    failure = Some(error);
+                }
+            }
             if session.tap.overloaded.load(Ordering::Relaxed) {
                 failure = Some(tr("实时识别跟不上播放，请切换引擎或重新开启。").to_owned());
             }
@@ -491,6 +545,7 @@ impl Live {
                     && event.end >= event.start
                 {
                     // Partial Zipformer results replace the current utterance, never append duplicates.
+                    if event.final_result {self.finalized=event.text.clone();self.finalized_language=event.language.clone();}
                     self.caption = event.text;
                     self.updated = Some(Instant::now());
                     if self.reusable
@@ -502,6 +557,7 @@ impl Live {
                             .any(|c| c.overlaps(event.start, event.end))
                     {
                         self.replay.push(crate::live_subtitle_cache::Cue {
+                            language:event.language.clone(),
                             start: event.start,
                             end: event.end,
                             text: self.caption.clone(),
@@ -517,12 +573,16 @@ impl Live {
         }
     }
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, has_audio: bool) {
-        let before = (self.enabled, self.engine, self.language);
-        ui.menu_button(tr("实时字幕"), |ui| {
-            ui.add_enabled(
-                has_audio || self.enabled,
-                egui::Checkbox::new(&mut self.enabled, tr("启用实时字幕")),
-            );
+        let before = (
+            self.enabled,
+            self.engine,
+            self.language,
+            self.manual_language,
+            self.disable_lookahead,
+        );
+        let translation_before=(self.translation.enabled,self.translation.target);
+        ui.label(tr("实时字幕"));
+        ui.menu_button("⚙", |ui| {
             egui::ComboBox::from_id_salt("live_subtitle_engine")
                 .selected_text(if self.engine == 0 {
                     "SenseVoice"
@@ -538,22 +598,39 @@ impl Live {
             }
             if self.engine == 0 {
                 egui::ComboBox::from_id_salt("live_subtitle_language")
-                    .selected_text(tr(auto_subtitle::LANGUAGES[self.language].1))
+                    .selected_text(tr(if self.manual_language{auto_subtitle::LANGUAGES[self.language].1}else{"自动识别"}))
                     .show_ui(ui, |ui| {
+                        if ui.selectable_label(!self.manual_language,tr("自动识别")).clicked(){self.manual_language=false;}
                         for (index, (_, label)) in auto_subtitle::LANGUAGES
                             .iter()
                             .enumerate()
                             .take(if self.engine == 0 { 5 } else { 2 })
                         {
-                            ui.selectable_value(&mut self.language, index, tr(label));
+                            if ui.selectable_label(self.manual_language&&self.language==index,tr(label)).clicked(){self.language=index;self.manual_language=true;}
                         }
                     });
+                if let Some((_,label))=self.replay_language.as_deref().or(self.finalized_language.as_deref()).and_then(|code|auto_subtitle::LANGUAGES.iter().find(|(language,_)|*language==code)){
+                    ui.small(format!("{}: {}",tr("识别结果语言"),tr(label)));
+                }
             } else {
                 ui.label(tr("中文 / 英语（双语识别）"));
+                ui.label(tr("翻译源语言"));
+                egui::ComboBox::from_id_salt("zip_translation_source").selected_text(tr(auto_subtitle::LANGUAGES[self.language].1)).show_ui(ui,|ui|{
+                    for (index,(_,label)) in auto_subtitle::LANGUAGES.iter().take(2).enumerate(){ui.selectable_value(&mut self.language,index,tr(label));}
+                });
             }
             ui.small(tr("SenseVoice 分句显示；Zipformer 连续更新中英识别结果。"));
             ui.small(tr("首次使用会下载模型；模型就绪后从当前播放位置开始识别。"));
             ui.small(tr("实时字幕自动缓存；点播回放优先复用已确认字幕。"));
+            if self.engine==0 {
+                let mut enabled=!self.disable_lookahead;
+                if ui.checkbox(&mut enabled,tr("点播提前识别字幕")).changed(){self.disable_lookahead=!enabled;}
+                ui.small(tr("本地视频或已确认的 HLS 点播提前识别约 20 秒，按播放时间显示；首次准备和跳转后可能仍需等待。"));
+            }
+            ui.separator();
+            ui.small(tr("翻译优先使用可用 GPU，失败时回退低占用 CPU。"));
+            ui.small(tr("计算偏好统一在第三方支持中设置。"));
+            if !self.translation.backend.is_empty(){ui.small(&self.translation.backend);}
             if let Some(paths) = self.last_cache.clone() {
                 if ui
                     .button(tr("定位实时字幕缓存"))
@@ -594,9 +671,60 @@ impl Live {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
         });
-        if before != (self.enabled, self.engine, self.language) {
+        ui.add_enabled_ui(has_audio||self.enabled,|ui|{crate::theme::compact_toggle_switch_size(ui,"",&mut self.enabled,crate::theme::ToggleSwitchSize::Small).on_hover_text(tr("启用实时字幕"));});
+        if self.enabled {
+            ui.label(tr("翻译:"));
+            let font=egui::TextStyle::Button.resolve(ui.style());
+            let language_width=auto_subtitle::LANGUAGES.iter().take(4).map(|(_,label)|ui.painter().layout_no_wrap(tr(label).to_owned(),font.clone(),ui.visuals().text_color()).size().x).fold(0.0_f32,f32::max);
+            let selector_width=(language_width+ui.spacing().icon_width+ui.spacing().button_padding.x*2.0+4.0).max(44.0);
+            egui::ComboBox::from_id_salt("live_translation_target").width(selector_width).selected_text(tr(auto_subtitle::LANGUAGES[self.translation.target].1)).show_ui(ui,|ui|{
+                for (index,(_,label)) in auto_subtitle::LANGUAGES.iter().take(4).enumerate(){ui.selectable_value(&mut self.translation.target,index,tr(label));}
+            });
+            crate::theme::compact_toggle_switch_size(ui,"",&mut self.translation.enabled,crate::theme::ToggleSwitchSize::Small).on_hover_text(tr("翻译:"));
+            if self.translation.enabled&&!self.translation.backend.is_empty(){
+                ui.small(if self.translation.backend.starts_with("GPU"){"GPU"}else{"CPU"}).on_hover_text(&self.translation.backend);
+            }
+            let mut show_source=!self.translation.hide_source;
+            if crate::theme::compact_toggle_switch_size(ui,tr("显示源字幕"),&mut show_source,crate::theme::ToggleSwitchSize::Small).changed(){self.translation.hide_source=!show_source;}
+        }else{self.translation.enabled=false;}
+        if translation_before!=(self.translation.enabled,self.translation.target){self.translation.reset();self.translation.error=None;}
+        if before
+            != (
+                self.enabled,
+                self.engine,
+                self.language,
+                self.manual_language,
+                self.disable_lookahead,
+            )
+        {
             self.reset();
             self.error = None;
+        }
+    }
+    // Must run independently of toolbar visibility and context-menu painting.
+    pub(crate) fn tick_translation(&mut self,ctx:&egui::Context){
+        self.translation.poll();
+        if self.enabled && self.translation.enabled {
+            let source=if self.scheduled {self.replay_caption.as_deref().unwrap_or("")}else{self.replay_caption.as_deref().unwrap_or(&self.finalized)};
+            let detected=if self.replay_caption.is_some(){self.replay_language.as_deref()}else{self.finalized_language.as_deref()};
+            let language=if self.engine==0{translation_source_language(source,detected,self.recognition_language())}else{self.recognition_language()};
+            if language!="auto"{self.translation.submit(source,language,ctx);}
+            self.translation.mark_visible(source);
+            if self.scheduled&&self.reusable {
+                let mut ahead_language=if source.is_empty()||language=="auto"{None}else{Some(language)};
+                for cue in self.replay.iter().filter(|cue|cue.end>self.media_position&&cue.start<=self.media_position+20.0){
+                    let language=translation_source_language(&cue.text,cue.language.as_deref(),self.recognition_language());
+                    if language=="auto"{continue;}
+                    if let Some(active)=ahead_language{if active!=language{break;}}else{ahead_language=Some(language);}
+                    self.translation.submit(&cue.text,language,ctx);
+                }
+            }
+        }
+    }
+    pub(crate) fn status(&self,ui:&mut egui::Ui){
+        if let Some(error)=&self.translation.error {
+            ui.colored_label(ui.visuals().error_fg_color,error);
+            if ui.small_button(tr("前往第三方支持")).clicked(){crate::third_party::request_open(ui.ctx());}
         }
         if self.enabled && (self.identity_job.is_some() || self.loading.is_some()) {
             ui.spinner();
@@ -616,44 +744,151 @@ impl Live {
         }
     }
     pub(crate) fn paint(&self, ui: &egui::Ui, canvas: egui::Rect) {
-        let caption = self.replay_caption.as_ref().unwrap_or(&self.caption);
-        if caption.is_empty()
-            || (self.replay_caption.is_none()
-                && !self
-                    .updated
-                    .is_some_and(|t| t.elapsed() < Duration::from_secs(8)))
-        {
+        let caption = self
+            .replay_caption
+            .as_ref()
+            .map(String::as_str)
+            .unwrap_or(if self.scheduled { "" } else { &self.caption });
+        let source=(!caption.is_empty()&&(self.replay_caption.is_some()||self.updated.is_some_and(|time|time.elapsed()<Duration::from_secs(8)))).then_some(caption);
+        let display=self.translation.display(source);
+        if display.source.is_none()&&display.translated.is_none(){return;}
+        let canvas = canvas.intersect(ui.clip_rect());
+        if canvas.width() < 48.0 || canvas.height() < 40.0 {
             return;
         }
-        let painter = ui
-            .painter()
-            .with_clip_rect(canvas.intersect(ui.clip_rect()));
-        let galley = painter.layout(
-            caption.clone(),
-            egui::FontId::proportional(22.0),
-            egui::Color32::WHITE,
-            (canvas.width() - 32.0).max(16.0),
-        );
-        let position = egui::pos2(
-            canvas.center().x - galley.size().x / 2.0,
-            canvas.bottom() - galley.size().y - 28.0,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_size(
-                position - egui::vec2(8.0, 4.0),
-                galley.size() + egui::vec2(16.0, 8.0),
-            ),
-            4.0,
-            egui::Color32::from_black_alpha(200),
-        );
-        painter.galley(position, galley, egui::Color32::WHITE);
+        let (margin_x, margin_y) = crate::subtitle_player::live_margins();
+        let top = crate::subtitle_player::live_top();
+        let safe = subtitle_box(canvas, margin_x, margin_y, top);
+        if safe.width() < 24.0 || safe.height() < 24.0 {
+            return;
+        }
+        let painter = ui.painter().with_clip_rect(safe);
+        let width = (safe.width() - 16.0).max(1.0);
+        let layout = |text: String| {
+            let mut job = egui::text::LayoutJob::simple(
+                text,
+                egui::FontId::proportional(22.0),
+                egui::Color32::WHITE,
+                width,
+            );
+            job.wrap.break_anywhere = true;
+            painter.layout_job(job)
+        };
+        // Each lane wraps independently; a delayed translation never replaces source text.
+        let fit=|text:&str|{
+            let mut galley=layout(text.to_owned());
+            if galley.rows.len()>2 {
+                let boundaries:Vec<_>=text.char_indices().map(|(index,_)|index).chain(std::iter::once(text.len())).collect();
+                let (mut low,mut high)=(0,boundaries.len()-1);
+                while low<high {let mid=(low+high)/2;if layout(text[boundaries[mid]..].to_owned()).rows.len()>2{low=mid+1;}else{high=mid;}}
+                galley=layout(text[boundaries[low]..].to_owned());
+            }
+            galley
+        };
+        let source=display.source.map(fit);
+        let translated=display.translated.map(|text|layout(text.to_owned()));
+        let heading=(display.previous&&translated.is_some()).then(||painter.layout_no_wrap(tr("稍早译文").to_owned(),egui::FontId::proportional(12.0),egui::Color32::from_gray(190)));
+        // Stack actual text heights with no reserved rows or inter-block gap.
+        let source_height=source.as_ref().map_or(0.0,|g|g.size().y+8.0);
+        let translated_height=translated.as_ref().map_or(0.0,|g|g.size().y+8.0+if heading.is_some(){16.0}else{0.0});
+        let height=source_height+translated_height;
+        let start_y=if top{safe.top()}else{safe.bottom()-height};
+        if let Some(galley)=source {
+            let position=egui::pos2(safe.center().x-galley.size().x/2.0,start_y+source_height-galley.size().y-4.0);
+            painter.rect_filled(egui::Rect::from_min_size(position-egui::vec2(8.0,4.0),galley.size()+egui::vec2(16.0,8.0)),4.0,egui::Color32::from_black_alpha(128));
+            painter.galley(position,galley,egui::Color32::WHITE);
+        }
+        if let Some(galley)=translated {
+            let label_height=if heading.is_some(){16.0}else{0.0};
+            let lane_y=start_y+source_height;
+            let position=egui::pos2(safe.center().x-galley.size().x/2.0,lane_y+4.0+label_height);
+            let block_width=galley.size().x.max(heading.as_ref().map_or(0.0,|g|g.size().x));
+            painter.rect_filled(egui::Rect::from_min_size(egui::pos2(safe.center().x-block_width/2.0-8.0,lane_y),egui::vec2(block_width+16.0,galley.size().y+8.0+label_height)),4.0,egui::Color32::from_rgba_unmultiplied(10,20,35,128));
+            if let Some(heading)=heading {let position=egui::pos2(safe.center().x-heading.size().x/2.0,lane_y+2.0);painter.galley(position,heading,egui::Color32::from_gray(190));}
+            painter.galley(position,galley,egui::Color32::WHITE);
+        }
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
 }
 
+fn translation_source_language(text:&str,detected:Option<&str>,configured:&'static str)->&'static str{
+    if configured=="yue"{return "yue";}
+    match detected.map(|value|value.trim().trim_start_matches("<|").trim_end_matches("|>")){
+        Some("ja"|"japanese")=>return "ja",Some("ko"|"korean")=>return "ko",Some("zh"|"chinese")=>return "zh",Some("en"|"english")=>return "en",Some("yue")=>return "yue",_=>{}
+    }
+    // Legacy cached cues have no language metadata. Kana/Hangul are stronger
+    // evidence than a default Mandarin setting; Han-only text stays ambiguous.
+    if text.chars().any(|c|matches!(c,'\u{3040}'..='\u{30ff}'|'\u{ff66}'..='\u{ff9f}')){return "ja";}
+    if text.chars().any(|c|matches!(c,'\u{ac00}'..='\u{d7af}'|'\u{1100}'..='\u{11ff}')){return "ko";}
+    if text.is_ascii()&&text.chars().any(|c|c.is_ascii_alphabetic()){return "en";}
+    configured
+}
+
+fn subtitle_box(canvas: egui::Rect, margin_x: f32, margin_y: f32, top: bool) -> egui::Rect {
+    let horizontal = margin_x
+        .max(0.0)
+        .min(((canvas.width() - 48.0) / 2.0).max(0.0));
+    let bottom = margin_y.max(0.0).min((canvas.height() - 32.0).max(0.0));
+    egui::Rect::from_min_max(
+        egui::pos2(
+            canvas.left() + horizontal,
+            canvas.top() + if top { bottom } else { 0.0 },
+        ),
+        egui::pos2(
+            canvas.right() - horizontal,
+            canvas.bottom() - if top { 0.0 } else { bottom },
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn vod_prefetch_translates_future_cues_without_displaying_them_early(){
+        let mut live=Live::default();live.enabled=true;live.translation.enabled=true;live.translation.target=0;live.scheduled=true;live.reusable=true;live.media_position=1.0;
+        live.replay=vec![crate::live_subtitle_cache::Cue{start:5.0,end:7.0,text:"未来字幕".into(),language:Some("zh".into())}];
+        live.tick_translation(&egui::Context::default());
+        assert!(live.translation.display(None).translated.is_none());
+        assert_eq!(live.translation.display(Some("未来字幕")).translated,Some("未来字幕"));
+    }
+    #[test]
+    fn translation_uses_detected_language_instead_of_default_mandarin(){
+        assert_eq!(translation_source_language("星のあしあと",Some("ja"),"zh"),"ja");
+        assert_eq!(translation_source_language("星のあしあと",None,"zh"),"ja");
+        assert_eq!(translation_source_language("안녕하세요",None,"zh"),"ko");
+        assert_eq!(translation_source_language("星光",Some("ja"),"auto"),"ja");
+        assert_eq!(translation_source_language("星光",None,"auto"),"auto");
+        let live=Live::default();assert_eq!(live.recognition_language(),"auto");
+    }
+    #[test]
+    fn translation_progresses_without_toolbar_or_menu(){
+        let mut live=Live::default();live.enabled=true;live.translation.enabled=true;live.translation.target=0;live.manual_language=true;
+        live.finalized="第一句确认文本".into();
+        let ctx=egui::Context::default();
+        live.tick_translation(&ctx);
+        assert_eq!(live.translation.display(Some(&live.finalized)).translated,Some("第一句确认文本"));
+        live.finalized="第二句确认文本".into();
+        live.tick_translation(&ctx);
+        assert_eq!(live.translation.display(Some(&live.finalized)).translated,Some("第二句确认文本"));
+    }
     use super::*;
+    #[test]
+    fn subtitle_width_excludes_both_margins_and_handles_narrow_windows() {
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 450.0));
+        let rect = subtitle_box(canvas, 30.0, 20.0, false);
+        assert_eq!(rect.left(), 130.0);
+        assert_eq!(rect.right(), 870.0);
+        assert_eq!(rect.width(), 740.0);
+        assert_eq!(rect.bottom(), 480.0);
+        let top = subtitle_box(canvas, 30.0, 40.0, true);
+        assert_eq!(top.top(), 90.0);
+        assert_eq!(top.bottom(), 500.0);
+        assert_eq!(top.width(), 740.0);
+        let narrow = subtitle_box(canvas, 1000.0, 1000.0, false);
+        assert_eq!(narrow.width(), 48.0);
+        assert_eq!(narrow.height(), 32.0);
+        assert!(canvas.contains_rect(narrow));
+    }
     #[test]
     fn covered_audio_skips_recognition_but_uncached_audio_and_eof_pass() {
         let (sender, receiver) = mpsc::sync_channel(4);
@@ -662,6 +897,7 @@ mod tests {
             ready: Arc::new(AtomicBool::new(true)),
             overloaded: Arc::new(AtomicBool::new(false)),
             replay: Arc::new(vec![crate::live_subtitle_cache::Cue {
+                language:None,
                 start: 5.0,
                 end: 7.0,
                 text: "cached".into(),

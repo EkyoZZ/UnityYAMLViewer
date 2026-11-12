@@ -4,6 +4,7 @@ use std::{io::{Read,BufRead}, path::{Path,PathBuf}, process::{Child,Stdio}, sync
 use eframe::egui;
 use crate::media_tools::{command,find_tool};
 mod receive_rate;
+mod subtitle_editor;
 
 fn text_input_active(ctx:&egui::Context)->bool{
     ctx.memory(|memory|memory.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some())
@@ -318,7 +319,7 @@ fn probe_with_live(path: &Path, video_input: Option<NetworkInput>, audio_input: 
         let codec=s["codec_name"].as_str().unwrap_or("");let language=s["tags"]["language"].as_str().unwrap_or("und");
         let title=s["tags"]["title"].as_str().unwrap_or("");
         let name=audio_language_name(title,language).map(crate::localization::tr).unwrap_or(language);
-        crate::subtitle_player::Source{path:path.to_owned(),ordinal,label:format!("{}. {} · {} · {}",ordinal+1,name,title,codec),default:s["disposition"]["default"]==1,text:matches!(codec,"subrip"|"ass"|"ssa"|"webvtt"|"mov_text"|"text"),language:audio_language_name(title,language)}
+        crate::subtitle_player::Source{path:path.to_owned(),ordinal,codec:codec.to_owned(),label:format!("{}. {} · {} · {}",ordinal+1,name,title,codec),default:s["disposition"]["default"]==1,text:matches!(codec,"subrip"|"ass"|"ssa"|"webvtt"|"mov_text"|"text"),language:audio_language_name(title,language)}
     }).collect();
     let audio=streams.iter().any(|s|s["codec_type"]=="audio");
     let channels=streams.iter().find(|s|s["codec_type"]=="audio").and_then(|s|s["channels"].as_u64()).unwrap_or(1).clamp(1,2) as usize;
@@ -349,7 +350,14 @@ fn probe_with_live(path: &Path, video_input: Option<NetworkInput>, audio_input: 
     Ok(Info {subtitle_cache_identity,network_video:video_input,network_audio:audio_input,variants,stream_title,audio_tags,video_details,reported_fps,subtitles,gif:if video_codec=="gif" {Some(crate::gif_playback::read(path)?)}else{None},ffmpeg,ffprobe,start_time,duration:if duration.is_finite(){duration.max(0.0)}else{0.0},video,audio,channels,sample_rate,bits,source_channels,file_size,fps,audio_tracks,video_codec,pixel_format,container,bit_rate,subtitle_count,sample_aspect,video_bits,dynamic_range,color_transfer})
 }
 struct Control { live_subtitle:Mutex<Option<crate::live_subtitle::Tap>>, stop:AtomicBool, volume:AtomicU32, children:Mutex<Vec<Child>>, clock:Mutex<Option<Instant>>,video_ready:AtomicBool,paused:AtomicBool,pause_at:Mutex<Option<Instant>>,receive_rate:Option<Arc<receive_rate::Meter>> }
-struct Playback { control:Arc<Control>, frames:mpsc::Receiver<(usize,egui::ColorImage)>, errors:mpsc::Receiver<String>, done:Arc<AtomicBool> }
+enum PlaybackFrame {Rgba(egui::ColorImage),Yuv(Arc<crate::render_system::video::Frame>)}
+fn present_playback_frame(texture:&mut Option<egui::TextureHandle>,yuv:&mut Option<Arc<crate::render_system::video::Frame>>,frame:PlaybackFrame,gpu:bool,ctx:&egui::Context){
+    match frame {
+        PlaybackFrame::Yuv(frame)=>{*yuv=Some(frame);*texture=None;},
+        PlaybackFrame::Rgba(frame)=>{if gpu&&crate::render_system::available(){*yuv=Some(Arc::new(crate::render_system::video::Frame::from_image(frame)));*texture=None;return;}*yuv=None;if let Some(texture)=texture{texture.set(frame,egui::TextureOptions::LINEAR);}else{*texture=Some(ctx.load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}}
+    }
+}
+struct Playback { control:Arc<Control>, frames:mpsc::Receiver<(usize,PlaybackFrame)>, errors:mpsc::Receiver<String>, done:Arc<AtomicBool> }
 
 impl Drop for Playback {
     fn drop(&mut self) {
@@ -370,6 +378,9 @@ fn spawn_decoder(control:&Control,ffmpeg:&Path,path:&Path,position:f64,realtime:
     if let Some(mode)=hardware {cmd.args(["-hwaccel",mode]);}
     if position>0.0 {cmd.args(["-ss",&position.to_string()]);}
     if let Some(input) = input { input.options(&mut cmd); } else { hls_input_options(&mut cmd, path); }
+    // Input decoder threads must be set before -i; the output -threads flag
+    // only limited raw-video encoding and left the decoder using all cores.
+    cmd.args(["-threads","4","-filter_threads","2"]);
     let mut child=cmd.arg("-i").arg(path)
         .args(args).args(["-threads","2","pipe:1"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(if meter.is_some(){Stdio::piped()}else{Stdio::null()}).spawn().map_err(|e|e.to_string())?;
     let stdout=child.stdout.take().ok_or("无法读取解码输出")?;
@@ -378,24 +389,44 @@ fn spawn_decoder(control:&Control,ffmpeg:&Path,path:&Path,position:f64,realtime:
     if control.stop.load(Ordering::Relaxed) {let _=child.kill();let _=child.wait();return Err("播放已停止".into());}
     children.push(child);Ok(stdout)
 }
-fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&str,audio_track:Option<u64>,info_frame_times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,subtitle:Option<crate::subtitle_player::Render>,preview_end:Option<f64>,ctx:&egui::Context)->Playback {
+fn playback_frame_size(source:[usize;2],fit:bool,window:[f32;2],pixels_per_point:f32)->[usize;2]{
+    if !fit||source[0]==0||source[1]==0{return source;}
+    let width=(window[0]*pixels_per_point).max(2.0) as f64;
+    let height=(window[1]*pixels_per_point).max(2.0) as f64;
+    let ratio=(width/source[0] as f64).min(height/source[1] as f64).min(1.0);
+    if ratio>=0.95{return source;}
+    let scale=((ratio*source[0] as f64/64.0).ceil()*64.0/source[0] as f64).min(1.0);
+    [(source[0] as f64*scale).ceil().max(1.0) as usize,(source[1] as f64*scale).ceil().max(1.0) as usize]
+}
+
+fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&str,audio_track:Option<u64>,info_frame_times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,subtitle:Option<crate::subtitle_player::Render>,preview_end:Option<f64>,output_size:Option<[usize;2]>,gpu_video:bool,ctx:&egui::Context)->Playback {
     let track_rate=remote_input(path,info.network_video.as_ref()) || info.network_audio.as_ref().is_some_and(|input|remote_input(&input.path,Some(input)));
     let control=Arc::new(Control {live_subtitle:Mutex::new(None),stop:AtomicBool::new(false),volume:AtomicU32::new(volume.to_bits()),children:Mutex::new(Vec::new()),clock:Mutex::new(None),video_ready:AtomicBool::new(info.video.is_none()),paused:AtomicBool::new(false),pause_at:Mutex::new(None),receive_rate:track_rate.then(||Arc::new(receive_rate::Meter::default()))});
     let (frame_tx,frames)=mpsc::sync_channel(2);let (error_tx,errors)=mpsc::channel();
     let done=Arc::new(AtomicBool::new(false));
     let remaining=Arc::new(AtomicU32::new(u32::from(info.video.is_some())+u32::from(audio_track.is_some())));
-    if let Some(size)=info.video {
+    if let Some(original_size)=info.video {
+        let mut size=output_size.unwrap_or(original_size);
+        let gpu=gpu_video&&crate::render_system::available();
+        let yuv=gpu&&matches!(info.pixel_format.as_str(),"yuv420p"|"nv12"|"yuvj420p"|"yuv422p"|"yuv444p"|"yuvj422p"|"yuvj444p"|"yuyv422"|"uyvy422")&&!info.video_details.iter().any(|(label,value)|label=="色域原色"&&value=="bt2020")&&info.dynamic_range!="HDR (PQ)"&&info.dynamic_range!="HDR (HLG)";
+        // Keep straight-alpha pixels at source resolution. Scaling straight RGBA
+        // before premultiplication can bake hidden RGB into transparent edges.
+        if gpu&&!yuv{size=original_size;}
+        let matrix=info.video_details.iter().find(|(label,_)|label=="颜色空间").map(|(_,value)|value.as_str());
+        let matrix=match matrix {Some("bt709")=>"bt709",Some("bt470bg"|"smpte170m")=>"bt601",Some("smpte240m")=>"smpte240m",Some("fcc")=>"fcc",_=>if original_size[1]>=720{"bt709"}else{"bt601"}};
+        let range=if info.pixel_format.starts_with("yuvj")||info.video_details.iter().any(|(label,value)|label=="颜色范围"&&value=="pc"){"pc"}else{"tv"};
         let input = info.network_video.clone();
         let video_map = input.as_ref().and_then(|input| input.stream).map_or_else(|| "0:V:0".into(), |index| format!("0:{index}"));
-        let cache_frames = info.network_video.is_none() && !crate::remote_file::is_hls(path);
+        let cache_frames = !gpu && size==original_size && info.network_video.is_none() && !crate::remote_file::is_hls(path);
         let control=control.clone();let path=path.to_owned();let ffmpeg=info.ffmpeg.clone();let ctx=ctx.clone();let errors=error_tx.clone();let done=done.clone();let mode=mode.to_owned();
         let remaining=remaining.clone();
         let only_video=audio_track.is_none();let fps=info.fps;let frame_times=info_frame_times.clone();let cache=cache.clone();
         std::thread::spawn(move|| {
             let result=(|| {
-                let base=format!("scale={}:{}:flags=bilinear",size[0],size[1]);let filter=subtitle.as_ref().map_or(base.clone(),|s|s.filter(position,&base));
-                let mut reader=spawn_decoder(&control,&ffmpeg,&path,position,false,Some(&mode),&["-map".into(),video_map,"-an".into(),"-vf".into(),filter,"-fps_mode".into(),"passthrough".into(),"-pix_fmt".into(),"rgba".into(),"-f".into(),"rawvideo".into()], input.as_ref())?;
-                let mut bytes=vec![0u8;size[0]*size[1]*4];let mut any=false;let mut index=first_frame;
+                let color=if yuv{format!(":in_color_matrix={matrix}:out_color_matrix=bt709:in_range={range}:out_range=tv:out_h_chr_pos=128:out_v_chr_pos=128")}else{String::new()};let scaler=if yuv{"lanczos+accurate_rnd"}else{"bilinear"};let base=format!("scale={}:{}:flags={scaler}{color}",size[0],size[1]);let filter=subtitle.as_ref().map_or(base.clone(),|s|s.filter(position,&base));
+                let mut reader=spawn_decoder(&control,&ffmpeg,&path,position,false,Some(&mode),&["-map".into(),video_map,"-an".into(),"-vf".into(),filter,"-fps_mode".into(),"passthrough".into(),"-pix_fmt".into(),if yuv{"yuv420p".into()}else{"rgba".into()},"-f".into(),"rawvideo".into()], input.as_ref())?;
+                let byte_len=if yuv{crate::render_system::video::Frame::byte_len(size)}else{size[0]*size[1]*4};
+                let mut bytes=vec![0u8;byte_len];let mut any=false;let mut index=first_frame;
                 while !control.stop.load(Ordering::Relaxed) {
                     let timestamp=frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(index as f64/fps);
                     if preview_end.is_some_and(|end|timestamp>=end){break}
@@ -403,8 +434,6 @@ fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&s
                     any=true;
                     control.video_ready.store(true,Ordering::Relaxed);
                     if only_video {control.clock.lock().unwrap().get_or_insert_with(Instant::now);}
-                    let image=egui::ColorImage::from_rgba_unmultiplied(size,&bytes);
-                    if cache_frames { cache.lock().unwrap().insert(index,image.clone()); }
                     let target=frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(index as f64/fps)-position;
                     loop {
                         if control.stop.load(Ordering::Relaxed){return Ok(());}
@@ -415,6 +444,13 @@ fn start(info:&Info,path:&Path,position:f64,first_frame:usize,volume:f32,mode:&s
                     }
                     let clock=*control.clock.lock().unwrap();
                     if clock.is_some_and(|clock|clock.elapsed().as_secs_f64()-target>0.15){index+=1;continue;}
+                    let image=if gpu {
+                        PlaybackFrame::Yuv(Arc::new(crate::render_system::video::Frame{size,format:if yuv{crate::render_system::video::Format::Yuv420}else{crate::render_system::video::Format::RgbaStraight},bytes:std::mem::replace(&mut bytes,vec![0;byte_len])}))
+                    }else{
+                        let image=egui::ColorImage{size,pixels:bytes.chunks_exact(4).map(|p|crate::asset_viewer::preview_color([p[0],p[1],p[2],p[3]])).collect()};
+                        if cache_frames {cache.lock().unwrap().insert(index,image.clone());}
+                        PlaybackFrame::Rgba(image)
+                    };
                     if frame_tx.send((index,image)).is_err() {break;}index+=1;ctx.request_repaint();
                 }
                 if !any && !control.stop.load(Ordering::Relaxed) {return Err("视频解码没有输出，请检查格式或解码器。".into());}Ok(())
@@ -561,7 +597,7 @@ impl Drop for SequenceSource {fn drop(&mut self){let _=std::fs::remove_dir_all(&
 pub fn open_sequence_editor(source:Arc<SequenceSource>,ctx:&egui::Context){
     let Some(info)=source.info.clone()else{return};let path=source.path.clone();
     let mut player=Preview::default();player.trim.open(info.duration);player.frame_times=Some(Arc::new(source.times()));player.position=0.;player.current_frame=Some(0);
-    if let Some(frame)=source.first_frame.clone(){player.poster=Some(preview_poster(&frame));player.cache.lock().unwrap().insert(0,frame.clone());player.texture=Some(ctx.load_texture("sequence_first_frame",frame,egui::TextureOptions::NEAREST));}
+    if let Some(frame)=source.first_frame.clone(){player.poster=Some(preview_poster(&frame));player.cache.lock().unwrap().insert(0,frame.clone());present_playback_frame(&mut player.texture,&mut player.video_frame,PlaybackFrame::Rgba(frame),player.gpu_video,ctx);}
     player.trim.keep_sequence_source(source);player.info=Some(info);
     TRIM_EDITORS.with(|editors|{editors.borrow_mut().insert(path.clone(),TrimEditor::new(path.clone(), player));});
     crate::native_window::wake(ctx,egui::Id::new(("media_trim",path)));ctx.request_repaint();
@@ -629,7 +665,7 @@ impl TrimEditor {
         if self.saved_edit_state.is_none() { self.saved_edit_state=self.edit_fingerprint(); }
         let (path, player) = &mut self.players[active];
         if self.queue.items[active].thumbnail.is_none() {
-            self.queue.items[active].thumbnail = player.texture.clone();
+            self.queue.items[active].thumbnail = player.poster.as_ref().map(|poster|ctx.load_texture(format!("editor-thumbnail:{}",path.display()),poster.clone(),egui::TextureOptions::LINEAR)).or_else(||player.texture.clone());
         }
         let mut host=egui::Ui::new(ctx.clone(),egui::Id::new(("trim_host",root)),egui::UiBuilder::new().max_rect(ctx.screen_rect()));
         player.show_trim_editor(&mut host, path, root, &mut self.queue);
@@ -733,37 +769,80 @@ impl TrimEditor {
 }
 
 pub(crate) fn trim_files_in_use() -> Vec<PathBuf> {
-    TRIM_EDITORS.with(|editors| {
+    let mut files:Vec<PathBuf>=TRIM_EDITORS.with(|editors| {
         editors.borrow().values().flat_map(|editor| editor.players.iter().flat_map(|(path, player)| {
             let mut paths = vec![path.clone()];
             if let Some(clip) = &player.edit_clip { paths.push(clip.path.clone()); }
             if let Some(source) = player.trim.sequence_source() { paths.push(source.path.clone()); }
             paths
         })).collect()
-    })
+    });
+    files.extend(subtitle_editor::files_in_use());files
 }
 
 /// Pump independent editors from the application, rather than the selected tab.
 pub fn show_trim_windows(ctx:&egui::Context) {
+    pump_recorded_video_editors(ctx);
     project::pump(ctx);
     TRIM_EDITORS.with(|editors| { editors.borrow_mut().retain(|path, editor| editor.show(ctx, path)); });
+    subtitle_editor::show(ctx);
 }
 
-pub struct Preview { live_subtitle:crate::live_subtitle::Live, subtitle_translation:crate::subtitle_translation::Translator, auto_subtitle:crate::auto_subtitle::Generator, subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_previous:bool,playlist_previous_available:bool,playlist_sources:Option<(usize,Vec<(usize,String)>)>,playlist_source_pick:Option<usize>,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
+thread_local! {
+    static RECORDED_VIDEO_OPENS:std::cell::RefCell<Vec<(PathBuf,mpsc::Receiver<Result<Info,String>>)>>=const {std::cell::RefCell::new(Vec::new())};
+    static RECORDED_VIDEO_ERROR:std::cell::RefCell<Option<String>>=const {std::cell::RefCell::new(None)};
+}
+
+pub(crate) fn open_recorded_video_editor(path:PathBuf,ctx:&egui::Context) {
+    let path=std::fs::canonicalize(&path).unwrap_or(path);
+    let (sender,receiver)=mpsc::channel();
+    RECORDED_VIDEO_OPENS.with(|opens|opens.borrow_mut().push((path.clone(),receiver)));
+    let ctx=ctx.clone();
+    std::thread::spawn(move||{let result=probe(&path,None,None,false);let _=sender.send(result);ctx.request_repaint();});
+}
+
+fn pump_recorded_video_editors(ctx:&egui::Context) {
+    RECORDED_VIDEO_OPENS.with(|opens|opens.borrow_mut().retain(|(path,receiver)|{
+        let result=match receiver.try_recv() {
+            Ok(result)=>result,
+            Err(mpsc::TryRecvError::Empty)=>{ctx.request_repaint_after(Duration::from_millis(100));return true;},
+            Err(mpsc::TryRecvError::Disconnected)=>Err(crate::localization::tr("录屏任务意外中断").into()),
+        };
+        match result {
+            Ok(info)=>{
+                let mut player=Preview::default();player.trim.open(info.duration);player.info=Some(info);
+                TRIM_EDITORS.with(|editors|{editors.borrow_mut().entry(path.clone()).or_insert_with(||TrimEditor::new(path.clone(),player));});
+                crate::native_window::wake(ctx,egui::Id::new(("media_trim",path)));
+            },
+            Err(error)=>RECORDED_VIDEO_ERROR.with(|state|*state.borrow_mut()=Some(error)),
+        }
+        false
+    }));
+    RECORDED_VIDEO_ERROR.with(|state|{
+        let mut state=state.borrow_mut();let mut open=state.is_some();
+        if let Some(error)=state.as_ref(){egui::Window::new(crate::localization::tr("进入视频编辑")).id(egui::Id::new("recorded_video_error")).open(&mut open).show(ctx,|ui|{ui.label(error);});}
+        if !open {*state=None;}
+    });
+}
+
+pub struct Preview { gpu_video:bool,video_frame:Option<Arc<crate::render_system::video::Frame>>,yuv_error:Arc<Mutex<Option<String>>>,playback_size_dirty:bool,live_subtitle:crate::live_subtitle::Live, subtitle_translation:crate::subtitle_translation::Translator, auto_subtitle:crate::auto_subtitle::Generator, subtitles:crate::subtitle_player::Subtitles,subtitle_revision:u64,gif_loop:crate::gif_playback::State,edit_clip:Option<Arc<crate::audio_edit::Clip>>,trim:crate::media_trim::Trim,trim_preview_end:Option<f64>,trim_preview_next:Option<(f64,f64)>,trim_scrub:Option<f64>,trim_manual_position:bool,overlay_interactive:bool,sidebar_width:f32,overlay_rect:Option<egui::Rect>,canvas_rect:Option<egui::Rect>,sidebar_rect:Option<egui::Rect>,playlist_mode:bool,playlist_previous:bool,playlist_previous_available:bool,playlist_sources:Option<(usize,Vec<(usize,String)>)>,playlist_source_pick:Option<usize>,playlist_next:bool,playlist_ended:bool,initial_seek:Option<f64>,history_file:Option<(PathBuf,crate::media_history::Identity)>,history_error:Option<String>,autoplay_pending:bool,meter_trails:[f32;2],video_gesture:Option<VideoGesture>,info:Option<Info>,probe:Option<mpsc::Receiver<Result<Info,String>>>,network:Option<(NetworkInput,Option<NetworkInput>)>,discover_network:bool,network_tab:bool,initial_audio:Option<usize>,playback:Option<Playback>,texture:Option<egui::TextureHandle>,poster:Option<egui::ColorImage>,error:Option<String>,position:f64,started:Option<Instant>,volume:f32,remembered_volume:f32,volume_hover:Option<Instant>,
     waveform:Option<Vec<Vec<f32>>>,wave_job:Option<WaveJob>,wave_error:Option<String>,scale_mode:String,display_aspect:u8,zoom:Option<f32>,pan:egui::Vec2,flip_x:bool,flip_y:bool,decoder:String,
     frame_times:Option<Arc<Vec<f64>>>,index_job:Option<IndexJob>,index_error:Option<String>,frame_job:Option<FrameJob>,current_frame:Option<usize>,selected_audio:Option<u64>,seek_drag:Option<(f64,bool)>,cache:Arc<Mutex<FrameCache>>,playback_origin:f64,resume_position:Option<f64>,keyboard_seek:Option<f64>,keyboard_seek_hint:Option<(f64,Instant)>,keyboard_volume_hint:Option<Instant> }
-impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {live_subtitle:Default::default(),subtitle_translation:Default::default(),auto_subtitle:Default::default(),subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_previous:false,playlist_previous_available:false,playlist_sources:None,playlist_source_pick:None,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),display_aspect:0,zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
+impl Default for Preview {fn default()->Self {let preference=*volume_preference().lock().unwrap();Self {gpu_video:true,video_frame:None,yuv_error:Arc::new(Mutex::new(None)),playback_size_dirty:false,live_subtitle:Default::default(),subtitle_translation:Default::default(),auto_subtitle:Default::default(),subtitles:Default::default(),subtitle_revision:0,gif_loop:Default::default(),edit_clip:None,trim:crate::media_trim::Trim::default(),trim_preview_end:None,trim_preview_next:None,trim_scrub:None,trim_manual_position:false,overlay_interactive:false,sidebar_width:0.0,overlay_rect:None,canvas_rect:None,sidebar_rect:None,playlist_mode:false,playlist_previous:false,playlist_previous_available:false,playlist_sources:None,playlist_source_pick:None,playlist_next:false,playlist_ended:false,initial_seek:None,history_file:None,history_error:None,autoplay_pending:false,meter_trails:[0.0;2],video_gesture:None,info:None,probe:None,network:None,discover_network:false,network_tab:false,initial_audio:None,playback:None,texture:None,poster:None,error:None,position:0.0,started:None,volume:preference.volume,remembered_volume:preference.remembered,volume_hover:None,waveform:None,wave_job:None,wave_error:None,scale_mode:"fit".into(),display_aspect:0,zoom:None,pan:egui::Vec2::ZERO,flip_x:false,flip_y:false,decoder:"auto".into(),frame_times:None,index_job:None,index_error:None,frame_job:None,current_frame:None,selected_audio:None,seek_drag:None,cache:Arc::new(Mutex::new(FrameCache::default())),playback_origin:0.0,resume_position:None,keyboard_seek:None,keyboard_seek_hint:None,keyboard_volume_hint:None}}}
 impl Preview {
     fn refresh_subtitles(&mut self,ctx:&egui::Context,path:&Path){
         let Some(info)=&self.info else{return;};
         if info.video.is_none()||info.gif.is_some(){return;}
+        self.subtitles.video_size(info.video,ctx);
         let language=info.audio_tracks.iter().find(|track|Some(track.index)==self.selected_audio).and_then(|track|track.language_name);
         self.subtitles.poll(&info.subtitles,language,(!self.network_tab).then_some(path),ctx);
         self.subtitles.style_window(ctx,path);
         if self.subtitle_revision!=self.subtitles.revision {
-            let playing=self.is_playing();let position=self.position_now();
-            self.stop_playback();self.frame_job=None;self.texture=None;self.poster=None;
+            let playing=self.is_playing();let position=self.position_now();let duration=info.duration;
+            // Hold the last displayed frame until the new subtitle decoder delivers a frame.
+            self.stop_playback();self.frame_job=None;
             self.cache=Arc::new(Mutex::new(FrameCache::default()));self.position=position;
+            if !playing&&duration>0.0&&position>=duration{self.initial_seek=Some(duration);}
             self.subtitle_revision=self.subtitles.revision;
             if playing{self.play(ctx,path);}else if self.frame_times.is_some(){self.seek_frame(ctx,path);}
             else if let Some(info)=&self.info {
@@ -949,6 +1028,7 @@ impl Preview {
             .inner_margin(egui::Margin::symmetric(5,1))
             .show(ui,|ui|ui.small(aspect)).response.on_hover_text(crate::localization::tr("显示比例"));
         if previous_scale!=self.scale_mode {
+            self.playback_size_dirty=true;
             self.video_gesture=None;
             self.pan=egui::Vec2::ZERO;
             if self.scale_mode=="native"{self.zoom=Some(1.0);}
@@ -1016,8 +1096,10 @@ impl Preview {
         self.stop_playback();
         self.save_position();
         if let Some(frame)=self.current_frame.and_then(|index|self.cache.lock().unwrap().get(index)){self.poster=Some(preview_poster(&frame));}
-        self.texture=None;self.wave_job=None;self.index_job=None;self.frame_job=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}
+        self.texture=None;self.video_frame=None;self.wave_job=None;self.index_job=None;self.frame_job=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}
     fn show_trim_editor(&mut self,ui:&mut egui::Ui,path:&Path,window_path:&Path,queue:&mut crate::media_edit_queue::Panel) {
+        let render_error=self.yuv_error.lock().unwrap().take();
+        if render_error.is_some(){let playing=self.is_playing();self.position=self.position_now();self.gpu_video=false;self.video_frame=None;self.resume_position=None;if playing{self.play(ui.ctx(),path);}else if let Some(info)=&self.info{let target=self.current_frame.unwrap_or((self.position*info.fps).round() as usize);self.frame_job=Some(decode_frame(info,path,target,self.frame_times.clone(),self.cache.clone(),&self.decoder,self.subtitles.render(),ui.ctx()));}}
         self.refresh_subtitles(ui.ctx(),path);
         self.subtitles.status(ui);
         if let Some(info)=&self.info {
@@ -1056,7 +1138,7 @@ impl Preview {
             Err(mpsc::TryRecvError::Disconnected)=>{self.index_job=None;self.index_error=Some("视频帧索引失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
         if let Some(job)=&self.frame_job {match job.receiver.try_recv(){
-            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(preview_poster(&frame));self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ui.ctx().load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}},Err(error)=>{self.trim_scrub=None;self.error=Some(error);}}},
+            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(preview_poster(&frame));self.video_frame=None;self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ui.ctx());},Err(error)=>{self.trim_scrub=None;self.error=Some(error);}}},
             Err(mpsc::TryRecvError::Disconnected)=>{self.frame_job=None;self.trim_scrub=None;self.error=Some("逐帧解码失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
 
@@ -1064,11 +1146,11 @@ impl Preview {
             self.preview_trim_position(ui.ctx(), &playback_path, position, true);
         }
         if self.index_job.is_some() || self.frame_job.is_some(){ui.ctx().request_repaint_after(Duration::from_millis(50));}
-        if !self.is_playing() && self.error.is_none() && self.texture.is_none() && self.frame_job.is_none() && self.frame_times.is_some(){self.seek_frame(ui.ctx(),path);}
+        if !self.is_playing() && self.error.is_none() && self.texture.is_none() && self.video_frame.is_none() && self.frame_job.is_none() && self.frame_times.is_some(){self.seek_frame(ui.ctx(),path);}
         let mut failed=false;
         if let Some(job)=&self.playback {
             self.started=if job.control.paused.load(Ordering::Relaxed){None}else{*job.control.clock.lock().unwrap()};
-            while !job.control.paused.load(Ordering::Relaxed) {let Ok((index,frame))=job.frames.try_recv() else{break};if self.trim_preview_end.is_some_and(|end|self.frame_times.as_ref().and_then(|times|times.get(index)).is_some_and(|time|*time>=end)){continue}self.current_frame=Some(index);if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ui.ctx().load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}}
+            while !job.control.paused.load(Ordering::Relaxed) {let Ok((index,frame))=job.frames.try_recv() else{break};if self.trim_preview_end.is_some_and(|end|self.frame_times.as_ref().and_then(|times|times.get(index)).is_some_and(|time|*time>=end)){continue}self.current_frame=Some(index);present_playback_frame(&mut self.texture,&mut self.video_frame,frame,self.gpu_video,ui.ctx());}
             if let Ok(error)=job.errors.try_recv(){self.error=Some(error);failed=true;}
             job.control.volume.store(self.volume.to_bits(),Ordering::Relaxed);
             if job.done.load(Ordering::Relaxed) && self.error.is_none() {
@@ -1102,7 +1184,7 @@ impl Preview {
         if let Some(info)=&self.info {
             let position=self.position_now();
             let description=format!("{} Hz · {} bit · {} ch",info.sample_rate,info.bits,info.source_channels);
-            let view=crate::media_trim::AudioView {frame_times:self.frame_times.as_deref().map(Vec::as_slice),fps:info.fps,video_size:info.video,video_texture:self.texture.as_ref(),wave:self.waveform.as_deref(),wave_error:self.wave_error.as_deref(),playing:self.is_playing(),volume:self.volume,playback_error:self.error.as_deref(),description};
+            let view=crate::media_trim::AudioView {frame_times:self.frame_times.as_deref().map(Vec::as_slice),fps:info.fps,video_size:info.video,video_texture:self.texture.as_ref(),video_frame:self.video_frame.as_ref(),video_render_error:self.yuv_error.clone(),wave:self.waveform.as_deref(),wave_error:self.wave_error.as_deref(),playing:self.is_playing(),volume:self.volume,playback_error:self.error.as_deref(),description};
             let previous_ranges = self.trim.playback_ranges();
             let action=self.trim.show(ui,path,window_path,queue,&info.ffmpeg,info.duration,position,info.video.is_some(),self.selected_audio,view);
             if let Some(volume)=action.volume {
@@ -1111,6 +1193,16 @@ impl Preview {
             }
             if action.trim_playback_changed { self.trim_manual_position = false; }
             if action.manual_seek { self.trim_manual_position = true; }
+            if action.frame_step!=0 && !self.is_playing() && self.frame_job.is_none() {
+                if let Some(times)=self.frame_times.as_ref().filter(|times|!times.is_empty()) {
+                    let base=self.current_frame.unwrap_or_else(||times.partition_point(|time|*time<=position).saturating_sub(1));
+                    let target=base.saturating_add_signed(action.frame_step).min(times.len()-1);
+                    let target_position=times[target];
+                    self.trim_manual_position=true;
+                    self.trim_preview_next=None;self.trim_preview_end=None;
+                    self.preview_trim_position(ui.ctx(),&playback_path,target_position,false);
+                }
+            }
             if let Some(position)=action.seek {
                 if !action.manual_seek { self.trim_manual_position = false; }
                 self.trim_scrub = None;
@@ -1192,15 +1284,23 @@ impl Preview {
     }
 
     pub(crate) fn show_with_video_actions(&mut self,ui:&mut egui::Ui,path:&Path,mut video_actions:Option<&mut dyn FnMut(&mut egui::Ui)>) {
+        if let Some(source)=self.subtitles.take_editor_request(){
+            self.pause();
+            if let Err(error)=subtitle_editor::open(ui.ctx(),&source,path,self){self.error=Some(error);}
+        }
+        let yuv_error=self.yuv_error.lock().unwrap().take();
+        if yuv_error.is_some(){let playing=self.is_playing();self.position=self.position_now();self.gpu_video=false;self.video_frame=None;self.resume_position=None;if playing{self.play(ui.ctx(),path);}else if let Some(info)=&self.info{let target=self.current_frame.unwrap_or((self.position*info.fps).round() as usize);self.frame_job=Some(decode_frame(info,path,target,self.frame_times.clone(),self.cache.clone(),&self.decoder,self.subtitles.render(),ui.ctx()));}}
+        if std::mem::take(&mut self.playback_size_dirty){self.resume_position=None;if self.is_playing(){self.position=self.position_now();self.play(ui.ctx(),path);}}
         let hls = self.network.is_some() || crate::remote_file::is_hls(path);
         if let Some(playback)=&self.playback {
             if self.selected_audio.is_some() {if let Some(info)=&self.info {
                 let input=info.network_audio.as_ref().or(info.network_video.as_ref());
                 let source=input.map_or(path,|i|i.path.as_path());
-                self.live_subtitle.attach(&playback.control.live_subtitle,ui.ctx(),playback.done.load(Ordering::Relaxed),source,input,info.duration,self.selected_audio.unwrap_or(0),info.subtitle_cache_identity.as_deref(),self.position_now());
+                self.live_subtitle.attach(&playback.control.live_subtitle,ui.ctx(),playback.done.load(Ordering::Relaxed),source,input,info.duration,self.selected_audio.unwrap_or(0),info.subtitle_cache_identity.as_deref(),self.position_now(),&info.ffmpeg);
             }}
             else {self.live_subtitle.reset();*playback.control.live_subtitle.lock().unwrap()=None;}
         } else {self.live_subtitle.poll();}
+        self.live_subtitle.tick_translation(ui.ctx());
         if let Some((subtitle, track)) = self.auto_subtitle.poll(path) {
             let language = self.info.as_ref().and_then(|info| info.audio_tracks.iter()
                 .find(|audio| Some(audio.index) == self.selected_audio)).and_then(|audio| audio.language_name);
@@ -1243,12 +1343,15 @@ impl Preview {
         let mut failed=false;
         if let Some(job)=&self.playback {
             self.started=if job.control.paused.load(Ordering::Relaxed){None}else{*job.control.clock.lock().unwrap()};
-            while !job.control.paused.load(Ordering::Relaxed) {let Ok((index,frame))=job.frames.try_recv() else{break};self.current_frame=Some(index);if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ui.ctx().load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}}
+            if !job.control.paused.load(Ordering::Relaxed){if let Some((index,frame))=job.frames.try_iter().last(){self.current_frame=Some(index);present_playback_frame(&mut self.texture,&mut self.video_frame,frame,self.gpu_video,ui.ctx());}}
             if let Ok(error)=job.errors.try_recv() {self.error=Some(error);failed=true;}
             let finished = job.done.load(Ordering::Relaxed) && self.error.is_none()
                 && !job.control.paused.load(Ordering::Relaxed)
                 && self.info.as_ref().is_none_or(|info| info.gif.is_none() || info.duration <= 0.0 || self.position_now() >= info.duration);
             if finished {
+                // Keep the last presented image. Cancel any stale still-frame request
+                // rather than replacing successful EOF with a late decode error.
+                self.frame_job=None;
                 // Let recognition finish the final audio packet after normal playback EOF.
                 self.finish_playback();
                 let repeat = self.info.as_ref().and_then(|info|info.gif.filter(|_|info.duration>0.0)).is_some_and(|metadata|self.gif_loop.finish(metadata));
@@ -1259,10 +1362,10 @@ impl Preview {
         if failed {self.stop_playback();}
         if let Some(error)=&self.error {ui.add(egui::Label::new(egui::RichText::new(error).color(ui.visuals().warn_fg_color)).wrap());
             if ui.button(crate::localization::tr("前往第三方支持")).clicked(){crate::third_party::request_open(ui.ctx());}
-            if ui.button(crate::localization::tr("重试")).clicked(){self.stop_playback();if hls {self.autoplay_pending=true;}self.cache=Arc::new(Mutex::new(FrameCache::default()));self.error=None;self.poster=None;self.texture=None;self.info=None;self.wave_job=None;self.waveform=None;self.wave_error=None;self.frame_times=None;self.index_job=None;self.index_error=None;self.frame_job=None;self.current_frame=None;}}
+            if ui.button(crate::localization::tr("重试")).clicked(){self.stop_playback();if hls {self.autoplay_pending=true;}self.cache=Arc::new(Mutex::new(FrameCache::default()));self.error=None;self.poster=None;self.texture=None;self.video_frame=None;self.info=None;self.wave_job=None;self.waveform=None;self.wave_error=None;self.frame_times=None;self.index_job=None;self.index_error=None;self.frame_job=None;self.current_frame=None;}}
         if self.info.is_none(){self.pending_source_controls(ui,fullscreen);return;}let Some(info)=&self.info else{return};let duration=info.duration;
-        if !hls && info.video.is_some() && self.texture.is_none() && !self.is_playing() {
-            if let Some(poster)=&self.poster {self.texture=Some(ui.ctx().load_texture("media_frame",poster.clone(),egui::TextureOptions::LINEAR));}
+        if !hls && info.video.is_some() && self.texture.is_none() && self.video_frame.is_none() && !self.is_playing() {
+            if let Some(poster)=&self.poster {present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(poster.clone()),self.gpu_video,ui.ctx());}
             else if self.frame_job.is_none() && self.error.is_none() {
                 let target = (self.position * info.fps).round() as usize;
                 self.frame_job=Some(decode_frame(info,path,target,self.frame_times.clone(),self.cache.clone(),&self.decoder,self.subtitles.render(),ui.ctx()));
@@ -1275,7 +1378,7 @@ impl Preview {
             Err(mpsc::TryRecvError::Disconnected)=>{self.index_job=None;self.index_error=Some("视频帧索引失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
         if let Some(job)=&self.frame_job {match job.receiver.try_recv(){
-            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(preview_poster(&frame));self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ui.ctx().load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}},Err(error)=>self.error=Some(error)}},
+            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(preview_poster(&frame));self.video_frame=None;self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ui.ctx());},Err(error)=>self.error=Some(error)}},
             Err(mpsc::TryRecvError::Disconnected)=>{self.frame_job=None;self.error=Some("逐帧解码失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
         if !hls && info.video.is_none() && self.waveform.is_none() && self.wave_job.is_none() && self.wave_error.is_none() {
@@ -1301,9 +1404,9 @@ impl Preview {
                 let tr=crate::localization::tr;
                 let fps=info.reported_fps.map_or_else(||tr("未知").to_owned(),|fps|format!("{fps:.2} fps"));
                 ui.small(format!("{}: {} · {w} × {h} · {fps}",tr("视频信息"),info.video_codec));
+                if let Some(frame)=&self.video_frame{ui.small(if frame.format==crate::render_system::video::Format::Yuv420{"YUV · GPU"}else{"RGBA · GPU"});}
                 ui.push_id("video_header_details",|ui|details_menu(ui,info));
                 self.subtitles.header(ui,&info.subtitles);
-                self.live_subtitle.show(ui,self.selected_audio.is_some());
                 if let Some(actions)=video_actions.as_mut(){
                     edit_video=ui.add_enabled(duration>0.0,egui::Button::new(tr("视频编辑"))).clicked();
                     actions(ui);
@@ -1334,6 +1437,8 @@ impl Preview {
                     }
                     self.subtitle_translation.show(ui,path,&info.ffmpeg,self.subtitles.translation_source());
                 }
+                self.live_subtitle.show(ui,self.selected_audio.is_some());
+                self.live_subtitle.status(ui);
             });}
         }else if info.audio {
             let tr=crate::localization::tr;
@@ -1392,9 +1497,9 @@ impl Preview {
         if self.wave_job.is_some() {ui.spinner();ui.label(crate::localization::tr("正在生成音频波形…"));ui.ctx().request_repaint_after(Duration::from_millis(100));}
         if let Some(error)=&self.wave_error {ui.small(error);}
         let mut video_clicked=false;
-        if let Some(texture)=&self.texture {
+        if self.texture.is_some()||self.video_frame.is_some() {
             let uv=egui::Rect::from_min_max(egui::pos2(if self.flip_x{1.0}else{0.0},if self.flip_y{1.0}else{0.0}),egui::pos2(if self.flip_x{0.0}else{1.0},if self.flip_y{0.0}else{1.0}));
-            let available=egui::vec2(ui.available_width(),ui.available_height().max(1.0));let pixels=self.info.as_ref().and_then(|info|info.video).map_or(texture.size_vec2(),|[w,h]|egui::vec2(w as f32,h as f32));let native=display_size(pixels,self.display_aspect);
+            let available=egui::vec2(ui.available_width(),ui.available_height().max(1.0));let pixels=self.info.as_ref().and_then(|info|info.video).map_or_else(||self.texture.as_ref().map_or(egui::vec2(1.0,1.0),|texture|texture.size_vec2()),|[w,h]|egui::vec2(w as f32,h as f32));let native=display_size(pixels,self.display_aspect);
             let free=self.scale_mode=="free";
             let (canvas,response)=ui.allocate_exact_size(available,if free{egui::Sense::drag()}else{egui::Sense::click()});
             let mut zoom=match self.scale_mode.as_str(){
@@ -1446,10 +1551,12 @@ impl Preview {
                 // Composite transparent playback frames over a checkerboard, never into decoded/exported pixels.
                 painter.add(crate::static_preview::background_shape(visible,"",[0;3]));
             }
-            painter.image(texture.id(),image_rect,uv,egui::Color32::WHITE);
-            self.live_subtitle.paint(ui,canvas);
+            if let Some(frame)=&self.video_frame{
+                if visible.is_positive(){painter.add(crate::render_system::video::callback(image_rect,visible,frame.clone(),[self.flip_x,self.flip_y],self.yuv_error.clone()));}
+            }else if let Some(texture)=&self.texture{painter.image(texture.id(),image_rect,uv,egui::Color32::WHITE);}
+            self.live_subtitle.paint(ui,visible);
             if free && response.dragged_by(egui::PointerButton::Primary){ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);}
-            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.display_aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);self.live_subtitle.show(ui,self.selected_audio.is_some());if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
+            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.display_aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);self.live_subtitle.show(ui,self.selected_audio.is_some());self.live_subtitle.status(ui);if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
         }
         else if self.info.as_ref().is_some_and(|info|info.video.is_some()) {
             let size=egui::vec2(ui.available_width(),ui.available_height().max(1.0));
@@ -1466,7 +1573,7 @@ impl Preview {
             paint_large_play(ui,button_rect,color);
             video_clicked=button.clicked();
             }
-            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.display_aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);self.live_subtitle.show(ui,self.selected_audio.is_some());if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
+            if let Some(info)=&self.info {response.context_menu(|ui|{crate::theme::menu_no_wrap(ui);display_menu(ui,&mut self.display_aspect,&mut self.flip_x,&mut self.flip_y);audio_menu(ui,info,&mut self.selected_audio,self.network_tab);self.live_subtitle.show(ui,self.selected_audio.is_some());self.live_subtitle.status(ui);if !hls && info.gif.is_none(){self.subtitles.menu(ui,&info.subtitles);}});}
         }
         else if self.waveform.is_none() {ui.label(crate::localization::tr("音频播放"));}
             (video_clicked,previous_audio,wave_seek)
@@ -1650,7 +1757,7 @@ impl Preview {
         if toggle {if self.is_playing(){self.pause();}else{if duration>0.0 && self.position>=duration{self.position=0.0;self.gif_loop.completed=0;}self.play(ui.ctx(),path);}}
         if previous {self.playlist_previous=true;}
         if next {self.playlist_next=true;}
-        if stop {self.gif_loop.completed=0;self.initial_seek=None;self.stop_playback();self.position=0.0;self.current_frame=None;self.frame_job=None;if hls {self.texture=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}else if self.frame_times.is_some(){self.seek_frame(ui.ctx(),path);}else if let Some(info)=self.info.as_ref().filter(|info|info.video.is_some()){self.frame_job=Some(decode_frame(info,path,0,None,self.cache.clone(),&self.decoder,self.subtitles.render(),ui.ctx()));}}
+        if stop {self.gif_loop.completed=0;self.initial_seek=None;self.stop_playback();self.position=0.0;self.current_frame=None;self.frame_job=None;if hls {self.texture=None;self.video_frame=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}else if self.frame_times.is_some(){self.seek_frame(ui.ctx(),path);}else if let Some(info)=self.info.as_ref().filter(|info|info.video.is_some()){self.frame_job=Some(decode_frame(info,path,0,None,self.cache.clone(),&self.decoder,self.subtitles.render(),ui.ctx()));}}
         {
             let mut preference=volume_preference().lock().unwrap();
             if preference.volume!=self.volume || preference.remembered!=self.remembered_volume {preference.volume=self.volume;preference.remembered=self.remembered_volume;preference.dirty=true;}
@@ -1670,7 +1777,7 @@ impl Preview {
             ((position * info.fps).floor() as usize).min(last)
         };
         if !dragging || self.frame_job.is_none() {
-            if self.current_frame != Some(target) || self.texture.is_none() {
+            if self.current_frame != Some(target) || (self.texture.is_none()&&self.video_frame.is_none()) {
                 self.error = None;
                 self.display_frame(ctx, path, target);
             } else {
@@ -1682,10 +1789,13 @@ impl Preview {
     }
 
     fn display_frame(&mut self,ctx:&egui::Context,path:&Path,target:usize) {
+        let target=if let Some(source)=self.trim.sequence_source(){target.min(source.frame_count.saturating_sub(1))}
+            else if let Some(info)=&self.info{bounded_frame_index(target,self.frame_times.as_deref().map(Vec::as_slice),info.duration,info.fps)}else{target};
         self.frame_job=None;
         if let Some(frame)=self.cache.lock().unwrap().get(target) {
             self.current_frame=Some(target);self.position=self.frame_times.as_ref().and_then(|times|times.get(target)).copied().unwrap_or(self.position);
-            if let Some(texture)=&mut self.texture {texture.set(frame,egui::TextureOptions::LINEAR);}else{self.texture=Some(ctx.load_texture("media_frame",frame,egui::TextureOptions::LINEAR));}
+            self.video_frame=None;
+            present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ctx);
         }else if let Some(source)=self.trim.sequence_source(){self.frame_job=Some(decode_sequence_frame(source,target,self.cache.clone(),ctx));}
         else if let Some(info)=&self.info {self.frame_job=Some(decode_frame(info,path,target,self.frame_times.clone(),self.cache.clone(),&self.decoder,self.subtitles.render(),ctx));}
     }
@@ -1694,7 +1804,7 @@ impl Preview {
         let target=self.frame_times.as_ref().and_then(|times|frame_before_end(times,end)).unwrap_or_else(||self.info.as_ref().map_or(0,|info|(end*info.fps).ceil().max(1.) as usize-1));
         self.display_frame(ctx,path,target);self.position=end;
     }
-    fn seek_frame(&mut self,ctx:&egui::Context,path:&Path) {if let Some(times)=&self.frame_times {let target=times.partition_point(|t|*t<=self.position).saturating_sub(1).min(times.len()-1);self.display_frame(ctx,path,target);}}
+    fn seek_frame(&mut self,ctx:&egui::Context,path:&Path) {if let Some(times)=self.frame_times.as_ref().filter(|times|!times.is_empty()){let target=times.partition_point(|t|*t<=self.position).saturating_sub(1).min(times.len()-1);self.display_frame(ctx,path,target);}}
     fn play(&mut self,ctx:&egui::Context,path:&Path) {
         self.playlist_ended=false;
         self.initial_seek = None;
@@ -1711,7 +1821,7 @@ impl Preview {
             self.position=0.0;
         }
         let source = path;
-        if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(if let Some(source)=self.trim.sequence_source(){start_sequence_playback(source,self.position,first,self.cache.clone(),self.trim_preview_end,ctx)}else{start(info,source,self.position,first,self.volume,&self.decoder,self.selected_audio,self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),self.trim_preview_end,ctx)});self.started=None;}
+        if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(if let Some(source)=self.trim.sequence_source(){start_sequence_playback(source,self.position,first,self.cache.clone(),self.trim_preview_end,ctx)}else{start(info,source,self.position,first,self.volume,&self.decoder,self.selected_audio,self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),self.trim_preview_end,info.video.map(|size|{let screen=ctx.screen_rect();playback_frame_size(size,self.scale_mode=="fit",[screen.width(),screen.height()],ctx.pixels_per_point())}),self.gpu_video,ctx)});self.started=None;}
     }
 
 }
@@ -1992,7 +2102,7 @@ fn start_sequence_playback(source:Arc<SequenceSource>,position:f64,first:usize,c
                 let target=(index as f64/source.fps() as f64-position).max(0.);
                 loop{if worker.stop.load(Ordering::Relaxed){return Ok(())}if worker.paused.load(Ordering::Relaxed){std::thread::sleep(Duration::from_millis(5));continue}
                     if worker.clock.lock().unwrap().is_some_and(|clock|clock.elapsed().as_secs_f64()>=target){break}std::thread::sleep(Duration::from_millis(2));}
-                if tx.send((index,image)).is_err(){return Ok(())}ctx.request_repaint();
+                if tx.send((index,PlaybackFrame::Rgba(image))).is_err(){return Ok(())}ctx.request_repaint();
             }
             // Keep the final frame visible for its full frame duration.
             let end=(preview_end.unwrap_or(f64::INFINITY).min(source.frame_count as f64/source.fps() as f64)-position).max(0.);
@@ -2002,8 +2112,18 @@ fn start_sequence_playback(source:Arc<SequenceSource>,position:f64,first:usize,c
     });Playback{control,frames,errors,done}
 }
 
+// Media duration is an exclusive endpoint, not another decoded frame.
+fn bounded_frame_index(index:usize,times:Option<&[f64]>,duration:f64,fps:f64)->usize{
+    let count=times.filter(|times|!times.is_empty()).map(|times|times.len()).unwrap_or_else(||{
+        if duration.is_finite()&&fps.is_finite()&&duration>0.0&&fps>0.0{(duration*fps).ceil().max(1.0) as usize}else{index.saturating_add(1)}
+    });
+    index.min(count.saturating_sub(1))
+}
+
 fn decode_frame(info:&Info,path:&Path,index:usize,times:Option<Arc<Vec<f64>>>,cache:Arc<Mutex<FrameCache>>,mode:&str,subtitle:Option<crate::subtitle_player::Render>,ctx:&egui::Context)->FrameJob {
     let fps = info.fps;
+    let times=times.filter(|times|!times.is_empty());
+    let index=bounded_frame_index(index,times.as_deref().map(Vec::as_slice),info.duration,fps);
     let control=frame_control();let worker=control.clone();let ffmpeg=info.ffmpeg.clone();let path=path.to_owned();let size=info.video.unwrap();let mode=mode.to_owned();let ctx=ctx.clone();let (tx,receiver)=mpsc::channel();
     std::thread::spawn(move|| {
         let result=(|| {
@@ -2018,7 +2138,7 @@ fn decode_frame(info:&Info,path:&Path,index:usize,times:Option<Arc<Vec<f64>>>,ca
             for offset in 0..count {
                 if worker.stop.load(Ordering::Relaxed){return Err("Cancelled".into());}
                 if let Err(error)=reader.read_exact(&mut bytes){if target.is_some() && error.kind()==std::io::ErrorKind::UnexpectedEof{break;}return Err(format!("逐帧解码失败: {error}"));}
-                let frame=egui::ColorImage::from_rgba_unmultiplied(size,&bytes);
+                let frame=egui::ColorImage{size,pixels:bytes.chunks_exact(4).map(|p|crate::asset_viewer::preview_color([p[0],p[1],p[2],p[3]])).collect()};
                 if first+offset==index{target=Some(frame.clone());}
                 cache.lock().unwrap().insert(first+offset,frame);
             }
@@ -2032,12 +2152,15 @@ impl Drop for WaveJob {fn drop(&mut self){
     std::thread::spawn(move||{for mut child in children {let _=child.kill();let _=child.wait();}});
 }}
 fn waveform(info:&Info,path:&Path,ctx:&egui::Context)->WaveJob {
+    waveform_track(info,path,None,ctx)
+}
+fn waveform_track(info:&Info,path:&Path,audio:Option<u64>,ctx:&egui::Context)->WaveJob {
     let control=frame_control();
     let worker=control.clone();let channels=info.channels;let duration=info.duration;let ffmpeg=info.ffmpeg.clone();let path=path.to_owned();let ctx=ctx.clone();
     let (tx,receiver)=mpsc::channel();
     std::thread::spawn(move|| {
         let result=(|| {
-            let mut reader=spawn_decoder(&worker,&ffmpeg,&path,0.0,false,None,&["-map".into(),"0:a:0".into(),"-vn".into(),"-ac".into(),channels.to_string(),"-ar".into(),"8000".into(),"-f".into(),"s16le".into()], None)?;
+            let mut reader=spawn_decoder(&worker,&ffmpeg,&path,0.0,false,None,&["-map".into(),audio.map_or_else(||"0:a:0".into(),|index|format!("0:{index}")),"-vn".into(),"-ac".into(),channels.to_string(),"-ar".into(),"8000".into(),"-f".into(),"s16le".into()], None)?;
             let bins=(duration*8000.0).ceil().clamp(2048.0,4_000_000.0) as usize;
             let mut peaks=vec![vec![0.0f32;bins];channels];let mut bytes=vec![0u8;16000*channels];let mut sample=0usize;
             loop {
@@ -2138,8 +2261,8 @@ fn wave_view<T>(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,foll
         let focused = ui.memory(|memory| memory.focused());
         if !focused.is_some_and(|id| egui::TextEdit::load_state(ui.ctx(), id).is_some()) {
             let steps = ui.input_mut(|input| {
-                let left = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft);
-                let right = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight);
+                let left = input.count_and_consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft);
+                let right = input.count_and_consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight);
                 5 * (right as isize - left as isize)
             });
             if steps != 0 {
@@ -2172,25 +2295,48 @@ fn wave_view<T>(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,foll
     let result=ui.scope_builder(egui::UiBuilder::new().max_rect(plot),|ui|paint(ui,&visible,position-view.offset,view.span,view.offset)).inner.map(|value|(value,view.offset));
     if zoomed {
         let track=egui::Rect::from_min_max(egui::pos2(left,rect.bottom()-14.0),rect.max);
-        let thumb_width=(track.width()*(view.span/duration) as f32).max(20.0).min(track.width());
-        let travel=(track.width()-thumb_width).max(1.0);
-        let x=track.left()+travel*(view.offset/(duration-view.span)) as f32;
-        let thumb=egui::Rect::from_min_size(egui::pos2(x,track.top()),egui::vec2(thumb_width,track.height()));
-        let response=ui.interact(track,id.with("scroll"),egui::Sense::click_and_drag());
-        if response.clicked()||response.dragged(){if let Some(pointer)=response.interact_pointer_pos(){
-            let grab_id=id.with("grab");
-            let grab=if response.drag_started(){let grab=if thumb.contains(pointer){pointer.x-thumb.left()}else{thumb_width*0.5};ui.ctx().data_mut(|d|d.insert_temp(grab_id,grab));grab}else{ui.ctx().data_mut(|d|d.get_temp::<f32>(grab_id)).unwrap_or(thumb_width*0.5)};
-            view.offset=(((pointer.x-track.left()-grab)/travel).clamp(0.0,1.0) as f64)*(duration-view.span);
+        let response=timeline_pan_bar(ui,track,id.with("scroll"),&mut view.offset,view.span,duration);
+        if response.clicked()||response.dragged(){
             last_navigation=Some(now);
-            ui.ctx().request_repaint();
-        }}
-        ui.painter().rect_filled(track,4.0,ui.visuals().extreme_bg_color);
-        ui.painter().rect_filled(thumb,4.0,ui.visuals().widgets.inactive.fg_stroke.color);
+        }
     }
     ui.ctx().data_mut(|data|data.insert_temp(id,view));
     ui.ctx().data_mut(|data|{if let Some(last)=last_navigation{data.insert_temp(navigation_id,last);}else{data.remove::<f64>(navigation_id);}});
     ui.allocate_rect(rect,egui::Sense::hover());
     result
+}
+
+/// Shared proportional panning thumb for video, audio and subtitle timelines.
+fn timeline_pan_bar(ui: &mut egui::Ui, track: egui::Rect, id: egui::Id, offset: &mut f64, span: f64, duration: f64) -> egui::Response {
+    let maximum = (duration - span).max(0.0);
+    *offset = offset.clamp(0.0, maximum);
+    let thumb_width = (track.width() * (span / duration.max(f64::EPSILON)) as f32).max(20.0).min(track.width());
+    let travel = (track.width() - thumb_width).max(1.0);
+    let thumb_at = |offset: f64| egui::Rect::from_min_size(
+        egui::pos2(track.left() + travel * (offset / maximum.max(f64::EPSILON)) as f32, track.top()),
+        egui::vec2(thumb_width, track.height()));
+    let thumb = thumb_at(*offset);
+    let response = ui.interact(track, id, egui::Sense::click_and_drag());
+    let grab_id = id.with("grab");
+    if response.drag_started() {
+        if let Some(press) = ui.input(|input| input.pointer.press_origin()) {
+            let grab = if thumb.contains(press) { press.x - thumb.left() } else { thumb_width * 0.5 };
+            ui.ctx().data_mut(|data| data.insert_temp(grab_id, grab));
+        }
+    }
+    if response.dragged() || response.clicked() {
+        if let Some(pointer) = response.interact_pointer_pos() {
+            let grab = if response.clicked() {
+                if thumb.contains(pointer) { pointer.x - thumb.left() } else { thumb_width * 0.5 }
+            } else { ui.ctx().data(|data| data.get_temp::<f32>(grab_id)).unwrap_or(thumb_width * 0.5) };
+            *offset = ((pointer.x - track.left() - grab) / travel).clamp(0.0, 1.0) as f64 * maximum;
+            ui.ctx().request_repaint();
+        }
+    }
+    if response.drag_stopped() { ui.ctx().data_mut(|data| data.remove::<f32>(grab_id)); }
+    ui.painter().rect_filled(track, 4.0, ui.visuals().extreme_bg_color);
+    ui.painter().rect_filled(thumb_at(*offset), 4.0, ui.visuals().widgets.inactive.fg_stroke.color);
+    response.on_hover_text(crate::localization::tr("横向浏览"))
 }
 
 pub(crate) fn paint_trim_waveform(ui:&mut egui::Ui,wave:&[Vec<f32>],position:f64,duration:f64,start:&mut f64,end:&mut f64,interval:bool,playing:bool,locks:[bool;2])->Option<f64> {
@@ -2298,7 +2444,7 @@ pub(crate) fn paint_video_edit_timeline(ui:&mut egui::Ui,position:f64,duration:f
         ],egui::Color32::from_rgb(255,175,40),egui::Stroke::NONE));
         paint_boundary_times(ui, plot, [(x(*start), *start), (x(*end), *end)], (range_top + range_bottom) * 0.5);
         response.on_hover_text(format!("{}\n{}", tr("滚轮缩放，底部横向浏览；刻度区跳转，选区左键设起点、右键设终点，拖动边界调整。"),
-            tr("缩放后，左右方向键每次平移 5 帧。")));
+            tr("暂停时，左右方向键前后逐帧；缩放后，Ctrl+左右方向键每次平移 5 帧。")));
         seek
     }).map(|(seek,_)|seek)
 }
@@ -2532,6 +2678,25 @@ fn fit_scale(native:egui::Vec2,available:egui::Vec2)->f32 {(available.x/native.x
 #[cfg(test)]
 mod tests {
     #[test]
+    fn eof_frame_request_uses_last_real_index_not_exclusive_count(){
+        let times:Vec<_>=(0..792).map(|index|index as f64/24.0).collect();
+        assert_eq!(bounded_frame_index(792,Some(&times),33.088,24.0),791);
+        assert_eq!(bounded_frame_index(1000,Some(&times),33.088,24.0),791);
+        assert_eq!(bounded_frame_index(790,Some(&times),33.088,24.0),790);
+        assert_eq!(bounded_frame_index(24,None,1.0,24.0),23);
+        assert_eq!(bounded_frame_index(24,Some(&[]),1.0,24.0),23);
+    }
+    #[test]
+    fn fit_playback_bounds_physical_pixels_and_preserves_native_modes(){
+        assert_eq!(playback_frame_size([3840,2160],true,[1920.0,1080.0],1.0),[1920,1080]);
+        assert_eq!(playback_frame_size([3840,2160],true,[1920.0,1080.0],2.0),[3840,2160]);
+        assert_eq!(playback_frame_size([1280,720],true,[1920.0,1080.0],1.0),[1280,720]);
+        assert_eq!(playback_frame_size([3840,2160],false,[1280.0,720.0],1.0),[3840,2160]);
+        let portrait=playback_frame_size([2160,3840],true,[1920.0,1080.0],1.0);
+        assert!(portrait[0]<2160&&portrait[1]<3840);
+        assert!((portrait[0] as f64/portrait[1] as f64-2160.0/3840.0).abs()<0.01);
+    }
+    #[test]
     fn television_arrows_work_with_a_focused_card_and_do_not_seek(){
         let ctx=egui::Context::default();let mut preview=super::Preview::for_playlist(0.0,false);
         preview.set_playlist_sources(Some((2,vec![(2,"first".into()),(7,"second".into())])));
@@ -2670,7 +2835,7 @@ mod tests {
         let source=Arc::new(source);let cache=Arc::new(Mutex::new(FrameCache::default()));
         let first=cached_sequence_frame(&source,0,&cache).unwrap();assert_eq!(first.pixels[0],crate::asset_viewer::preview_color([40,80,120,128]));
         let ctx=egui::Context::default();let playback=start_sequence_playback(source,0.,0,cache,None,&ctx);
-        for expected in 0..3{let (index,frame)=playback.frames.recv_timeout(Duration::from_secs(3)).unwrap();assert_eq!(index,expected);assert_eq!(frame.pixels[0],crate::asset_viewer::preview_color([40+expected as u8,80,120,128]));}
+        for expected in 0..3{let (index,frame)=playback.frames.recv_timeout(Duration::from_secs(3)).unwrap();assert_eq!(index,expected);let PlaybackFrame::Rgba(frame)=frame else{panic!("sequence playback must retain alpha")};assert_eq!(frame.pixels[0],crate::asset_viewer::preview_color([40+expected as u8,80,120,128]));}
     }
     #[test]
     fn missing_sequence_frame_is_reported_instead_of_silent_black_output(){

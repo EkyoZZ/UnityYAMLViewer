@@ -34,8 +34,8 @@ pub struct Trim {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct VideoSettings { codec: usize, container: usize, quality: u32, bitrate_mode:bool, two_pass:bool, video_bitrate:u32, fps:String, audio_bitrate: u32, audio_codec:usize, audio_rate:u32, matte:[u8;3],flatten:bool,gif_compress:bool, gif_fps:u32, gif_loops:u32, gif_filter:usize, gif_colors:u32, gif_dither:usize, gif_bayer:u32, crop:crate::video_crop::Crop }
-impl Default for VideoSettings {fn default()->Self{Self{codec:0,container:0,quality:18,bitrate_mode:false,two_pass:false,video_bitrate:6000,fps:"source".into(),audio_bitrate:192,audio_codec:0,audio_rate:48000,matte:[0;3],flatten:false,gif_compress:false,gif_fps:15,gif_loops:0,gif_filter:2,gif_colors:256,gif_dither:4,gif_bayer:2,crop:Default::default()}}}
+struct VideoSettings { #[serde(skip)] burn_snapshot:Option<crate::subtitle_player::Render>, #[serde(default)] burn_subtitle:Option<PathBuf>, codec: usize, container: usize, quality: u32, bitrate_mode:bool, two_pass:bool, video_bitrate:u32, fps:String, audio_bitrate: u32, audio_codec:usize, audio_rate:u32, matte:[u8;3],flatten:bool,gif_compress:bool, gif_fps:u32, gif_loops:u32, gif_filter:usize, gif_colors:u32, gif_dither:usize, gif_bayer:u32, crop:crate::video_crop::Crop }
+impl Default for VideoSettings {fn default()->Self{Self{burn_snapshot:None,burn_subtitle:None,codec:0,container:0,quality:18,bitrate_mode:false,two_pass:false,video_bitrate:6000,fps:"source".into(),audio_bitrate:192,audio_codec:0,audio_rate:48000,matte:[0;3],flatten:false,gif_compress:false,gif_fps:15,gif_loops:0,gif_filter:2,gif_colors:256,gif_dither:4,gif_bayer:2,crop:Default::default()}}}
 impl VideoSettings {
     const CONTAINERS:[(&'static str,&'static str,&'static str);11]=[
         ("MP4","mp4","mp4"),("WebM","webm","webm"),("Matroska (MKV)","mkv","matroska"),
@@ -171,6 +171,14 @@ impl VideoSettings {
             if self.gif_dither==1{ui.horizontal(|ui|{ui.label(tr("Bayer 强度"));ui.add(egui::DragValue::new(&mut self.gif_bayer).range(0..=5));});}
             ui.label(tr("GIF 最多 256 色，不含音频和字幕；帧率不改变选区时长，循环次数写入文件。"));return;
         }
+        ui.horizontal_wrapped(|ui|{
+            if ui.button(tr("烧录 ASS 字幕")).clicked(){
+                if let Some(path)=rfd::FileDialog::new().add_filter("ASS",&["ass"]).pick_file(){self.burn_subtitle=Some(path);self.burn_snapshot=None;}
+            }
+            if let Some(path)=&self.burn_subtitle{ui.label(path.file_name().unwrap_or_default().to_string_lossy());}
+            if self.burn_subtitle.is_some()&&ui.button(tr("移除烧录字幕")).clicked(){self.burn_subtitle=None;self.burn_snapshot=None;}
+        });
+        if self.burn_subtitle.is_some(){ui.small(tr("字幕将永久写入画面，时间与源视频对齐；内嵌字幕轨道仍按列表单独导出。"));}
         ui.label(tr("音频编码"));
         egui::ComboBox::from_id_salt("video_audio_codec").selected_text(Self::AUDIO[self.audio_codec].0).show_ui(ui,|ui|{
             for (index,(label,_)) in Self::AUDIO.into_iter().enumerate(){if self.audio_compatible(index){ui.selectable_value(&mut self.audio_codec,index,label);}}
@@ -251,6 +259,7 @@ impl AudioSettings {
 
 #[derive(Default)]
 pub struct Action {
+    pub frame_step: isize,
     pub seek: Option<f64>,
     pub manual_seek: bool,
     pub trim_playback_changed: bool,
@@ -266,6 +275,8 @@ pub struct Action {
 pub struct AudioView<'a> {
     pub fps: f64,
     pub video_texture: Option<&'a egui::TextureHandle>,
+    pub video_frame:Option<&'a std::sync::Arc<crate::render_system::video::Frame>>,
+    pub video_render_error:std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub video_size: Option<[usize;2]>,
     pub frame_times: Option<&'a [f64]>,
     pub wave: Option<&'a [Vec<f32>]>,
@@ -277,6 +288,7 @@ pub struct AudioView<'a> {
 }
 
 impl Trim {
+    pub(crate) fn set_burn_snapshot(&mut self,render:crate::subtitle_player::Render){self.video_settings.burn_subtitle=Some(render.path().to_owned());self.video_settings.burn_snapshot=Some(render);}
     pub fn playback_ranges(&self) -> Option<Vec<(f64, f64)>> {
         if !self.trim_playback { return None; }
         if let Some(session) = &self.session {
@@ -722,8 +734,9 @@ impl Trim {
                     let available=egui::vec2(ui.available_width().max(1.0),ui.available_height().max(1.0));
                     let (rect,response)=ui.allocate_exact_size(available,egui::Sense::click());
                     ui.painter().rect_filled(rect,0.0,egui::Color32::from_rgb(self.video_settings.matte[0],self.video_settings.matte[1],self.video_settings.matte[2]));
-                    if let Some(texture)=view.video_texture {
-                        let (image,canvas)=self.video_settings.crop.preview_rects(rect,texture.size_vec2());
+                    if view.video_frame.is_some()||view.video_texture.is_some(){
+                        let source_size=view.video_size.map(|[w,h]|egui::vec2(w as f32,h as f32)).unwrap_or_else(||view.video_frame.map(|frame|egui::vec2(frame.size[0] as f32,frame.size[1] as f32)).unwrap_or_else(||view.video_texture.unwrap().size_vec2()));
+                        let (image,canvas)=self.video_settings.crop.preview_rects(rect,source_size);
                         if self.video_settings.crop.enabled {
                             ui.painter().rect_filled(canvas,0.0,egui::Color32::from_rgb(self.video_settings.matte[0],self.video_settings.matte[1],self.video_settings.matte[2]));
                         }
@@ -732,7 +745,10 @@ impl Trim {
                             let columns=(image.width()/cell).ceil() as u32;let rows=(image.height()/cell).ceil() as u32;
                             for y in 0..rows{for x in 0..columns{let square=egui::Rect::from_min_size(image.min+egui::vec2(x as f32*cell,y as f32*cell),egui::Vec2::splat(cell));painter.rect_filled(square,0.,egui::Color32::from_gray(if (x+y)%2==0{140}else{100}));}}
                         }
-                        ui.painter().image(texture.id(),image,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
+                        if let Some(frame)=view.video_frame{
+                            let visible=image.intersect(rect).intersect(ui.clip_rect());
+                            if visible.is_positive(){ui.painter().add(crate::render_system::video::callback(image,visible,frame.clone(),[false,false],view.video_render_error.clone()));}
+                        }else if let Some(texture)=view.video_texture{ui.painter().image(texture.id(),image,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);}
                         self.video_settings.crop.overlay(ui,image,self.pending.is_none());
                     } else {
                         let diameter=128.0_f32.min(rect.width().min(rect.height())).max(1.0);
@@ -753,6 +769,13 @@ impl Trim {
                         pressed && input.consume_key(egui::Modifiers::NONE,egui::Key::Space)
                     });
                     if space { action.toggle = true; }
+                    if video && !view.playing && self.pending.is_none() && !ui.memory(|memory|memory.any_popup_open()) {
+                        action.frame_step=ui.input_mut(|input|{
+                            let left=input.count_and_consume_key(egui::Modifiers::NONE,egui::Key::ArrowLeft);
+                            let right=input.count_and_consume_key(egui::Modifiers::NONE,egui::Key::ArrowRight);
+                            right as isize-left as isize
+                        });
+                    }
                 }
                 if queue.confirm_discard {
                     egui::Modal::new(egui::Id::new(("discard_media_edits",window_path))).show(ui.ctx(),|ui| {
@@ -1013,6 +1036,7 @@ fn commit_export(temporary:&Path,target:&Path)->Result<(),String>{
 fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, duration: f64, video: bool, audio: Option<u64>, settings: &AudioSettings, video_settings:&VideoSettings, tracks:&[crate::export_tracks::Track], audio_filter:Option<&str>) -> Result<PathBuf, String> {
     let audio=if video && video_settings.container==9{None}else{audio};
     if !valid_range(start, end, duration) { return Err("Invalid trim range".into()); }
+    if video&&video_settings.container>=9&&video_settings.burn_subtitle.is_some(){return Err("ASS burn-in requires a regular video container".into());}
     if video&&video_settings.container==10 {return export_png_sequence(ffmpeg,source,target,start,end,video_settings);}
     // Encode to a unique sibling first; replace the destination only after success.
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1026,6 +1050,10 @@ fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, dur
         if gif_source(source){cmd.args(["-ignore_loop","1"]);}
         cmd.arg("-i").arg(source);
         let has_audio=video&&video_settings.container!=9&&tracks.iter().any(|t|t.enabled&&!t.subtitle);
+        let burn_filter=video_settings.burn_subtitle.as_ref().filter(|_|video).map(|path|{
+            if !path.is_file(){return Err(format!("Subtitle file unavailable: {}",path.display()));}
+            Ok(format!("{},{}",crate::export_tracks::burn_filter(path,start),video_settings.spatial_filter("lanczos")))
+        }).transpose()?;
         let _subtitle_inputs;
         if video {
             _subtitle_inputs=Some(crate::export_tracks::configure(&mut cmd,tracks,source,video_settings.container,start,end-start,ffmpeg,&temp)?);
@@ -1034,7 +1062,7 @@ fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, dur
             for encoder in std::iter::once(video_settings.encoder()).chain(has_audio.then_some(video_settings.audio_encoder())) {
                 if !encoders.status.success() || !available.lines().any(|line|line.split_whitespace().nth(1)==Some(encoder)){return Err(format!("FFmpeg encoder unavailable: {encoder}"));}
             }
-            video_settings.configure(&mut cmd);
+            video_settings.configure_with_filter(&mut cmd,burn_filter.as_deref());
         } else { _subtitle_inputs=None;cmd.arg("-vn"); }
         if video {
             if has_audio {
@@ -1055,7 +1083,7 @@ fn export(ffmpeg: &Path, source: &Path, target: &Path, start: f64, end: f64, dur
             let args:Vec<_>=cmd.get_args().map(|a|a.to_os_string()).collect();
             let inputs_end=args.iter().position(|arg|arg=="-map").ok_or("Missing video map")?;
             let mut first=command(ffmpeg);first.args(&args[..inputs_end]);
-            video_settings.configure(&mut first);
+            video_settings.configure_with_filter(&mut first,burn_filter.as_deref());
             first.args(["-map","0:V:0","-an","-sn","-t",&(end-start).to_string(),"-pass","1","-passlogfile"]).arg(&prefix).args(["-f","null","-"]);
             let result=first.output().map_err(|e|e.to_string())?;
             if !result.status.success(){return Err(format!("Pass 1: {}",String::from_utf8_lossy(&result.stderr)));}

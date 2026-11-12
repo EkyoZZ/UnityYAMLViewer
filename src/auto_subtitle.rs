@@ -14,14 +14,26 @@ const WORKER: &str = include_str!("auto_subtitle.py");
 static COMPONENT_ACCESS: Mutex<()> = Mutex::new(());
 
 const PACKAGE: &str = "sherpa-onnx==2.0.1";
+const GPU_PACKAGE:&str="sherpa-onnx==2.0.1+cuda12.cudnn9";
 
 pub(crate) fn component() -> Result<PathBuf, String> {
     Ok(crate::third_party::component_root()?.join("sensevoice-sherpa-onnx-2.0.1"))
 }
 
-pub(crate) fn installed() -> bool {
-    component().is_ok_and(|path| path.join("ready").is_file() && path.join("sherpa_onnx").is_dir())
+fn runtime_path(gpu:bool)->Result<PathBuf,String>{
+    if gpu{Ok(crate::third_party::component_root()?.join("sensevoice-sherpa-onnx-2.0.1-cuda12-cudnn9"))}else{component()}
 }
+fn runtime_installed(gpu:bool)->bool{runtime_path(gpu).is_ok_and(|path|path.join("ready").is_file()&&path.join("sherpa_onnx").is_dir())}
+fn preferred_gpu()->bool{crate::third_party::component_root().ok().and_then(|root|fs::read(root.join("asr-runtime.json")).ok()).and_then(|bytes|serde_json::from_slice::<bool>(&bytes).ok()).unwrap_or(false)}
+fn select_runtime(gpu:bool)->Result<(),String>{
+    let root=crate::third_party::component_root()?;
+    fs::create_dir_all(&root).map_err(|e|e.to_string())?;
+    fs::write(root.join("asr-runtime.json"),if gpu{"true"}else{"false"}).map_err(|e|e.to_string())
+}
+fn selected_gpu()->bool{let preferred=preferred_gpu();if runtime_installed(preferred){preferred}else{!preferred&&runtime_installed(true)}}
+pub(crate) fn runtime()->Result<PathBuf,String>{runtime_path(selected_gpu())}
+pub(crate) fn installed()->bool{runtime_installed(selected_gpu())}
+
 
 pub(crate) fn sidecar(path: &Path, code: &str) -> PathBuf {
     path.with_extension(format!("{code}.srt"))
@@ -34,7 +46,11 @@ pub(crate) fn python() -> Result<Command, String> {
         .map(|directory| directory.join(executable))
         .find(|path| path.is_file())
         .ok_or_else(|| tr("请先安装 Python 并将其加入 PATH。").to_owned())?;
-    Ok(command(python))
+    let mut command=command(python);
+    #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000|0x00004000);}
+    command.env("OMP_WAIT_POLICY","PASSIVE").env("KMP_BLOCKTIME","0");
+    command.args(["-X","utf8"]);
+    Ok(command)
 }
 
 pub(crate) fn run(job: &mut Option<mpsc::Receiver<Result<PathBuf, String>>>, ctx: &egui::Context,
@@ -63,19 +79,40 @@ fn pip_download_progress(line: &str) -> Option<(u64, u64)> {
     Some((done.parse().ok()?, total.parse().ok()?))
 }
 
-fn install(progress: &Shared) -> Result<PathBuf, String> {
+fn install(gpu:bool,progress: &Shared) -> Result<PathBuf, String> {
     let _guard = COMPONENT_ACCESS.lock().unwrap();
-    let path = component()?;
+    let path = runtime_path(gpu)?;
+    if path.join("ready").is_file(){verify(&path)?;return Ok(path);}
+    ensure_runtime_unoccupied(&path)?;
     fs::create_dir_all(&path).map_err(|error| error.to_string())?;
     let marker = path.join("ready");
     if marker.exists() {
         fs::remove_file(&marker).map_err(|error| error.to_string())?;
     }
-    install_packages(&path, &[PACKAGE], progress)?;
+    if gpu {
+        let mut worker=python()?;
+        worker.args(["-I","-u","-m","pip","install","--upgrade","--disable-pip-version-check","--no-input","--only-binary=:all:","--find-links","https://k2-fsa.github.io/sherpa/onnx/cuda.html","--target"]).arg(&path).arg(GPU_PACKAGE);
+        run_install_command(worker,progress)?;
+    }else{install_packages(&path,&[PACKAGE],progress)?;}
     progress.phase(5);
     verify(&path)?;
-    fs::write(marker, PACKAGE).map_err(|error| error.to_string())?;
+    fs::write(marker, if gpu{GPU_PACKAGE}else{PACKAGE}).map_err(|error| error.to_string())?;
     Ok(path)
+}
+
+fn ensure_runtime_unoccupied(path:&Path)->Result<(),String>{
+    if !path.exists(){return Ok(());}
+    for entry in fs::read_dir(path).map_err(|e|e.to_string())?{
+        let entry=entry.map_err(|e|e.to_string())?;let kind=entry.file_type().map_err(|e|e.to_string())?;
+        if kind.is_symlink(){return Err("Unexpected runtime link".into());}
+        if kind.is_dir(){if !matches!(entry.file_name().to_str(),Some("models"|"zipformer-zh-en"|"downloads")){ensure_runtime_unoccupied(&entry.path())?;}}
+        else if entry.path().extension().is_some_and(|ext|ext.eq_ignore_ascii_case("dll")||ext.eq_ignore_ascii_case("pyd")){
+            let mut options=fs::OpenOptions::new();options.read(true);
+            #[cfg(windows)]{use std::os::windows::fs::OpenOptionsExt;options.share_mode(0);}
+            options.open(entry.path()).map_err(|_|tr("识别运行库正在使用，请先关闭字幕任务后重试。").to_owned())?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn install_packages(path: &Path, packages: &[&str], progress: &Shared) -> Result<(), String> {
@@ -110,12 +147,16 @@ pub(crate) fn run_install_command(mut command: Command, progress: &Shared) -> Re
             Ok(_) => {
                 let line = String::from_utf8_lossy(&line);
                 let line = line.trim();
-                if let Some((done, total)) = pip_download_progress(line) {
+                if let Some(phase)=line.strip_prefix("UNITY_INSTALL_STAGE ").and_then(|value|value.parse::<usize>().ok()).filter(|phase|*phase<=5) {
+                    progress.bytes(0,0);progress.phase(phase);
+                } else if let Some((done, total)) = pip_download_progress(line) {
                     progress.bytes(done, total);
                     progress.phase(2);
                 } else if !line.is_empty() {
                     progress.bytes(0, 0);
-                    progress.phase(if line.starts_with("Downloading ") { 2 } else { 4 });
+                    if !line.starts_with("M2M100 ") && !line.starts_with("Checking converted") && !line.starts_with("Using verified") {
+                        progress.phase(if line.starts_with("Downloading ") { 2 } else {4});
+                    }
                     progress.log(line);
                 }
             }
@@ -126,7 +167,10 @@ pub(crate) fn run_install_command(mut command: Command, progress: &Shared) -> Re
     let status = child.wait().map_err(|error| error.to_string())?;
     read_result.map_err(|error| error.to_string())?;
     if !status.success() {
-        return Err(status.to_string());
+        let details=progress.details();
+        return Err(if details.contains("10060") || details.contains("timed out") {
+            format!("{}\n{}",tr("组件下载连接超时，可重试安装；已缓存的模型文件会继续使用。"),status)
+        }else{format!("{status}\n{details}")});
     }
     Ok(())
 }
@@ -134,7 +178,7 @@ pub(crate) fn run_install_command(mut command: Command, progress: &Shared) -> Re
 fn verify(path: &Path) -> Result<(), String> {
     let symbols = "OfflineRecognizer VadModelConfig VoiceActivityDetector";
     let output = python()?.args(["-I", "-c",
-        "import importlib, sys; sys.path.insert(0, sys.argv[1]); module = importlib.import_module(sys.argv[2]); [getattr(module, name) for name in sys.argv[3].split()]"])
+        "import importlib,sys,os; from pathlib import Path; root=Path(sys.argv[1]); dirs=[root.parent/'ai-gpu-runtime/nvidia'/part/'bin' for part in ('cublas','cuda_runtime','cudnn')]; dirs=[str(p) for p in dirs if p.is_dir()]; handles=[os.add_dll_directory(p) for p in dirs] if os.name=='nt' else []; os.environ['PATH']=os.pathsep.join(dirs)+os.pathsep+os.environ.get('PATH',''); sys.path.insert(0,str(root)); module=importlib.import_module(sys.argv[2]); assert Path(module.__file__).resolve().is_relative_to(root.resolve()); assert 'cuda' not in root.name or '+cuda' in module.__version__; [getattr(module,name) for name in sys.argv[3].split()]"])
         .arg(path).arg("sherpa_onnx").arg(symbols).output().map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().into());
@@ -160,30 +204,21 @@ impl Installer {
             self.success = result.is_ok().then_some(if self.checking { "SenseVoice 检测通过" } else { "SenseVoice 安装完成" });
             self.error = result.err();
         }
-        ui.horizontal_wrapped(|ui| {
-            crate::theme::section_heading(ui, "SenseVoice");
-            crate::third_party::component_status_badge(ui, installed());
-            if ui.add_enabled(self.job.is_none() && self.model_job.is_none(), egui::Button::new(tr("安装 SenseVoice"))).clicked() {
-                self.error = None;
-                self.success = None;
-                self.checking = false;
-                self.progress = Shared::default();
-                let progress = self.progress.clone();
-                run(&mut self.job, ui.ctx(), move || install(&progress));
-            }
-            if ui.add_enabled(self.job.is_none() && self.model_job.is_none() && installed(), egui::Button::new(tr("重新检测"))).clicked() {
-                self.error = None;
-                self.success = None;
-                self.checking = true;
-                self.progress = Shared::default();
-                run(&mut self.job, ui.ctx(), move || {
-                    let _guard = COMPONENT_ACCESS.lock().unwrap();
-                    let path = component()?;
-                    verify(&path)?;
-                    Ok(path)
-                });
-            }
-        });
+        crate::theme::section_heading(ui,"SenseVoice / Zipformer");
+        for gpu in [false,true]{
+            let ready=runtime_installed(gpu);
+            ui.horizontal_wrapped(|ui|{
+                ui.label(if gpu{"GPU · CUDA 12 / cuDNN 9"}else{"CPU"});
+                crate::third_party::component_status_badge(ui,ready);
+                if ui.add_enabled(self.job.is_none()&&self.model_job.is_none(),egui::Button::new(tr("安装 / 校验运行库"))).clicked(){
+                    self.error=None;self.success=None;self.checking=false;self.progress=Shared::default();let progress=self.progress.clone();
+                    run(&mut self.job,ui.ctx(),move||install(gpu,&progress));
+                }
+                if ui.add_enabled(ready,egui::Button::new(tr("使用此版本")).selected(ready&&selected_gpu()==gpu)).clicked(){self.error=select_runtime(gpu).err();}
+            });
+        }
+        ui.small(tr("CPU / GPU 版可独立安装或同时保留，共用语言模型；默认使用 CPU，新字幕任务生效。"));
+        ui.small(tr("GPU 版还需 NVIDIA 驱动和共享 CUDA 运行库；安装成功不代表当前模型已启用 GPU。"));
         if self.job.is_some() {
             self.progress.show_for(ui, "pip");
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));
@@ -362,7 +397,7 @@ fn generate(path: &Path, ffmpeg: &Path, track: u64, language: &str, stage: &Mute
             "aresample=16000:async=1:first_pts=0", "-f", "s16le", "pipe:1"])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|error| error.to_string())?;
     let output = (|| {
-        let mut child = worker.args(["-I", "-c", WORKER]).arg(component).arg(language)
+        let mut child = worker.env("UNITY_ASR_RUNTIME",runtime()?).args(["-I", "-c", WORKER]).arg(component).arg(language)
             .stdin(decoder.stdout.take().unwrap()).stdout(Stdio::piped()).stderr(Stdio::piped())
             .spawn().map_err(|error| error.to_string())?;
         let stderr = child.stderr.take().unwrap();
