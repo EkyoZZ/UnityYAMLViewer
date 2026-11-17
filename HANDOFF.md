@@ -1,4 +1,66 @@
+# 录屏线框状态颜色（2026-11-16，未重建）
+
+- 选区／倒计时／启动准备保持绿框，收到实际首帧录制通知后切红框，停止或异常结束恢复绿框。`ui.rs` 从 `Job.started` 与 `stopping` 派生状态，`outline.rs` 的目标状态包含颜色标志，原生线框刷新时绘制对应颜色；重新选区显式恢复绿色。
+- 捕获排除、尺寸和鼠标穿透沿用现有行为；停止后不会恢复区域鼠标拦截。`cargo check --locked --offline` 通过，日志 `target/recording-frame-color-check.log`；中英文指南、版本记录与七语言关于摘要同步。
+- 未生成 EXE、未运行应用、未发布。实际颜色切换、取消／失败、重复录制及捕获排除待运行验证；现有 EXE 仍为下述 16:54 构建，不含本节修改。
+
+# 1.3.6 本地 Release 构建完成（2026-11-16 16:54:09，未更新 GitHub 附件）
+
+- 用户明确授权编译；构建前进程与 EXE 独占访问检查通过。`cargo build --release --locked --offline` 成功，61.71 秒，仅有既有警告。产物 `target/release/unity_yaml_viewer.exe`，文件／产品版本 1.3.6，33,484,800 字节，SHA-256：`07170FAE030A2674F94A2FA141E5EC1DB65AF43BCEBAE0DA35DEBB8B3703CC4F`。
+- 包含矢量倒计时居中、外部音轨试听／波形、轨道连续编号、独立字幕预览、“无音轨／无字幕”及工程预览选择保存，连同此前录屏和交互修复。沿用先前编译检查、FFmpeg 解码及几何预览验证；本轮没有运行新应用，实际窗口、高 DPI、切轨／静音／字幕与工程重开仍待运行验证。
+- 记录：`target/recording-vector-release-preflight.json`、`target/recording-vector-release-build.log`、`target/recording-vector-release-build-status.json`、`target/recording-vector-release-verification.json`。没有更新 GitHub 附件、历史发布副本或版本号，没有提交／推送；下方未重建描述保留此前修改时点事实，当前本地产物已包含相关调整。
+
+# 倒计时矢量数字居中（2026-11-16，未重建）
+
+- `src/screen_record/countdown.rs` 将字体数字替换为加粗圆润的矢量 3、2、1，以包含笔画粗细的图形边界中心对齐圆心，统一可见高度；不改变计时和原生窗口逻辑。
+- `cargo check --locked --offline` 通过（`target/recording-countdown-vector-check.log`）；源码曲线的 3 数字 × 6 缩放共 18 项几何居中检查通过，预览已检查。证据 `target/recording-countdown-vector-geometry.json`，图片 `target/recording-countdown-vector-preview.png`；实际应用窗口、高 DPI／混合缩放与录制操作待验证。
+- 中英文指南、版本记录与七语言关于摘要同步。未生成 EXE、未运行应用、未发布；现有 EXE 仍为下述 16:00 构建，不包含本节及后续编辑轨道预览修改。
+
+# 编辑轨道预览调整（2026-11-16，未重建）
+
+- 外部音轨接入波形／试听，下拉列表与右侧“音轨1、音轨2……”统一编号。音轨下方增加字幕预览下拉菜单；两者始终提供“无音轨／无字幕”，关闭预览不改变导出勾选或 ASS 烧录。
+- 编辑字幕默认关闭，不再继承播放页会话、不自动扫描外挂或按语言启用。内嵌／外部文字字幕显式选择后按绝对流编号提取；图形字幕预览不支持，原画面压制字幕不可隐藏。工程兼容保存／恢复预览来源与关闭状态，路径重定位沿用既有轨道引用。
+- 新模块 `src/media_preview/edit_audio.rs` 保存来源身份及菜单构造；编辑入口、轨道列表、字幕会话与工程序列化相应更新。`cargo check --tests --locked --offline` 通过，新增 5 项 Rust 回归用例仅编译；FFmpeg 外部音轨、静音尾部、内嵌／外部字幕流提取验证通过，证据 `target/editor-preview-tracks-verification.json`。
+- 中英文指南／README、七语言关于摘要和菜单文字同步。未编译 EXE、未运行新应用、未发布；实际下拉菜单、字幕消失、切轨／静音和工程重开仍需运行验证。现有 EXE 仍为下述 16:00 构建，不含本节更改。
+
+# 1.3.6 本地 Release 构建完成（2026-11-16 16:00:48，未更新 GitHub 附件）
+
+- 用户授权编译，构建前进程与目标 EXE 独占访问检查通过；`cargo build --release --locked --offline` 成功，约 61 秒，仅有既有警告。产物 `target/release/unity_yaml_viewer.exe`，文件／产品版本 1.3.6，33,397,248 字节，SHA-256：`D384B8AFFE934CAEA2609029B67C4E12EC7B9CF682DFA67CF429E03E514A960B`。
+- 包含录屏进入编辑无声修复、视频音轨波形／切换、时间戳对齐与尾部静音、录屏结束后的绿框穿透、字幕框收窄及此前倒计时修正。此前编译检查及 FFmpeg 音频核验通过，实际界面与扬声器试听待验证；未自动启动应用。
+- 日志／证据：`target/video-edit-audio-release-build.log`、`target/video-edit-audio-release-preflight.json`、`target/video-edit-audio-release-verification.json`。未替换 GitHub 附件或历史发布副本，没有提交／推送；下方“未重建”保留先前源码修改时点事实。
+
+# 视频编辑音轨与录屏试听（2026-11-16，未重建）
+
+- 修复录屏结果／历史直接进入编辑漏选音轨导致无声；与编辑列表添加文件共用默认音轨初始化。视频时间轴加入内嵌音轨波形，左侧多轨切换同步试听与波形并保留位置和范围；无音轨保留原布局。导出音轨勾选及外部添加音轨不受预览切换影响，外部音轨尚不参与试听。
+- 波形／视频编辑试听按时间戳对齐，短音轨尾部试听补静音并限制当前范围；解码错误记录 error.log。cargo check --locked --offline 通过；FFmpeg 多音轨、短／长／延迟／跳到音频结束后静音及用户录屏非零 PCM 核验通过，target/video-edit-audio-verification.json。实际界面与扬声器试听待构建验证。
+- 中英文指南、README 能力概览、七语言关于摘要及版本记录同步；每语言 11 条、默认最近两版、重开收起配置核对通过。cargo check --tests --locked --offline 及 git diff --check 通过（target/video-edit-audio-tests-check.log），未运行 Rust 测试。没有生成新 EXE、没有替换 GitHub 附件；现有本地 EXE 仍为倒计时构建，不含本次、绿框穿透及字幕框收窄。
+
+# 录屏结束后绿框保持鼠标穿透（2026-11-16，未重建）
+
+- src/screen_record/ui.rs 独立保存线框交互状态：录屏任务结束即关闭线框拖动／缩放，只有再次进入选区才恢复；复用原生穿透样式并隐藏内部拖动层。工具条坐标输入及结果操作继续可用，修改坐标不恢复鼠标拦截。
+- 中英文使用指南及七语言关于摘要同步；每语言 11 条、默认两版及重开收起配置已核对。`cargo check --locked --offline` 与 `git diff --check` 通过，日志 `target/recording-outline-passthrough-check.log`。实际底层软件鼠标操作、重新选区／移动／缩放待新构建验证。未生成 EXE、未更新 GitHub 附件；当前本地 EXE 仍是下述倒计时构建，不包含本次及字幕选择框宽度调整。
+
+# 播放页字幕选择框收窄（2026-11-16，未重建）
+
+- 用户截图指向视频信息行的字幕选择框；src/subtitle_player.rs 将最大宽度 180 改为 140 个逻辑像素，保留长名称省略／悬停全文及展开菜单最大 280。七语言关于摘要同步，索引配置不变。
+- 本轮不生成 EXE，实际布局待新构建验证。当前本地 EXE 仍为下述倒计时修复构建，不包含本次宽度调整；GitHub 附件未改变。
+- `cargo check --locked --offline` 与 `git diff --check` 通过；检查日志为 `target/subtitle-selector-140-check.log`。
+
+# 1.3.6 倒计时修复已本地重建（2026-11-16，未更新 GitHub 附件）
+
+- 用户明确授权编译；构建及测试前均确认程序未运行、目标 EXE 独占访问通过。cargo build --release --locked --offline 成功（72.50 秒）；target/release/unity_yaml_viewer.exe，文件／产品版本 1.3.6，33,551,872 字节，SHA-256：A4099A10E3660CFC6C68CE459959008C3D829EE73FB063928B5A73A427D6F111。包含透明窗口初始化、显示就绪后开始三秒准备和错误保留修正，仅保留既有警告。
+- 新增倒计时针对性测试 2 项通过，日志 target/recording-countdown-visibility-tests.log；构建日志 target/recording-countdown-visibility-release-build.log，核验 target/recording-countdown-visibility-release-verification.json。未自动启动 GUI，实际数字、混合 DPI／多屏／全屏与关于窗口仍待运行验证。
+- 本轮没有更新 GitHub 发布附件、target/releases/v1.3.6 历史副本或版本号，也未提交／推送。下方“未重建／测试仅编译”保留此前源码修改时点事实。
+
+# 1.3.6 发布后倒计时源码修正（2026-11-16，当时未重建）
+
+- 按用户最新要求修复中央数字不显示：winit 的鼠标穿透添加 WS_EX_LAYERED，原流程未初始化分层透明属性；现在在显示前补上 Alpha 255／LWA_ALPHA，保留鼠标穿透与捕获排除。倒计时从数字窗口就绪后开始，窗口准备阶段可取消，5 秒仍未就绪则报错，并记录 countdown.waiting／countdown.shown。
+- cargo check --tests --locked --offline 通过，日志 target/recording-countdown-visibility-check.log；新增两项计时／取消回归用例仅编译。隐藏 Win32 窗口探针验证初始化和穿透／捕获排除兼容性通过，证据 target/recording-countdown-layered-probe.json；不等于实际应用视觉验证。
+- 七语言关于摘要与错误提示、中英文指南同步；关于默认两版和重开收起配置不变。未生成新 EXE、未运行 Rust 测试或新应用 GUI、未发布；现有 EXE 与 GitHub 附件仍是原版本，后续需获得编译授权并检查程序占用后重建。实际数字、全屏／混合 DPI／多屏负坐标及关于窗口交互待验证。
+
 # 当前发布：1.3.6（已正式发布）
+
+- 2026-11-16，按用户反馈移除 GitHub v1.3.6 多余的 SHA256SUMS.txt 附件；EXE 原附件、正文、标签和 Latest／正式版状态均未变。GitHub 自带 SHA-256，后续不再上传重复校验附件；本地校验文件及大小／哈希核验继续保留，AGENTS.md 已补充约定。核验 target/v1.3.6-checksum-removal-verification.json。本轮仅清理该远程附件并回填本地记录，未编译或修改发布正文；以下双附件上传记录为首次发布时的历史事实。
 
 - 用户明确授权发布到 GitHub。北京时间 2026-11-12 22:16:43 正式发布 v1.3.6，Release ID 443041359，显示标题仅 v1.3.6，非草稿、非预发布，latest API 已确认为最新稳定版。标签指向 3ae9149ebc048883dbd5fb1e7ef9cfeed120f39e；该提交相对构建基准仅增加发布资料，313 项构建输入字节一致，无需重新编译。
 - 已上传 UnityYAMLViewer-v1.3.6-windows-x64.exe（33,457,664 字节）及 SHA256SUMS.txt；GitHub 返回的两个附件大小与 SHA-256 均与本地一致。EXE SHA-256：CF0392D497503E8158C6A425C595E09EDDCBD6F57543EACF6A07D864F54C326D。
@@ -3804,3 +3866,206 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 用户明确授权后，确认 unity_yaml_viewer 无运行进程、目标 EXE 可独占访问，cargo build --release --locked --offline 成功（约 1 分 09 秒）。target/release/unity_yaml_viewer.exe，版本 1.3.5，33502720 字节；SHA-256：F4739FB0AC34BD4D4A36B588CD60AD354D67E29CC4D91B56A1669CC3AB21A52F。
 - 产物包含录屏 PCM 非阻塞暂时不可写的有界队列重试、区域中央 3→2→1 大数字倒计时，以及字幕／视频编辑共用比例浏览滑块，连同此前 error.log 及工作区修改。未自动启动；连续重录、声音同步、倒计时显示和捕获排除、字幕滑块实际交互仍待运行验证。
 - 构建日志 target/recording-pcm-countdown-timeline-release-build.log；占用检查 target/recording-pcm-countdown-timeline-release-preflight.json；产物核验 target/recording-pcm-countdown-timeline-release-verification.json。仅有既有 vendor 和 media_trim.configure 未使用警告，未发布。
+
+
+## 像素 Tile / Photoshop UXP（2026-11-16）
+
+新增 src/asset_viewer/pixel_tile.rs；文件菜单、图片工具栏及 .uytile 打开入口已接线。支持单层像素编辑、同图／多 Tile 循环、跨格绘制、带高度预览、工程保存与当前 Tile PNG 导出。独立 PS 原型位于 plugins/photoshop-isometric-tile。
+
+未执行生成可执行程序的命令；Rust 测试只做 check，未运行。界面与 PS 插件均待实机验证，不代表已发布。保留本轮开始前已有录屏、媒体、字幕和文档等工作区修改；未提交。
+
+### PS CCX 试装包（2026-11-16）
+
+- 产物：plugins/photoshop-isometric-tile/dist/isometric-tile-preview-0.1.0.ccx（6147 字节）。
+- SHA-256：ed397ddaf6c57512860e4bfc9ef98c63d408ea32ca6305357698e966d66a2d60；旁边保留 .sha256 文件。
+- package.ps1 可重现封装并逐项检查包内 5 个文件；只封装插件资源，不生成 Rust 可执行程序。源码 JS 语法、PNG 编码测试通过。
+- 未使用 UDT（当前环境未安装），按 ZIP 格式生成试装容器；Creative Cloud 安装、PS 加载与卸载待用户试装，不能作为已验证发布包。
+
+
+### 安装器源码、PS 左右布局与 PSD Slot（2026-11-16）
+
+- 独立工程：plugins/photoshop-isometric-tile/installer；Cargo.lock 独立维护，check --offline --locked --tests 已通过，仅检查，不运行测试、不生成目标 EXE。复用主项目图标；安装器 build.ps1 只有用户确认编译后方可执行，已做语法检查而未执行。
+- 用户已手动加载 PS 面板；当前插件源码更新为 0.1.2，左侧设置宽 260px，右侧自适应预览，增加多文档 Slot 绑定和变更缓存。模拟宿主与 PNG 编码检查通过；新版 PS 效果仍待用户验证。
+- 未改动用户已安装的插件目录，未关闭 PS。用户需要关闭 PS，再用当前四个源码文件覆盖手动安装目录后重新打开。
+
+### PS 0.1.3 手动更新产物
+
+- dist/isometric-tile-preview-0.1.3-files.zip：6396 字节，SHA-256 92b55e5d200f3d03af317b78f0847430e94b196ad94c7a0115cd22224c390476，只有四个运行文件，解压到用户已验证的插件目录。
+- dist/isometric-tile-preview-0.1.3.ccx：8539 字节，SHA-256 7fa2ea8558dfb6dd19ebba47f5fc99063b3e246a0ee5ca5b4023e27d2c9e37c8。两包逐项核对源码字节一致，哈希文件在旁边保留。
+- 当前版紧凑间距、顶部版本号来自清单、左右布局与多 PSD Slot。仍需 PS 实机复核，未对用户目录执行安装。安装器目标 EXE 未生成。
+
+### PS 0.1.5 模式与边缘回绕边界
+
+- 单文档网格／多文档 Slot／单 Tile 重复共存。新增顶层 Multiply 全锁定辅助层、单文档斜轴网格预览及逐格透明 PNG 导出；3×3 九张、256×128 拆四张128×64 已由模拟宿主与实际 PNG 解码校验。
+- 源码还未覆盖用户已安装目录；PS 实机效果待验证。自动隐藏辅助层的读取使用模态历史回滚，需重点检查锁定、可见性、撤销、画笔光标与忙碌时行为。
+- 用户进一步澄清重点是 PS 原生画笔的菱形边缘回绕；该能力未实现，界面和文档已明确，不应以副本更新冒充回绕。正在查 PS 内的现成方案（Artlandia SymmetryShop 等），不再以独立像素软件替代需求。
+
+### PS 0.1.5 产物与 PS 原生回绕调查
+
+- 四文件包 dist/isometric-tile-preview-0.1.5-files.zip：12125 字节，SHA-256 94c7f9c14a6012e95fb50dba0e0b9a198f14031729550e3e6b76485a7971b22a。CCX：15008 字节，SHA-256 ae3cf292cd1f55acaebaedb6139c0c3d38fe13c428c49ef5f9d3f50294300044。包内字节与源码核对通过；没有自动安装。
+- PS 内的现成候选：Artlandia SymmetryShop 4。官方 v4 页面说明 Photoshop 画笔、橡皮等操作会触发 Linked Pattern 自动重建，控制路径可调整重复大小与方向；官方 requirements 范围为 CC 2014–2025，包含 PS 2024。https://artlandia.com/products/SymmetryShop/v4.html 及 https://artlandia.com/products/SymmetryShop/requirements.html 。尚未实际验证等距菱形跨边缘原生笔刷逐点回绕；不能把 Linked Pattern 自动重建视为已确认等价。
+
+
+## 软件内像素 Tile 回绕与多屏预览（2026-11-16）
+
+- 修改 src/asset_viewer/pixel_tile.rs：单／多格周期回绕、1–32方形刷头、整组编辑、独立副本、最多64张、工程v2兼容v1；窗口设置／绘制／预览三列，独立只读预览走 native_window 多视口。
+- 独立预览不会调用 finish_stroke，避免副视口无鼠标按下状态提前提交主视口笔触；主视口修改或副窗口开关／缩放时请求重绘。绘制纹理按受影响 Tile 更新。
+- cargo check --tests 已通过；Rust测试未运行以遵循不生成可执行程序约定，独立几何样例核对通过。真实窗口布局、多屏 DPI、拖动、关闭恢复和画笔回绕手感仍待授权构建后运行验证。保留原工作区媒体、录屏等修改，未执行安装、构建或发布。
+
+## 用户授权后生成验证产物（2026-11-16）
+
+- 最新主程序源码按用户参考图将Tile工具改为互斥图标（画笔／橡皮／滴管），Tool枚举替代erase/pick布尔，点击当前工具不取消，切换finish_stroke，Alt临时取色不改变所选。使用icons统一SVG绘制，新增brush/eraser/eyedropper三资源及画笔七语言tooltip；未编译主程序EXE，实际UI待验证。
+
+- 最新双产物交付：2026-11-17用户分别授权主程序和PS安装器，均检查进程关闭和EXE未占用后Release成功。
+  - `target/release/unity_yaml_viewer.exe`：1.3.6，33605120字节，SHA-256 `38754ab83aca05a8375c87445304b2ea24190d3b79c494015c00f959f115ca8c`；含主图平滑RGBA8回调及Tile关闭／工具布局／滚轮／HEX源码。
+  - `plugins/photoshop-isometric-tile/installer/target/release/ps-tile-installer.exe`：内嵌插件0.1.0，5196288字节，SHA-256 `700094e1b9c743e6bb844ab2173d05d1ae6285c7383d5044ee0007cf3dba123e`；含边界复制、历史方向比较、自动wrap-status及统计。
+- EXE版本资源核对通过，两个输出旁保留本地.sha256。PS安装器5项Rust及wrap／PNG／panel／icon检查全部通过。未自动运行或安装、未发布、未生成旧格式资源包；实际GPU和PS表现待用户复验，以下旧构建数据为历史。
+- 主程序Release专项测试已实际执行：render_system::image_preview::tests 2项、pixel_tile::tests 9项全通过；不替代真实GPU上下文测试。构建日志target/alpha-smooth-release.log，测试日志target/alpha-smooth-tests.log和target/pixel-tile-tests.log；安装器日志仍在其target目录。
+
+- 最新主程序平滑亮边源码：asset_viewer主图片平滑改用render_system/image_preview.rs回调，gamma预乘RGBA8经现有video::Renderer手动双线性／预乘混合，独立Gpu.image_preview缓存，不走egui sRGB纹理过滤再gamma转换；pixel模式不改。ImageTab缓存按原图Arc／通道／Alpha键重建，预算及淘汰同步，GPU shutdown释放图片缓存。
+- cargo check --tests通过，新增亮边与部分Alpha检查仅编译未运行，实际主窗口效果待授权构建后验证；本轮未生成EXE，不能把该主程序修复计入已交付PS安装器。
+
+- 最新用户最终规则：边界覆盖原位保留且复制到对边，真正越界才搬移清空。wrapPixels新增copied统计和RGBA直接复制，不积累Alpha；读取前一historyStateID比较变化侧（支持内向外），缺少历史按外缘向内并提示，透明源不传播擦除。原导出diamondMask范围不变。
+- 已加入紧邻自动开关的wrap-status，显示等待paint／200ms延迟、手动自动、完成搬移/边界复制数、位移、跳过和失败原因；既有笔迹不开启即处理。wrap-check新增四边保留同步、下边2×2配对、内侧历史变化、半透明幂等和状态时序通过，panel检查通过。未生成新EXE、实机待验证，保持0.1.0；前述唯一归属试验已撤回，PSD路径问题不阻塞当前实现。
+
+- 最新回落排查：用户明确仅左下／右下到上方差1像素，四边辅助覆盖都保留。已撤回未交付的insideWrapUnit互斥判断／repeatMask预览试验，实际仍diamondMask保边，不接受“重叠就必少一像素”的解释。新增2×2下向上整数位移和四边保留测试通过，但实机根因未确认；已异步询问回落前PSD完整路径，需实际源像素定位，不能写成已修复。
+- 源码新增wrap-status紧邻开关，显示手动／自动区别、等待paint／200ms延迟／执行／完成含位移统计／状态变化跳过／失败。开关只启用监听不立即处理旧笔迹，手动按钮可处理旧内容。模拟状态时序通过，未重新生成安装器，版本0.1.0。
+
+- 最新交付：2026-11-17用户授权编译PS安装器，进程关闭及独占打开检查通过，Release成功；同路径EXE5192192字节，SHA-256 `39c4772564fdc76b6f549a814d8b64dc4044738ee27d993d0afad7cb6bffc71e`。含普通层手动／自动回落、Web用途PNG无损压缩、辅助线边缘包含与滚轮焦点调整，0.1.0。5项Rust安装器测试及wrap-check／check／panel-check／icon-check全部通过。未自动安装、未发布、不生成CCX／ZIP；实际PS重点验证回落事件与撤销、源尖角转换导出、真实PNG大小及滚轮，主程序EXE未重建。
+
+- 用户询问旧图标是否无用，核对manifest／安装器／生成脚本后删除四个无引用的tile-dark-23.png、tile-dark-46.png、tile-light-23.png、tile-light-46.png；保留基础名和@1x／@2x。icon-check通过。删除前四文件已由用户暂存为A，本轮仅删除工作区文件，未改暂存区，当前AD需用户下次暂存时纳入删除。
+
+- 最新PS源码实现当前普通层回落：manual按钮与可选paint事件自动处理，双轴周期映射1×1／多格、源清空、同层透明叠加，保留边界和其他层；RGB8／普通可见未锁定／正常混合100%层，拒绝蒙版及效果等，读取完整图层bounds含已有画布外内容，最多16M像素。历史事务失败回滚／一步撤销，自动处理核对历史身份避免undo重做。wrap-check.cjs覆盖映射、负范围、alpha、幂等、限制、回滚与自动事件通过；未实机验证、未编译EXE，0.1.0。未加画布缓冲区，画布外未记录笔迹与对边橡皮仍不支持。
+- PNG导出改为web=true无损滤波+LZ77 fixed-Huffman压缩，必要时回退stored；8位RGBA不降色、只IHDR/IDAT/IEND。独立unfilter+Node zlib随机及结构RGBA回读逐字节／CRC通过，渐变128×64 32900→387字节，真实纹理压缩结果不承诺。不是PS原生Save for Web命令；preview默认仍stored以免每次捕获新增压缩开销。新增png-test-utils.cjs仅测试使用，不部署。需与本轮边缘覆盖及滚轮焦点调整一起授权构建后实机验证。
+
+- 用户最终明确边缘规则：应切菱形内部并包含辅助线覆盖范围。已以diamondMask统一转换／平面预览／cellPNG：内部并集gridRaster边界覆盖，保留源RGBA不烘焙线色、矩形外角透明。上一轮完整矩形方案被替代，现不是保留所有矩形像素；边界可在相邻切片重复。新增全部guide像素覆盖与四端转换／PNG检查通过，真实PS待验证，尚未重建EXE，版本0.1.0。旧转换丢失像素需源文档重新转换恢复。
+
+- 最新PS源码修复转换丢尖角：移除readSlotPixels理想菱形判定，保留完整矩形RGBA（仍按设定尺寸／8位sRGB），每Slot独立摆放。新增全缓冲保留和四端尖角检查，模拟通过。旧转换doc不自动恢复，需源文档重新转换；cellPNG导出仍有独立硬遮罩，尚未宣称解决其边缘保真。未编译安装器，保持0.1.0；需与滚轮焦点调整一并交付验证。
+
+- 最新PS滚轮兼容源码：用户确认预览wheel未接收、文档仍滚动；stage加tabindex=1、mouseenter／mousedown focus、捕获阶段非passive wheel、前景img pointer-events:none。模拟检查通过，真正PS事件分发待验证，未重建EXE。参考官方UXP正tabindex说明和开发者报告 https://forums.creativeclouddeveloper.com/t/bug-mouse-wheel-scrolling-not-working-in-uxp-panels-when-zoom-with-scroll-wheel-is-enabled/12437 （报告针对27.11+，不能直接认定PS2024同因）；没有修改全局偏好。
+- 用户进一步询问单文档回落层范围，已说明建议仅当前普通像素层、排除辅助层及其他层；回落功能仍未实现，不能把该设计描述为当前能力。
+
+- 2026-11-17最新交付：用户明确授权编译PS安装器，检查进程关闭和EXE未占用后Release成功。同路径EXE5178880字节，SHA-256 `44d2c616c8a4ace82220b70aa30000e875002b31629369704db46b0fd38ab83d`。插件保持0.1.0，包含最新像素中心格线、2／3／4预设、转换单文档、错位选择、1:1和滚轮。5项Rust及图标／PNG／模拟宿主与转换检查全通过，未自动安装、未发布；实机待复验，主程序未重建。
+- 按EXE单一交付约定，本轮未调用旧格式package.ps1，未重新生成CCX／ZIP；以下资源包记录为已清理历史。
+
+- 最新PS源码增加预览wheel缩放，仅preview区域监听，单位归一及单次幅度限制，0.1–10倍，与底部及1:1共享updateZoom。方向／边界／零增量和无额外采样模拟检查通过；实际PS待验证，尚未重建安装器，保持0.1.0。
+
+- 最新PS源码在缩放条右侧新增zoom-reset（1:1），复用updateZoom同步数值／滑条、回到1倍；从10倍复位及不额外读取模拟检查通过。未编译安装器，版本0.1.0。
+
+- 最新PS源码增加可选错位预览：多Slot下stagger-mode选择无／沿列／沿行／双向，列行各0–8整数、默认2，可组合1×2／2×1。按相邻循环组奇偶映射来源Slot，地面格点不变，标签／点击匹配来源；仅预览，不改绑定和转换原排列，不额外采样。纯映射与模拟UI验证四模式、负坐标双组周期、单行单列排列与1×2／2×1偏移通过，真实PS待验证、未生成EXE，版本0.1.0。前述待选方向现已落实为用户可选。
+
+- 最新PS源码增加“转换为单文档”：多Slot平面排列转新doc，每格独立像素层含空格／重复引用、行列顺序，顶层锁定Multiply网格，自动切换单文档刷新；源可见画面8位sRGB按设定尺寸缩放／裁菱形，不保留原PSD内部层结构，源文档保持不合并。源去重读取、辅助层历史回滚、目标部分失败保留；3×2位置／顺序／空格／重复／切模式及三类失败模拟通过，实际PS未验证、未生成EXE，版本0.1.0。
+- 用户追加“错一个2×2”预览，已异步询问沿列错2／沿行错2／行列各错2，等待回答，不应擅自把错位预览写入单文档转换几何。
+
+- 最新PS源码将快捷排列改为2×2／3×3／4×4，8×8仅手填，仍支持64格及缩小后保留绑定。三个快捷值、手填8×8和3×5模拟检查通过；未重新编译安装器，后续与像素中心格线修正一并构建，0.1.0。
+
+- 最新PS网格再修正：用户指出下移一像素；旧预览与PSD共用栅格仍有整数落点／像素中心偏差和底端clamp问题。gridRaster现按像素中心主轴求交、裁除越界、不压缩端点，新增独立对称与尖角检查通过。新版预览及新建辅助层受益，已有PSD层不自动重写；尚未编译安装器，0.1.0。
+
+- 用户要求只通过 EXE 安装：已删除 dist 内22个历史 CCX／ZIP及对应.sha256，新增插件目录.gitignore忽略dist；package.ps1默认不生成，仅显式-GenerateLegacyArchives可生成备用旧格式，默认无产物检查通过。之后常规安装器编译不再附带调用该资源打包脚本；源码、当前EXE及本地构建／校验日志保留。以下资源包路径和哈希为已清理的历史记录。
+
+- 最新交付：用户授权后检查安装器关闭、EXE未占用，Release成功；同路径EXE 5169664字节，SHA-256 `a4503a022ec62e7bbb244c7eaec4f9d732558b1ad22219d32aa69cf7c993e5c6`，内嵌0.1.0含底部0.1–10缩放条及Slot坐标开关前置。5项Rust及图标／PNG／模拟宿主检查全部通过，未自动安装、实机待验证，主程序未重建。
+- 同步手动ZIP16304字节，SHA-256 `da7946d28dd3eb8414f825119152f9aeddd2355fbc93f26fd1e539105f685242`；CCX19675字节，SHA-256 `2f9d3faf16141aaf42beced79e767a0311083fb3075123303787109d7b6affcd`。以下旧哈希为历史产物。
+
+- 最新PS布局源码：show-slots开关移至selected-slot下方、文档绑定／新建／导出之前，便于就近控制坐标标签。模拟检查通过；尚未与底部缩放条调整一起重建安装器，保持0.1.0。
+
+- 最新PS源码：缩放移到预览区底部固定条，数值框加range滑条同步，0.1–10倍（旧EXE上限8），即时拖动复用捕获缓存。边界、双向同步、无效输入恢复、无额外采样模拟检查通过；尚未重建安装器，0.1.0。
+
+- 最新交付（本轮“可以编译”按上下文编译 PS 安装器）：占用检查通过，Release成功，同路径EXE 5168640字节，SHA-256 `91928024ba85c3d85b009471894c76f3f310a5dfe4d4e9494969ca158ef5b9d9`。包含棋盘格固定图块、刷新恢复、网格对齐、Slot圆角和宽高前置，保持0.1.0。5项Rust测试及图标、PNG、模拟宿主检查通过，未自动安装，实际PS待复验；主程序尚未重新生成。
+- 最新手动ZIP十文件16023字节，SHA-256 `1d93aae4287627ff49f875dc68ac55fa79afd79f97fd652427472b50c19c3afd`；CCX十一文件19329字节，SHA-256 `8b0433d16269a73135ee109b404f01e147ced46951bc07b11af35439adaedc7d`。以下旧哈希和未构建标记为历史记录。
+
+- 用户确认“卡死”为插件状态异常，PS 未卡死。源码 refresh 统一捕获背景／状态校正异常，start 先建立轮询，mode 保持上次有效选择，reconcileControls 按配置变化修正显示；空文档记录 lastKey。模拟背景故障后恢复、无 change 配置更新、无效下拉保留模式及重新开文档通过；未确认实机确切触发点，未编译新安装器，0.1.0。后续交付需包含棋盘格、网格对齐、圆角、尺寸前置及此恢复逻辑。
+
+- 最新 PS 棋盘格源码修复：新增 preview-stage／preview-background 底层，固定256px PNG图块平铺（棋盘格8逻辑像素），移除旧全视口缩略背景拉伸。复用节点、缩小回收、颜色模式隐藏，主预览节点不受影响。非整倍数视口和像素检查通过，真实PS待验证；现有EXE不含此修改以及格线对齐、Slot圆角和宽高前置调整，保持0.1.0。
+
+- 最新 PS 布局源码将宽高输入及预计画布尺寸移到循环行列之前（带高度选项下方），避免新建操作上方找不到尺寸。模拟宿主检查通过；尚未重建安装器，后续与网格对齐、圆角修复一并打包，版本0.1.0。
+
+- 最新 PS Slot 样式源码：固定2px浅色描边和13px圆角，蓝色选中／深色未选中，避免点击后默认边框消失；模拟检查覆盖选中／取消样式，实际PS待验证。尚未重建安装器，需与网格对齐修正一并打包，版本保持0.1.0。
+
+- 用户最新实机反馈并截图确认 PS 折叠菱形图标已显示，图标该场景验证通过；先前“图标未验证／空白”为历史状态。其他主题／DPI及最新网格对齐修正仍待验证，版本不升级，保持0.1.0。
+
+- 最新 PS 源码修正网格偏移：previewGridImage 不再按屏幕尺寸／宽高减一绘制，改用来源采样尺寸、与 PSD 共用 gridRaster，缩放时复用同一 PNG。新增2×2／3×5、0.5／1／2／4倍率逐像素比对，通过；实际 PS 待验证。现有安装器不含此修正，插件仍0.1.0，未重建。
+
+- 最新主程序源码支持工具栏 HEX 颜色输入，#RRGGBB 保留 Alpha，#RRGGBBAA 可设置 Alpha，非法内容不修改颜色、失焦恢复；拾色器及 Alt 取色同步显示。cargo check --tests 通过；与布局／滚轮／关闭修复一起等待后续授权生成主程序。
+
+- 最新主程序布局源码：按标注将倍率／网格放到各区标题旁，新增独立 preview_grid 状态；绘制工具集中到绘制区顶部 drawing_tools，可换行，左侧仅保留配置与文件／工程。cargo check --tests 通过；主程序未重建，后续需连同关闭弹窗与滚轮缩放一起验证。
+
+- 最新主程序源码：绘制区及循环预览支持悬停滚轮缩放（独立预览同样支持），绘制区鼠标锚点、预览中心缩放，分别保持现有范围。cargo check --tests 通过；未生成主程序 EXE，需与关闭确认弹窗修复一起构建后验证。
+
+- 最新主程序源码修复：用户反馈像素 Tile 点 X 无提示，截图实际左设置栏内有被裁切的行内确认。已改为主 Tile 视口中央 egui::Modal，继续／放弃关闭两按钮竖排，Esc／遮罩取消，关闭请求主动重绘。cargo check --tests 通过；未生成新主程序 EXE，实际窗口行为待验证。PS 安装器不受此项主程序修改影响。
+
+- 最新安装器交付（用户明确授权）：先检查进程关闭和目标 EXE 未占用，Release 成功。路径仍为 `plugins/photoshop-isometric-tile/installer/target/release/ps-tile-installer.exe`，5167616 字节，SHA-256 `490e4566ede93dc2c2e9e30aa898d8005aab4f4c2f50fb7b86b3e81bb35c9780`。包含上述背景／辅助网格／Slot 缓存／图标兼容修改，版本保持 0.1.0。5 项 Rust 安装器测试及图标、PNG、模拟宿主检查通过；未自动安装，PS 实机仍待验证。
+- 最新 0.1.0 手动 ZIP 十文件、15690 字节，SHA-256 `111e5a8a82eb99495615151509a3420c44efef251165edb5757858b06c04036d`；CCX 十一文件、18996 字节，SHA-256 `18f062769fcad33660f2b4677dd72e239a692f7e2915a453c95bab2809d9db90`。下文尚未编译或其他哈希均属历史构建。
+
+- 最新用户实机反馈：折叠图标仍空白，不能标记修复完成。源码改 generic 图标用途，插件级同步备用 icons，补 tile-dark@1x.png／tile-light@1x.png（与基础图字节相同），安装／打包列表十文件，图标检查及 cargo check 通过。未确认根因，未生成包含此调整以及背景／预览网格／Slot 缓存修复的新安装器，版本保持 0.1.0。
+
+- 后续 Slot 闪烁排查源码修复：slotUI 按排列形状复用按钮，隐藏模式不刷新文档下拉，重复绑定 change 不触发刷新；capture／refresh 缓存采用网格回滚后的 history ID，防止循环模态采样。新增模拟回滚改变 ID 后五轮无重复捕获、Slot 原节点选中／取消选中测试，通过。实际 PS 待验证，现有 EXE 不包含本轮修复及预览背景／网格，版本保持 0.1.0。
+
+- 最新源码新增预览辅助网格开关 show-grid（默认关），单／多 Slot 显示地面菱形、单文档依实际行列分格，透明黄色 PNG 叠加并鼠标穿透，不影响 PSD／导出；与标签开关独立。模拟宿主测试通过，含 3×3 单文档及不额外 getPixels；尚未生成包含背景与此网格功能的安装器，插件继续 0.1.0。
+
+- 后续源码新增预览背景选择，默认棋盘格，自定义颜色用 #RRGGBB 输入；仅当前会话，不影响源文档和 PNG。previewBackground 使用至多 512px 全视口 PNG，绕开 UXP background-repeat 不支持，背景切换不重建前景或调用 getPixels。模拟测试通过，实际 PS 待验证；当前已交付 EXE 不含此背景功能，尚未重新编译。
+
+- 最新交付：用户授权后检查安装器已关闭且 EXE 未占用，Release 重新生成，插件版本仍为 0.1.0，包含 @2x 图标命名、预览节点复用和部署状态提示修正。安装器路径不变，5161984 字节，SHA-256 `4a53519cc317331e26663a1b6562037feff47e3a5335d3aa3cff8c944d1df34f`；5 项 Rust 测试及图标、PNG、模拟宿主检查均通过。
+- 最新手动 ZIP（13834 字节）SHA-256 `225aedfb84d34f4e483b4a596447d7ffb01ac9cce523d29454ecde49edb1a4b7`；CCX（16956 字节）SHA-256 `dd939ae5cf3eae8cc599c84f20b84c19e4ff786a380ae676f45f1ba5457cd0da`。实际 PS 图标和预览闪烁待用户复验，未自动安装。以下“尚未编译”和旧哈希为先前状态。
+
+- 用户确认 PS 可打开插件，当前待解决为图标空白与预览闪烁。源码改用 tile-dark.png／tile-dark@2x.png、浅色对应文件，manifest scale [1,2]；安装器嵌入列表、打包列表及 README 同步。新增 icon-check.cjs 校验实际路径、尺寸、透明轮廓，通过。
+- main.js 新增 commitPreview 复用已挂载图片，两个预览模式不再清空整个 DOM；采样失败保留上一帧。模拟宿主、图标、PNG 检查全部通过，实际 PS 待复验。用户明确“稍等编译”，未生成新 EXE；当前 EXE 尚不包含安装提示、图标命名和节点复用修改。dist 0.1.0 图标修复 ZIP 是闪烁修复前的中间包，后续交付前需要重新打包。版本继续保持 0.1.0。
+
+- 卸载重装排查：实际 `%APPDATA%/Adobe/UXP/Plugins/External/unityyamlviewer.isometric-preview` 八个文件哈希全部匹配当前源码，manifest 为 0.1.0，部署已成功；PS 加载结果未确认。已询问用户重新启动后的增效工具菜单情况。安装器当前进程仍运行（未关闭它），只改源码提示区分部署与宿主加载，未重新构建；现有 EXE 尚不含该文案修正。
+
+- 最终测试版本按用户要求固定为 0.1.0（覆盖先前 0.1.5 约定）。为排查无法放大，清单明确 maximumSize 7680×4320，未锁定为固定大小；实际拖拽仍待 PS 验证。模拟检查通过，安装器重新生成且保留模态修复及菱形图标，SHA-256 `ca2f1b3b2680d14bd8ba0e58d130483a57c173c5e7f107e6d2d9d08f0dda903d`。0.1.0 手动包 SHA-256 `6af7fa0ec17f40f9af45fa087366c98c8405dccda6c0dd2fa5f12b54a720a39e`；未自动安装。
+
+- 最新用户约定：测试未确认通过前不升级版本号。插件恢复并固定为 0.1.5，保留全部修复和图标；AGENTS.md 已记录。同路径安装器重新生成，SHA-256 `e13fb02357613003b66b566633d09f89cc0523ebc8c9b331a92d3d0b1ff6dc2e`。当前 0.1.5 手动 ZIP 为 13603 字节，SHA-256 `2e166a76e23100839f4efce27685cb83bc23999fea7c388186d080f6f2466437`。先前 0.1.6／0.1.7 及旧 0.1.5 构建哈希均是历史记录；单看面板版本无法区分本轮测试修订。
+
+- PS 实机反馈 v0.1.5 普通 PNG 预览报模态作用域错误；已在 0.1.7 修复 withoutGrid 无辅助层直接读取分支，改为所有预览捕获均进入 executeAsModal。模拟宿主严格检查所有 getPixels 处于模态且不嵌套，全部通过；PNG 检查通过，真实 PS 效果待用户复验。
+- 最新同路径安装器内嵌 0.1.7（含菱形图标），重建前脚本占用检查通过，Release 成功，SHA-256 `d49f48171dab410e770edd5987fcc3e1655590a988556b6dda18bcefb22acbcb`。0.1.7 四张图标加四个代码文件的手动 ZIP 为 13603 字节，SHA-256 `74a5c3abd4b997096a839eee07a5ff233033c8a76aade568a6f1dc9b3b24c4bc`；未自动安装。以下 0.1.6／0.1.5 哈希为前次构建。
+
+- 后续图标更新：插件 0.1.6 新增透明空心等距菱形折叠面板图标，深浅主题各 23／46px；源图由 `plugins/photoshop-isometric-tile/generate-icons.cjs` 确定性生成。运行文件从四个增为八个，安装器和两种包均同步，PS 实际显示待用户验证。
+- 同路径安装器已重新构建，内嵌插件为 0.1.6，最新 SHA-256 `f267d4b08996cb6cb0a97887fa3de518c0d1832f5a3aab0358fd5dc64ecaaced`。5 项安装器测试及模拟 PS 检查通过，未实际安装。0.1.6 手动 ZIP（13556 字节）SHA-256 `edd406b2512b9e6b1f3c9c1a6c2608c70ade924dda35d53eadf56b08c6d4fe70`；CCX（16571 字节）SHA-256 `87f65070700ee5d145f6adab628d5d112a3371b5af4b56e73dc2b74af16150bc`。以下安装器 0.1.5 数据为前次构建记录。
+
+- 用户明确要求编译主程序和 PS 安装工具。构建前检查两程序未运行、主程序目标可独占打开、安装器目标不存在；两个 Release 构建成功，未自动启动、安装或发布。
+- 主程序 1.3.6：`target/release/unity_yaml_viewer.exe`，33721344 字节，SHA-256 `6e4051397f627e3eeaba9d957d2e885dbf107b589d88c1aeae4209f8f91d1831`。
+- 安装器 0.1.0，内嵌插件 0.1.5：`plugins/photoshop-isometric-tile/installer/target/release/ps-tile-installer.exe`，5140992 字节，SHA-256 `032a989460936325c975f3ad521369abf386e8e352f209d3be697d7b504a3601`。Windows EXE 头及版本资源核对通过。
+- 主程序像素 Tile 9 项 Rust Release 测试、安装器 5 项 Rust Release 测试全部通过；PNG 编码和模拟 PS 宿主检查再次通过。安装器测试仅修改临时目录，未修改真实 Adobe 目录。
+- 构建日志：`target/pixel-tile-release.log`、`plugins/photoshop-isometric-tile/installer/target/release-build.log`；测试日志：`target/pixel-tile-tests.log`、`plugins/photoshop-isometric-tile/installer/target/tests.log`。编译有既有依赖／无用方法警告，无错误。
+- 用户待验证：主窗口三列、单／多格菱形画笔跨边、独立预览多屏 DPI 与重绘、PS 安装更新卸载和插件真实行为。安装／卸载前需关闭 Photoshop，安装器不会主动关闭它；PS 原生画笔菱形回绕仍未实现。
+
+- 像素 Tile：互斥工具 Tab、B/I/E/U/G、Ctrl+Z/Y、[ / ] 笔宽 1–32、空格左拖及右拖平移、工程按钮置顶。cargo check --offline --locked --tests 通过，未生成新 EXE，交互待验证。
+
+- 像素 Tile 复用独立拾色窗口，工具栏 HEX 替换为 Alpha 0–255 滑条；窗口内仍可输入 HEX。新增 editable 调用保留其他资源拾色的预览／编辑权限。未重新生成 EXE，UI 待验证。
+
+- PS 安装器错误状态新增独立标志，PS 占用等失败提示加粗标红；重试清除错误样式。不改变进程检查，未生成新安装器。
+
+- PS自动回落：paint事件200ms＋新画笔历史稳定500ms兜底，识别用户截图“画笔工具”；排除既有历史undo/redo、插件自身回读／回落和文档／图层切换。新增auto-wrap-check.cjs。未生成安装器，Wacom实测待验证。
+
+### 2026-11-17 本轮双程序构建
+
+- 用户明确授权后，检查两个固定目标进程均未运行，EXE 独占打开检查通过，再生成 release 产物；主程序1.3.6、PS插件／安装器0.1.0，不递增测试版本。
+- 主程序：`target/release/unity_yaml_viewer.exe`，33622528字节，SHA-256 `e08396595cfb7c629d529b41073fa1d1d0e7977fd79ea9c27e46c8f22e5f96ca`。
+- 安装器：`plugins/photoshop-isometric-tile/installer/target/release/ps-tile-installer.exe`，5199360字节，SHA-256 `a9fb56816c0aced781206c16b4e584ed0197ec74c31e40a2e75979a46f35c8a0`。对应.sha256已更新。
+- 验证：像素Tile测试11项、安装器测试5项通过；Node自动回落历史、回落像素、面板转换与布局逻辑、PNG及图标检查通过。构建日志：`target/tile-ui-release.log`、`target/tile-installer-release.log`；测试日志：`target/tile-ui-tests.log`、`target/installer-tests.log`。
+- 新EXE包含本轮工具快捷键、笔宽快捷键、平移、独立拾色器／Alpha、关闭弹窗及菜单排序；安装器包含历史兜底自动回落、预览设置集中、输入框对齐和安装错误标红。Wacom实际触发、PS文字与布局、主程序新增UI仍待用户实测；未发布。
+
+- 像素Tile坐标格选择＋下方导入／清空，默认独立；去掉Tile素材下拉／添加空白／独立副本按钮。旧共享工程载入时分离，超预算拒绝且不改当前数据。适应画布已移到绘制区标题行。新测试仅编译检查，待授权构建／运行。
+
+- 本轮新增像素Tile图层（基底默认锁定、独立绘制层、缩略图、≡拖序、右键删除／重命名、右侧锁与显隐），.uytile格式3、可见层合成及多格逐格PNG、2/3/4快捷预设；修复关闭确认重复居中原生窗口（retain_on_close_request＋CancelClose）。仅cargo check --tests，新增测试未运行；待授权编译和用户UI验证。
+
+- PS背景色块新增原生调色板按钮，modal＋batchPlay showColorPicker，HEX／背景同步；取消不改、错误提示。color-picker-check.cjs及panel-check.cjs通过，PS实际兼容待验证，未打包。
+
+- 用户确认PS历史兜底自动回落有效，但报告左下→右上部分像素缺色。已修复自动任务使用笔触前基线ID（连续笔触保留最早）、outside合成结束后重新同步周期边界副本。wrap-check新增软笔跨边RGBA一致性，auto-wrap-check新增基线断言；缺色修复待实机，未打包。
+
+- PS自动回落增加文档ID绑定、显示绑定名／ID及手动改绑按钮；切其他文档暂停、关闭不改绑、取消勾选解除。事件／轮询／执行前均守卫，跨文档mock回归通过；尚未打包。
+
+- PS自动回落重开恢复：按完整已保存文件路径匹配新ID（非文件名），网格校验、清队列与重建基线；未保存／多候选需手动绑定。修复执行前恢复导致空队列访问的边界。Node回归通过，尚未打包／PS实测。
+
+- PS本次工作显式绑定后后台回落；收起仅停预览，销毁／取消勾选才停回落。独立wrapTimer、连续笔触不重置等待起点、错误9保留重试、最近执行信息，后台完成不展开面板。auto-wrap-check覆盖隐藏与重试等；未打包，Wacom真实持续绘制稳定性待验证。
+
+### 2026-11-17 最新双程序构建（图层与后台回落）
+
+- 用户明确授权，主程序与安装器固定目标均通过进程／独占占用检查。主程序仍为1.3.6，PS插件及安装器仍为0.1.0。
+- `C:\Git\UnityYAMLViewer\target\release\unity_yaml_viewer.exe`：33888256字节；SHA-256 `0aded8ce0cda65e8b9b0e1a6390c177938075e88e2dbe6a162bc97c701690de8`。
+- `C:\Git\UnityYAMLViewer\plugins\photoshop-isometric-tile\installer\target\release\ps-tile-installer.exe`：5207552字节；SHA-256 `ab362dab630916f4f681178e319d3a252a348b346d9b81ac2caa27c48f345356`。
+- 对应.sha256已更新；主程序构建日志target/tile-layers-release.log，安装器target/tile-background-installer-release.log。
+- 像素Tile测试14项通过（图层锁保护／Alpha合成／橡皮撤销、坐标格独立修改、3×3逐格导出及工程层结构等）；安装器测试5项通过。Node自动回落（隐藏生命周期、忙碌重试、绑定／重开及连续笔触）、边界像素、面板、调色板、PNG、图标检查通过。测试日志target/tile-layers-tests.log及target/tile-background-installer-tests.log。
+- 本次产物包含本轮全部源代码调整；之前条目“未生成新EXE／安装器”为当时状态。主程序图层拖拽、右键／锁、光标／Alpha／关闭定位，PS Wacom持续绘制、收起后台／同文件重开／缺色修复及调色板实际行为仍需用户验证；未发布。
+
+- 本轮像素Tile：竖向悬浮六工具＋L直线、方框笔宽快捷与滑条、图层下背景（棋盘格／自定义色块＋HEX）、.uytile可选背景字段。仅cargo check --tests，新增直线测试待运行，未生成EXE。

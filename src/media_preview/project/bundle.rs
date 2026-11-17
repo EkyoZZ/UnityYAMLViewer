@@ -89,7 +89,7 @@ mod tests {
         let source=root.join("source.wav");fs::write(&source,b"source fixture").unwrap();
         let clip=root.join("edited.wav");fs::write(&clip,b"edited fixture").unwrap();
         let project=root.join("example.uyap");
-        let item=Item{burn_subtitle:None,enabled:true,source:external(&source,&root),state:EditState::fixture(),tracks:vec![],clip:Some(Reference::Embedded{entry:"assets/edit.wav".into()}),position:0.0,selected_audio:None};
+        let item=Item{burn_subtitle:None,enabled:true,source:external(&source,&root),state:EditState::fixture(),tracks:vec![],clip:Some(Reference::Embedded{entry:"assets/edit.wav".into()}),position:0.0,selected_audio:None,preview_audio_track:None,preview_audio_disabled:false,preview_subtitle_track:None};
         let document=Document{merge_burn_subtitle:None,format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:"audio".into(),active:0,expanded:true,merge:false,merge_settings:MergeSettings::default(),items:vec![item]};
         write_archive(&project,&document,&[("assets/edit.wav".into(),clip)]).unwrap();
         let target=root.join("share.zip");pack(&project,&target).unwrap();

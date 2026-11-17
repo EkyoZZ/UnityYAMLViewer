@@ -23,19 +23,32 @@ pub fn paint_swatch(ui: &egui::Ui, rect: Rect, rgba: [f64; 4]) {
 }
 
 pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
+    show_impl(ui, name, rgba, false)
+}
+
+/// Editable drawing color using the shared native palette.
+pub fn show_editable(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
+    show_impl(ui, name, rgba, true)
+}
+
+fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool) -> Option<[f64; 4]> {
     let id = ui.id().with(("color_preview", name));
     let mut state = ui.ctx().data_mut(|data| data.get_temp::<Preview>(id))
         .unwrap_or(Preview { original: rgba, rgba, mode: 0, open: false });
-    if state.original != rgba { state.original = rgba; state.rgba = rgba; }
+    if drawing {
+        if !state.open { state.original = rgba; }
+        state.rgba = rgba;
+    } else if state.original != rgba { state.original = rgba; state.rgba = rgba; }
     let before = state.rgba;
     let available = ui.clip_rect().width() - (ui.cursor().min.x - ui.min_rect().left());
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(available.clamp(80.0, 120.0), 19.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(if drawing { 48.0 } else { available.clamp(80.0, 120.0) }, 19.0), Sense::click());
     paint_swatch(ui, rect, rgba);
     if response.clicked() {
         state.rgba = rgba;
+        state.original = rgba;
         state.open = true;
     }
-    response.on_hover_text(crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]));
+    response.on_hover_text(if drawing { name.to_owned() } else { crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]) });
     if state.open {
         let mut open = true;
         crate::native_window::Window::new(name)
@@ -43,7 +56,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
             .default_width(220.0).min_width(220.0).max_width(220.0)
             .show(ui.ctx(), |ui| {
                 ui.set_width(220.0);
-                ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑颜色，保存编辑后写入文件。") } else { crate::localization::tr("仅预览，不修改属性或资源文件。") });
+                if !drawing { ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑颜色，保存编辑后写入文件。") } else { crate::localization::tr("仅预览，不修改属性或资源文件。") }); }
                 palette(ui, &mut state.rgba);
                 egui::ComboBox::from_id_salt("color_units")
                     .selected_text(["RGB 0–1", "RGB 0–255", "HSV"][state.mode as usize])
@@ -77,7 +90,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
                 ui.horizontal(|ui| {
                     ui.label("Hexadecimal");
                     let mut hex = format!("{r:02X}{g:02X}{b:02X}");
-                    let editable = crate::editing::active(ui);
+                    let editable = drawing || crate::editing::active(ui);
                     let hex_id = ui.id().with("hex_draft");
                     if editable { if let Some(draft) = ui.ctx().data(|data| data.get_temp::<String>(hex_id)) { hex = draft; } }
                     let response = ui.add(TextEdit::singleline(&mut hex).desired_width(90.0).interactive(editable));

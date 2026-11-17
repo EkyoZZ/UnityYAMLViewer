@@ -449,10 +449,36 @@ mod tests{
         subtitles.follow_audio(Some("英语"),&[],&egui::Context::default());
         assert_eq!(subtitles.selected.unwrap().language,Some("中文"));
     }
+    #[test]
+    fn editor_preview_off_clears_selection_and_disables_automatic_follow(){
+        let ctx=egui::Context::default();
+        let mut subtitles=Subtitles{selected:Some(source(Some("中文"))),manual_required:true,..Default::default()};
+        subtitles.editor_preview(None,&ctx);
+        let revision=subtitles.revision;
+        subtitles.follow_audio(Some("英语"),&[source(Some("英语"))],&ctx);
+        subtitles.poll_editor_preview(&ctx);
+        assert!(subtitles.selected.is_none() && subtitles.render().is_none() && subtitles.job.is_none());
+        assert!(subtitles.manual_override && !subtitles.manual_required);
+        assert!(subtitles.revision>=revision);
+    }
 }
 #[derive(Default)]
-pub struct Subtitles {pub revision:u64,video_size:Option<[usize;2]>,asset:Option<Arc<Asset>>,asset_style:Option<Style>,selected:Option<Source>,external:Vec<Source>,sidecars:Vec<Source>,next_scan:Option<std::time::Instant>,job:Option<mpsc::Receiver<Result<(Arc<Asset>,Style),String>>>,initialized:bool,style:Style,preview_style:Option<Style>,preview_pending:Option<(Style,std::time::Instant)>,draft:Style,style_error:Option<String>,settings_open:bool,settings_id:Option<egui::Id>,export_job:Option<mpsc::Receiver<Result<PathBuf,String>>>,export_result:Option<PathBuf>,editor_request:Option<PathBuf>,saved_revision:u64,extracting:bool,font_search:String,error:Option<String>,manual_required:bool,manual_override:bool,needs_follow:bool}
+pub struct Subtitles {pub revision:u64,video_size:Option<[usize;2]>,asset:Option<Arc<Asset>>,asset_style:Option<Style>,selected:Option<Source>,edit_stream_index:Option<u64>,external:Vec<Source>,sidecars:Vec<Source>,next_scan:Option<std::time::Instant>,job:Option<mpsc::Receiver<Result<(Arc<Asset>,Style),String>>>,initialized:bool,style:Style,preview_style:Option<Style>,preview_pending:Option<(Style,std::time::Instant)>,draft:Style,style_error:Option<String>,settings_open:bool,settings_id:Option<egui::Id>,export_job:Option<mpsc::Receiver<Result<PathBuf,String>>>,export_result:Option<PathBuf>,editor_request:Option<PathBuf>,saved_revision:u64,extracting:bool,font_search:String,error:Option<String>,manual_required:bool,manual_override:bool,needs_follow:bool}
 impl Subtitles {
+    pub(crate) fn editor_preview(&mut self,track:Option<&crate::export_tracks::Track>,ctx:&egui::Context){
+        self.manual_override=true;self.manual_required=false;self.needs_follow=false;
+        self.asset=None;self.asset_style=None;self.job=None;self.selected=None;self.error=None;
+        self.edit_stream_index=None;self.revision+=1;
+        if let Some(track)=track {
+            self.edit_stream_index=Some(track.index);
+            self.load(Source{path:track.path.clone(),ordinal:track.index as usize,codec:track.codec.clone(),
+                label:track.path.file_name().unwrap_or_default().to_string_lossy().into_owned(),default:false,text:true,language:None},ctx);
+        }
+    }
+    pub(crate) fn poll_editor_preview(&mut self,ctx:&egui::Context){
+        self.manual_override=true;self.manual_required=false;self.needs_follow=false;
+        self.poll(&[],None,None,ctx);
+    }
     pub(crate) fn take_editor_request(&mut self)->Option<PathBuf>{self.editor_request.take()}
     pub(crate) fn editor_render(&mut self,render:Render){
         self.asset=Some(render.asset);self.asset_style=Some(render.style);self.job=None;
@@ -468,7 +494,6 @@ impl Subtitles {
     pub(crate) fn video_size(&mut self,size:Option<[usize;2]>,ctx:&egui::Context){
         if self.video_size!=size {self.video_size=size;if let Some(source)=self.selected.clone(){self.load(source,ctx);}}
     }
-    pub fn session_copy(&self)->Self{Self{revision:1,video_size:self.video_size,asset:self.asset.clone(),asset_style:self.asset_style.clone(),selected:self.selected.clone(),external:self.external.clone(),sidecars:self.sidecars.clone(),initialized:true,style:self.style.clone(),manual_override:self.manual_override,manual_required:self.manual_required,..Default::default()}}
     fn render_style(&self)->&Style{self.preview_style.as_ref().unwrap_or(&self.style)}
     pub fn render(&self)->Option<Render>{Some(Render{asset:self.asset.clone()?,style:self.asset_style.as_ref().unwrap_or_else(||self.render_style()).clone()})}
     pub(crate) fn translation_source(&self)->Option<Source>{
@@ -507,7 +532,7 @@ impl Subtitles {
         if self.selected.is_some() && self.preview_style.is_some(){ui.small(tr("预览（尚未保存）"));}
         if !self.sidecars.is_empty() || !self.external.is_empty() || !sources.is_empty() {
             let current=self.selected.as_ref().map_or_else(||tr("关闭字幕"),|source|source.label.as_str()).to_owned();
-            let width=ui.available_width().min(180.0);
+            let width=ui.available_width().min(140.0);
             ui.scope(|ui|{
                 // ComboBox::width is a minimum; constrain its layout as well.
                 ui.set_max_width(width);
@@ -605,6 +630,7 @@ impl Subtitles {
         }
     }
     fn load(&mut self,source:Source,ctx:&egui::Context){
+        let stream_map=self.edit_stream_index.map_or_else(||format!("0:s:{}",source.ordinal),|index|format!("0:{index}"));
         self.saved_revision=crate::subtitle_document::saved_revision(&source.path);
         // Keep the active asset until its replacement is ready; loading must not restart playback.
         self.selected=Some(source.clone());self.error=None;
@@ -621,7 +647,7 @@ impl Subtitles {
                 if style.native_ass && source.path.extension().is_some_and(|ext|ext.eq_ignore_ascii_case("ass")||ext.eq_ignore_ascii_case("ssa")) {
                     std::fs::copy(&source.path,&asset.0).map_err(|e|e.to_string())?;
                 }else{
-                    let output=crate::media_tools::command(&ffmpeg).args(["-nostdin","-v","error","-y","-i"]).arg(&source.path).args(["-map",&format!("0:s:{}",source.ordinal),"-c:s","ass","-f","ass"]).arg(&asset.0).output().map_err(|e|e.to_string())?;
+                    let output=crate::media_tools::command(&ffmpeg).args(["-nostdin","-v","error","-y","-i"]).arg(&source.path).args(["-map",&stream_map,"-c:s","ass","-f","ass"]).arg(&asset.0).output().map_err(|e|e.to_string())?;
                     if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).to_string());}
                 }
                 let text=std::fs::read_to_string(&asset.0).map_err(|e|e.to_string())?;

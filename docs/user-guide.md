@@ -482,6 +482,18 @@ Vert, Frag and helpers use named, typed boundary inputs wired to internal operat
 
 In the video editor, Left/Right steps backward/forward one frame while paused. On a zoomed timeline, Ctrl+Left/Right pans the view by five frames without changing the playback position.
 
+视频编辑的时间轴选区内显示当前试听音轨波形，右侧添加的外部音轨也参与切换。左侧音轨下拉菜单始终提供“无音轨”，选择后只关闭试听声音及波形，保留原选区条；恢复选择具体音轨后继续试听。右侧列表与下拉菜单按相同顺序显示“音轨1、音轨2……”；字幕另行编号，添加／移除后同步更新，文件名和语言仍保留。切换保留播放位置和剪切范围，不改变导出勾选；移除当前音轨后优先回到仍存在的原视频音轨，否则选择剩余第一条。录屏结果／历史直接进入编辑时优先选择默认音轨。
+
+音轨菜单下方是独立的字幕预览下拉菜单。新开视频编辑默认“无字幕”，不继承播放页的字幕选择、不自动扫描同名外挂字幕或按语言启用字幕。添加到右侧列表的文字字幕可在这里选择预览，随时可切回“无字幕”；图形字幕暂不支持预览。音轨与字幕预览均独立于导出勾选和 ASS 烧录设置；已经压在原视频画面里的字幕无法通过预览菜单关闭。工程保存预览音轨、静音和字幕选择，重开时恢复，旧工程的字幕预览默认关闭。
+
+音轨按原时间戳放在现有媒体时间轴上，不自动变速或拉伸：较晚开始的部分留空，较早结束后试听补静音，超过当前选区的部分不试听；导出仍按所选起止范围处理。波形后台生成，切换时取消旧任务；加载失败保留原选区条并显示失败提示。这里的波形是声道峰值合并显示，并不是可分别拖动、变速或混音的多轨编辑器。
+
+The video timeline shows the selected preview track's waveform, including externally added audio. Its selector always offers No audio, which disables preview sound and waveform while retaining the range bar. Choose a track to resume preview audio. The sidebar and selector use matching Audio 1, Audio 2… numbers; subtitles are numbered separately, and adding/removing entries updates both lists while retaining filenames and languages. Switching preserves position and trim boundaries without changing export checkboxes. Removing the previewed track falls back to the original video audio if available, otherwise the first remaining track. Opening a recording directly for editing prefers its default audio track.
+
+An independent subtitle preview selector appears below the audio selector. New video editors default to No subtitles, without inheriting playback-page choices, scanning sidecars or selecting by language. Choose an added text subtitle from the sidebar list for preview, or return to No subtitles; bitmap subtitle preview is unsupported. Both preview selectors are independent of export checkboxes and ASS burn-in settings. Subtitles already burned into the source video cannot be hidden this way. Projects retain preview audio, mute and subtitle choices; older projects default to subtitle preview off.
+
+Audio follows its original timestamps on the existing media timeline without time stretching. Delayed starts leave a gap, early endings play silence, and preview audio is limited to the current range; exports still follow the selected start/end times. Waveforms are generated in the background, canceled when switching tracks, and fall back to the original bar with an error message on failure. Channel peaks are combined into one waveform; this is not a multitrack mixer with independent track movement or speed adjustment.
+
 编辑窗口左上角的列表图标用于展开或收起侧栏，旁边的后台任务中心与主窗口共享进度和结果。展开后可点“添加文件…”或拖入同类音视频文件，点击整张卡片切换编辑，按住左上角的双横线手柄拖动排序，右上角叉号用于移除条目。每条独立保留裁切范围、画面处理和导出设置。同一路径在一个列表中保留一项。
 
 - “队列”模式按列表顺序分别导出。“另存为”选择输出目录，自动给同名成品增加编号。列表只有一条时仍使用原来的文件保存对话框。
@@ -889,17 +901,19 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 - 确认后，鼠标进入区域内部显示四向移动箭头，按住左键可整体移动区域而不改变尺寸。四角手柄同时改变宽高，上下边中点只改高度，左右边中点只改宽度；上边中段仍可移动，Ctrl+拖动上边调整顶部。拖动、缩放和输入数值保持同步。来源窗口随后移动不会自动跟随区域。
 - 工具条采用与主程序相同的界面控件和主题：区域／屏幕选择后是圆圈十字“重新选择区域”，再后是主窗口同款设置图标，然后 X、Y、`宽 × 高 px`、红圆开始／方块停止和 × 退出。设置图标打开独立录屏设置窗口，记录参数与快捷键。单屏显示全屏，多屏提供各屏及全部屏幕。工具条优先置于选区下方，不足时尝试上方和左右，避开屏幕外、多屏空隙及任务栏；没有外围空间时才放入屏幕内。
 - 设置包含 1–60 fps、质量、MKV／MP4、鼠标指针、开始前最小化、两个快捷键，以及独立的录屏历史上限（20–50 条，默认 20），可用数值框或同款设置滑条调整。保存跨重启记住，取消放弃未保存修改。默认停止 Ctrl+Shift+F9，进入指定区域 Ctrl+Shift+F8，可通过 Ctrl／Alt／Shift 与功能键或字母数字修改；F12 保留，字母／数字需 Ctrl 或 Alt，两个操作不能相同。系统注册检查全局占用，其他程序的局部快捷键仍可能相同。
-- 点击开始先检查 FFmpeg／FFprobe；缺失列出组件，确定后打开第三方支持，不自动下载安装。通过检查后写入系统配置的用户下载目录，以 `recording-<纳秒时间戳>.mkv/mp4` 命名，不弹保存对话框、不覆盖已有文件。开始前有 3 秒准备时间；当前中央大数字在用户环境中未能显示，暂不依赖数字判断状态。可以用停止按钮或配置的停止快捷键取消。
-- 工具条显示停止快捷键、时间与文件体积。全屏／全部屏幕开始后隐藏，区域录制保留停止按钮；录制时区域、参数及快捷键锁定，线框与区域内部不拦截鼠标。结束后恢复工具条，下方显示本次视频地址及编辑／打开目录按钮；不提供“完成”，用 × 退出。录制中 × 会先正常收尾再退出；Esc 不用于中止正在进行的录制。
+- 点击开始先检查 FFmpeg／FFprobe；缺失列出组件，确定后打开第三方支持，不自动下载安装。通过检查后写入系统配置的用户下载目录，以 `recording-<纳秒时间戳>.mkv/mp4` 命名，不弹保存对话框、不覆盖已有文件。录制区域中央显示大数字 3→2→1，使用加粗、圆润的矢量笔画并在圆圈内居中；窗口就绪后才开始三秒准备，结束时关闭数字窗口；可以用停止按钮或配置的停止快捷键取消。倒计时窗口无法就绪时保留错误提示与日志。
+- 工具条显示停止快捷键、时间与文件体积。全屏／全部屏幕开始后隐藏，区域录制保留停止按钮；录制时区域、参数及快捷键锁定，线框与区域内部不拦截鼠标。结束后恢复工具条，下方显示本次视频地址及编辑／打开目录按钮，绿框继续保持鼠标穿透，可以操作框内软件；点击圆圈十字“重新选择区域”后才恢复线框拖动及手柄缩放。工具条坐标输入仍可使用，修改数值不会重新拦截框内鼠标。不提供“完成”，用 × 退出。录制中 × 会先正常收尾再退出；Esc 不用于中止正在进行的录制。
 - 重新进入录屏或重新选区时，不在下方展示上次的保存结果。工具条“历史记录”打开独立录屏历史窗口，与主程序“最近打开”分开保存和计数，按成功录制顺序保留最新记录。选中存在的文件可进入视频编辑或打开目录；不存在的标红并禁用这两个操作。红色“移除记录”只移除条目，任何情况下都不删除视频文件；调整上限淘汰旧记录也不删除视频。
-- 绿色线框、选区交互层、工具条和屏幕选择菜单均设置捕获排除，要求 Windows 10 2004+；设置失败禁止开始。实际输出仍需在目标捕获环境核对。可录制默认播放设备的系统声音，不采集麦克风，不支持暂停续录；受保护画面、独占全屏、安全桌面与远程／特殊合成环境不保证兼容。
+- 选区、倒计时和启动准备时显示绿框，实际开始录制后变为红框；点击停止、使用停止快捷键或异常结束后恢复绿框。停止后仍保持鼠标穿透，再次选区才恢复调整。
+- 录屏线框、选区交互层、工具条和屏幕选择菜单均设置捕获排除，要求 Windows 10 2004+；设置失败禁止开始。实际输出仍需在目标捕获环境核对。可录制默认播放设备的系统声音，不采集麦克风，不支持暂停续录；受保护画面、独占全屏、安全桌面与远程／特殊合成环境不保证兼容。
 - English: Open File → Screen recording to select a region. The crosshair snaps to visible windows; click to confirm or hold the left button to draw a rectangle and release. Right-click cancels the current selection; before recording, Esc closes both region and toolbar, whether drawing or already confirmed. Movement beyond the system tolerance (at least four physical pixels) switches to drawing. All directions and negative origins are supported, with a 16×16 minimum inside the virtual desktop.
 - Inside a confirmed region the pointer becomes a four-way move cursor; left-drag to move without resizing. Corner handles change both dimensions, top/bottom middle handles change height, left/right middle handles change width. The top middle segment still moves the region; Ctrl+drag the top edge adjusts upward. Fields and geometry stay synchronized. The region does not follow subsequent movement of its original window.
 - The toolbar uses the app’s controls/theme: screen selector, circled cross to reselect, the same settings icon as the main window, X/Y, width × height px, red start circle/stop square and × close. Settings opens separately. Choose Fullscreen for one monitor or individual/all screens for multiple monitors. Placement prefers below, then above or beside the region within monitor work areas, falling inside a screen only if no outside space exists.
 - Settings retain 1–60 fps, quality, MKV/MP4, pointer capture, minimization, two shortcuts and a separate recording history limit (20–50, default 20), adjusted with a number field or the standard settings slider. Save persists across restarts; Cancel discards unsaved edits. Default shortcuts are Ctrl+Shift+F9 to stop and Ctrl+Shift+F8 to select a region. Configure Ctrl/Alt/Shift with function keys or letters/digits; F12 is reserved and letters/digits require Ctrl or Alt. Bindings must differ. Registration detects global conflicts but cannot detect another app’s local shortcuts.
-- Start checks FFmpeg/FFprobe; confirming missing components opens Third-party Support without automatically downloading. Output uses the configured Downloads folder and nanosecond timestamp filenames, without a save dialog or overwriting. Recording has a three-second preparation period. The central digits have not appeared in the reported environment, so do not rely on them to judge recording state. Cancel with Stop or its shortcut.
-- The toolbar shows the stop shortcut, elapsed time and file size. Fullscreen/all-screen recording hides it; region recording retains Stop. Recording locks geometry/settings/shortcuts and makes the border/interior click-through. Completion restores the toolbar and shows the current output path plus editor/folder actions below it. There is no Done button; × exits, gracefully finalizing first if recording. Esc does not stop an active recording.
+- Start checks FFmpeg/FFprobe; confirming missing components opens Third-party Support without automatically downloading. Output uses the configured Downloads folder and nanosecond timestamp filenames, without a save dialog or overwriting. Large 3→2→1 digits appear at the recording area's center, using bold, rounded vector strokes centered inside the circle; the three-second preparation starts once the window is ready, and the digits close when it ends. Cancel with Stop or its shortcut. If the countdown window cannot become ready, an error message and log are retained.
+- The toolbar shows the stop shortcut, elapsed time and file size. Fullscreen/all-screen recording hides it; region recording retains Stop. Recording locks geometry/settings/shortcuts and makes the border/interior click-through. Completion restores the toolbar and shows the current output path plus editor/folder actions below it. The green frame remains click-through so you can operate the software beneath it; use the crosshair-in-a-circle button to select a region again and restore frame dragging and resize handles. Toolbar coordinate fields remain available, and changing them does not restore mouse interception. There is no Done button; × exits, gracefully finalizing first if recording. Esc does not stop an active recording.
 - Reopening recording or selecting a new region hides the previous completion result. History opens a separate recording history window, with storage/count independent of Recent files. It keeps the newest successful recordings. Select an existing file to edit or open its folder. Missing files appear red and disable these actions. The red Remove entry button only removes metadata; it never deletes a video. Trimming to a new limit likewise keeps all video files.
+- The frame is green during selection, countdown and startup, and turns red when recording actually begins. Stop, the stop shortcut or an error restores green. It remains click-through after stopping until you select a region again.
 - Border, selection interaction layer, toolbar and screen menu use capture exclusion, requiring Windows 10 version 2004+. Failure disables starting; recorded output still needs checking in the target environment. System audio from the default playback device is supported; microphone capture and pause/resume are not. Protected content, exclusive fullscreen, secure desktops and remote/unusual composition environments are not guaranteed compatible.
 
 - 工具条录制按钮前的麦克风形状按钮控制系统声音，默认开启；点击关闭后显示红色禁止标记，保存并记住选择。它不访问麦克风；录制过程中不可切换。采集默认播放设备（多声道转立体声），没有播放内容时保留静音；受保护音频可能无法捕获，更换系统播放设备需停止后重新开始。初始化或中途失败会提示，不悄悄改为无声录制。
@@ -919,3 +933,43 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 
 - 字幕编辑时间轴下方使用与视频编辑相同的圆角比例滑块：长度代表当前可见时间范围，拖动滑块平移视野，点击空白轨道将滑块移到该处；不改变播放位置。原蓝色填充和条内时间文字移除，波形与浏览条之间仍保留间距。
 - The subtitle timeline uses the same rounded proportional pan thumb as video editing. Its length represents the visible time range; dragging pans the view and clicking the empty track centers the thumb there, without seeking playback. The blue fill and in-bar time text are removed, with spacing retained beneath the waveform.
+
+
+## 像素 Tile
+
+从“文件 → 像素 Tile”新建空白工程，或从图片工具栏打开并导入当前图片；.uytile 文件也可通过打开文件、拖入或启动参数进入独立窗口。工程以 JSON 编码保存全部 Tile 像素、循环排列、地面尺寸和模式，PNG 可导出当前格或按行列拆分全部格的可见图层合成结果。
+
+- 所有格子共享一套图层，尺寸相同，边长为 2–1024 的偶数；最多64格，每层最多16 MiB，全部图层像素最多32 MiB、最多32层。新建不同尺寸会重置 Tile 集合，可撤销。
+- 中间绘制区编辑当前 Tile，或在开启“多 Tile 循环”与“编辑整个循环单元”后编辑整组格子。设置支持 1–8 行列，点击“行,列”坐标选中格子，在下方导入图片或清空当前格；菱形排列的行列沿两条斜轴展开。默认排列为 1×1。
+- 窗口按设置／绘制／循环预览三列排列，设置独立滚动。绘制区中键平移，绘制与预览分别缩放；预览可移到独立原生窗口，在其他屏幕拖动、放大，关闭后回到右侧。独立预览只读，停靠预览仍可绘制。
+- 平面模式提供 1–32 像素方形铅笔、橡皮及取色，默认开启边缘回绕。每个笔刷像素独立映射，跨斜边和角点的笔触、橡皮也会回到对边；单格编辑回到当前 Tile，多格“编辑整个循环单元”按循环行列落到对应格。关闭回绕后越过循环单元外边界的部分被裁去。
+- 每格独立保存像素，最多 8×8 格；取消素材编号下拉和独立副本按钮。旧工程的共享格在打开时保留图像并分离，超出64张或16 MiB则拒绝打开，当前内容不变。Alt 临时取色。一笔涉及多个 Tile 时整体撤销／重做，历史像素预算为 32 MiB，超出时淘汰最旧记录。此像素笔刷替换 RGBA，不提供压感、柔边混色或写实笔刷。
+- 带高度模式保持可见像素命中与单像素绘制，不使用平面边缘回绕。
+- 平面菱形会遮罩并在 PNG 导出时清除菱形外像素；切回矩形前内存中原有外围像素仍保留。带高度模式保留整张图片，地面菱形尺寸独立设置，底部中心对齐并从后向前绘制。
+- 带高度模式优先编辑最前方非透明像素；空白处按地面格归属，被遮挡区域在左侧编辑。半透明像素也拦截落笔；不支持任意锚点、多层穿插、3D 深度或自动判断建筑结构。
+- 很小的 Tile 或极端高度比例会自动放大预览；绘制范围最多前后各 32 排、左右各 32 格，极端比例可能无法填满视区。项目为未压缩 JSON，读取上限256 MiB，新保存工程格式为3，兼容读取格式1和2。旧程序不能读取格式3。
+- 请保存 .uytile 以保留多 Tile 排列；另存 PNG 不覆盖入口源图片。窗口有未保存内容时关闭会提示，打开其他工程前也可先保存；前一个内容可在本次会话中通过撤销找回。
+
+独立 Photoshop UXP 插件的加载方法与当前限制见 plugins/photoshop-isometric-tile/README.md；它只负责预览，绘画仍由 Photoshop 完成。
+
+### 像素 Tile 快捷键
+
+B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 闭合区域填充；图标互斥选中，悬停显示快捷键。Ctrl+Z 撤销、Ctrl+Y 重做。[ 缩小笔宽、] 增大笔宽，每次 1 像素，范围 1–32；文本输入时不触发。绘制区支持空格＋左键、右键及中键拖动画布。工程保存和打开位于设置顶部。
+
+填充按相同 RGBA 的四邻域查找，循环单元外边界视为未闭合，不跨回绕边界，逻辑范围最多 4194304 像素。框画和填充仅适用于平面模式。
+
+点击像素 Tile 工具栏色块可打开独立拾色窗口，使用 RGB／HSV、六位 HEX（可加 #）及 Alpha 调整绘制颜色。工具栏 Alpha 滑条范围为 0–100%，0% 完全透明、100% 完全不透明；修改会同步到拾色窗口。“恢复原始颜色”恢复打开拾色窗口时的颜色。
+
+### 像素 Tile 图层与拆分导出
+
+导入当前图片作为默认锁定的 BaseLayer，上方自动创建透明绘制层。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，左侧≡手柄拖拽排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除，至少保留一层。
+
+绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。导入图片／清空当前格修改当前层；新建空白／导入当前图片重新建立底图与绘制层，可撤销。预览与PNG采用普通Alpha合成，暂不提供图层混合模式、蒙版或图层不透明度。
+
+多格设置支持2×2、3×3、4×4快捷按钮。点击“拆分导出全部格 PNG”选择文件夹，3×3会导出9张，名称为tile_r01_c01.png等；使用可见层合成并按菱形遮罩裁切，矩形模式保留矩形，带高度模式保留图片轮廓。已有同名文件时拒绝导出，遇到写入失败会报告已完成数量。PNG不保留图层，请另存.uytile工程。
+
+### 像素 Tile 工具栏与背景
+
+绘制工具位于绘制区左上角的竖向悬浮栏：B画笔、I取色、E橡皮、U框画、L直线、G闭合填充。直线在按下处起笔、拖动预览、松开完成，使用当前笔宽／颜色／Alpha并支持平面边缘回绕和整笔撤销；带高度模式不启用直线、框画与填充。工具栏点击不会穿透到画布落笔。
+
+颜色和Alpha保留在绘制区顶部，笔宽提供不同大小方框快捷选项（1／4／8／16／32）及1–32滑条和数值，仍支持[／]调节。图层下方可选择透明棋盘格或自定义背景，色块与HEX可改色，同步绘制区、循环预览及独立预览；背景仅用于显示，不写入PNG，保存在.uytile工程中。

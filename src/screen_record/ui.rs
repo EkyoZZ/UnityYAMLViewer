@@ -12,6 +12,7 @@ pub struct Recorder {
     area: Area,
     pending_select: bool,
     outline: Option<outline::Outline>,
+    outline_editable: bool,
     toolbar: toolbar::View,
     countdown: countdown::Countdown,
     toolbar_actions: Vec<outline::Action>,
@@ -46,6 +47,7 @@ impl Default for Recorder {
             area: screen(false),
             pending_select: false,
             outline: None,
+            outline_editable: false,
             toolbar: toolbar::View::default(),
             countdown: countdown::Countdown::default(),
             toolbar_actions: vec![],
@@ -176,7 +178,7 @@ impl Recorder {
         if let Some(job) = &mut self.job {
             loop {
                 match job.events.try_recv() {
-                    Ok(Event::Countdown(deadline)) => job.countdown = Some(deadline),
+                    Ok(Event::Countdown(ready)) => job.countdown = Some(countdown::Request::new(ready)),
                     Ok(Event::Starting) => job.countdown = None,
                     Ok(Event::Recording) => job.started = Some(Instant::now()),
                     Ok(Event::Stopping) => job.stopping = true,
@@ -195,6 +197,8 @@ impl Recorder {
         }
         if let Some(result) = finished {
             self.job = None;
+            // Keep the recorded area click-through until the user selects a region again.
+            self.outline_editable = false;
             self.open = !self.exit_requested;
             if self.restore {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
@@ -208,7 +212,11 @@ impl Recorder {
                     self.result_open = false;
                 }
                 Err(error) => {
-                    self.error = Some(error);
+                    // A window initialization error may have requested cancellation.
+                    // Keep that original cause rather than replacing it with "canceled".
+                    if self.error.is_none() {
+                        self.error = Some(error);
+                    }
                     self.result_open = true;
                 }
             }
@@ -345,6 +353,7 @@ impl Recorder {
             if let Some(outline) = &mut self.outline {
                 if outline.ready {
                     outline.select(self.area);
+                    self.outline_editable = true;
                     self.pending_select = false;
                 }
             }
@@ -545,6 +554,7 @@ impl Recorder {
     }
     fn sync_outline(&mut self, ctx: &egui::Context, monitors: &[displays::Display]) {
         let busy = self.busy();
+        let recording = self.job.as_ref().is_some_and(|job| job.started.is_some() && !job.stopping);
         let area = self
             .job
             .as_ref()
@@ -619,13 +629,13 @@ impl Recorder {
             result: self.result.clone(),
         };
         let active = (self.open || busy) && area.valid(screen(true));
-        let deadline = self
+        let countdown = self
             .job
-            .as_ref()
+            .as_mut()
             .filter(|job| !job.stopping)
-            .and_then(|job| job.countdown);
-        if let Err(error) = self.countdown.show(ctx, area, deadline) {
-            self.error = Some(error);
+            .and_then(|job| job.countdown.as_mut());
+        if let Err(error) = self.countdown.show(ctx, area, countdown) {
+            self.error = Some(format!("{}\n{error}", tr("无法显示录屏倒计时，请重试。")));
             self.result_open = true;
             self.stop();
         }
@@ -658,12 +668,13 @@ impl Recorder {
             if active {
                 outline.show(
                     area,
-                    editable,
+                    editable && self.outline_editable,
                     !busy
                         && !self.settings_open
                         && !self.history.open
                         && self.missing_tools.is_none()
                         && !self.result_open,
+                    recording,
                 );
             } else {
                 outline.hide();

@@ -14,7 +14,7 @@ pub const FORMAT_GROUPS: &[(&str, &str)] = &[
     ("视频", ".mp4 .m4v .mkv .webm .mov .avi .wmv .flv .mpeg .mpg .ts .mts .m2ts .3gp"),
     ("文本 / 代码", ".cs .txt .md .json .xml .shader .hlsl .cginc .compute .glsl .uxml .uss .asmdef .asmref .meta .csv .tsv .psv .log .ini .toml .js .ts .lua .py .pyw .c .cpp .h .hpp .rs .java .html .css .sh .ps1 .bat .cmd"),
     ("播放列表", ".m3u8 .m3u"),
-    ("编辑工程", ".uyap .uyvp"),
+    ("编辑工程", ".uyap .uyvp .uytile"),
 ];
 
 fn extensions(group: usize) -> Vec<String> {

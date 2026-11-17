@@ -739,6 +739,14 @@ pub(super) fn native_place(
         ) -> i32;
         fn ShowWindow(hwnd: Handle, command: i32) -> i32;
         fn SetWindowRgn(hwnd: Handle, region: Handle, redraw: i32) -> i32;
+        fn GetWindowLongPtrW(hwnd: Handle, index: i32) -> isize;
+        fn GetLayeredWindowAttributes(
+            hwnd: Handle,
+            key: *mut u32,
+            alpha: *mut u8,
+            flags: *mut u32,
+        ) -> i32;
+        fn SetLayeredWindowAttributes(hwnd: Handle, key: u32, alpha: u8, flags: u32) -> i32;
     }
     #[link(name = "gdi32")]
     unsafe extern "system" {
@@ -756,6 +764,22 @@ pub(super) fn native_place(
         GetWindowThreadProcessId(hwnd, &mut process);
         if process != std::process::id() {
             return Err(tr("无法创建可排除捕获的录屏线框。").into());
+        }
+        // winit's mouse passthrough adds WS_EX_LAYERED as well as WS_EX_TRANSPARENT.
+        // A new layered HWND stays invisible until its layered attributes are set.
+        // Keep per-pixel transparency from the renderer; do not add a color key.
+        if GetWindowLongPtrW(hwnd, -20) & 0x80000 != 0 {
+            let (mut key, mut alpha, mut flags) = (0, 0, 0);
+            if GetLayeredWindowAttributes(hwnd, &mut key, &mut alpha, &mut flags) == 0
+                || alpha != 255
+                || flags != 2
+            {
+                if SetLayeredWindowAttributes(hwnd, 0, 255, 2) == 0 {
+                    let error = std::io::Error::last_os_error();
+                    ShowWindow(hwnd, 0);
+                    return Err(error.to_string());
+                }
+            }
         }
         let mut affinity = 0;
         if SetWindowDisplayAffinity(hwnd, 0x11) == 0

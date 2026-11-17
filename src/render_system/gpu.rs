@@ -12,6 +12,7 @@ struct CachedMesh { vertices:Arc<[Vertex]>, indices:Arc<[u32]>, vao:glow::Vertex
 struct Snapshot {scene:Arc<super::scene::Scene>,projection:[[f32;4];4],viewport:[i32;4],style:u64,texture:glow::Texture,framebuffer:glow::Framebuffer,vao:glow::VertexArray}
 pub(crate) struct Gpu {
     video:Option<super::video::Renderer>,
+    image_preview:Option<super::video::Renderer>,
     gl: Arc<glow::Context>,
     programs: HashMap<usize, CachedProgram>,
     textures: HashMap<usize, CachedTexture>,
@@ -185,7 +186,7 @@ impl Gpu {
         let copy=Arc::new(Program{pipeline:super::scene::UnityPipeline::BuiltIn,revision:1,
             vertex:Arc::from("#version 330 core\nout vec2 uv;uniform vec2 preview_scale;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4((p*2.0-1.0)*preview_scale,0.0,1.0);}"),
             fragment:Arc::from("#version 330 core\nin vec2 uv;uniform sampler2D preview_image;out vec4 color;void main(){if(any(lessThan(uv,vec2(0.0)))||any(greaterThan(uv,vec2(1.0))))discard;color=texture(preview_image,uv);}")});
-        Self { video:None,gl, programs: HashMap::new(), textures: HashMap::new(), meshes:HashMap::new(),failed:HashMap::new(),fallback,copy,snapshot:None,warnings:Vec::new() }
+        Self { video:None,image_preview:None,gl, programs: HashMap::new(), textures: HashMap::new(), meshes:HashMap::new(),failed:HashMap::new(),fallback,copy,snapshot:None,warnings:Vec::new() }
     }
 
     unsafe fn mesh(&mut self,draw:&Draw)->Result<glow::VertexArray,String> {
@@ -305,11 +306,16 @@ impl Gpu {
         if self.video.is_none(){self.video=Some(super::video::Renderer::new(&self.gl)?);}
         self.video.as_mut().unwrap().draw(&self.gl,frame,viewport,flip,crop)
     }}
+    pub unsafe fn draw_image_preview(&mut self,frame:&Arc<super::video::Frame>,viewport:[i32;4],crop:[f32;4])->Result<(),String>{unsafe{
+        if self.image_preview.is_none(){self.image_preview=Some(super::video::Renderer::new(&self.gl)?);}
+        self.image_preview.as_mut().unwrap().draw(&self.gl,frame,viewport,[false;2],crop)
+    }}
 
     /// Explicit shutdown avoids GL calls after the context is destroyed.
     pub unsafe fn destroy(&mut self) {
         unsafe {
             if let Some(video)=self.video.take(){video.destroy(&self.gl);}
+            if let Some(renderer)=self.image_preview.take(){renderer.destroy(&self.gl);}
             self.drop_snapshot();
             for (_, entry) in self.programs.drain() { self.gl.delete_program(entry.handle); }
             for (_, entry) in self.textures.drain() { self.gl.delete_texture(entry.handle); }

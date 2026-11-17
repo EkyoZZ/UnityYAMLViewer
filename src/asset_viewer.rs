@@ -4,6 +4,7 @@ use eframe::egui::{self, Color32};
 use egui::emath::GuiRounding as _;
 pub(crate) mod nine_slice;
 mod seamless;
+mod pixel_tile;
 mod sequence;
 mod image_history;
 pub(crate) mod image_info;
@@ -204,11 +205,14 @@ struct ImageTab {
     info:image_info::State,
     editor: nine_slice::Editor,
     seamless: seamless::Editor,
+    pixel_tile: pixel_tile::Editor,
     sequence: sequence::Editor,
     watermark:watermark::Editor,
     original: Option<Arc<image::RgbaImage>>,
     pending: Option<mpsc::Receiver<Loaded>>,
     texture: Option<egui::TextureHandle>,
+    smooth_image:Option<(Arc<image::RgbaImage>,Channel,bool,Arc<crate::render_system::video::Frame>)>,
+    smooth_error:Arc<std::sync::Mutex<Option<String>>>,
     channel: Channel,
     apply_alpha: bool,
     background: ImageBackground,
@@ -218,11 +222,23 @@ struct ImageTab {
     pan: egui::Vec2,
 }
 impl ImageTab {
+    fn smooth_image(&mut self)->Option<Arc<crate::render_system::video::Frame>>{
+        if self.pixelated||!crate::render_system::available(){self.smooth_image=None;return None;}
+        let source=self.original.as_ref()?;
+        if !self.smooth_image.as_ref().is_some_and(|(image,channel,alpha,_)|Arc::ptr_eq(image,source)&&*channel==self.channel&&*alpha==self.apply_alpha){
+            let bytes=source.pixels().flat_map(|pixel|preview_color(self.channel.preview_pixel(pixel.0,self.apply_alpha)).to_array()).collect();
+            let frame=Arc::new(crate::render_system::video::Frame{size:[source.width() as usize,source.height() as usize],bytes,format:crate::render_system::video::Format::RgbaPremultiplied});
+            self.smooth_image=Some((source.clone(),self.channel,self.apply_alpha,frame));
+            *self.smooth_error.lock().unwrap()=None;
+        }
+        self.smooth_image.as_ref().map(|(_,_,_,frame)|frame.clone())
+    }
     fn sampling(&self)->egui::TextureOptions {
         if self.pixelated {egui::TextureOptions::NEAREST}
         else {egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear))}
     }
     fn load(&mut self, path: PathBuf, ctx: egui::Context) {
+        self.smooth_image=None;
         let original = self.original.clone();
         let channel = self.channel;
         let apply_alpha=self.apply_alpha;
@@ -258,6 +274,7 @@ struct NetworkTab {
 
 #[derive(Default)]
 pub struct Assets {
+    pixel_tile: pixel_tile::Editor,
     rtf:rtf_preview::Preview,
     markdown: markdown::Preview,
     command_markdown: markdown::Preview,
@@ -282,6 +299,14 @@ pub struct Assets {
 
 }
 impl Assets {
+    pub fn open_pixel_tile(&mut self,ctx:&egui::Context) {
+        self.pixel_tile.open=true;
+        crate::native_window::wake(ctx,egui::Id::new(("pixel_tile",Path::new(""))));
+    }
+    pub fn open_tile_project(&mut self,path:&Path)->Result<(),String> {
+        self.pixel_tile.open=true;
+        self.pixel_tile.load_project(path)
+    }
     /// Additional browsing frames have a 64 MiB estimated CPU/GPU budget.
     /// The active frame, fallback frame and independent editors are not cache entries.
     fn update_image_cache(&mut self,ctx:&egui::Context,path:&Path) {
@@ -319,14 +344,15 @@ impl Assets {
         for cached in &nearby {
             if Some(cached)==self.displayed_image.as_ref(){continue;}
             if let Some(tab)=self.images.get(cached) {
-                let bytes=tab.original.as_ref().map_or(0,|image|image.as_raw().len().saturating_mul(3));
+                let bytes=tab.original.as_ref().map_or(0,|image|image.as_raw().len().saturating_mul(3))
+                    .saturating_add(tab.smooth_image.as_ref().map_or(0,|(_,_,_,frame)|frame.bytes.len().saturating_mul(2)));
                 if bytes>0&&bytes<=remaining {remaining-=bytes;keep.insert(cached.clone());}
             }
         }
         for (other,tab) in &mut self.images {
             if other!=path&&Some(other)!=self.displayed_image.as_ref()&&!keep.contains(other)
                 &&!tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active()&&!tab.sequence.active()&&!tab.watermark.active() {
-                tab.original=None;tab.texture=None;tab.pending=None;tab.editor.release();
+                tab.original=None;tab.texture=None;tab.smooth_image=None;tab.pending=None;tab.editor.release();
             }
         }
         // Keep one speculative decoder alive even when navigation outruns it.
@@ -417,7 +443,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);self.images.remove(path);if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
+    pub fn forget(&mut self, path: &Path) { if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);if !self.images.get(path).is_some_and(|t|t.pixel_tile.active()){self.images.remove(path);}if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -436,6 +462,7 @@ impl Assets {
         crate::native_window::wake(ctx,egui::Id::new(("nine_slice",path)));true
     }
     pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
+        self.pixel_tile.show(ctx,Path::new(""),None);
         for changed in self.browser.poll_optimization() {
             if let Some(tab) = self.images.get_mut(&changed) {
                 tab.info = Default::default();
@@ -443,6 +470,7 @@ impl Assets {
         }
         self.browser.show_optimization_report(ctx);
         for (path,tab) in &mut self.images {
+            tab.pixel_tile.show(ctx,path,tab.original.as_deref());
             if let Some(original)=&tab.original {tab.sequence.show(ctx,path,original);}
             tab.watermark.show(ctx,path,tab.original.as_ref());
             if !tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active(){
@@ -768,6 +796,10 @@ impl Assets {
                 tab.sequence.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("sequence",path)));
             }
+            if ui.button(crate::localization::tr("像素 Tile")).clicked() {
+                tab.pixel_tile.open=true;
+                crate::native_window::wake(ui.ctx(),egui::Id::new(("pixel_tile",path)));
+            }
             }
         });
         ui.horizontal_wrapped(|ui| {
@@ -817,6 +849,8 @@ impl Assets {
         let tab=self.images.get_mut(display_path).expect("displayed image tab");
         let Some(texture) = &tab.texture else { ui.spinner(); return; };
         let size = texture.size_vec2();
+        let texture_id=texture.id();
+        let smooth_image=tab.smooth_image();
         let (canvas, response) = ui.allocate_exact_size(egui::vec2(available.width(),available.height()-strip_height).max(egui::vec2(1.0,1.0)), egui::Sense::drag());
         let pixels_per_point=ui.ctx().pixels_per_point();
         let mut zoom = tab.zoom.unwrap_or_else(|| {
@@ -866,8 +900,13 @@ impl Assets {
                 background.add_colored_rect(visible,Color32::from_rgb(color[0],color[1],color[2]));
                 painter.add(egui::Shape::mesh(background));
             }
-            painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0,1.0)), Color32::WHITE);
+            if let Some(frame)=smooth_image {
+                painter.add(crate::render_system::image_preview::callback(rect,visible,frame,tab.smooth_error.clone()));
+            }else{
+                painter.image(texture_id, rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0,1.0)), Color32::WHITE);
+            }
         }
+        if let Some(error)=tab.smooth_error.lock().unwrap().as_ref(){ui.colored_label(ui.visuals().error_fg_color,error);}
         let info = format!("{} × {} · {} {:.0}%", size.x as usize, size.y as usize, tab.channel.label(), zoom * 100.0);
         let info = if browsing {
             self.browser.position(display_path).map_or_else(||info.clone(),|(index,total)|format!("{index}/{total} · {info}"))

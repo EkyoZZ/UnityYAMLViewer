@@ -1,4 +1,8 @@
 设置	設定	Settings	設定	설정	Einstellungen	Paramètres
+无音轨	無音軌	No audio	音声なし	오디오 없음	Keine Audiospur	Sans audio
+无字幕	無字幕	No subtitles	字幕なし	자막 없음	Keine Untertitel	Sans sous-titres
+音轨{0}	音軌{0}	Audio {0}	音声{0}	오디오 {0}	Audiospur {0}	Piste audio {0}
+字幕{0}	字幕{0}	Subtitles {0}	字幕{0}	자막 {0}	Untertitel {0}	Sous-titres {0}
 请先确认正在输入的值，再拖动关键帧。	請先確認正在輸入的值，再拖曳關鍵影格。	Confirm pending input before dragging keyframes.	入力中の値を確定してからキーフレームをドラッグしてください。	입력 중인 값을 확정한 후 키프레임을 드래그하세요.	Aktuelle Eingabe bestätigen, bevor Keyframes verschoben werden.	Validez la saisie en cours avant de déplacer les images clés.
 点击选择 · Ctrl / Shift 多选 · 空白处拖动框选 · 拖动选中关键帧按帧移动	點擊選取 · Ctrl / Shift 多選 · 空白處拖曳框選 · 拖曳所選關鍵影格逐格移動	Click to select · Ctrl / Shift for multiple selection · Drag empty space to box-select · Drag selected keys to snap to frames	クリックで選択 · Ctrl / Shift で複数選択 · 空白をドラッグで範囲選択 · キーをドラッグでフレーム単位移動	클릭 선택 · Ctrl / Shift 다중 선택 · 빈 공간 드래그로 영역 선택 · 선택한 키를 프레임 단위로 드래그	Klicken zum Auswählen · Ctrl / Shift für Mehrfachauswahl · Leeren Bereich ziehen für Rahmenauswahl · Ausgewählte Keys auf Frames ziehen	Cliquer pour sélectionner · Ctrl / Shift pour sélection multiple · Glisser dans le vide pour sélectionner une zone · Glisser les clés avec alignement sur les images
 按 Shader 声明区分 Color 和 Vector4；无法确认类型时以只读四分量显示。	依 Shader 宣告區分 Color 與 Vector4；無法確認類型時以唯讀四分量顯示。	Color and Vector4 follow Shader declarations; unverified types show four read-only components.	Shader 宣言で Color と Vector4 を区別。型が不明な場合は4成分を読み取り専用で表示します。	Shader 선언에 따라 Color와 Vector4를 구분합니다. 확인되지 않은 유형은 읽기 전용 4성분으로 표시합니다.	Color und Vector4 gemäß Shader-Deklaration; unbestätigte Typen als vier schreibgeschützte Komponenten.	Color et Vector4 selon la déclaration du Shader ; types non vérifiés affichés en quatre composantes en lecture seule.
@@ -1926,6 +1930,7 @@ SSA 的描边与阴影共用背景颜色；透明度使用原格式 AlphaLevel�
 直接压缩保存视频，不缓存序列帧图片。当前仅录制画面，不包含声音。	直接壓縮儲存影片，不快取序列影格圖片。目前僅錄製畫面，不含聲音。	Compress directly to video without caching frame images. Video only; no audio.	連番画像を保存せず動画に直接圧縮します。現在は映像のみで音声は含みません。	프레임 이미지를 캐시하지 않고 동영상으로 직접 압축합니다. 현재 영상만 녹화하며 소리는 포함하지 않습니다.	Direkt als Video komprimieren, ohne Einzelbildcache. Derzeit nur Bild, ohne Ton.	Compression directe en vidéo, sans cache d’images. Image uniquement, sans son.
 Ctrl+Shift+F9 停止录制（其他窗口中也可使用）。	Ctrl+Shift+F9 停止錄製（其他視窗中也可使用）。	Ctrl+Shift+F9 stops recording, even in other windows.	Ctrl+Shift+F9 で録画停止（他のウィンドウでも使用可能）。	Ctrl+Shift+F9로 녹화를 중지합니다. 다른 창에서도 사용할 수 있습니다.	Ctrl+Shift+F9 beendet die Aufnahme, auch in anderen Fenstern.	Ctrl+Shift+F9 arrête l’enregistrement, même dans une autre fenêtre.
 录屏已取消	錄屏已取消	Recording canceled	録画をキャンセルしました	녹화 취소됨	Aufnahme abgebrochen	Enregistrement annulé
+无法显示录屏倒计时，请重试。	無法顯示錄影倒數，請重試。	Cannot display the recording countdown. Please try again.	録画のカウントダウンを表示できません。もう一度お試しください。	녹화 카운트다운을 표시할 수 없습니다. 다시 시도해 주세요.	Der Aufnahme-Countdown kann nicht angezeigt werden. Bitte erneut versuchen.	Impossible d’afficher le compte à rebours de l’enregistrement. Veuillez réessayer.
 录制区域超出桌面范围，请重新设置。	錄製區域超出桌面範圍，請重新設定。	The recording region is outside the desktop. Adjust it.	録画範囲がデスクトップ外です。設定し直してください。	녹화 영역이 바탕 화면 범위를 벗어났습니다. 다시 설정하세요.	Aufnahmebereich liegt außerhalb des Desktops. Bitte anpassen.	La zone dépasse le bureau. Veuillez la modifier.
 录屏收尾超时，文件可能不完整。	錄屏收尾逾時，檔案可能不完整。	Finalization timed out. The file may be incomplete.	録画の終了処理がタイムアウトしました。ファイルが不完全な可能性があります。	녹화 마무리 시간이 초과되었습니다. 파일이 불완전할 수 있습니다.	Zeitüberschreitung beim Abschließen. Die Datei ist möglicherweise unvollständig.	Délai de finalisation dépassé. Le fichier peut être incomplet.
 录屏失败；若已生成文件，请检查其完整性。	錄屏失敗；若已產生檔案，請檢查其完整性。	Recording failed. Check any resulting file for completeness.	録画に失敗しました。生成されたファイルの完全性を確認してください。	녹화에 실패했습니다. 생성된 파일이 있다면 완전한지 확인하세요.	Aufnahme fehlgeschlagen. Erzeugte Datei auf Vollständigkeit prüfen.	Échec de l’enregistrement. Vérifiez l’intégrité du fichier éventuel.
@@ -2005,3 +2010,77 @@ Ctrl+Shift+F9 停止录制（其他窗口中也可使用）。	Ctrl+Shift+F9 停
 写入错误日志失败	寫入錯誤日誌失敗	Failed to write error log	エラーログの書き込みに失敗	오류 로그 기록 실패	Fehlerprotokoll konnte nicht geschrieben werden	Échec d’écriture du journal d’erreurs
 
 正在启动录屏…	正在啟動錄影…	Starting recording…	録画を開始しています…	녹화 시작 중…	Aufnahme wird gestartet…	Démarrage de l’enregistrement…
+像素 Tile	像素 Tile	Pixel Tile	ピクセル Tile	픽셀 Tile	Pixel-Tile	Tile pixel
+画布尺寸	畫布尺寸	Canvas size	キャンバスサイズ	캔버스 크기	Leinwandgröße	Taille du canevas
+新建空白	新增空白	New blank	空白を作成	빈 캔버스	Neue leere Fläche	Nouveau canevas vide
+导入当前图片	匯入目前圖片	Import current image	現在の画像を取り込む	현재 이미지 가져오기	Aktuelles Bild importieren	Importer l’image actuelle
+另存 PNG	另存 PNG	Save PNG as	PNG を別名保存	PNG로 다른 이름 저장	PNG speichern unter	Enregistrer PNG sous
+请另存到其他文件，保留源图片。	請另存為其他檔案，保留來源圖片。	Save to another file to preserve the source image.	元画像を保持するため別ファイルに保存してください。	원본을 보존하려면 다른 파일로 저장하세요.	Zum Erhalten des Quellbilds in einer anderen Datei speichern.	Enregistrez dans un autre fichier pour conserver l’image source.
+菱形平铺	菱形平鋪	Diamond tiling	ひし形タイル	마름모 타일링	Rautenraster	Pavage en losanges
+带高度 Tile	帶高度 Tile	Raised Tile	高さのある Tile	높이가 있는 Tile	Tile mit Höhe	Tile avec hauteur
+绘制缩放	繪製縮放	Drawing zoom	描画倍率	그리기 배율	Zeichenzoom	Zoom de dessin
+预览缩放	預覽縮放	Preview zoom	プレビュー倍率	미리보기 배율	Vorschauzoom	Zoom d’aperçu
+地面菱形尺寸	地面菱形尺寸	Ground diamond size	地面のひし形サイズ	바닥 마름모 크기	Größe der Bodenraute	Taille du losange au sol
+有未保存的绘制，是否关闭？	有未儲存的繪製，是否關閉？	Close with unsaved artwork?	未保存の描画があります。閉じますか？	저장하지 않은 그림이 있습니다. 닫을까요?	Mit ungespeicherter Zeichnung schließen?	Fermer avec des dessins non enregistrés ?
+放弃修改并关闭	放棄修改並關閉	Discard and close	変更を破棄して閉じる	변경 사항 버리고 닫기	Verwerfen und schließen	Abandonner et fermer
+继续编辑	繼續編輯	Continue editing	編集を続ける	계속 편집	Weiter bearbeiten	Continuer à modifier
+多 Tile 循环	多 Tile 循環	Multi-Tile repeat	複数 Tile の繰り返し	여러 Tile 반복	Mehrere Tiles wiederholen	Répétition de plusieurs Tiles
+添加空白 Tile	新增空白 Tile	Add blank Tile	空白 Tile を追加	빈 Tile 추가	Leeres Tile hinzufügen	Ajouter un Tile vide
+导入 Tile 图片	匯入 Tile 圖片	Import Tile image	Tile 画像を取り込む	Tile 이미지 가져오기	Tile-Bild importieren	Importer une image Tile
+Tile 尺寸必须与当前画布一致。	Tile 尺寸必須與目前畫布一致。	Tile dimensions must match the current canvas.	Tile の寸法は現在のキャンバスと一致する必要があります。	Tile 크기는 현재 캔버스와 같아야 합니다.	Die Tile-Größe muss der aktuellen Leinwand entsprechen.	Les dimensions du Tile doivent correspondre au canevas actuel.
+循环列数	循環欄數	Repeat columns	繰り返し列数	반복 열 수	Wiederholungsspalten	Colonnes de répétition
+循环行数	循環列數	Repeat rows	繰り返し行数	반복 행 수	Wiederholungszeilen	Lignes de répétition
+点击格子放入当前选中的 Tile	點擊格子放入目前選取的 Tile	Click a cell to place the selected Tile	セルをクリックして選択中の Tile を配置	셀을 클릭해 선택한 Tile 배치	Zelle anklicken, um das ausgewählte Tile einzusetzen	Cliquez sur une case pour placer le Tile sélectionné
+已保存当前 Tile；多 Tile 排列请保存工程。	已儲存目前 Tile；多 Tile 排列請儲存專案。	Current Tile saved; save the project to keep the Tile arrangement.	現在の Tile を保存しました。配置はプロジェクトで保存してください。	현재 Tile 저장됨. Tile 배열은 프로젝트로 저장하세요.	Aktuelles Tile gespeichert; für die Anordnung das Projekt speichern.	Tile actuel enregistré ; enregistrez le projet pour conserver la disposition.
+保存 Tile 工程	儲存 Tile 專案	Save Tile project	Tile プロジェクトを保存	Tile 프로젝트 저장	Tile-Projekt speichern	Enregistrer le projet Tile
+打开 Tile 工程	開啟 Tile 專案	Open Tile project	Tile プロジェクトを開く	Tile 프로젝트 열기	Tile-Projekt öffnen	Ouvrir un projet Tile
+无效的 Tile 工程或超出尺寸限制。	無效的 Tile 專案或超出尺寸限制。	Invalid Tile project or size limit exceeded.	Tile プロジェクトが無効かサイズ制限を超えています。	잘못된 Tile 프로젝트이거나 크기 제한을 초과했습니다.	Ungültiges Tile-Projekt oder Größenlimit überschritten.	Projet Tile invalide ou limite de taille dépassée.
+两侧均可绘制，平铺区支持跨格落笔；同编号同步。Alt 取色，中键平移单图；偶数边长 2–1024。带高度模式编辑最前方可见像素；空白处按地面格归属。	兩側皆可繪製，平鋪區支援跨格落筆；相同編號同步。Alt 取色，中鍵平移單圖；偶數邊長 2–1024。帶高度模式編輯最前方可見像素；空白處依地面格歸屬。	Draw in either pane, across repeat cells; matching IDs update together. Alt picks color; middle-drag pans the single image. Even sides: 2–1024. Raised mode edits frontmost visible pixels; empty areas use the ground cell.	両側で描画でき、繰り返し領域ではセルをまたげます。同じ番号は同期します。Alt で色を取得、中ボタンドラッグで単画像を移動。辺長は偶数の 2–1024。高さモードは最前面の可視ピクセル、空白は地面セルを編集します。	양쪽에서 그리며 반복 셀 경계를 넘을 수 있습니다. 같은 번호는 함께 갱신됩니다. Alt로 색 추출, 가운데 드래그로 단일 이미지 이동. 변 길이는 짝수 2–1024. 높이 모드는 맨 앞의 보이는 픽셀, 빈 곳은 바닥 셀을 편집합니다.	In beiden Ansichten und über Zellgrenzen zeichnen; gleiche Nummern werden synchronisiert. Alt nimmt Farbe auf, mittlere Maustaste verschiebt das Einzelbild. Gerade Seiten: 2–1024. Höhenmodus bearbeitet vorderste sichtbare Pixel, leere Bereiche die Bodenzelle.	Dessinez dans les deux vues et au-delà des cases ; les mêmes numéros sont synchronisés. Alt prélève une couleur, le bouton central déplace l’image seule. Côtés pairs : 2–1024. Le mode hauteur modifie les pixels visibles au premier plan ; les zones vides suivent la case au sol.
+
+取色	取色	Pick color	色を取得	색 추출	Farbe aufnehmen	Prélever une couleur
+
+网格	網格	Grid	グリッド	격자	Raster	Grille
+将每格设为独立副本	將每格設為獨立副本	Make each cell independent	各セルを独立した複製にする	각 셀을 독립 복사본으로 만들기	Jede Zelle unabhängig kopieren	Créer une copie indépendante par case
+保留各格图像并分离共享引用，可撤销；像素总量上限 16 MiB。	保留各格影像並分離共用參照，可復原；像素總量上限 16 MiB。	Keep each cell’s image and separate shared references; undoable. Pixel data limit: 16 MiB.	各セルの画像を保持し共有参照を分離します。取り消し可能。ピクセルデータ上限は 16 MiB。	각 셀 이미지를 유지하고 공유 참조를 분리합니다. 실행 취소 가능. 픽셀 데이터 한도: 16 MiB.	Behält Zellbilder bei und trennt gemeinsame Referenzen; rückgängig machbar. Pixeldatenlimit: 16 MiB.	Conserve les images et sépare les références partagées ; annulable. Limite des pixels : 16 Mio.
+边缘回绕	邊緣回繞	Wrap at edges	境界で回り込む	경계 감싸기	An Kanten umbrechen	Boucler aux bords
+编辑整个循环单元	編輯整個循環單元	Edit the whole repeat unit	繰り返し単位全体を編集	전체 반복 단위 편집	Gesamte Wiederholung bearbeiten	Modifier l’unité de répétition entière
+方形画笔尺寸	方形筆刷尺寸	Square brush size	四角いブラシのサイズ	사각 브러시 크기	Quadratische Pinselgröße	Taille du pinceau carré
+独立预览窗口	獨立預覽視窗	Separate preview window	独立プレビューウィンドウ	별도 미리보기 창	Separates Vorschaufenster	Fenêtre d’aperçu séparée
+边缘回绕覆盖整个方形笔刷；单格编辑回到本 Tile，循环单元编辑按行列回到对应格。	邊緣回繞涵蓋整個方形筆刷；單格編輯回到本 Tile，循環單元編輯依行列回到對應格。	The entire square brush wraps. Single-cell editing wraps to this Tile; whole-unit editing wraps to the corresponding row and column.	四角いブラシ全体が回り込みます。単一セル編集ではこの Tile、単位全体の編集では対応する行列セルに戻ります。	사각 브러시 전체가 감싸집니다. 단일 셀 편집은 현재 Tile로, 전체 단위 편집은 대응 행과 열의 셀로 돌아갑니다.	Der gesamte quadratische Pinsel wird umgebrochen. Einzelzellen kehren zu diesem Tile zurück, ganze Einheiten zur entsprechenden Zeile und Spalte.	Le pinceau carré entier boucle. Une case revient à ce Tile ; l’unité entière revient à la ligne et colonne correspondantes.
+同编号副本同步；Alt 取色，中键平移绘制区。带高度模式不使用平面回绕；独立预览窗口只读。	相同編號副本同步；Alt 取色，中鍵平移繪製區。帶高度模式不使用平面回繞；獨立預覽視窗唯讀。	Matching IDs update together. Alt picks color; middle-drag pans the drawing area. Raised mode has no planar wrapping; separate previews are read-only.	同番号は同期します。Alt で色取得、中ボタンで描画領域を移動。高さモードは平面回り込みなし。独立プレビューは読み取り専用です。	같은 번호는 함께 갱신됩니다. Alt로 색 추출, 가운데 드래그로 그리기 영역 이동. 높이 모드는 평면 감싸기를 사용하지 않으며 별도 미리보기는 읽기 전용입니다.	Gleiche Nummern sind synchron. Alt nimmt Farbe auf; mittlere Maustaste verschiebt die Zeichenfläche. Höhenmodus ohne Flächenumbruch; separate Vorschau nur lesbar.	Les mêmes numéros se synchronisent. Alt prélève une couleur ; le bouton central déplace le dessin. Le mode hauteur ne boucle pas le plan ; l’aperçu séparé est en lecture seule.
+绘制区	繪製區	Drawing area	描画領域	그리기 영역	Zeichenfläche	Zone de dessin
+循环预览	循環預覽	Repeat preview	繰り返しプレビュー	반복 미리보기	Wiederholungsvorschau	Aperçu de répétition
+预览已移至独立窗口	預覽已移至獨立視窗	Preview moved to a separate window	プレビューを独立ウィンドウに移動しました	미리보기가 별도 창으로 이동했습니다	Vorschau in separates Fenster verschoben	Aperçu déplacé dans une fenêtre séparée
+回到右侧预览	回到右側預覽	Return preview to the right	プレビューを右側に戻す	미리보기를 오른쪽으로 돌리기	Vorschau rechts wiederherstellen	Replacer l’aperçu à droite
+
+画笔	畫筆	Brush	ブラシ	브러시	Pinsel	Pinceau
+
+框画	框畫	Rectangle	矩形描画	사각형 그리기	Rechteck	Rectangle
+填充	填滿	Fill	塗りつぶし	채우기	Füllen	Remplir
+仅填充闭合区域	僅填滿封閉區域	Fill enclosed regions only	閉じた領域のみ塗りつぶす	닫힌 영역만 채우기	Nur geschlossene Bereiche füllen	Remplir uniquement les zones fermées
+区域未闭合，未执行填充。	區域未封閉，未執行填滿。	Region is not enclosed; nothing filled.	領域が閉じていないため塗りつぶしません。	닫히지 않은 영역은 채우지 않습니다.	Bereich ist nicht geschlossen; nicht gefüllt.	Zone non fermée ; aucun remplissage.
+填充区域过大，请缩小循环范围。	填滿區域過大，請縮小循環範圍。	Fill area is too large; reduce the repeat unit.	領域が大きすぎます。繰り返し範囲を小さくしてください。	채우기 영역이 너무 큽니다. 반복 범위를 줄이세요.	Füllbereich zu groß; Wiederholungsbereich verkleinern.	Zone trop grande ; réduisez l’unité répétée.
+
+绘制颜色	繪製顏色	Drawing color	描画色	그리기 색상	Zeichenfarbe	Couleur de dessin
+
+当前格	目前格	Selected cell	選択セル	선택한 셀	Ausgewählte Zelle	Case sélectionnée
+导入图片	匯入圖片	Import image	画像を読み込む	이미지 가져오기	Bild importieren	Importer une image
+清空当前格	清空目前格	Clear selected cell	選択セルを消去	선택한 셀 비우기	Ausgewählte Zelle leeren	Vider la case sélectionnée
+格子独立副本超出64张或16 MiB限制，请减少行列或缩小画布。	格子獨立副本超過64張或16 MiB限制，請減少行列或縮小畫布。	Independent cells exceed 64 images or 16 MiB. Reduce the grid or canvas size.	独立セルが64枚または16 MiBを超えます。行列またはキャンバスを小さくしてください。	독립 셀이 64개 또는 16 MiB를 초과합니다. 격자나 캔버스를 줄이세요.	Unabhängige Zellen überschreiten 64 Bilder oder 16 MiB. Raster oder Leinwand verkleinern.	Les cases indépendantes dépassent 64 images ou 16 MiB. Réduisez la grille ou la toile.
+
+添加图层	新增圖層	Add layer	レイヤーを追加	레이어 추가	Ebene hinzufügen	Ajouter un calque
+删除图层	刪除圖層	Delete layer	レイヤーを削除	레이어 삭제	Ebene löschen	Supprimer le calque
+锁定图层	鎖定圖層	Lock layer	レイヤーをロック	레이어 잠금	Ebene sperren	Verrouiller le calque
+解锁图层	解鎖圖層	Unlock layer	レイヤーのロックを解除	레이어 잠금 해제	Ebene entsperren	Déverrouiller le calque
+显示或隐藏图层	顯示或隱藏圖層	Show or hide layer	レイヤーを表示・非表示	레이어 표시/숨기기	Ebene ein-/ausblenden	Afficher ou masquer le calque
+拖拽调整图层顺序	拖曳調整圖層順序	Drag to reorder layers	ドラッグしてレイヤーを並べ替え	드래그하여 레이어 순서 변경	Zum Sortieren der Ebenen ziehen	Glisser pour réordonner les calques
+当前图层已锁定或隐藏，不能绘制。	目前圖層已鎖定或隱藏，無法繪製。	This layer is locked or hidden and cannot be painted.	このレイヤーはロック中または非表示のため描画できません。	현재 레이어가 잠겼거나 숨겨져 그릴 수 없습니다.	Diese Ebene ist gesperrt oder ausgeblendet und kann nicht bemalt werden.	Ce calque est verrouillé ou masqué et ne peut pas être peint.
+当前图层已锁定，请先解锁或选择其他图层。	目前圖層已鎖定，請先解鎖或選擇其他圖層。	Unlock this layer or select another layer first.	ロックを解除するか別のレイヤーを選択してください。	잠금을 해제하거나 다른 레이어를 선택하세요.	Ebene zuerst entsperren oder eine andere wählen.	Déverrouillez ce calque ou sélectionnez-en un autre.
+图层像素总量超过32 MiB限制。	圖層像素總量超過32 MiB限制。	Layer pixels exceed the 32 MiB limit.	レイヤーのピクセル量が32 MiBの上限を超えています。	레이어 픽셀이 32 MiB 제한을 초과합니다.	Die Ebenenpixel überschreiten das Limit von 32 MiB.	Les pixels des calques dépassent la limite de 32 MiB.
+拆分导出全部格 PNG	拆分匯出全部格 PNG	Export all cells as PNG	すべてのセルを個別PNGに書き出す	모든 셀을 PNG로 분할 내보내기	Alle Zellen als PNG exportieren	Exporter toutes les cases en PNG
+目标文件已存在，请选择其他文件夹。	目標檔案已存在，請選擇其他資料夾。	Target files already exist. Choose another folder.	保存先に同名ファイルがあります。別のフォルダーを選んでください。	대상 파일이 이미 있습니다. 다른 폴더를 선택하세요.	Zieldateien existieren bereits. Anderen Ordner wählen.	Les fichiers existent déjà. Choisissez un autre dossier.
+
+直线	直線	Line	直線	직선	Linie	Ligne
+透明（棋盘格）	透明（棋盤格）	Transparent (checkerboard)	透明（市松模様）	투명 (체커보드)	Transparent (Schachbrett)	Transparent (damier)
+自定义颜色	自訂顏色	Custom color	カスタムカラー	사용자 지정 색상	Benutzerdefinierte Farbe	Couleur personnalisée
+预览背景色	預覽背景色	Preview background color	プレビュー背景色	미리보기 배경색	Vorschau-Hintergrundfarbe	Couleur de fond de l’aperçu

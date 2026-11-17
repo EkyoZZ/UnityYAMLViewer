@@ -259,6 +259,8 @@ impl AudioSettings {
 
 #[derive(Default)]
 pub struct Action {
+    pub audio_track: Option<Option<crate::media_preview::edit_audio::Source>>,
+    pub subtitle_track: Option<Option<crate::media_preview::edit_audio::Source>>,
     pub frame_step: isize,
     pub seek: Option<f64>,
     pub manual_seek: bool,
@@ -273,6 +275,10 @@ pub struct Action {
 }
 
 pub struct AudioView<'a> {
+    pub edit_audio: Option<&'a crate::media_preview::edit_audio::Source>,
+    pub audio_preview_disabled: bool,
+    pub edit_subtitle: Option<&'a crate::media_preview::edit_audio::Source>,
+    pub audio_tracks: &'a [crate::media_preview::AudioTrack],
     pub fps: f64,
     pub video_texture: Option<&'a egui::TextureHandle>,
     pub video_frame:Option<&'a std::sync::Arc<crate::render_system::video::Frame>>,
@@ -288,6 +294,7 @@ pub struct AudioView<'a> {
 }
 
 impl Trim {
+    pub(crate) fn preview_tracks(&self)->&[crate::export_tracks::Track]{&self.video_tracks.entries}
     pub(crate) fn set_burn_snapshot(&mut self,render:crate::subtitle_player::Render){self.video_settings.burn_subtitle=Some(render.path().to_owned());self.video_settings.burn_snapshot=Some(render);}
     pub fn playback_ranges(&self) -> Option<Vec<(f64, f64)>> {
         if !self.trim_playback { return None; }
@@ -616,11 +623,23 @@ impl Trim {
                 if video {
                     egui::TopBottomPanel::bottom("video_edit_timeline").exact_height(88.0).resizable(false).show_inside(ui,|ui|{
                         ui.add_enabled_ui(self.pending.is_none(),|ui|{
-                            if let Some((position, dragging)) = crate::media_preview::paint_video_edit_timeline(ui,position,duration,&mut self.start,&mut self.end,view.playing,view.fps,view.frame_times,self.boundary_locks) {
+                            use crate::media_preview::edit_audio::{self,Source};
+                            let choices=edit_audio::choices(path,view.audio_tracks,&self.video_tracks.entries,!self.video_tracks.ready());
+                            let native=audio.map(|index|Source::new(path,index));
+                            let previous=if view.audio_preview_disabled {None}else{view.edit_audio.cloned().or_else(||native.clone())};
+                            let mut selected_audio=if view.audio_preview_disabled {None}else{edit_audio::reconcile(previous.clone(),native,&choices)};
+                            let same_audio=selected_audio==previous;
+                            let subtitle_choices=edit_audio::subtitle_choices(&self.video_tracks.entries);
+                            let mut selected_subtitle=view.edit_subtitle.cloned().filter(|source|subtitle_choices.iter().any(|choice|&choice.source==source));
+                            let timeline_audio=crate::media_preview::TimelineAudio{tracks:&choices,selected:&mut selected_audio,wave:if same_audio && !view.audio_preview_disabled{view.wave}else{None},error:if same_audio && !view.audio_preview_disabled{view.wave_error}else{None}};
+                            let timeline_subtitles=crate::media_preview::TimelineSubtitles{tracks:&subtitle_choices,selected:&mut selected_subtitle};
+                            if let Some((position, dragging)) = crate::media_preview::paint_video_edit_timeline(ui,position,duration,&mut self.start,&mut self.end,view.playing,view.fps,view.frame_times,self.boundary_locks,timeline_audio,timeline_subtitles) {
                                 action.manual_seek = true;
                                 if dragging { action.scrub = Some(position); }
                                 else { action.seek = Some(position); }
                             }
+                            if selected_audio!=previous {action.audio_track=Some(selected_audio);}
+                            if selected_subtitle.as_ref()!=view.edit_subtitle {action.subtitle_track=Some(selected_subtitle);}
                         });
                     });
                 }

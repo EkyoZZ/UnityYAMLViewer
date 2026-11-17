@@ -1,0 +1,2 @@
+# Optional legacy archives are local build artifacts, not source files.
+/dist/

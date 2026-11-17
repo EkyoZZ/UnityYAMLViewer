@@ -6,6 +6,9 @@ const LANGUAGES:&[(&str,&str)]=&[("und","未标注语言"),("zho","中文"),("cm
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Track {pub path:PathBuf,pub index:u64,pub subtitle:bool,pub codec:String,pub language:String,pub title:String,pub enabled:bool,pub default:bool,pub forced:bool}
+pub(crate) fn numbered_label(subtitle:bool,number:usize)->String {
+    tr(if subtitle{"字幕{0}"}else{"音轨{0}"}).replace("{0}",&number.to_string())
+}
 impl Track {
     pub fn subtitle_encoder(&self,container:usize)->Option<&'static str>{
         let text=matches!(self.codec.as_str(),"subrip"|"ass"|"ssa"|"webvtt"|"mov_text"|"text");
@@ -92,10 +95,14 @@ impl Tracks {
         if container==5 {ui.small(tr("此容器最多导出一条音轨。"));}
         if matches!(container,3|4|5){ui.small(tr("部分语言标签可能无法被此容器保留；需要完整语言标记时建议使用 MKV 或 MP4。"));}
         let mut remove=None;
+        let mut audio_ordinal=0;
+        let mut subtitle_ordinal=0;
         for (index,track) in self.entries.iter_mut().enumerate(){ui.push_id(index,|ui|{
+            if track.subtitle {subtitle_ordinal+=1;}else{audio_ordinal+=1;}
             let supported=track.supported(container);
             ui.horizontal(|ui| {
-                ui.checkbox(&mut track.enabled, tr(if track.subtitle { "字幕" } else { "音轨" }));
+                let label=numbered_label(track.subtitle,if track.subtitle{subtitle_ordinal}else{audio_ordinal});
+                ui.checkbox(&mut track.enabled, label);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("×").on_hover_text(tr("从导出列表移除，不修改原文件。")).clicked() {
                         remove = Some(index);

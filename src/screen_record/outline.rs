@@ -1,4 +1,4 @@
-//! Native green region frame and pointer selection; controls are app-rendered viewports.
+//! Native region frame and pointer selection; controls are app-rendered viewports.
 pub(super) use super::toolbar::{Action, Toolbar};
 use super::{Area, screen};
 use eframe::egui;
@@ -8,6 +8,7 @@ struct Target {
     area: Area,
     editable: bool,
     escape_enabled: bool,
+    recording: bool,
 }
 enum Command {
     Show(Target),
@@ -98,7 +99,7 @@ impl Outline {
         }
         area
     }
-    pub fn show(&mut self, area: Area, editable: bool, escape_enabled: bool) {
+    pub fn show(&mut self, area: Area, editable: bool, escape_enabled: bool, recording: bool) {
         if self.selecting {
             return;
         }
@@ -106,6 +107,7 @@ impl Outline {
             area,
             editable,
             escape_enabled,
+            recording,
         };
         if self.last != Some(target) || !self.visible {
             let _ = self.commands.send(Command::Show(target));
@@ -148,6 +150,9 @@ mod native {
         time::Duration,
     };
     type Handle = *mut c_void;
+    // COLORREF stores red in the low byte.
+    const READY_COLOR: u32 = 0x0050d020;
+    const RECORDING_COLOR: u32 = 0x004444ef;
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
     struct Rect {
@@ -275,6 +280,9 @@ mod native {
         fn GetWindowDisplayAffinity(hwnd: Handle, affinity: *mut u32) -> i32;
         fn ShowWindow(hwnd: Handle, command: i32) -> i32;
         fn GetWindowRect(hwnd: Handle, rect: *mut Rect) -> i32;
+        fn GetClientRect(hwnd: Handle, rect: *mut Rect) -> i32;
+        fn FillRect(dc: Handle, rect: *const Rect, brush: Handle) -> i32;
+        fn InvalidateRect(hwnd: Handle, rect: *const Rect, erase: i32) -> i32;
         fn GetCursorPos(point: *mut Point) -> i32;
         fn GetAsyncKeyState(key: i32) -> i16;
         fn GetSystemMetrics(index: i32) -> i32;
@@ -422,6 +430,7 @@ mod native {
         rebuilding_region: bool,
         visible: bool,
         escape_enabled: bool,
+        recording: bool,
         events: mpsc::Sender<Event>,
         ctx: egui::Context,
     }
@@ -735,6 +744,24 @@ mod native {
             if pointer.is_null() {
                 return DefWindowProcW(hwnd, message, wparam, lparam);
             }
+            if message == 0x14 && hwnd == (*pointer).border {
+                // WM_ERASEBKGND: repaint the hollow frame with its current recording state.
+                let mut rect = Rect::default();
+                if GetClientRect(hwnd, &mut rect) != 0 {
+                    let brush = CreateSolidBrush(if (*pointer).recording {
+                        RECORDING_COLOR
+                    } else {
+                        READY_COLOR
+                    });
+                    if !brush.is_null() {
+                        let painted = FillRect(wparam as Handle, &rect, brush);
+                        DeleteObject(brush);
+                        if painted != 0 {
+                            return 1;
+                        }
+                    }
+                }
+            }
             if message == 0x84 && hwnd == (*pointer).border {
                 if !(*pointer).editable || (*pointer).selecting {
                     return -1;
@@ -965,7 +992,7 @@ mod native {
                 );
             }
             let instance = GetModuleHandleW(null());
-            let brush = CreateSolidBrush(0x0050d020);
+            let brush = CreateSolidBrush(READY_COLOR);
             let class: Vec<u16> = format!(
                 "UnityYAMLViewer.RecordingFrame.{}.{}\0",
                 std::process::id(),
@@ -1042,6 +1069,7 @@ mod native {
                 rebuilding_region: false,
                 visible: false,
                 escape_enabled: true,
+                recording: false,
                 events: events.clone(),
                 ctx: ctx.clone(),
             });
@@ -1074,6 +1102,10 @@ mod native {
                             state.visible = true;
                             state.selecting = false;
                             state.escape_enabled = target.escape_enabled;
+                            if state.recording != target.recording {
+                                state.recording = target.recording;
+                                InvalidateRect(state.border, null(), 1);
+                            }
                             release_drag(&raw mut *state);
                             ShowWindow(state.shield, 0);
                             style(&raw mut *state, target.editable);
@@ -1082,6 +1114,8 @@ mod native {
                         }
                         Ok(Command::Select(fallback)) => {
                             release_drag(&raw mut *state);
+                            state.recording = false;
+                            InvalidateRect(state.border, null(), 1);
                             state.selecting = true;
                             state.visible = true;
                             state.escape_enabled = true;

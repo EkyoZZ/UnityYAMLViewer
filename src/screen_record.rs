@@ -254,7 +254,7 @@ impl Options {
 }
 
 enum Event {
-    Countdown(Instant),
+    Countdown(mpsc::Sender<Instant>),
     Starting,
     Recording,
     Stopping,
@@ -266,7 +266,7 @@ struct Job {
     events: mpsc::Receiver<Event>,
     path: PathBuf,
     started: Option<Instant>,
-    countdown: Option<Instant>,
+    countdown: Option<countdown::Request>,
     stopping: bool,
 }
 impl Drop for Job {
@@ -299,11 +299,13 @@ fn record_inner(
     ctx: &egui::Context,
     trace: &diagnostics::Trace,
 ) -> Result<PathBuf, String> {
-    trace.note("countdown", "3 seconds");
-    // Give the root window time to minimize. Cancellation also works during preparation.
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let _ = events.send(Event::Countdown(deadline));
+    trace.note("countdown.waiting", "waiting for the numeral window to be displayed");
+    let (ready, visible) = mpsc::channel();
+    let _ = events.send(Event::Countdown(ready));
     ctx.request_repaint();
+    let deadline = countdown::wait_until_visible(&visible, &stop, ctx)?;
+    trace.note("countdown.shown", "3 seconds after first presentation");
+    // Cancellation also works while preparing or counting down.
     match stop.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
         Err(mpsc::RecvTimeoutError::Timeout) => {}
         _ => return Err(tr("录屏已取消").into()),

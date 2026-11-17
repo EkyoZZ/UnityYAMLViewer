@@ -24,6 +24,12 @@ struct Item {
     clip: Option<Reference>,
     position: f64,
     selected_audio: Option<u64>,
+    #[serde(default)]
+    preview_audio_track: Option<usize>,
+    #[serde(default)]
+    preview_audio_disabled: bool,
+    #[serde(default)]
+    preview_subtitle_track: Option<usize>,
 }
 #[derive(Serialize, Deserialize)]
 struct Document {
@@ -227,6 +233,10 @@ fn load(path:PathBuf) -> Result<Loaded,String> {
         item.state.validate()?;
         if let Some(reference)=&item.burn_subtitle {let resolved=resolve(reference,&path,&mut archive,&assets,&mut next)?;item.state.set_burn_subtitle(Some(resolved));}
         if !item.position.is_finite() || item.position<0.0 || item.tracks.len()!=item.state.tracks.len() {return Err(tr("工程设置无效或格式版本不受支持。").into());}
+        if item.preview_audio_track.is_some_and(|index|edit_audio::Source::from_entry(&item.state.tracks,index).is_none())
+            || item.preview_subtitle_track.is_some_and(|index|edit_audio::Source::subtitle_entry(&item.state.tracks,index).is_none()) {
+            return Err(tr("工程设置无效或格式版本不受支持。").into());
+        }
         let source=resolve(&item.source,&path,&mut archive,&assets,&mut next)?;
         let info=probe(&source,None,None,false)?;
         if info.video.is_some()!=video {return Err(tr("工程素材类型不匹配。").into());}
@@ -255,7 +265,13 @@ impl Loaded {
         queue.merge_settings=self.document.merge_settings;queue.project_path=Some(self.path.clone());
         for (item,(path,info,clip,thumbnail)) in self.document.items.into_iter().zip(self.media) {
             let mut player=Preview::default();player.trim.open(info.duration);
+            player.edit_audio=item.preview_audio_track.and_then(|index|edit_audio::Source::from_entry(&item.state.tracks,index));
+            player.edit_audio_muted=item.preview_audio_disabled;
+            player.edit_subtitle=item.preview_subtitle_track.and_then(|index|edit_audio::Source::subtitle_entry(&item.state.tracks,index));
             player.trim.restore_project(item.state,clip.as_ref().map(|(p,d)|(p.as_path(),*d)),info.ffmpeg.clone(),info.source_channels as usize)?;
+            let subtitle=player.edit_subtitle.as_ref().and_then(|source|source.subtitle_index(player.trim.preview_tracks()))
+                .and_then(|index|player.trim.preview_tracks().get(index));
+            player.subtitles.editor_preview(subtitle,ctx);
             player.position=item.position.min(clip.as_ref().map_or(info.duration,|(_,d)|*d));
             player.selected_audio=item.selected_audio.filter(|index|info.audio_tracks.iter().any(|track|track.index==*index));
             player.info=Some(info);
@@ -306,6 +322,9 @@ impl TrimEditor {
         let items=self.players.iter().zip(&self.queue.items).map(|((path,player),item)| {
             let state=player.trim.project_state(player.has_video()).ok()?;
             Some(serde_json::json!({"path":path,"enabled":item.enabled,"state":state,
+                "preview_audio":player.edit_audio.as_ref().and_then(|source|source.entry_index(&state.tracks)),
+                "preview_audio_disabled":player.edit_audio_muted,
+                "preview_subtitle":player.edit_subtitle.as_ref().and_then(|source|source.subtitle_index(&state.tracks)),
                 "clip":player.trim.clip().map(|clip|clip.path.clone())}))
         }).collect::<Option<Vec<_>>>()?;
         serde_json::to_vec(&serde_json::json!({"items":items,"settings":self.queue.merge_settings})).ok()
@@ -349,7 +368,9 @@ impl TrimEditor {
             }).collect();
             let clip=player.trim.clip().map(|clip|{let entry=format!("assets/audio-{}.wav",items.len());files.push((entry.clone(),clip.path.clone()));clips.push(clip);Reference::Embedded{entry}});
             let burn_subtitle=state.burn_subtitle().map(|path|{let entry=format!("assets/burn-{}.ass",items.len());files.push((entry.clone(),path.to_owned()));Reference::Embedded{entry}});
-            items.push(Item{burn_subtitle,enabled:queue_item.enabled,source,state,tracks,clip,position:player.position_now(),selected_audio:player.selected_audio});
+            let preview_audio_track=player.edit_audio.as_ref().and_then(|source|source.entry_index(&state.tracks));
+            let preview_subtitle_track=player.edit_subtitle.as_ref().and_then(|source|source.subtitle_index(&state.tracks));
+            items.push(Item{preview_audio_track,preview_subtitle_track,preview_audio_disabled:player.edit_audio_muted,burn_subtitle,enabled:queue_item.enabled,source,state,tracks,clip,position:player.position_now(),selected_audio:player.selected_audio});
         }
         if self.players.iter().any(|(path,_)|*path==target) || files.iter().any(|(_,path)|*path==target) {self.queue.error=Some(tr("工程不能覆盖素材文件。").into());return;}
         let merge_burn_subtitle=self.queue.merge_settings.burn_subtitle().map(|path|{let entry="assets/merge-burn.ass".to_owned();files.push((entry.clone(),path.to_owned()));Reference::Embedded{entry}});
@@ -375,7 +396,24 @@ mod tests {
     use super::*;
     fn document() -> Document {
         Document{merge_burn_subtitle:None,format:"UnityYAMLViewer.MediaProject".into(),version:1,kind:"audio".into(),active:0,expanded:true,merge:false,merge_settings:MergeSettings::default(),items:vec![Item{burn_subtitle:None,enabled:true,
-            source:Reference::External{absolute:PathBuf::from("missing.wav"),relative:None},state:EditState::fixture(),tracks:vec![],clip:None,position:12.0,selected_audio:Some(0)}]}
+            source:Reference::External{absolute:PathBuf::from("missing.wav"),relative:None},state:EditState::fixture(),tracks:vec![],clip:None,position:12.0,selected_audio:Some(0),preview_audio_track:None,preview_audio_disabled:false,preview_subtitle_track:None}]}
+    }
+    #[test]
+    fn preview_track_preferences_round_trip_and_legacy_defaults_remain_off_for_subtitles(){
+        let mut doc=document();
+        doc.items[0].preview_audio_track=Some(1);
+        doc.items[0].preview_audio_disabled=true;
+        doc.items[0].preview_subtitle_track=Some(2);
+        let mut value=serde_json::to_value(&doc).unwrap();
+        let restored:Document=serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(restored.items[0].preview_audio_track,Some(1));
+        assert!(restored.items[0].preview_audio_disabled);
+        assert_eq!(restored.items[0].preview_subtitle_track,Some(2));
+        let item=value["items"][0].as_object_mut().unwrap();
+        for field in ["preview_audio_track","preview_audio_disabled","preview_subtitle_track"]{item.remove(field);}
+        let legacy:Document=serde_json::from_value(value).unwrap();
+        assert!(legacy.items[0].preview_audio_track.is_none() && legacy.items[0].preview_subtitle_track.is_none());
+        assert!(!legacy.items[0].preview_audio_disabled);
     }
     #[test]
     fn archive_preserves_manifest_and_embedded_bytes() {

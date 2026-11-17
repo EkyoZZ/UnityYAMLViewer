@@ -817,7 +817,7 @@ impl ViewerApp {
         .add_filter(crate::localization::tr("模型"), &["fbx", "obj"])
         .add_filter(crate::localization::tr("音频"), &["mp3", "wav", "ogg", "oga", "flac", "aac", "m4a", "wma", "opus", "aiff", "aif"])
         .add_filter(crate::localization::tr("播放列表"), &["m3u8", "m3u"])
-        .add_filter(crate::localization::tr("编辑工程"), &["uyap", "uyvp"])
+        .add_filter(crate::localization::tr("编辑工程"), &["uyap", "uyvp", "uytile"])
         .add_filter(crate::localization::tr("视频"), &["mp4", "m4v", "mkv", "webm", "mov", "avi", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts", "3gp", "bytes"]);
         let dialog = if let Some(directory) = &self.last_open_dir {
             dialog.set_directory(directory)
@@ -891,6 +891,16 @@ impl ViewerApp {
     }
 
     fn open_file_with_options(&mut self, path: PathBuf, remember_directory: bool, record_recent: bool) {
+        if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("uytile")) {
+            match self.assets.open_tile_project(&path) {
+                Ok(())=>{
+                    if record_recent&&!self.restoring_session {self.recent_files.record(path.clone());self.recent_files.persist();}
+                    if remember_directory&&!self.restoring_session {self.last_open_dir=path.parent().map(PathBuf::from);self.persist_last_open_dir();}
+                },
+                Err(e)=>self.status=e,
+            }
+            return;
+        }
         if record_recent && self.folder_preview_path.as_ref() == Some(&path) {
             self.folder_preview_path = None;
         }
@@ -1821,14 +1831,6 @@ impl eframe::App for ViewerApp {
                             self.url_error = None;
                             ui.close_menu();
                         }
-                        if ui.button(localization::tr("视频提取")).clicked() {
-                            self.video_extract.open(ctx);
-                            ui.close_menu();
-                        }
-                        if ui.button(localization::tr("录屏")).clicked() {
-                            self.screen_record.open();
-                            ui.close_menu();
-                        }
                         ui.menu_button(crate::localization::tr("最近打开"), |ui| {
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                             if self.recent_files.paths().is_empty() { ui.label(crate::localization::tr("暂无最近文件")); }
@@ -1889,6 +1891,18 @@ impl eframe::App for ViewerApp {
                                 if ui.button(localization::tr("清空记录")).clicked() { self.recent_files.clear(); }
                             }
                         });
+                        if ui.button(localization::tr("视频提取")).clicked() {
+                            self.video_extract.open(ctx);
+                            ui.close_menu();
+                        }
+                        if ui.button(localization::tr("像素 Tile")).clicked() {
+                            self.assets.open_pixel_tile(ctx);
+                            ui.close_menu();
+                        }
+                        if ui.button(localization::tr("录屏")).clicked() {
+                            self.screen_record.open();
+                            ui.close_menu();
+                        }
                     });
                     if open_dialog { self.show_open_dialog(); }
                     if let Some(path) = recent_path {
