@@ -2084,3 +2084,20 @@ Tile 尺寸必须与当前画布一致。	Tile 尺寸必須與目前畫布一致
 透明（棋盘格）	透明（棋盤格）	Transparent (checkerboard)	透明（市松模様）	투명 (체커보드)	Transparent (Schachbrett)	Transparent (damier)
 自定义颜色	自訂顏色	Custom color	カスタムカラー	사용자 지정 색상	Benutzerdefinierte Farbe	Couleur personnalisée
 预览背景色	預覽背景色	Preview background color	プレビュー背景色	미리보기 배경색	Vorschau-Hintergrundfarbe	Couleur de fond de l’aperçu
+
+Photoshop 插件	Photoshop 外掛	Photoshop plugin	Photoshop プラグイン	Photoshop 플러그인	Photoshop-Plugin	Plugin Photoshop
+已部署版本：	已部署版本：	Deployed version:	配置済みバージョン：	배포된 버전:	Bereitgestellte Version:	Version déployée :
+未检测到已部署的 PS 插件	未偵測到已部署的 PS 外掛	No deployed PS plugin detected	配置済み PS プラグインが見つかりません	배포된 PS 플러그인을 찾을 수 없습니다	Kein bereitgestelltes PS-Plugin erkannt	Aucun plugin PS déployé détecté
+无法读取已部署版本	無法讀取已部署版本	Cannot read deployed version	配置済みバージョンを読み取れません	배포된 버전을 읽을 수 없습니다	Bereitgestellte Version nicht lesbar	Impossible de lire la version déployée
+仅检测当前用户部署目录，不代表 Photoshop 已加载插件。	僅偵測目前使用者部署目錄，不代表 Photoshop 已載入外掛。	Checks only the current user deployment folder; Photoshop loading is not verified.	現在のユーザーの配置先のみ確認します。Photoshop での読み込みは未確認です。	현재 사용자 배포 폴더만 확인하며 Photoshop 로드는 확인하지 않습니다.	Prüft nur den Benutzerordner; das Laden in Photoshop wird nicht bestätigt.	Vérifie uniquement le dossier utilisateur ; le chargement dans Photoshop n’est pas confirmé.
+检查 PS 插件更新	檢查 PS 外掛更新	Check PS plugin updates	PS プラグインの更新を確認	PS 플러그인 업데이트 확인	PS-Plugin-Updates prüfen	Rechercher les mises à jour du plugin PS
+两次查询至少间隔 60 秒	兩次查詢至少間隔 60 秒	Wait at least 60 seconds between checks	確認間隔は最低 60 秒です	확인 간격은 최소 60초입니다	Mindestens 60 Sekunden zwischen Prüfungen	Attendre au moins 60 secondes entre les recherches
+最新插件版本：	最新外掛版本：	Latest plugin version:	最新プラグインバージョン：	최신 플러그인 버전:	Neueste Plugin-Version:	Dernière version du plugin :
+更新 PS 插件	更新 PS 外掛	Update PS plugin	PS プラグインを更新	PS 플러그인 업데이트	PS-Plugin aktualisieren	Mettre à jour le plugin PS
+已是最新版，打开下载页	已是最新版，開啟下載頁	Up to date; open downloads	最新版です。ダウンロードページを開く	최신 버전입니다. 다운로드 열기	Aktuell; Downloadseite öffnen	À jour ; ouvrir les téléchargements
+已部署版本较新，打开下载页	已部署版本較新，開啟下載頁	Deployed version is newer; open downloads	配置済みの方が新しいです。ダウンロードを開く	배포된 버전이 더 최신입니다. 다운로드 열기	Bereitgestellte Version neuer; Downloads öffnen	Version déployée plus récente ; ouvrir les téléchargements
+安装 PS 插件	安裝 PS 外掛	Install PS plugin	PS プラグインをインストール	PS 플러그인 설치	PS-Plugin installieren	Installer le plugin PS
+打开插件下载页	開啟外掛下載頁	Open plugin downloads	プラグインのダウンロードを開く	플러그인 다운로드 열기	Plugin-Downloadseite öffnen	Ouvrir les téléchargements du plugin
+PS 插件尚未正式发布	PS 外掛尚未正式發佈	PS plugin has not been released yet	PS プラグインはまだリリースされていません	PS 플러그인이 아직 출시되지 않았습니다	PS-Plugin noch nicht veröffentlicht	Le plugin PS n’est pas encore publié
+插件更新查询失败，可稍后重试或打开下载页。	外掛更新查詢失敗，可稍後重試或開啟下載頁。	Plugin update check failed. Retry later or open downloads.	更新確認に失敗しました。後で再試行するかダウンロードを開いてください。	업데이트 확인에 실패했습니다. 나중에 다시 시도하거나 다운로드를 여세요.	Updateprüfung fehlgeschlagen. Später erneut versuchen oder Downloads öffnen.	Échec de la recherche. Réessayez plus tard ou ouvrez les téléchargements.
+关闭 Photoshop，运行安装器并点击安装／更新，然后重新启动 Photoshop。	關閉 Photoshop，執行安裝器並點選安裝／更新，然後重新啟動 Photoshop。	Close Photoshop, run the installer and choose Install/Update, then restart Photoshop.	Photoshop を閉じ、インストーラーでインストール／更新を選び、Photoshop を再起動してください。	Photoshop을 닫고 설치 프로그램에서 설치/업데이트를 선택한 뒤 Photoshop을 다시 시작하세요.	Photoshop schließen, im Installer Installieren/Aktualisieren wählen und Photoshop neu starten.	Fermez Photoshop, lancez l’installateur et choisissez Installer/Mettre à jour, puis redémarrez Photoshop.

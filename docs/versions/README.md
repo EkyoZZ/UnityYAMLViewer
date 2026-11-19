@@ -4,6 +4,7 @@
 
 | 版本 | 记录 |
 | --- | --- |
+| 1.3.7 | [像素 Tile、PS 插件与录屏／预览优化（开发中，未发布）](1.3.7.md) |
 | 1.3.6 | [字幕生成／翻译／编辑、Windows 录屏与播放优化（已正式发布）](1.3.6.md) · [发布说明](../releases/1.3.6.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.6) |
 | 1.3.5 | [电视／电台列表、多源切换与播放体验（已正式发布）](1.3.5.md) · [发布说明](../releases/1.3.5.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.5) |
 | 1.3.4 | [网页 HLS 助手、播放修正与缓存体验（已正式发布）](1.3.4.md) · [发布说明](../releases/1.3.4.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.4) |

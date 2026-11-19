@@ -1023,3 +1023,9 @@ B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 闭合区域填充；图标�
 颜色和Alpha保留在绘制区顶部，笔宽提供不同大小方框快捷选项（1／4／8／16／32）及1–32滑条和数值，仍支持[／]调节。图层下方可选择透明棋盘格或自定义背景，色块与HEX可改色，同步绘制区、循环预览及独立预览；背景仅用于显示，不写入PNG，保存在.uytile工程中。
 
 图层最左侧眼睛按钮用于显示／隐藏：睁眼为可见、划线眼睛为隐藏；隐藏会同步改变绘制区、预览及PNG合成，但保留该层像素。图层名称单击选中、拖拽排序，不再显示独立手柄。
+
+### 像素 Tile 中的 Photoshop 插件入口 / Photoshop plugin entry in Pixel Tile
+
+展开 Photoshop 插件区域，点击“检查 PS 插件更新”才会联网；至少间隔 60 秒。可查看当前用户已部署版本及最新独立发布版本，并打开下载页。关闭 PS 后运行安装器“安装／更新”，完成后重启。已部署版本不代表 PS 已成功加载；未发布时不会提供虚假的安装版本。
+
+Expand Photoshop Plugin and click Check PS Plugin Updates to query online; checks are at least 60 seconds apart. View the current user’s deployed version and latest independent release, then open its download page. Close Photoshop, run Install/Update in the installer, and restart Photoshop. Deployment does not confirm host loading; unpublished packages are not offered as available releases.

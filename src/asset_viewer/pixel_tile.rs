@@ -3,6 +3,7 @@ use crate::localization::tr;
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use image::{Rgba, RgbaImage};
 use std::path::Path;
+mod ps_plugin;
 
 const MAX_SIDE: u32 = 1024;
 const HISTORY_BYTES: usize = 32 * 1024 * 1024;
@@ -175,6 +176,7 @@ impl Project {
 }
 
 pub(super) struct Editor {
+    ps_plugin: ps_plugin::State,
     background_custom: bool,
     background_color: [u8; 3],
     layers: Vec<Layer>,
@@ -226,6 +228,7 @@ pub(super) struct Editor {
 impl Default for Editor {
     fn default() -> Self {
         Self {
+            ps_plugin: Default::default(),
             background_custom: false,
             background_color: default_background(),
             layers: Vec::new(),
@@ -2299,6 +2302,7 @@ impl Editor {
             .rect
     }
     fn controls(&mut self, ui: &mut egui::Ui, path: &Path, source: Option<&RgbaImage>) {
+        self.ps_plugin.ui(ui);
         self.project_controls(ui, path);
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("画布尺寸"));
