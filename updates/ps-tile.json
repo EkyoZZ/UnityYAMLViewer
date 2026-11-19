@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "published": false,
+  "published": true,
   "version": "0.1.0",
-  "release_url": null,
+  "release_url": "https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/ps-v0.1.0",
   "asset_name": "PS-Tile-Installer-v0.1.0-windows-x64.exe",
   "minimum_photoshop_version": "24.4.0"
 }
