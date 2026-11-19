@@ -1,17 +1,29 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 html { height:100%; }
-body { height:100%; margin:0; display:flex; flex-direction:row; overflow:hidden; color:#ddd; background:#292929; font-size:12px; }
-#controls { width:260px; min-width:260px; max-width:260px; flex:0 0 260px; height:100%; box-sizing:border-box; padding:8px; overflow:auto; border-right:1px solid #555; }
+body { height:100%; margin:0; display:flex; flex-direction:column; overflow:hidden; color:#ddd; background:#292929; font-size:12px; }
+#controls { display:none; flex-direction:column; width:100%; min-width:0; min-height:0; flex:1 1 auto; height:100%; box-sizing:border-box; padding:8px; overflow-x:hidden; overflow-y:auto; }
+#controls > *, .control-stack > * { flex-shrink:0; }
+.control-stack { display:flex; flex-direction:column; align-items:stretch; }
+.button-row { display:flex; flex-direction:row; flex-wrap:wrap; align-items:center; }
+.button-row > button { flex-shrink:0; margin-right:3px; }
+#atlas-actions > button, #atlas-export-actions > button, #multi-document-controls > button { align-self:flex-start; }
 #version { display:block; font-size:12px; margin:0 0 3px; color:#bbb; }
 h3 { font-size:14px; margin:0 0 4px; }
-label { display:flex; align-items:center; height:24px; min-height:24px; margin:1px 0; padding:0; }
+#settings-top-row { display:flex; flex-direction:row; align-items:center; justify-content:space-between; min-width:0; }
+#settings-top-row #version { flex:1 1 auto; min-width:0; margin:0 4px 0 0; }
+#settings-top-row #open-preview { flex:0 0 auto; align-self:center; white-space:nowrap; padding:3px 6px; }
+#panel-error:empty, #operation-status:empty, #preview-panel-status:empty { display:none; }
+#grid-settings-status { display:none; }
+#panel-error { color:#ff6e6e; white-space:normal; overflow-wrap:break-word; margin:3px 0; }
+
+label { display:flex; flex-wrap:nowrap; align-items:center; height:24px; min-height:24px; margin:1px 0; padding:0; }
 input[type=number], input[type=text] { box-sizing:border-box; height:24px; min-height:24px; font-size:12px; line-height:16px; padding:3px 4px; }
 input[type=number] { width:72px; margin:0 0 0 6px; }
 input[type=checkbox] { margin:0 4px 0 0; }
 button { margin:2px 0; padding:3px 8px; min-height:26px; }
 p { margin:5px 0; line-height:16px; }
-#view-area { flex:1 1 auto; min-width:0; height:100%; display:flex; flex-direction:column; box-sizing:border-box; padding:8px; overflow:hidden; }
+#view-area { flex:1 1 auto; width:100%; min-width:0; height:100%; display:none; flex-direction:column; box-sizing:border-box; padding:8px; overflow:hidden; }
 #preview-footer { display:flex; align-items:center; flex-shrink:0; padding-top:6px; }
 #preview-footer label { flex-shrink:0; margin-right:8px; }
 #zoom-slider { flex:1 1 auto; min-width:60px; }
@@ -20,73 +32,102 @@ p { margin:5px 0; line-height:16px; }
 #preview-background { pointer-events:none; }
 #preview-background img { position:absolute; max-width:none; }
 #preview img { position:absolute; max-width:none; pointer-events:none; }
-#preview-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-start; flex-shrink:0; margin-bottom:4px; }
+#preview-header { display:flex; flex-direction:column; align-items:stretch; flex-shrink:0; min-width:0; margin-bottom:4px; }
+#preview-toolbar { display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; flex-shrink:0; min-height:34px; overflow:auto; }
 #preview-header label { flex:0 0 auto; margin:0 12px 0 0; white-space:nowrap; }
 #background-mode { flex:0 0 150px; width:150px; margin:0 12px 0 0; }
-#background-error { flex:0 0 100%; }
+#preview-arrangement, #stagger-settings { display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; flex:0 0 auto; }
+#stagger-mode { flex:0 0 160px; width:160px; margin-right:12px; }
+#stagger-settings input { width:48px; }
+#stagger-description { flex-shrink:0; margin:4px 0 0; line-height:16px; white-space:normal; }
+#background-error { flex-shrink:0; }
 #status { margin:0 0 8px; flex:0 0 auto; min-width:0; white-space:normal; overflow-wrap:break-word; }
 #slots { display:flex; flex-wrap:wrap; margin:4px 0; }
 #slots button { padding:0; min-height:25px; height:25px; margin:0; font-size:10px; border:2px solid #ddd; border-radius:13px; box-sizing:border-box; background-color:#292929; color:#fff; }
 #document-picker { width:100%; margin:2px 0; }
 #mode { width:100%; margin:2px 0 4px; }
 #selected-slot { margin:3px 0; }
-.slot-marker { position:absolute; width:42px; height:16px; font-size:10px; text-align:center; overflow:hidden; color:#fff; background:rgba(0,0,0,0.65); border:1px solid #aaa; }
+#document-settings-toggle, #tile-slot-settings-toggle { display:flex; align-items:center; flex:0 0 30px; height:30px; min-height:30px; width:100%; box-sizing:border-box; text-align:left; margin:5px 0 2px; }
+#document-settings { padding:3px 0 6px; border-bottom:1px solid #555; }
+#operation-status { margin-top:6px; }
+#tile-slot-hint { color:#bbb; margin:5px 0 0; padding-bottom:6px; border-bottom:1px solid #555; line-height:16px; }
+#bind-auto-wrap { border-radius:14px; min-height:26px; padding:3px 12px; box-sizing:border-box; }
+#clear-errors { align-self:flex-start; margin-top:10px; }
+#refresh, #open-preview { align-self:flex-start; }
+#preview-panel-status:empty { display:none; }
+#open-settings { flex:0 0 auto; margin-left:auto; }
+#wrap-last-run { display:none; }
+.slot-marker { position:absolute; width:24px; height:16px; font-size:10px; text-align:center; overflow:hidden; color:#fff; background:rgba(0,0,0,0.65); border:1px solid #aaa; }
 </style></head><body>
 <div id="controls">
-<div id="version">版本…</div>
-<h3>等距 Tile 实时预览</h3>
+<div id="settings-top-row"><div id="version">版本…</div>
+<button id="open-preview" title="打开独立预览面板；关闭请使用预览面板的 ×">打开预览</button></div>
+<h3>等距 Tile 实时预览设置</h3>
+<div id="panel-error" role="alert"></div>
+<button id="refresh">加载当前打开文档</button>
+<div id="preview-panel-status"></div>
+<div id="document-settings-group" class="control-stack">
+<button id="document-settings-toggle" aria-expanded="true">▾ 文档设置(可新建文档)</button>
+<div id="document-settings" class="control-stack">
 <sp-dropdown id="mode"><sp-menu slot="options"><sp-menu-item>单 Tile 重复</sp-menu-item><sp-menu-item selected>单文档菱形网格</sp-menu-item><sp-menu-item>多文档 Slot</sp-menu-item></sp-menu></sp-dropdown>
-<label><input id="live" type="checkbox" checked>自动更新（笔画结束后）</label>
 <label><input id="elevated" type="checkbox">带高度 Tile（底部中心对齐）</label>
-<label><span id="width-label">地面宽度</span><input id="width" type="number" value="128" min="2" max="8192"></label>
-<label><span id="height-label">地面高度</span><input id="height" type="number" value="64" min="2" max="8192"></label>
+<label><span id="width-label">单格宽度</span><input id="width" type="number" value="128" min="2" max="8192"></label>
+<label><span id="height-label">单格高度</span><input id="height" type="number" value="64" min="2" max="8192"></label>
 <div id="grid-size"></div>
-<div id="slot-controls" style="display:none">
+<div id="grid-dimensions" class="control-stack">
 <label>循环列数 <input id="columns" type="number" value="1" min="1" max="8"></label>
 <label>循环行数 <input id="rows" type="number" value="1" min="1" max="8"></label>
-<div><button id="preset-2">2×2</button><button id="preset-3">3×3</button><button id="preset-4">4×4</button></div>
+<div class="button-row"><button id="preset-2">2×2</button><button id="preset-3">3×3</button><button id="preset-4">4×4</button></div>
+</div>
+<div id="grid-document-actions" class="button-row"><button id="new-grid-document">新建文档</button><button id="expand-grid-document" disabled>扩展文档</button></div>
+</div>
+</div>
+<div id="grid-settings-status" style="display:none"></div>
+<div id="operation-status" style="display:none"></div>
+<div id="slot-controls" class="control-stack">
+<button id="tile-slot-settings-toggle" aria-expanded="false">▸ TileSlot设置与导出</button>
+<div id="tile-slot-settings" class="control-stack" style="display:none">
+<div id="slot-selection" class="control-stack" style="display:none">
 <div id="slots"></div>
 <div id="selected-slot"></div>
-<label><input id="show-slots" type="checkbox" checked>在预览中显示 Slot 坐标</label>
-
-<div id="multi-document-controls">
-<sp-dropdown id="stagger-mode"><sp-menu slot="options"><sp-menu-item selected>不偏移</sp-menu-item><sp-menu-item>隔组沿列错位</sp-menu-item><sp-menu-item>隔组沿行错位</sp-menu-item><sp-menu-item>隔组沿行列错位</sp-menu-item></sp-menu></sp-dropdown>
-<div id="stagger-settings" style="display:none">
-<label>列偏移格数 <input id="stagger-columns" type="number" value="2" min="0" max="8" step="1"></label>
-<label>行偏移格数 <input id="stagger-rows" type="number" value="2" min="0" max="8" step="1"></label>
-<p>每隔一组循环错开指定格数，仅影响预览；坐标标签仍对应来源 Slot。偏移为整组宽高的整数倍时外观不变。转换为单文档仍按原 Slot 排列。</p>
 </div>
+<div id="atlas-export-actions" class="control-stack">
+<button id="export-cell">导出选中格 PNG</button><button id="export-grid">导出全部格 PNG</button>
+</div>
+<div id="tile-slot-hint">在预览中开启显示Slot编号</div>
+
+</div>
+<div id="multi-document-controls" class="control-stack" style="display:none">
 <sp-dropdown id="document-picker" placeholder="选择已打开的文档"><sp-menu id="document-options" slot="options"></sp-menu></sp-dropdown>
 <button id="reload-documents">刷新文档列表</button>
 <button id="bind">绑定当前文档到选中 Slot</button><button id="unbind">清除选中绑定</button>
 <button id="convert-single-document">转换为单文档</button>
 <p>按 Slot 排列生成独立像素图层和顶层辅助网格，源文档可见画面合成为每格一层，不自动合并。空格保留空图层；仅支持平面菱形。</p>
 </div>
-<div id="atlas-actions">
-<button id="export-cell">导出选中格 PNG</button><button id="export-grid">导出全部格 PNG</button>
-<button id="new-grid-document">新建文档并添加网格</button>
+<div id="atlas-actions" class="control-stack">
 <button id="wrap-layer">回落当前图层</button>
-<label><input id="auto-wrap" type="checkbox">绘画结束后自动回落当前层</label>
-<div id="auto-wrap-document">自动回落对象：未绑定</div>
-<button id="bind-auto-wrap">绑定当前文档</button>
+<div id="auto-wrap-document">自动回落：尚未绑定图层</div>
+<button id="bind-auto-wrap">绑定当前图层</button>
+<label><input id="joint-wrap" type="checkbox">子组＋整体回落</label>
+<div id="group-settings" style="display:none"><div><button id="group-preset-1x1">1×1</button><button id="group-preset-1x2">1×2</button><button id="group-preset-2x1">2×1</button><button id="group-preset-2x2">2×2</button></div><label>子组列数 <input id="group-columns" type="number" min="1" max="8" value="1"></label><label>子组行数 <input id="group-rows" type="number" min="1" max="8" value="1"></label><div id="selected-group"></div><p>选中 Slot 所在子组的边界变化会同步到其他同位子组，形成子组与整图循环。预览网格会区分各子组。</p></div>
 <div id="wrap-last-run">本次工作尚未绑定，自动回落未开启。</div>
-<div id="wrap-status" style="margin:3px 0;color:#ddd">自动回落未开启；可手动执行。</div>
-<p>仅处理单个可编辑RGB 8位普通像素层。真正越界部分搬移并清空；辅助线边界原位保留，并复制到对边。可读前一历史时按变化侧同步，否则外缘向内复制；不修改其他层。自动处理监听paint事件（至少等待200ms），并检测新画笔历史作为兜底（稳定至少200ms）；不监听画布原始Press／Release。状态显示触发来源，未识别笔触仍可手动回落。画布外未记录的笔迹无法找回；对边橡皮同步暂不支持。</p>
+<div id="wrap-status" style="display:none;margin:3px 0;color:#ddd"></div>
 
-<p>上层网格为正片叠底并锁定；在下方绘画层绘制。逐格导出为透明的 8 位 sRGB PNG，不包含辅助网格。</p>
-<p>单格宽高为 2–1024 的偶数像素。默认 1×1；3×3 导出 9 张。画布宽高＝单格宽高×（行数＋列数）÷2。</p>
-</div>
-<p>格子坐标为“行,列”，沿菱形斜轴排列。选择格子后下拉绑定 PNG／PSD；同文档可多格引用。缩小排列保留隐藏绑定，绑定只保留在本次面板会话中。</p>
 </div>
 
-<button id="refresh">立即刷新</button>
-<div id="operation-status"></div>
-<p>以整个文档作为 Tile；平面模式裁切菱形，多文档共用地面尺寸。带高度模式保留透明轮廓并按底部中心对齐。</p>
-<p>单文档可在收笔后回落当前层；不接管 PS 原生画笔，按住绘制时不实时回绕。缩放为相对显示比例，小格子会限制最小显示间距。</p>
 </div>
-<div id="view-area"><div id="preview-header"><label><input id="show-grid" type="checkbox">显示辅助网格</label><sp-dropdown id="background-mode"><sp-menu slot="options"><sp-menu-item selected>透明（棋盘格）</sp-menu-item><sp-menu-item>自定义颜色</sp-menu-item></sp-menu></sp-dropdown>
-<label id="background-color-row" style="display:none">背景色 <input id="background-color" type="text" value="#555555" maxlength="7" style="width:90px;margin-left:6px"><button id="background-swatch" type="button" title="点击打开调色板" aria-label="选择预览背景色" style="width:22px;min-width:22px;height:22px;min-height:22px;padding:0;margin:0 0 0 6px;border:1px solid #999"></button></label>
+
+<button id="clear-errors" type="button">清除所有提示信息</button>
+</div>
+<div id="view-area"><div id="preview-header"><div id="preview-toolbar"><label><input id="show-grid" type="checkbox">显示辅助网格</label><label><input id="show-slots" type="checkbox">显示 Slot 编号</label><sp-dropdown id="background-mode"><sp-menu slot="options"><sp-menu-item selected>透明（棋盘格）</sp-menu-item><sp-menu-item>自定义颜色</sp-menu-item></sp-menu></sp-dropdown>
+<label id="background-color-row" style="display:none"><input id="background-color" type="hidden" value="#555555"><button id="background-swatch" type="button" title="点击打开调色板" aria-label="选择预览背景色" style="width:22px;min-width:22px;height:22px;min-height:22px;padding:0;margin:0 0 0 6px;border:1px solid #999"></button></label>
+<div id="preview-arrangement"><label>错位预览</label><sp-dropdown id="stagger-mode"><sp-menu slot="options"><sp-menu-item selected>不偏移</sp-menu-item><sp-menu-item>隔组沿列错位</sp-menu-item><sp-menu-item>隔组沿行错位</sp-menu-item><sp-menu-item>隔组沿行列错位</sp-menu-item></sp-menu></sp-dropdown>
+<div id="stagger-settings" style="display:none">
+<label>列偏移格数 <input id="stagger-columns" type="number" value="2" min="0" max="8" step="1"></label>
+<label>行偏移格数 <input id="stagger-rows" type="number" value="2" min="0" max="8" step="1"></label>
+</div></div><button id="open-settings">打开设置</button></div>
+<div id="stagger-description" style="display:none">每隔一组循环错开指定格数，仅改变预览；坐标对应来源 Slot，文档、回落和导出不受影响。</div>
 <div id="background-error" style="color:#ffb079"></div>
-</div><div id="status">正在初始化预览…</div><div id="preview-stage" tabindex="1"><div id="preview-background"></div><div id="preview"></div></div><div id="preview-footer"><label>预览缩放 <input id="zoom" type="number" value="1" min="0.1" max="10" step="0.1"></label><input id="zoom-slider" type="range" min="0.1" max="10" step="0.1" value="1"><button id="zoom-reset" title="恢复到1倍" style="margin-left:8px;flex-shrink:0">1:1</button></div></div>
+</div><div id="status">正在初始化预览…</div><div id="preview-stage"><div id="preview-background"></div><div id="preview"></div></div><div id="preview-footer"><label>预览缩放 <input id="zoom" type="number" value="1" min="0.1" max="10" step="0.1"></label><input id="zoom-slider" type="range" min="0.1" max="10" step="0.1" value="1"><button id="zoom-reset" title="恢复到1倍" style="margin-left:8px;flex-shrink:0">1:1</button></div></div>
 <script src="main.js"></script>
 </body></html>

@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(__dirname+'/main.js','utf8');let failure='No pixels in the requested area';
+const host={ps:{imaging:{async getPixels(){throw Error(failure);}}},enableAutoWrap:{emptyBaselines:new Map()},Uint8Array};
+vm.runInNewContext(source.slice(source.indexOf('async function previousLayerPixels('),source.indexOf('function wrapTarget(')),host);
+(async()=>{const doc={id:1,historyStates:[{id:10},{id:11}],activeHistoryState:{id:11}},bounds={left:0,top:0,right:4,bottom:2};
+const empty=await host.previousLayerPixels(doc,{id:2},bounds,'',10);assert.equal(empty.length,32);assert(empty.every(v=>v===0));
+failure='host unavailable';await assert.rejects(host.previousLayerPixels(doc,{id:2},bounds,'',10),/host unavailable/);
+host.enableAutoWrap.emptyBaselines.set('1:2',10);assert((await host.previousLayerPixels(doc,{id:2},bounds,'',10)).every(v=>v===0));
+host.enableAutoWrap.emptyBaselines.set('1:2',9);await assert.rejects(host.previousLayerPixels(doc,{id:2},bounds,'',10),/host unavailable/);
+console.log('History pixel checks passed: explicit empty area becomes transparent; unrelated errors remain failures; baseline fallback requires exact history.');})().catch(e=>{console.error(e);process.exitCode=1;});

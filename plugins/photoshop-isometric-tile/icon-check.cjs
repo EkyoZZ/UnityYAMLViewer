@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const zlib=require('node:zlib');
 const manifest=require('./manifest.json');
-for(const icon of [...manifest.entrypoints[0].icons,...manifest.icons]) {
+for(const icon of [...manifest.entrypoints.flatMap(panel=>panel.icons),...manifest.icons]) {
     assert.deepEqual(icon.species,['generic']);
     assert.deepEqual(fs.readFileSync(path.join(__dirname,icon.path)),fs.readFileSync(path.join(__dirname,icon.path.replace(/\.png$/,'@1x.png'))));
     assert.deepEqual(icon.scale,[1,2]);

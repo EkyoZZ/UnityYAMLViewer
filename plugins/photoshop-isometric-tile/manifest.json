@@ -16,18 +16,76 @@
       "type": "panel",
       "id": "tilePreview",
       "label": {
-        "default": "Isometric Tile Preview"
+        "default": "Tile 设置"
       },
       "minimumSize": {
-        "width": 600,
-        "height": 400
+        "width": 240,
+        "height": 320
       },
       "preferredDockedSize": {
-        "width": 900,
+        "width": 280,
+        "height": 700
+      },
+      "preferredFloatingSize": {
+        "width": 280,
+        "height": 700
+      },
+      "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "tile-dark.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "darkest",
+            "dark",
+            "medium"
+          ],
+          "species": [
+            "generic"
+          ]
+        },
+        {
+          "width": 23,
+          "height": 23,
+          "path": "tile-light.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "lightest",
+            "light"
+          ],
+          "species": [
+            "generic"
+          ]
+        }
+      ],
+      "maximumSize": {
+        "width": 7680,
+        "height": 4320
+      }
+    },
+    {
+      "type": "panel",
+      "id": "tilePreviewView",
+      "label": {
+        "default": "Tile 预览"
+      },
+      "minimumSize": {
+        "width": 360,
+        "height": 320
+      },
+      "preferredDockedSize": {
+        "width": 800,
         "height": 650
       },
       "preferredFloatingSize": {
-        "width": 1100,
+        "width": 900,
         "height": 700
       },
       "icons": [
@@ -105,5 +163,10 @@
         "generic"
       ]
     }
-  ]
+  ],
+  "requiredPermissions": {
+    "ipc": {
+      "enablePluginCommunication": true
+    }
+  }
 }

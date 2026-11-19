@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(__dirname+'/main.js','utf8'),nodes={};
+for(const id of ['mode','width','height','columns','rows','elevated','joint-wrap','group-columns','group-rows','stagger-mode','stagger-columns','stagger-rows'])nodes[id]={value:'1',checked:false,selectedIndex:0};
+let active={id:1},docs=[active,{id:2}];
+const host={documentSettingsSession:new Map(),settingsDocumentID:null,selected:0,selectedMode:1,autoWrapPending:null,wrapObserved:null,controlsKey:'',lastKey:'',cache:new Map(),generation:0,$:id=>nodes[id],mode:()=>nodes.mode.selectedIndex,documents:()=>docs,ps:{app:{get activeDocument(){return active;}}},setStatus(){}};
+vm.runInNewContext(source.slice(source.indexOf('function rememberDocumentSettings(){'),source.indexOf('function reconcileControls(){')),host);
+nodes.mode.selectedIndex=1;nodes.columns.value='2';nodes.rows.value='4';host.rememberDocumentSettings();
+active=docs[1];host.rememberDocumentSettings();nodes.columns.value='3';nodes.rows.value='3';nodes.width.value='256';host.selected=9;host.rememberDocumentSettings();
+active=docs[0];host.rememberDocumentSettings();assert.equal(nodes.columns.value,'2');assert.equal(nodes.rows.value,'4');assert.equal(host.selected,0);
+active=docs[1];host.rememberDocumentSettings();assert.equal(nodes.columns.value,'3');assert.equal(nodes.width.value,'256');assert.equal(host.selected,9);
+nodes.mode.selectedIndex=2;active=docs[0];host.rememberDocumentSettings();assert.equal(nodes.columns.value,'3','multi-document composition stays shared');
+nodes.mode.selectedIndex=1;host.rememberDocumentSettings();docs=[active];host.settingsDocumentID=null;host.rememberDocumentSettings();assert(!host.documentSettingsSession.has(2));
+console.log('Document settings checks passed: independent grid/Slot settings, round trips, shared multi-document mode and closed-document cleanup.');

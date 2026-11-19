@@ -589,10 +589,16 @@ impl Editor {
         self.height = self.pixels.height();
         self.ensure_layers();
     }
-    fn layer_lock_button(ui: &mut egui::Ui, id: egui::Id, locked: bool) -> egui::Response {
+    fn layer_icon_button(
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        selected: bool,
+        icon: crate::icons::Icon,
+        tooltip: &str,
+    ) -> egui::Response {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(28., 28.), egui::Sense::hover());
         let response = ui.interact(rect, id, egui::Sense::click());
-        let visuals = ui.style().interact_selectable(&response, locked);
+        let visuals = ui.style().interact_selectable(&response, selected);
         ui.painter().rect(
             rect,
             3.,
@@ -600,21 +606,25 @@ impl Editor {
             visuals.bg_stroke,
             egui::StrokeKind::Inside,
         );
-        crate::icons::paint(
+        crate::icons::paint(ui, icon, rect.shrink(5.), visuals.fg_stroke.color);
+        response.on_hover_text(tooltip)
+    }
+    fn layer_lock_button(ui: &mut egui::Ui, id: egui::Id, locked: bool) -> egui::Response {
+        Self::layer_icon_button(
             ui,
+            id,
+            locked,
             if locked {
                 crate::icons::Icon::Lock
             } else {
                 crate::icons::Icon::Unlock
             },
-            rect.shrink(5.),
-            visuals.fg_stroke.color,
-        );
-        response.on_hover_text(tr(if locked {
-            "解锁图层"
-        } else {
-            "锁定图层"
-        }))
+            tr(if locked {
+                "解锁图层"
+            } else {
+                "锁定图层"
+            }),
+        )
     }
     fn layer_controls(&mut self, ui: &mut egui::Ui) {
         if self.layers.is_empty() {
@@ -693,13 +703,18 @@ impl Editor {
             let (row, dropped) = ui.dnd_drop_zone::<(egui::Id, usize), _>(frame, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.;
-                    ui.dnd_drag_source(owner.with(index), (owner, index), |ui| {
-                        ui.label("≡").on_hover_text(tr("拖拽调整图层顺序"));
-                    });
-                    if ui
-                        .small_button(if visible { "●" } else { "○" })
-                        .on_hover_text(tr("显示或隐藏图层"))
-                        .clicked()
+                    if Self::layer_icon_button(
+                        ui,
+                        owner.with(("visible", index)),
+                        visible,
+                        if visible {
+                            crate::icons::Icon::Eye
+                        } else {
+                            crate::icons::Icon::EyeOff
+                        },
+                        tr("显示或隐藏图层"),
+                    )
+                    .clicked()
                     {
                         toggle_visible = Some(index);
                     }
@@ -724,10 +739,15 @@ impl Editor {
                         select = Some(index);
                     }
                     let width = (ui.available_width() - 28. - ui.spacing().item_spacing.x).max(1.);
-                    let name_response = ui.add_sized(
-                        [width, 28.],
-                        egui::Button::new(&name).selected(active).truncate(),
-                    );
+                    let name_response = ui
+                        .dnd_drag_source(owner.with(("name", index)), (owner, index), |ui| {
+                            ui.add_sized(
+                                [width, 28.],
+                                egui::Button::new(&name).selected(active).truncate(),
+                            )
+                        })
+                        .inner
+                        .on_hover_text(tr("拖拽调整图层顺序"));
                     if name_response.clicked() {
                         select = Some(index);
                     }
@@ -2622,6 +2642,66 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn layer_eye_click_changes_visible_composite_without_changing_pixels() {
+        fn frame(ctx: &egui::Context, e: &mut Editor, events: Vec<egui::Event>) -> egui::Id {
+            let mut id = egui::Id::NULL;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(270., 600.))),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        id = ui.id().with("tile_layers_owner").with(("visible", 1usize));
+                        e.layer_controls(ui);
+                    });
+                },
+            );
+            id
+        }
+        let ctx = egui::Context::default();
+        let mut e = Editor::default();
+        e.ensure_layers();
+        e.write_pixel(0, 64, 32, Rgba([20, 180, 50, 255]));
+        frame(&ctx, &mut e, vec![]);
+        let id = frame(&ctx, &mut e, vec![]);
+        let pos = ctx.read_response(id).unwrap().rect.center();
+        for visible in [false, true] {
+            frame(
+                &ctx,
+                &mut e,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            frame(
+                &ctx,
+                &mut e,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert_eq!(e.layers[1].visible, visible);
+            assert_eq!(
+                e.composite(0).get_pixel(64, 32)[3],
+                if visible { 255 } else { 0 }
+            );
+            assert_eq!(e.pixels.get_pixel(64, 32).0, [20, 180, 50, 255]);
+            assert!(!e.layers[1].locked);
+        }
+    }
     #[test]
     fn layer_lock_has_an_unclipped_click_target_and_toggles_both_ways() {
         fn frame(

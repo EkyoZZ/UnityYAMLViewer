@@ -4,6 +4,7 @@ for(const [,id]of fs.readFileSync(__dirname+'/index.html','utf8').matchAll(/id="
 Object.assign(nodes.width,{value:'128'});nodes.height.value='64';nodes.columns.value=nodes.rows.value=nodes.zoom.value='1';nodes.mode.selectedIndex=1;nodes['background-mode'].selectedIndex=1;nodes['background-color'].value='#555555';
 let doc=null,modal=false,commits=0,rollbacks=0,writes=0,failWrite=false,masked=false,paintCallback,clock=0,interval;
 const ps={constants:{LayerKind:{NORMAL:'normal',GROUP:'group'},BlendMode:{NORMAL:'normal'},DocumentMode:{RGB:'RGB'},BitsPerChannelType:{EIGHT:8}},app:{documents:[],get activeDocument(){return doc;}},action:{async batchPlay(){return [{hasUserMask:masked}];},async addNotificationListener(events,fn){assert.deepEqual(Array.from(events),['paint']);paintCallback=fn;},async removeNotificationListener(){paintCallback=null;}},imaging:{async getPixels({documentID,layerID,sourceBounds:b,historyStateID}){
+    assert.equal(documentID,doc.id);assert.equal(layerID,doc.activeLayers[0].id,"wrap reads, including history, must target the active layer rather than the document composite");
     assert(modal);assert.equal(documentID,doc.id);const layer=doc.layers.find(l=>l.id===layerID);assert(layer,'must read individual layer, never composite');
     const width=b.right-b.left,height=b.bottom-b.top,raw=new Uint8Array(width*height*4),s=layer.boundsNoEffects;
     for(let y=0;y<height;y++)for(let x=0;x<width;x++){const sx=x+b.left-s.left,sy=y+b.top-s.top;if(sx>=0&&sx<layer.width&&sy>=0&&sy<layer.height)raw.set((historyStateID!==undefined&&layer.previousRGBA?layer.previousRGBA:layer.rgba).subarray((sy*layer.width+sx)*4,(sy*layer.width+sx)*4+4),(y*width+x)*4);}
@@ -11,7 +12,7 @@ const ps={constants:{LayerKind:{NORMAL:'normal',GROUP:'group'},BlendMode:{NORMAL
 },async createImageDataFromBuffer(raw,options){return {...options,raw:new Uint8Array(raw),dispose(){}};},async putPixels({documentID,layerID,imageData,targetBounds,replace}){
     assert(modal);assert.equal(documentID,doc.id);assert(replace);assert.equal(imageData.colorProfile,'Test RGB');const layer=doc.layers.find(l=>l.id===layerID);writes++;layer.rgba=new Uint8Array(imageData.raw);layer.width=imageData.width;layer.height=imageData.height;layer.boundsNoEffects={left:targetBounds.left,top:targetBounds.top,right:targetBounds.left+layer.width,bottom:targetBounds.top+layer.height};if(failWrite)throw Error('write failed');
 }},core:{async executeAsModal(fn){assert(!modal);modal=true;try{return await fn({isCancelled:false,hostControl:{async suspendHistory(){return doc.layers.map(layer=>({layer,rgba:new Uint8Array(layer.rgba),bounds:{...layer.boundsNoEffects},width:layer.width,height:layer.height}));},async resumeHistory(snapshot,commit){if(commit){commits++;doc.activeHistoryState.id++;}else{rollbacks++;for(const s of snapshot){s.layer.rgba=s.rgba;s.layer.boundsNoEffects=s.bounds;s.layer.width=s.width;s.layer.height=s.height;}}}}});}finally{modal=false;}}}};
-const host={require(name){if(name==='photoshop')return ps;if(name==='uxp')return {entrypoints:{setup(){}}};return require(name.startsWith('./')?__dirname+'/'+name.slice(2):name);},document:{getElementById:id=>nodes[id],createElement:()=>({style:{},children:[],addEventListener(){}})},setInterval(fn){interval=fn;return 1;},clearInterval(){},Date:{now:()=>clock},console};
+const host={require(name){if(name==='photoshop')return ps;if(name==='uxp')return {entrypoints:{setup(){}}};return require(name.startsWith('./')?__dirname+'/'+name.slice(2):name);},document:{getElementById:id=>nodes[id],querySelectorAll:()=>Object.entries(nodes).map(([id,node])=>Object.assign(node,{id})),createElement:()=>({style:{},children:[],addEventListener(){}})},setInterval(fn){interval=fn;return 1;},clearInterval(){},Date:{now:()=>clock},console};
 vm.runInNewContext(fs.readFileSync(__dirname+'/main.js','utf8'),host);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function makeDocument(columns=1,rows=1,left=0,top=0){
@@ -49,6 +50,22 @@ function getPixel(layer,x,y){const b=layer.boundsNoEffects;return Array.from(lay
         const moved=await host.wrapCurrentLayer();assert.equal(moved,1);assert.equal(commits,previous+1);assert.deepEqual(getPixel(layer,0,0),[0,0,0,0]);assert.deepEqual(getPixel(layer,tx,ty),[200,10,20,255]);assert.deepEqual(Array.from(doc.layers[0].rgba),[7,8,9,255]);
         const oldWrites=writes;assert.equal(await host.wrapCurrentLayer(),0);assert.equal(writes,oldWrites,'wrapping must be idempotent');
     }
+    // An oversized canvas uses the centered tile region and reads/writes only Paint.
+    // Even an unlocked reference layer elsewhere on that canvas is untouched.
+    for(const [dw,dh]of [[1024,512],[1025,513]]){
+        const paint=makeDocument(2,2),ox=Math.floor((dw-256)/2),oy=Math.floor((dh-128)/2);
+        doc.width=dw;doc.height=dh;
+        paint.boundsNoEffects={left:ox,top:oy,right:ox+256,bottom:oy+128};
+        const reference={...paint,id:4,name:'Reference',width:2,height:2,rgba:new Uint8Array(16).fill(123),boundsNoEffects:{left:5,top:5,right:7,bottom:7}};
+        doc.layers.push(reference);const originalReference=new Uint8Array(reference.rgba),referenceBounds={...reference.boundsNoEffects};
+        setPixel(paint,ox+64,oy+97,[90,120,150,255]);
+        assert.equal(await host.wrapCurrentLayer(),1);
+        assert.deepEqual(getPixel(paint,ox+64,oy+97),[0,0,0,0]);
+        assert.deepEqual(getPixel(paint,ox+192,oy+33),[90,120,150,255]);
+        assert.deepEqual(getPixel(paint,ox+192,oy+32),[0,0,0,0]);
+        assert.deepEqual(reference.rgba,originalReference);assert.deepEqual(reference.boundsNoEffects,referenceBounds);
+        assert.equal(await host.wrapCurrentLayer(),0,'centered wrap must be idempotent');
+    }
     let layer=makeDocument(2,2);setPixel(layer,230,45,[222,3,4,255]);assert.equal(await host.wrapCurrentLayer(),1);assert.deepEqual(getPixel(layer,102,109),[222,3,4,255]);assert.deepEqual(getPixel(layer,102,110),[0,0,0,0]);
     // Regression: the exact lower-left/lower-right guide rows belong to the upper side.
     for(const [x,y,tx,ty]of [[64,97,192,33],[191,97,63,33],[64,100,192,36],[192,100,64,36]]){
@@ -60,15 +77,29 @@ function getPixel(layer,x,y){const b=layer.boundsNoEffects;return Array.from(lay
     layer=makeDocument();setPixel(layer,64,32,[0,0,255,255]);setPixel(layer,0,0,[255,0,0,128]);await host.wrapCurrentLayer();assert.deepEqual(getPixel(layer,64,32),[128,0,127,255]);
     // All four guide-covered boundaries remain intact, as requested.
     for(const [x,y]of [[0,31],[127,31],[62,0],[65,63]]){layer=makeDocument();setPixel(layer,x,y,[30,40,50,128]);assert.equal(await host.wrapCurrentLayer(),1);assert.deepEqual(getPixel(layer,x,y),[30,40,50,128]);const target=host.wrappedPixel(x+.5,y+.5,{columns:1,rows:1,tw:128,th:64});assert.deepEqual(getPixel(layer,Math.floor(target.x),Math.floor(target.y)),[30,40,50,128]);assert.equal(await host.wrapCurrentLayer(),0,'copying a translucent boundary twice must not compound alpha');}
-    for(const [x,y,tx,ty]of [[64,96,192,32],[191,96,63,32]]){layer=makeDocument(2,2);setPixel(layer,x,y,[30,40,50,128]);assert.equal(await host.wrapCurrentLayer(),1);assert.deepEqual(getPixel(layer,x,y),[30,40,50,128]);assert.deepEqual(getPixel(layer,tx,ty),[30,40,50,128]);assert.match(nodes['operation-status'].textContent,/搬移 0.*复制 1/);}
+    for(const [x,y,tx,ty]of [[64,96,192,32],[191,96,63,32]]){layer=makeDocument(2,2);setPixel(layer,x,y,[30,40,50,128]);assert.equal(await host.wrapCurrentLayer(),1);assert.deepEqual(getPixel(layer,x,y),[30,40,50,128]);assert.deepEqual(getPixel(layer,tx,ty),[30,40,50,128]);assert.equal(nodes['operation-status'].textContent,'');assert.equal(nodes['operation-status'].style.display,'none');}
     // If the interior edge changed since the previous history, synchronize outward instead.
     layer=makeDocument(2,2);setPixel(layer,64,96,[0,0,200,255]);setPixel(layer,192,32,[0,0,200,255]);layer.previousRGBA=new Uint8Array(layer.rgba);doc.historyStates=[{id:0},{id:1}];setPixel(layer,192,32,[200,0,0,128]);assert.equal(await host.wrapCurrentLayer(),1);assert.deepEqual(getPixel(layer,64,96),[200,0,0,128]);assert.deepEqual(getPixel(layer,192,32),[200,0,0,128]);
     layer=makeDocument(1,1,-64,-32);setPixel(layer,-64,-32,[20,30,40,255]);assert.equal(await host.wrapCurrentLayer(),1);assert.deepEqual(getPixel(layer,-64,-32),[0,0,0,0]);
     layer=makeDocument();setPixel(layer,0,0,[10,20,30,255]);const original=new Uint8Array(layer.rgba);failWrite=true;await assert.rejects(host.wrapCurrentLayer(),/write failed/);failWrite=false;assert.deepEqual(layer.rgba,original);assert.equal(rollbacks,1);
     const oldWrites=writes;layer.allLocked=true;await assert.rejects(host.wrapCurrentLayer(),/锁定/);layer.allLocked=false;masked=true;await assert.rejects(host.wrapCurrentLayer(),/蒙版/);masked=false;doc.bitsPerChannel=16;await assert.rejects(host.wrapCurrentLayer(),/8位/);doc.bitsPerChannel=8;doc.activeLayers=[doc.layers[0]];await assert.rejects(host.wrapCurrentLayer(),/辅助网格/);assert.equal(writes,oldWrites);
-    layer=makeDocument();nodes['auto-wrap'].checked=true;await nodes['bind-auto-wrap'].click();assert(paintCallback);assert.match(nodes['wrap-status'].textContent,/等待新笔触/);setPixel(layer,0,0,[11,22,33,255]);doc.activeHistoryState.id++;paintCallback();assert.match(nodes['wrap-status'].textContent,/paint绘画事件/);const beforeDelay=writes;clock+=100;host.tryAutoWrap();assert.equal(writes,beforeDelay);clock+=200;
+    layer=makeDocument();await nodes['bind-auto-wrap'].click();assert(paintCallback);assert.match(nodes['wrap-status'].textContent,/已绑定层/);setPixel(layer,0,0,[11,22,33,255]);doc.activeHistoryState.id++;paintCallback();assert.match(nodes['wrap-status'].textContent,/paint绘画事件/);const beforeDelay=writes;clock+=100;host.tryAutoWrap();assert.equal(writes,beforeDelay);clock+=200;
     // Call auto processing without preview rendering, to isolate history behavior.
     host.tryAutoWrap();await tick();assert.deepEqual(getPixel(layer,64,32),[11,22,33,255]);assert.match(nodes['wrap-status'].textContent,/自动回落完成/);const afterAuto=writes;host.tryAutoWrap();await tick();assert.equal(writes,afterAuto);
     setPixel(layer,0,0,[55,66,77,255]);doc.activeHistoryState.id++;paintCallback();doc.activeHistoryState.id--;clock+=300;host.tryAutoWrap();await tick();assert.equal(writes,afterAuto,'history changes after the paint event must cancel pending auto wrap');assert.match(nodes['wrap-status'].textContent,/已跳过/);
+    // Actual pixel writes obey the accumulating allowlist, not just event scheduling.
+    const second={...layer,id:20,name:'Second',rgba:new Uint8Array(layer.width*layer.height*4)};
+    doc.layers.push(second);doc.activeLayers=[second];setPixel(second,0,0,[99,88,77,255]);
+    const unboundExpected={documentID:doc.id,layerID:second.id,historyID:doc.activeHistoryState.id};
+    assert.equal(await host.wrapCurrentLayer(unboundExpected),0);assert.equal(writes,afterAuto);
+    assert.deepEqual(getPixel(second,0,0),[99,88,77,255]);
+    await nodes['bind-auto-wrap'].click();assert.equal(nodes['bind-auto-wrap'].textContent,'解绑当前图层');
+    assert(host.isWrapLayerBound(doc.id,layer.id));assert(host.isWrapLayerBound(doc.id,second.id));
+    assert.equal(await host.wrapCurrentLayer(host.wrapObservation()),1);assert.deepEqual(getPixel(second,64,32),[99,88,77,255]);
+    doc.activeLayers=[layer];host.updateWrapBinding();assert.equal(nodes['bind-auto-wrap'].textContent,'解绑当前图层');
+    setPixel(layer,0,0,[123,45,67,255]);assert.equal(await host.wrapCurrentLayer(host.wrapObservation()),1);assert.deepEqual(getPixel(layer,64,32),[123,45,67,255]);
+    layer.allLocked=true;await nodes['bind-auto-wrap'].click();assert(!host.isWrapLayerBound(doc.id,layer.id),'even a locked layer can be unbound');assert(host.isWrapLayerBound(doc.id,second.id));layer.allLocked=false;
+    const postUnbind=writes;assert.equal(await host.wrapCurrentLayer({documentID:doc.id,layerID:layer.id,historyID:doc.activeHistoryState.id}),0);assert.equal(writes,postUnbind);
+    doc.activeLayers=[second];await nodes['bind-auto-wrap'].click();assert.equal(vm.runInNewContext('autoWrapEnabled',host),false,'removing the last binding stops automatic wrapping');
     console.log('Layer wrap checks passed: single/multi lattice mapping, alpha, four-side boundary retention, exact lower-to-upper 2x2 translation, negative bounds, idempotency, one-step history, rollback, layer guards and paint-only auto processing.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

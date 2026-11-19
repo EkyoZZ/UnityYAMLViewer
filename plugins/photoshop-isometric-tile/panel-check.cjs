@@ -6,12 +6,16 @@ const zlib=require('node:zlib');
 const png=require('./png.js');
 const {unfilter}=require('./png-test-utils.cjs');
 function element(){return {style:{},children:[],value:'',checked:false,textContent:'',clientWidth:320,clientHeight:220,
-    focus(){this.focusCount=(this.focusCount||0)+1;},addEventListener(event,fn,options){this[event]=fn;this[event+"Options"]=options;},appendChild(child){this.children.push(child);},replaceChild(next,old){this.children[this.children.indexOf(old)]=next;},removeChild(child){this.children.splice(this.children.indexOf(child),1);},
+    focus(){this.focusCount=(this.focusCount||0)+1;},addEventListener(event,fn,options){this[event]=fn;this[event+"Options"]=options;},appendChild(child){if(child.parentNode)child.parentNode.removeChild(child);this.children.push(child);child.parentNode=this;},replaceChild(next,old){this.children[this.children.indexOf(old)]=next;next.parentNode=this;old.parentNode=null;},removeChild(child){this.children.splice(this.children.indexOf(child),1);child.parentNode=null;},
     getBoundingClientRect(){return {width:this.clientWidth,height:this.clientHeight};},
     set innerHTML(value){this.children=[];}};}
-const nodes=Object.fromEntries(['wrap-last-run','auto-wrap-document','bind-auto-wrap','wrap-status','wrap-layer','auto-wrap','preview-stage','zoom-reset','stagger-mode','stagger-settings','stagger-columns','stagger-rows','convert-single-document','zoom-slider','preview-background','show-grid','background-mode','background-color','background-color-row','background-swatch','background-error','version','preview','status','width','height','width-label','height-label','zoom','elevated','live','refresh','mode','columns','rows','preset-2','preset-3','preset-4','slots','slot-controls','bind','unbind','selected-slot','document-picker','document-options','reload-documents','show-slots','multi-document-controls','atlas-actions','grid-size','operation-status','new-grid-document','export-cell','export-grid'].map(k=>[k,element()]));
+const nodes=Object.fromEntries(['wrap-last-run','auto-wrap-document','bind-auto-wrap','wrap-status','wrap-layer','auto-wrap','preview-stage','zoom-reset','stagger-mode','stagger-settings','stagger-columns','stagger-rows','convert-single-document','zoom-slider','preview-background','show-grid','background-mode','background-color','background-color-row','background-swatch','background-error','version','preview','status','width','height','width-label','height-label','zoom','elevated','refresh','mode','columns','rows','preset-2','preset-3','preset-4','slots','slot-controls','bind','unbind','selected-slot','document-picker','document-options','reload-documents','show-slots','multi-document-controls','atlas-actions','grid-size','operation-status','new-grid-document','export-cell','export-grid'].map(k=>[k,element()]));
+for(const [,id]of fs.readFileSync(__dirname+'/index.html','utf8').matchAll(/id="([^"]+)"/g))if(!nodes[id])nodes[id]=element();
+for(const [id,node]of Object.entries(nodes))node.id=id;
+const roots={tilePreview:element(),tilePreviewView:element()};
+nodes['group-columns'].value=nodes['group-rows'].value='1';
 nodes['stagger-mode'].selectedIndex=0;nodes['stagger-columns'].value='2';nodes['stagger-rows'].value='2';nodes.mode.selectedIndex=0;nodes['background-mode'].selectedIndex=0;nodes['background-color'].value='#555555';
-nodes.width.value='128';nodes.height.value='64';nodes.zoom.value='1';nodes.live.checked=true;
+nodes.width.value='128';nodes.height.value='64';nodes.zoom.value='1';
 nodes.columns.value='2';nodes.rows.value='2';nodes['show-slots'].checked=true;
 let interval,hooks,reads=0,disposals=0,guideDisposals=0,failRead=false;const readIds=[],readOptions=[],exportFolders=[];
 let modalDepth=0,rollbackChangesHistoryID=false;
@@ -29,13 +33,75 @@ ps.core={async executeAsModal(fn){assert.equal(modalDepth,0);modalDepth++;try{re
 ps.imaging.createImageDataFromBuffer=async(raw,options)=>({raw,...options,dispose(){guideDisposals++;}});
 ps.imaging.putPixels=async({documentID,layerID,imageData,targetBounds})=>{const doc=ps.app.documents.find(d=>d.id===documentID),layer=doc.layers.find(l=>l.id===layerID);layer.gridPixels=imageData.raw;layer.pixelSize=[imageData.width,imageData.height];layer.targetBounds=targetBounds;};
 ps.action={async batchPlay(commands){ps.app.activeDocument.selectedLayerID=commands[0]._target[0]._id;}};
-const uxp={entrypoints:{setup(v){hooks=v;}},storage:{formats:{binary:'binary'},localFileSystem:{async getFolder(){return {async createFolder(name){const folder={name,nativePath:'mock/'+name,files:new Map(),async createFile(filename,options){assert.equal(options.overwrite,false);assert(!this.files.has(filename));return {write:async bytes=>this.files.set(filename,Buffer.from(bytes))};}};exportFolders.push(folder);return folder;}};}}}};
+const uxp={entrypoints:{setup(v){
+    if(v.plugin&&typeof v.plugin.create!=='function')throw Error('create method is not defined for plugin.');
+    hooks=v;v.plugin.create();v.panels.tilePreview.create(roots.tilePreview);
+}},storage:{formats:{binary:'binary'},localFileSystem:{async getFolder(){return {async createFolder(name){const folder={name,nativePath:'mock/'+name,files:new Map(),async createFile(filename,options){assert.equal(options.overwrite,false);assert(!this.files.has(filename));return {write:async bytes=>this.files.set(filename,Buffer.from(bytes))};}};exportFolders.push(folder);return folder;}};}}}};
 const host={
     require(name){if(name==='photoshop')return ps;if(name==='uxp')return uxp;if(name==='./png.js')return png;if(name==='./manifest.json')return require('./manifest.json');throw Error(name);},
-    document:{getElementById:id=>nodes[id],createElement:()=>element()},
+    document:{getElementById:id=>nodes[id],querySelectorAll:()=>Object.values(nodes),createElement:()=>element()},
     setInterval(fn){interval=fn;return 1;},clearInterval(){},console,
 };
-vm.runInNewContext(fs.readFileSync(__dirname+'/main.js','utf8'),host);
+uxp.pluginManager={plugins:[{id:require('./manifest.json').id,async showPanel(id){hooks.panels[id].show(roots[id]);}}]};
+const mainSource=fs.readFileSync(__dirname+'/main.js','utf8');
+{
+    // The host can launch either entrypoint first. The preview must not inherit
+    // the settings UI, and both panels must reuse their controls after detaching.
+    const isolatedNodes=Object.fromEntries(Object.entries(nodes).map(([id,node])=>[id,Object.assign(element(),{id,value:node.value,checked:node.checked,selectedIndex:node.selectedIndex})]));
+    const previewRoot=element(),settingsRoot=element();let isolatedHooks;
+    const isolatedUXP={entrypoints:{setup(v){isolatedHooks=v;v.plugin.create();v.panels.tilePreviewView.create(previewRoot);}}};
+    const isolatedHost={...host,require(name){return name==='uxp'?isolatedUXP:host.require(name);},document:{getElementById:id=>isolatedNodes[id],querySelectorAll:()=>Object.values(isolatedNodes),createElement:()=>element()},setInterval(){return 1;}};
+    vm.runInNewContext(mainSource,isolatedHost);
+    assert.equal(isolatedNodes['view-area'].parentNode,previewRoot);
+    assert.equal(isolatedNodes.controls.style.display,'none');
+    assert.equal(isolatedNodes['view-area'].style.display,'flex');
+    assert.match(isolatedNodes.status.textContent,/新建文档/);
+    isolatedHost.document.getElementById=()=>null; // A different/detached root is no longer searchable.
+    isolatedHooks.panels.tilePreview.show(settingsRoot);
+    assert.equal(isolatedNodes.controls.parentNode,settingsRoot);
+    assert.equal(previewRoot.children.includes(isolatedNodes.controls),false);
+    isolatedHooks.panels.tilePreview.destroy();
+    assert.equal(isolatedNodes['view-area'].style.display,'flex');
+    isolatedHooks.panels.tilePreviewView.destroy();
+    const reopenedRoot=element();isolatedHooks.panels.tilePreviewView.show(reopenedRoot);
+    assert.equal(isolatedNodes['view-area'].parentNode,reopenedRoot);
+    assert.equal(previewRoot.children.length,0);
+    assert.equal(isolatedNodes.mode.selectedIndex,1);
+    isolatedHooks.plugin.destroy();
+}
+{
+    const failedNodes={status:element(),refresh:element(),"panel-error":element()};let logged='';
+    const failedHost={require(name){if(name==='photoshop')return ps;if(name==='uxp')return {entrypoints:{setup(){throw Error('Simulated lifecycle registration rejection');}}};throw Error('Resources must not load after failed registration');},document:{getElementById:id=>failedNodes[id]},console:{error(message){logged=message;}}};
+    assert.throws(()=>vm.runInNewContext(mainSource,failedHost),/Simulated lifecycle registration rejection/);
+    assert.match(failedNodes["panel-error"].textContent,/插件初始化失败.*Simulated lifecycle registration rejection/);
+    assert.equal(failedNodes['panel-error'].style.color,'#ff6e6e');assert.equal(failedNodes.refresh.disabled,true);assert.match(logged,/请关闭并重新打开/);
+}
+vm.runInNewContext(mainSource,host);
+vm.runInNewContext('setStatus("operation-status","重复错误",true);setStatus("wrap-status","无法开启：重复错误",true);',host);
+assert.equal(nodes['panel-error'].textContent,'无法开启：重复错误');
+assert.equal(nodes['operation-status'].style.display,'none');assert.equal(nodes['wrap-status'].style.display,'none');
+vm.runInNewContext('setStatus("wrap-status","");setStatus("operation-status","");',host);
+assert.equal(nodes['panel-error'].textContent,'');
+vm.runInNewContext('setStatus("operation-status","持续错误",true);',host);
+nodes['clear-errors'].click();assert.equal(nodes['panel-error'].textContent,'');
+vm.runInNewContext('setStatus("operation-status","持续错误",true);',host);
+assert.equal(nodes['panel-error'].textContent,'','polling must not immediately restore dismissed errors');
+vm.runInNewContext('setStatus("operation-status","新错误",true);',host);
+assert.equal(nodes['panel-error'].textContent,'新错误');
+vm.runInNewContext('setStatus("operation-status","");setStatus("operation-status","持续错误",true);',host);
+assert.equal(nodes['panel-error'].textContent,'持续错误','a recurrence after recovery must be shown');
+vm.runInNewContext('setStatus("operation-status","");',host);
+{
+    const targets=['grid-settings-status','panel-error'];let writes=0;
+    for(const id of targets){const node=nodes[id];let value=node.textContent;Object.defineProperty(node,'textContent',{configurable:true,get(){return value;},set(next){writes++;value=next;}});}
+    vm.runInNewContext('setStatus("grid-settings-status","",true);',host);writes=0;
+    for(let i=0;i<20;i++)vm.runInNewContext('setStatus("grid-settings-status","",true);',host);
+    assert.equal(writes,0,'stable validation polling must not rewrite empty text nodes');
+    vm.runInNewContext('setStatus("grid-settings-status","网格不匹配",true);',host);writes=0;
+    for(let i=0;i<20;i++)vm.runInNewContext('setStatus("grid-settings-status","网格不匹配",true);',host);
+    assert.equal(writes,0,'stable errors must not rebuild text during polling');
+    vm.runInNewContext('setStatus("grid-settings-status","",true);',host);
+}
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function decodedPNG(bytes){const width=bytes.readUInt32BE(16),height=bytes.readUInt32BE(20),chunks=[];for(let p=8;p<bytes.length;){const n=bytes.readUInt32BE(p);if(bytes.toString('ascii',p+4,p+8)==='IDAT')chunks.push(bytes.subarray(p+8,p+8+n));p+=n+12;}return {width,height,raw:unfilter(zlib.inflateSync(Buffer.concat(chunks)),width,height)};}
 // Offset selection is evaluated in lattice cells, including negative repeat groups.
@@ -78,13 +144,41 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
 }
 (async()=>{
     await tick();assert.match(nodes.status.textContent,/请打开/);assert.equal(typeof interval,'function');
+    assert.equal(nodes.controls.parentNode,roots.tilePreview);
+    assert.equal(nodes.controls.style.display,'flex');assert.equal(nodes['view-area'].style.display,'none');
+    assert.equal(nodes['open-preview'].textContent,'打开预览');
+    // Merely opening settings must not sample the current document, even after
+    // edits or refresh requests; preview visibility is the only refresh switch.
+    const unseenDoc={id:99,width:256,height:128,title:'Not previewed.psd',activeHistoryState:{id:1}};
+    ps.app.documents=[unseenDoc];ps.app.activeDocument=unseenDoc;
+    for(let i=0;i<3;i++){unseenDoc.activeHistoryState.id++;host.request(true);interval();await tick();}
+    assert.equal(reads,0,'settings-only startup must not read preview pixels');
+    ps.app.documents=[];ps.app.activeDocument=null;interval();await tick();
+    const showPanel=uxp.pluginManager.plugins[0].showPanel;
+    uxp.pluginManager.plugins[0].showPanel=async()=>{throw Error('Host refused to show panel');};
+    await nodes['open-preview'].click();assert.match(nodes['preview-panel-status'].textContent,/Host refused/);assert.equal(nodes['preview-panel-status'].style.color,'#ff6e6e');assert.equal(nodes['open-preview'].disabled,false);
+    uxp.pluginManager.plugins[0].showPanel=showPanel;
+    assert.match(nodes.status.textContent,/新建文档/);assert.equal(nodes['expand-grid-document'].disabled,true);
+    await assert.rejects(host.expandGridDocument(),/请先打开/);
+    nodes.refresh.click();await tick();assert.match(nodes.status.textContent,/新建文档/);assert.equal(reads,0);
+    assert.equal(nodes['view-area'].parentNode,roots.tilePreviewView);assert.equal(nodes['view-area'].style.display,'flex');assert.equal(nodes['open-preview'].textContent,'显示预览');assert.equal(nodes['preview-panel-status'].textContent,'');
+    assert.equal(nodes.mode.selectedIndex,1,'startup must explicitly select the default grid mode');
+    assert.equal(nodes['grid-dimensions'].style.display,'flex');assert.equal(nodes['slot-controls'].style.display,'flex');assert.equal(nodes.slots.children.length,4,'grid controls must be available without a PS document');
+    for(let i=0;i<3;i++){
+        nodes['document-settings-toggle'].click();assert.equal(nodes['document-settings'].style.display,'none');assert.equal(nodes['slot-controls'].style.display,'flex');assert.equal(nodes['atlas-actions'].style.display,'flex');
+        nodes['document-settings-toggle'].click();assert.equal(nodes['document-settings'].style.display,'flex');assert.equal(nodes['grid-dimensions'].style.display,'flex');
+    }
+    const originalBindingUpdate=host.updateWrapBinding;host.updateWrapBinding=()=>{throw Error('Simulated binding read failure');};
+    hooks.panels.tilePreview.show();await tick();assert.match(nodes['wrap-status'].textContent,/Simulated binding read failure/);assert.equal(nodes['grid-dimensions'].style.display,'flex');assert.match(nodes.status.textContent,/请打开/);
+    host.updateWrapBinding=originalBindingUpdate;
     const background=nodes['preview-background'],append=background.appendChild;
     nodes.preview.clientWidth=641;nodes.preview.clientHeight=579;
     background.appendChild=function(){throw new Error('Simulated background layout failure');};interval();await tick();
     assert.match(nodes.status.textContent,/Simulated background layout failure/);
+    assert.equal(nodes['grid-dimensions'].style.display,'flex');assert.equal(nodes.slots.children.length,4,'preview failure must not hide grid settings');
     background.appendChild=append;interval();await tick();assert.match(nodes.status.textContent,/请打开/);
     nodes.preview.clientWidth=320;nodes.preview.clientHeight=220;interval();await tick();
-    nodes.mode.selectedIndex=2;nodes.columns.value='1';nodes.rows.value='1';interval();await tick();assert.equal(nodes.slots.children.length,1);assert.equal(nodes['slot-controls'].style.display,'block');
+    nodes.mode.selectedIndex=2;nodes.columns.value='1';nodes.rows.value='1';interval();await tick();assert.equal(nodes.slots.children.length,1);assert.equal(nodes['slot-controls'].style.display,'flex');
     nodes.mode.selectedIndex=-1;assert.equal(host.mode(),2,'transient dropdown state must preserve selected mode');
     nodes.mode.selectedIndex=0;interval();await tick();assert.equal(nodes['slot-controls'].style.display,'none');
     nodes.columns.value='2';nodes.rows.value='2';interval();await tick();
@@ -92,9 +186,15 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
     const docA={id:1,width:128,height:128,title:'Test',activeHistoryState:{id:1}};
     ps.app.documents=[docA];ps.app.activeDocument=docA;
     nodes.refresh.click();await tick();assert.equal(reads,1);assert.match(nodes.status.textContent,/Test/);
+    assert.equal(nodes['expand-grid-document'].disabled,false);
     assert(nodes.preview.children.length>0);assert.equal(disposals,1);
     const stableImage=nodes.preview.children[0];
-    nodes['preview-stage'].mouseenter();nodes['preview-stage'].mousedown();assert.equal(nodes['preview-stage'].focusCount,2);assert.equal(nodes['preview-stage'].wheelOptions.capture,true);assert.equal(nodes['preview-stage'].wheelOptions.passive,false);
+    assert.equal(nodes['preview-stage'].mouseenter,undefined);assert.equal(nodes['preview-stage'].mousedown,undefined);assert.equal(nodes['preview-stage'].wheelOptions.capture,true);assert.equal(nodes['preview-stage'].wheelOptions.passive,false);
+    let blurred=0;host.document.activeElement={tagName:'INPUT',type:'number',blur(){blurred++;}};
+    nodes.controls.click({type:'click',target:{tagName:'BUTTON'}});assert.equal(blurred,0,'numeric editing must retain focus');
+    nodes.controls.mouseleave({type:'mouseleave'});assert.equal(blurred,1);
+    host.document.activeElement={tagName:'BUTTON',blur(){blurred++;}};nodes.controls.click({type:'click',target:{tagName:'BUTTON'}});assert.equal(blurred,2);
+    nodes.controls.keydown({key:'b'});assert.equal(blurred,2);nodes.controls.keydown({key:'Escape'});assert.equal(blurred,3);host.document.activeElement=null;
     let prevented=0,stopped=0;const wheel=(deltaY,deltaMode=0)=>nodes['preview-stage'].wheel({deltaY,deltaMode,preventDefault(){prevented++;},stopPropagation(){stopped++;}});
     wheel(-120);await tick();assert(Number(nodes.zoom.value)>1);assert.equal(nodes.zoom.value,nodes['zoom-slider'].value);assert.equal(reads,1);assert.equal(nodes.preview.children[0],stableImage);
     const enlarged=Number(nodes.zoom.value);wheel(3,1);await tick();assert(Number(nodes.zoom.value)<enlarged);
@@ -133,7 +233,7 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
     nodes.zoom.value='1';nodes.zoom.change();await tick();
     for(const child of nodes.preview.children){assert(parseFloat(child.style.left)<=320);assert(parseFloat(child.style.top)<=220);}
     const left=nodes.preview.children.map(c=>c.style.left).join(',');
-    nodes.preview.clientWidth=640;nodes.live.checked=false;interval();await tick();
+    nodes.preview.clientWidth=640;interval();await tick();
     assert.equal(reads,1);assert.notEqual(nodes.preview.children.map(c=>c.style.left).join(','),left);
     hooks.panels.tilePreview.hide();nodes.refresh.click();await tick();assert.equal(reads,2);
     nodes.mode.selectedIndex=2;nodes.mode.change();await tick();assert.match(nodes.status.textContent,/绑定/);
@@ -149,7 +249,7 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
         assert.equal(nodes['stagger-columns'].disabled,mode===2);assert.equal(nodes['stagger-rows'].disabled,mode===1);
     }
     nodes['stagger-mode'].selectedIndex=0;nodes['stagger-mode'].change();await tick();assert.equal(nodes['stagger-settings'].style.display,'none');
-    const previous=reads;docB.activeHistoryState.id++;nodes.live.checked=true;interval();await tick();
+    const previous=reads;docB.activeHistoryState.id++;interval();await tick();
     assert.equal(reads,previous+1);assert.equal(readIds[readIds.length-1],2);
     ps.app.activeDocument=docA;nodes.bind.click();await tick();
     assert.equal(new Set(nodes.preview.children.filter(c=>c.src).map(c=>c.src)).size,1);
@@ -215,6 +315,37 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
     nodes.columns.value='2';nodes.rows.value='2';nodes.columns.change();await tick();
     await nodes['export-grid'].click();await tick();assert.match(nodes['operation-status'].textContent,/已导出 4 张/);assert.equal(exportFolders[exportFolders.length-1].files.size,4);
     const rawReads=readOptions.filter(o=>o.documentID===101&&!o.targetSize);assert.equal(rawReads.length,4);assert(rawReads.every(o=>o.sourceBounds.right-o.sourceBounds.left===128&&o.sourceBounds.bottom-o.sourceBounds.top===64));
+    existing.width=1025;existing.height=513;existing.activeHistoryState.id++;nodes.refresh.click();await tick();
+    const centered=host.atlasSpec(existing);assert.equal(centered.left,384);assert.equal(centered.top,192);assert.equal(centered.width,256);assert.equal(centered.height,128);
+    const centeredRead=readOptions.filter(o=>o.documentID===101&&o.targetSize).at(-1);
+    assert.deepEqual(plain(centeredRead.sourceBounds),{left:384,top:192,right:640,bottom:320});
+    const centerFrame=await host.capture(existing,false,512,centered),centerPNG=decodedPNG(Buffer.from(centerFrame.url.split(',')[1],'base64'));
+    assert.equal(centerFrame.dw,256);assert.equal(centerFrame.dh,128);assert.equal(centerPNG.raw[64*(256*4+1)+1+128*4+3],128,'centered read must not become transparent from double offsets');
+    await nodes['export-grid'].click();await tick();
+    const centeredCells=readOptions.filter(o=>o.documentID===101&&!o.targetSize).slice(-4);
+    assert.deepEqual(plain(centeredCells[0].sourceBounds),{left:448,top:192,right:576,bottom:256});
+    assert.deepEqual(plain(centeredCells[3].sourceBounds),{left:448,top:256,right:576,bottom:320});
+    existing.width=255;assert.throws(()=>host.atlasSpec(existing),/放不下/);existing.width=256;existing.height=128;
+    // Single-document subgroup controls and both-axis staggered coverage.
+    const grouped={id:200,title:'groups.psd',width:384,height:192,activeHistoryState:{id:1},layers:[]};ps.app.documents.push(grouped);ps.app.activeDocument=grouped;
+    nodes.rows.value='4';nodes['joint-wrap'].checked=true;nodes['group-columns'].value=nodes['group-rows'].value='2';nodes.rows.change();await tick();
+    assert.equal(nodes['group-settings'].style.display,'block');nodes.slots.children[4].click();await tick();assert.match(nodes['selected-group'].textContent,/2／2/);
+    nodes['group-rows'].value='3';nodes['group-rows'].change();await tick();assert.match(nodes.status.textContent,/整除/);assert.equal(nodes.status.style.color,'#ff6e6e');
+    nodes['group-rows'].value='2';nodes['group-rows'].change();await tick();
+    const synthetic={dw:48,dh:24,w:48,h:24,title:'coordinates',rgba:new Uint8Array(48*24*4)};
+    for(let y=0;y<24;y++)for(let x=0;x<48;x++)synthetic.rgba.set([x,y,0,255],(y*48+x)*4);
+    const smallSpec={columns:2,rows:4,tw:16,th:8},crops=host.atlasTileFrames(synthetic,smallSpec);
+    for(let r=0;r<4;r++)for(let c=0;c<2;c++){
+        const decoded=decodedPNG(Buffer.from(crops[r*2+c].url.split(',')[1],'base64')),i=4*(16*4+1)+1+8*4;
+        assert.deepEqual(Array.from(decoded.raw.subarray(i,i+4)),[(4+c-r)*8,(c+r)*4+4,0,255],'crop center belongs to the named source Slot');
+    }
+    nodes['show-grid'].checked=nodes['show-slots'].checked=false;nodes['joint-wrap'].checked=false;
+    host.renderAtlas(synthetic,{width:320,height:220},smallSpec,1,{columns:1,rows:1});
+    const cells=nodes.preview.children.filter(n=>n.src).map(n=>({x:parseFloat(n.style.left),y:parseFloat(n.style.top),w:parseFloat(n.style.width),h:parseFloat(n.style.height)}));
+    for(let y=3;y<220;y+=7)for(let x=3;x<320;x+=7)assert(cells.some(n=>Math.abs((x-n.x-n.w/2)/(n.w/2))+Math.abs((y-n.y-n.h/2)/(n.h/2))<=1.001),'both-axis staggering must cover every ground point');
+    const groupOverlay=host.subgroupGridImage({columns:8,rows:8,tw:1024,th:512},{columns:2,rows:2,across:4,down:4,index:0},0,0,1),groupOverlayPNG=decodedPNG(Buffer.from(groupOverlay.src.split(',')[1],'base64'));
+    assert.equal(groupOverlayPNG.width,512);assert.equal(groupOverlayPNG.height,256);assert.equal(groupOverlay.style.width,'8192px');
+    nodes.rows.value='2';
     // A capture failure still rolls visibility and lock state back.
     ps.app.activeDocument=atlas;nodes.columns.value='3';nodes.rows.value='3';nodes.columns.change();await tick();failRead=true;
     await nodes['export-grid'].click();await tick();assert.match(nodes['operation-status'].textContent,/0\/9/);assert.equal(guide.visible,true);assert.equal(guide.allLocked,true);failRead=false;
@@ -224,7 +355,7 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
     for(let i=0;i<6;i++){nodes.slots.children[i].click();nodes.unbind.click();await tick();}
     for(const [cell,doc]of [[0,docA],[1,docB],[3,docA],[5,atlas]]){nodes.slots.children[cell].click();ps.app.activeDocument=doc;nodes.bind.click();await tick();}
     const beforeConvert=readIds.length;await nodes['convert-single-document'].click();await tick();
-    assert.match(nodes['operation-status'].textContent,/已转换为单文档/);assert.equal(nodes.mode.selectedIndex,1);assert.equal(nodes['atlas-actions'].style.display,'block');assert.equal(nodes['multi-document-controls'].style.display,'none');
+    assert.match(nodes['operation-status'].textContent,/已转换为单文档/);assert.equal(nodes.mode.selectedIndex,1);assert.equal(nodes['atlas-actions'].style.display,'flex');assert.equal(nodes['multi-document-controls'].style.display,'none');
     const converted=ps.app.activeDocument;assert.equal(converted.width,320);assert.equal(converted.height,160);assert.equal(converted.layers.length,7);
     assert.match(converted.layers[0].name,/辅助网格/);assert.equal(converted.layers[0].allLocked,true);assert.equal(converted.layers[0].blendMode,'multiply');
     assert.deepEqual(converted.layers.slice(1).map(l=>l.name.match(/Slot (\d+,\d+)/)[1]),['1,1','1,2','1,3','2,1','2,2','2,3']);
@@ -245,6 +376,32 @@ for(const spec of [{columns:2,rows:2,tw:128,th:64},{columns:3,rows:5,tw:32,th:16
     failRead=true;await nodes['convert-single-document'].click();await tick();assert.equal(ps.app.documents.length,beforeFailure+1);assert.match(nodes['operation-status'].textContent,/未创建目标文档/);assert.equal(guide.visible,true);assert.equal(guide.allLocked,true);failRead=false;
     const putPixels=ps.imaging.putPixels;ps.imaging.putPixels=async options=>{if(options.targetBounds)throw new Error('Simulated destination write failure');return putPixels(options);};
     const beforePartial=ps.app.documents.length;await nodes['convert-single-document'].click();await tick();assert.equal(ps.app.documents.length,beforePartial+1);assert.match(nodes['operation-status'].textContent,/保留未完成的新文档/);assert.equal(nodes.mode.selectedIndex,2);assert(ps.app.documents.includes(docA));assert(ps.app.documents.includes(docB));ps.imaging.putPixels=putPixels;
+    // Closing the last document must clear stale pixels.
+    ps.app.documents=[];ps.app.activeDocument=null;
+    interval();await tick();assert.equal(nodes.preview.children.length,0);assert.match(nodes.status.textContent,/新建文档/);assert.equal(nodes['expand-grid-document'].disabled,true);
+    for(const mode of [0,1,2]){nodes.mode.selectedIndex=mode;nodes.mode.change();await tick();assert.match(nodes.status.textContent,/新建文档/);assert.equal(nodes['expand-grid-document'].disabled,true);}
+    ps.app.documents=[docA];ps.app.activeDocument=docA;interval();await tick();assert.equal(nodes['expand-grid-document'].disabled,false);
+    nodes.mode.selectedIndex=0;nodes.mode.change();nodes.refresh.click();await tick();assert.match(nodes.status.textContent,/Test/);assert(nodes.preview.children.length>0);
+    // Settings may be collapsed or destroyed while live preview keeps working.
+    const beforeHiddenSettings=reads;
+    hooks.panels.tilePreview.hide();hooks.panels.tilePreview.destroy();await tick();
+    docA.activeHistoryState.id++;interval();await tick();assert.equal(reads,beforeHiddenSettings+1);
+    assert.equal(nodes.controls.style.display,'none');assert.equal(nodes['view-area'].style.display,'flex');
+    const savedMode=nodes.mode.selectedIndex,savedZoom=nodes.zoom.value;
+    hooks.panels.tilePreviewView.hide();hooks.panels.tilePreviewView.destroy();const beforeHiddenPreview=reads;
+    docA.activeHistoryState.id++;interval();await tick();assert.equal(reads,beforeHiddenPreview,'hidden preview must stop reading pixels');
+    roots.tilePreviewView=element();await nodes['open-preview'].click();await tick();
+    assert.equal(nodes['view-area'].parentNode,roots.tilePreviewView);assert.equal(reads,beforeHiddenPreview+1);
+    assert.equal(nodes.mode.selectedIndex,savedMode);assert.equal(nodes.zoom.value,savedZoom);
+    await nodes['open-settings'].click();await tick();assert.equal(nodes.controls.style.display,'flex');assert.equal(nodes.controls.parentNode,roots.tilePreview);
+    hooks.panels.tilePreviewView.hide();const beforeSettingsOnly=reads;
+    for(let i=0;i<3;i++){docA.activeHistoryState.id++;host.request(true);interval();await tick();}
+    assert.equal(reads,beforeSettingsOnly,'keeping settings open must not update a hidden preview');
+    assert.equal(nodes.controls.style.display,'flex');assert.equal(nodes['view-area'].style.display,'none');
+    await nodes['open-preview'].click();await tick();assert.equal(reads,beforeSettingsOnly+1);
+    docA.activeHistoryState.id++;interval();await tick();assert.equal(reads,beforeSettingsOnly+2,'opened preview updates automatically without a checkbox');
+    console.log('Separate-panel checks passed: either entrypoint first, separate roots, retained detached controls, show failure recovery, hidden-settings live refresh, hidden-preview pause and reopening with current pixels.');
+    console.log('Panel lifecycle checks passed: early host callbacks, fold/unfold, initialization failure recovery, no-document guidance, cleared stale preview and expansion availability.');
     console.log('Conversion checks passed: 3x2 ordered layers, duplicate/blank Slots, original-size reads, top locked Multiply grid, mode refresh, closed/read/write failures and source preservation.');
     console.log('Mock-host checks passed: startup/resize, document dropdown, 2x2/3x3/4x4 presets and manual 8x8/3x5, hidden binding retention, clickable markers, deduplicated cache, 64 distinct documents at 256px and buffer disposal.');
     console.log('Atlas checks passed: locked Multiply guide, 3x3 creates/exports 9 transparent PNGs, existing 256x128 splits to four 128x64 cells, cell-coordinate mapping and helper restoration after failure.');

@@ -950,7 +950,55 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 - 很小的 Tile 或极端高度比例会自动放大预览；绘制范围最多前后各 32 排、左右各 32 格，极端比例可能无法填满视区。项目为未压缩 JSON，读取上限256 MiB，新保存工程格式为3，兼容读取格式1和2。旧程序不能读取格式3。
 - 请保存 .uytile 以保留多 Tile 排列；另存 PNG 不覆盖入口源图片。窗口有未保存内容时关闭会提示，打开其他工程前也可先保存；前一个内容可在本次会话中通过撤销找回。
 
-独立 Photoshop UXP 插件的加载方法与当前限制见 plugins/photoshop-isometric-tile/README.md；它只负责预览，绘画仍由 Photoshop 完成。
+独立 Photoshop UXP 插件的加载方法与当前限制见 plugins/photoshop-isometric-tile/README.md；绘画由 Photoshop 完成，插件提供循环预览、切片和收笔后的当前层回落。
+
+插件菜单提供“Tile 设置”和“Tile 预览”两个面板。设置中的“打开预览”用于显示独立预览，预览顶部的“打开设置”可返回设置。首次打开可能被PS放入同一停靠组，可拖动预览标签到画布外或另一屏幕，再独立调整大小；设置收起不停止预览更新。关闭使用面板自身的 ×，UXP没有脚本关闭面板接口。设置面板建议280×700，最小240×320，可由用户调整大小，内容超出时纵向滚动；预览最小360×320、建议浮动900×700，仍可自由调整。实际停靠位置、面板尺寸及宿主缩放手柄显示由PS及已保存的工作区决定。
+
+The plugin menu provides separate Tile Settings and Tile Preview panels. Open Preview shows the preview, and Open Settings returns to the controls. Photoshop may initially group the panels; drag the preview tab out or onto another monitor to float and resize it independently. Collapsing settings does not stop live preview. Close panels with their native × controls; UXP has no programmatic close-panel API. Settings are resizable with a 240×320 minimum and 280×700 preferred size, with vertical scrolling; preview remains resizable, with a 360×320 minimum and 900×700 preferred floating size. Photoshop and its saved workspace control actual placement, dimensions and native resize-grip visibility.
+
+Photoshop 单文档模式可启用子组联动回落：按总格数可整除的列／行数分组，点选 Slot 定位子组；同位子组的边界变化联动，保证重复拼接连续。错位循环预览可用于单文档和多文档模式，只改变预览排列，不修改绘画或导出。
+
+错位预览设置位于独立预览面板顶部，与辅助网格和背景设置排在一行。选择错位模式后，列／行偏移格数在同一行显示，第二行显示简短说明；选“不偏移”隐藏偏移参数和说明。窗口较窄时可横向滚动这一排设置。偏移是整组宽高的整数倍时外观不变，转换为单文档仍按原Slot排列。
+
+Staggered preview controls share the top row of the separate preview panel with grid and background settings. Enabling staggering reveals column/row offsets in that row and a short explanation below it. No Offset hides both parameters and guidance. Narrow panels allow horizontal scrolling of the settings row. Offsets equal to whole repeat dimensions leave the appearance unchanged; single-document conversion retains the original Slot layout.
+
+PS 单文档画布可大于 Tile 区域。区域宽高为单格宽高×（行数＋列数）÷2，默认1×1；例如2×2、单格128×64占256×128区域，放在1024×512画布时左上角为(384,192)。预览、逐格PNG与回落都以此中心区域定位；新建文档仍使用最小尺寸，需要更大空间时可在PS中以中心为锚点扩展画布。奇数余量按整数像素居中，左右／上下留白至多相差1像素。不要单独移动辅助网格；画布任何一边小于区域时会报错。
+
+回落只读写当前选中的普通像素图层，其他图层不会被搬移。依次选中绘画层点击“绑定当前图层”可累计绑定；选中已绑定层时显示“解绑当前图层”，解绑只移除这一层。A和B都绑定后，在两层间切换均可自动回落，未绑定的参考层不会触发。参考层仍可锁定以避免误画。绑定即启用该层自动回落，解绑即停止该层，其他已绑定层不受影响；手动回落不受名单限制。普通回落会处理当前层已有的越界像素，不区分参考内容。预览与切片仍取中心区域内的可见图层合成画面。
+
+In Photoshop single-document mode, the canvas may be larger than the Tile area. Preview, slicing and wrapping use a pixel-aligned region at the canvas center. Wrapping modifies only the selected editable pixel layer. Bind drawing layers individually: the list accumulates, switching between bound layers continues automatic wrapping, and unbinding removes only the current layer. Unbound reference layers are ignored by automatic wrapping. Pausing retains the list; manual wrapping still operates on the current layer. Preview and export use the visible composite within the central region.
+
+标题下的“加载当前打开文档”会打开独立预览并重新读取画面，不改变图层绑定；多文档模式仍读取已绑定的 Slot。没有打开文档时，右侧提示打开或新建文档，并禁用“扩展文档”；关闭最后一个文档会清除旧预览。预览显示时默认每300ms检查文档变化并按需读取；不再提供自动更新开关。未打开、关闭或收起预览时不读取预览像素，重新打开时显示当前画面；只收起设置不影响已显示的预览。此规则不停止已绑定图层的自动回落。
+
+1×1 时省略 Slot 选择、当前格坐标和坐标显示开关，默认使用唯一格，预览不显示坐标标签。多格时恢复这些控件，坐标默认关闭，可手动开启；临时切回1×1不会清除多格时的显示偏好。导出、绑定与回落操作仍可使用。
+
+单文档的“导出选中格 PNG”和“导出全部格 PNG”集中在 Slot 区域，紧接坐标显示开关，位于回落设置之前；1×1 时仍显示导出按钮。
+
+图层绑定区依次显示当前绑定信息、绑定／解绑当前图层按钮、子组＋整体回落开关。子组参数紧跟其开关展开，绑定方式和回落行为不因排列改变。
+
+自动回落随绑定图层生效，无全局开关。不重复显示普通等待、历史检测和自动检查次数；当前绑定信息与标题下红色错误仍保留。
+
+“文档设置”可手动展开／收起，集中模式选择、单格尺寸、行列、2×2／3×3／4×4预设以及新建／扩展。收起后 Slot 和导出仍可操作。“新建文档”默认添加锁定的正片叠底辅助网格。扩展时保持单格宽高不变，增加行列后点“扩展文档”：原1,1仍为1,1，其他旧格也保留编号；不复制旧画面填充新格。文档需保留一个位于顶层的原辅助网格，不支持用扩展减少行列或改变单格尺寸。
+
+扩展保留原画布与旧网格之间的四周余量，画布宽高增加新旧网格包围尺寸之差；新增行对应左侧补边、新增列对应右侧补边，二者都增加底部空间。原图层随画布补边整体平移，像素不缩放、图层ID与绑定保留，辅助网格重新生成并置顶锁定。已有更大画布同样按增量扩大，不会裁去参考内容；参考图不会被识别或自动重新排布。整个扩展可在PS撤销一步，失败时回滚尺寸和网格。
+
+扩展无需手动解锁辅助网格；完成后恢复原图层选择，绘画层和参考层保持原锁定状态。新建／扩展按钮下方显示操作结果，扩展失败时标红并注明失败步骤。
+
+绑定只在本次插件会话内保留，一个工作文档可以绑定多个图层；切换其他文档暂停，在另一文档主动绑定会更换工作文档。重开同一完整路径文件时，仅同一图层ID恢复，重命名不影响、复制图层不会继承绑定；ID改变需重新点击绑定。收起或关闭单个面板不主动清空名单，插件运行期间自动回落继续检测；退出／重载整个插件才清空名单。
+
+Load Current Open Document below the heading opens the separate preview and reloads the image without changing layer bindings; multi-document mode continues to read its bound Slots. With no open document, the preview prompts you to open or create one and Expand is disabled. Closing the last document clears the old preview. While visible, the preview checks for document changes every 300ms and reads changed images as needed; there is no automatic-update toggle. An unopened, closed or collapsed preview does not read preview pixels; reopening shows the current image. Collapsing only settings leaves a visible preview running. Automatic wrapping on bound layers remains independent.
+
+For 1×1 grids, Slot selection, current-cell coordinates and the label toggle are hidden; the only cell is selected automatically and no preview labels are shown. Larger grids restore these controls with labels off by default. Temporarily switching to 1×1 retains the label preference for larger grids. Export, binding and wrapping remain available.
+
+In single-document mode, Export Selected Cell PNG and Export All Cells PNG are grouped with Slots, directly below the coordinate toggle and before wrap settings. Export buttons remain visible for 1×1 grids.
+
+The layer binding area shows binding status, Bind/Unbind Current Layer, Auto-wrap and Subgroup + Overall Wrap in that order. Subgroup parameters expand immediately below their switch. Binding and wrapping behavior remain unchanged.
+
+Enabling auto-wrap uses the existing operation message to state that it applies only to bound layers. Duplicate guidance, normal waiting messages, history detection and automatic check counts are no longer shown below the switches. Binding status and red errors remain visible.
+
+Document Settings can be collapsed and contains mode selection, tile dimensions, grid size, presets and New/Expand actions. Slot selection and export remain available when it is collapsed. New documents include a locked Multiply guide. Expand increases row/column counts without changing tile dimensions: existing slots retain their coordinates and new slots are not filled with copies. The canvas grows by the grid size difference, preserving its previous margins; existing layers shift with the added canvas, without resampling or losing layer bindings. Reference images are retained but not automatically rearranged. Expansion requires the original top-level guide, supports one-step undo and rolls back on failure. Bindings and automatic wrapping survive collapsing individual panels while the plugin runs; exiting or reloading the plugin clears them. Switching the working document requires an explicit bind, and reopened files only restore matching layer IDs.
+
+You do not need to unlock the guide manually before expanding. The original layer selection is restored, and drawing/reference layers retain their locks. Results appear below New/Expand; expansion errors are red and identify the failed step.
 
 ### 像素 Tile 快捷键
 
@@ -962,7 +1010,7 @@ B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 闭合区域填充；图标�
 
 ### 像素 Tile 图层与拆分导出
 
-导入当前图片作为默认锁定的 BaseLayer，上方自动创建透明绘制层。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，左侧≡手柄拖拽排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除，至少保留一层。
+导入当前图片作为默认锁定的 BaseLayer，上方自动创建透明绘制层。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，拖拽图层名称排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除，至少保留一层。
 
 绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。导入图片／清空当前格修改当前层；新建空白／导入当前图片重新建立底图与绘制层，可撤销。预览与PNG采用普通Alpha合成，暂不提供图层混合模式、蒙版或图层不透明度。
 
@@ -973,3 +1021,5 @@ B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 闭合区域填充；图标�
 绘制工具位于绘制区左上角的竖向悬浮栏：B画笔、I取色、E橡皮、U框画、L直线、G闭合填充。直线在按下处起笔、拖动预览、松开完成，使用当前笔宽／颜色／Alpha并支持平面边缘回绕和整笔撤销；带高度模式不启用直线、框画与填充。工具栏点击不会穿透到画布落笔。
 
 颜色和Alpha保留在绘制区顶部，笔宽提供不同大小方框快捷选项（1／4／8／16／32）及1–32滑条和数值，仍支持[／]调节。图层下方可选择透明棋盘格或自定义背景，色块与HEX可改色，同步绘制区、循环预览及独立预览；背景仅用于显示，不写入PNG，保存在.uytile工程中。
+
+图层最左侧眼睛按钮用于显示／隐藏：睁眼为可见、划线眼睛为隐藏；隐藏会同步改变绘制区、预览及PNG合成，但保留该层像素。图层名称单击选中、拖拽排序，不再显示独立手柄。

@@ -2,7 +2,7 @@
 use eframe::egui;
 
 #[derive(Clone, Copy)]
-pub enum Icon { Microphone, Gear, BackgroundTasks, EditList, Eye, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup, Brush, Eraser, Eyedropper, RectangleTool, LineTool, Lock, Unlock, PaintBucket }
+pub enum Icon { Microphone, Gear, BackgroundTasks, EditList, Eye, EyeOff, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup, Brush, Eraser, Eyedropper, RectangleTool, LineTool, Lock, Unlock, PaintBucket }
 
 pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) {
     // Keep Next's triangle and bar at their original scale; TrimPlay adds a bar.
@@ -26,6 +26,7 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         Icon::EditList => egui::include_image!("../assets/icons/edit-list.svg"),
         Icon::BackgroundTasks => egui::include_image!("../assets/icons/background-tasks.svg"),
         Icon::Gear => egui::include_image!("../assets/icons/gear.svg"),
+        Icon::EyeOff => egui::include_image!("../assets/icons/eye-off.svg"),
         Icon::Eye => egui::include_image!("../assets/icons/eye.svg"),
         Icon::Hand => egui::include_image!("../assets/icons/hand.svg"),
         Icon::Play => egui::include_image!("../assets/icons/play.svg"),
