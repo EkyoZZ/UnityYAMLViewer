@@ -8,6 +8,9 @@ struct App {
     status: String,
     status_error: bool,
     installed: String,
+    install_label: &'static str,
+    install_allowed: bool,
+    install_hint: String,
     pending: Option<mpsc::Receiver<installer::Result<String>>>,
     confirm_uninstall: bool,
 }
@@ -34,6 +37,9 @@ impl App {
             status: "安装到当前用户目录；无需管理员权限。".into(),
             status_error: false,
             installed: String::new(),
+            install_label: "安装",
+            install_allowed: false,
+            install_hint: String::new(),
             pending: None,
             confirm_uninstall: false,
         };
@@ -41,16 +47,36 @@ impl App {
         app
     }
     fn refresh(&mut self) {
+        self.install_allowed=false; self.install_label="安装"; self.install_hint.clear();
         self.installed = match &self.appdata {
             Some(root) => match installer::installed(root) {
-                Ok(Some(v)) => format!("目录中的插件版本：{v}（PS 加载状态未检测）"),
-                Ok(None) => "尚未安装".into(),
+                Ok(local) => {
+                    match installer::install_action(local.as_deref()) {
+                        Ok(action) => {
+                            self.install_allowed=action!=installer::InstallAction::NewerInstalled;
+                            self.install_label=match action {
+                                installer::InstallAction::Install=>"安装",
+                                installer::InstallAction::Update=>"更新",
+                                installer::InstallAction::Overwrite=>"覆盖安装",
+                                installer::InstallAction::NewerInstalled=>"已部署版本较新",
+                            };
+                            self.install_hint=match action {
+                                installer::InstallAction::Overwrite=>"版本相同，点击覆盖安装将重新部署并校验插件文件。",
+                                installer::InstallAction::NewerInstalled=>"目录中的插件版本较新，请使用匹配的新版安装器。",
+                                _=>"",
+                            }.into();
+                        }
+                        Err(error)=>self.install_hint=error,
+                    }
+                    local.map_or_else(||"尚未安装".into(),|v|format!("目录中的插件版本：{v}（PS 加载状态未检测）"))
+                },
                 Err(e) => format!("无法读取安装状态：{e}"),
             },
             None => "无法读取 APPDATA，安装与卸载已禁用。".into(),
         };
     }
     fn action(&mut self, ctx: &egui::Context, uninstall: bool) {
+        if !uninstall && !self.install_allowed { return; }
         let Some(root) = self.appdata.clone() else {
             return;
         };
@@ -101,15 +127,16 @@ impl eframe::App for App {
             let enabled=self.pending.is_none()&&self.appdata.is_some();
             ui.add_enabled_ui(enabled,|ui|{
                 ui.horizontal(|ui|{
-                    if ui.button("安装 / 更新").clicked(){self.action(ctx,false);}
+                    if ui.add_enabled(self.install_allowed,egui::Button::new(self.install_label)).clicked(){self.action(ctx,false);}
                     if ui.button("卸载插件").clicked(){self.confirm_uninstall=true;}
                     if ui.button("刷新状态").clicked(){self.refresh();}
                 });
                 if self.confirm_uninstall {
-                    ui.label("确认移除本插件的四个文件？其他文件会保留。");
+                    ui.label(format!("确认移除本插件的{}个文件？其他文件会保留。",installer::FILES.len()));
                     ui.horizontal(|ui|{if ui.button("确认卸载").clicked(){self.action(ctx,true);}if ui.button("取消").clicked(){self.confirm_uninstall=false;}});
                 }
             });
+            if !self.install_hint.is_empty(){ui.label(&self.install_hint);}
             if self.pending.is_some(){ui.spinner();}
             ui.add_space(12.);
             if self.status_error {

@@ -647,7 +647,29 @@ pub(crate) fn track_file_drop(ctx: &egui::Context, frame: &eframe::Frame) {
 }
 
 pub(crate) fn file_drop_position(ctx: &egui::Context) -> Option<egui::Pos2> {
+    if ctx.viewport_id()!=egui::ViewportId::ROOT { return current_viewport_drop_cursor(ctx); }
     ctx.data(|data| data.get_temp(egui::Id::new("native_file_drop_position")))
+}
+
+// A native child viewport has its own client origin; root HWND coordinates cannot be reused.
+#[cfg(windows)]
+fn current_viewport_drop_cursor(ctx:&egui::Context)->Option<egui::Pos2> {
+    if !ctx.input(|i|!i.raw.hovered_files.is_empty()||!i.raw.dropped_files.is_empty()) { return None; }
+    #[repr(C)] struct Point {x:i32,y:i32}
+    #[link(name="user32")] unsafe extern "system" {fn GetCursorPos(point:*mut Point)->i32;}
+    let mut point=Point{x:0,y:0};
+    if unsafe{GetCursorPos(&mut point)}==0 {return None;}
+    let inner=ctx.input(|i|i.viewport().inner_rect)?;
+    viewport_drop_point([point.x,point.y],inner,ctx.pixels_per_point())
+}
+#[cfg(not(windows))]
+fn current_viewport_drop_cursor(ctx:&egui::Context)->Option<egui::Pos2> {ctx.input(|i|i.pointer.latest_pos())}
+#[cfg(any(windows,test))]
+fn viewport_drop_point(screen:[i32;2],inner:egui::Rect,scale:f32)->Option<egui::Pos2> {
+    if !scale.is_finite()||scale<=0.||!inner.is_finite()||!inner.is_positive() {return None;}
+    let point=egui::pos2(screen[0] as f32/scale,screen[1] as f32/scale);
+    if !inner.contains(point)||point.x>=inner.right()||point.y>=inner.bottom() {return None;}
+    Some((point-inner.min).to_pos2())
 }
 
 #[cfg(windows)]
@@ -719,6 +741,15 @@ fn file_drop_cursor(ctx: &egui::Context, _frame: &eframe::Frame) -> Option<egui:
 
 #[cfg(test)]
 mod file_drop_tests {
+    #[test]
+    fn child_viewport_drop_position_uses_its_own_origin_and_scale() {
+        let child=eframe::egui::Rect::from_min_size(eframe::egui::pos2(-800.,100.),eframe::egui::vec2(600.,400.));
+        assert_eq!(super::viewport_drop_point([-900,300],child,1.5),Some(eframe::egui::pos2(200.,100.)));
+        assert!(super::viewport_drop_point([300,300],child,1.5).is_none());
+        assert!(super::viewport_drop_point([-300,300],child,1.5).is_none());
+        assert!(super::viewport_drop_point([-900,300],child,0.).is_none());
+        assert!(super::viewport_drop_point([-900,300],child,f32::NAN).is_none());
+    }
     #[test]
     fn client_pixels_convert_at_display_and_ui_scale_without_accepting_outside() {
         assert_eq!(

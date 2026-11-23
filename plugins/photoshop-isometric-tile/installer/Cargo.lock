@@ -2407,6 +2407,7 @@ dependencies = [
  "eframe",
  "ico",
  "image",
+ "semver",
  "serde_json",
  "sha2",
  "windows 0.54.0",

@@ -2,7 +2,7 @@
 use eframe::egui;
 
 #[derive(Clone, Copy)]
-pub enum Icon { Microphone, Gear, BackgroundTasks, EditList, Eye, EyeOff, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup, Brush, Eraser, Eyedropper, RectangleTool, LineTool, Lock, Unlock, PaintBucket }
+pub enum Icon { Locate, AddLayer, Move, Microphone, Gear, BackgroundTasks, EditList, Eye, EyeOff, Hand, Play, Pause, Stop, Next, Previous, TrimPlay, MarkStart, MarkEnd, ChevronLeft, ChevronRight, TriangleRight, TriangleDown, Search, Close, Minus, TabGroup, Brush, Eraser, Eyedropper, RectangleTool, LineTool, Lock, Unlock, PaintBucket }
 
 pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) {
     // Keep Next's triangle and bar at their original scale; TrimPlay adds a bar.
@@ -10,6 +10,9 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         egui::Rect::from_center_size(rect.center(), egui::vec2(rect.height()*28.0/24.0, rect.height()))
     } else { rect };
     let source = match icon {
+        Icon::Locate => egui::include_image!("../assets/icons/locate.svg"),
+        Icon::AddLayer => egui::include_image!("../assets/icons/add-layer.svg"),
+        Icon::Move => egui::include_image!("../assets/icons/move.svg"),
         Icon::Brush => egui::include_image!("../assets/icons/brush.svg"),
         Icon::Eraser => egui::include_image!("../assets/icons/eraser.svg"),
         Icon::Eyedropper => egui::include_image!("../assets/icons/eyedropper.svg"),

@@ -2101,3 +2101,63 @@ Photoshop 插件	Photoshop 外掛	Photoshop plugin	Photoshop プラグイン	Pho
 PS 插件尚未正式发布	PS 外掛尚未正式發佈	PS plugin has not been released yet	PS プラグインはまだリリースされていません	PS 플러그인이 아직 출시되지 않았습니다	PS-Plugin noch nicht veröffentlicht	Le plugin PS n’est pas encore publié
 插件更新查询失败，可稍后重试或打开下载页。	外掛更新查詢失敗，可稍後重試或開啟下載頁。	Plugin update check failed. Retry later or open downloads.	更新確認に失敗しました。後で再試行するかダウンロードを開いてください。	업데이트 확인에 실패했습니다. 나중에 다시 시도하거나 다운로드를 여세요.	Updateprüfung fehlgeschlagen. Später erneut versuchen oder Downloads öffnen.	Échec de la recherche. Réessayez plus tard ou ouvrez les téléchargements.
 关闭 Photoshop，运行安装器并点击安装／更新，然后重新启动 Photoshop。	關閉 Photoshop，執行安裝器並點選安裝／更新，然後重新啟動 Photoshop。	Close Photoshop, run the installer and choose Install/Update, then restart Photoshop.	Photoshop を閉じ、インストーラーでインストール／更新を選び、Photoshop を再起動してください。	Photoshop을 닫고 설치 프로그램에서 설치/업데이트를 선택한 뒤 Photoshop을 다시 시작하세요.	Photoshop schließen, im Installer Installieren/Aktualisieren wählen und Photoshop neu starten.	Fermez Photoshop, lancez l’installateur et choisissez Installer/Mettre à jour, puis redémarrez Photoshop.
+移动	移動	Move	移動	이동	Verschieben	Déplacer
+已下载安装包版本：	已下載安裝包版本：	Downloaded installer version:	ダウンロード済みバージョン：	다운로드된 설치 파일 버전:	Heruntergeladene Installer-Version:	Version de l’installateur téléchargé :
+未检测到有效的本地安装包	未偵測到有效的本機安裝包	No valid local installer found	有効なローカルインストーラーがありません	유효한 로컬 설치 파일이 없습니다	Kein gültiger lokaler Installer gefunden	Aucun installateur local valide trouvé
+本地安装包已是最新版，无需下载	本機安裝包已是最新版，無需下載	Local installer is up to date; no download needed	ローカルインストーラーは最新です。ダウンロード不要です	로컬 설치 파일이 최신입니다. 다운로드할 필요가 없습니다	Lokaler Installer ist aktuell; kein Download erforderlich	L’installateur local est à jour ; aucun téléchargement nécessaire
+下载并打开安装器	下載並開啟安裝器	Download and open installer	ダウンロードしてインストーラーを開く	다운로드 후 설치 프로그램 열기	Installer herunterladen und öffnen	Télécharger et ouvrir l’installateur
+安装包位置：	安裝包位置：	Installer location:	インストーラーの場所：	설치 파일 위치:	Installer-Speicherort:	Emplacement de l’installateur :
+打开安装器	開啟安裝器	Open installer	インストーラーを開く	설치 프로그램 열기	Installer öffnen	Ouvrir l’installateur
+打开所在目录	開啟所在目錄	Open containing folder	保存先フォルダーを開く	저장 폴더 열기	Ordner öffnen	Ouvrir le dossier
+安装包已下载，已请求打开安装器。	安裝包已下載，已請求開啟安裝器。	Installer downloaded; launch requested.	ダウンロード完了。インストーラーの起動を要求しました。	다운로드 완료. 설치 프로그램 실행을 요청했습니다.	Installer heruntergeladen; Start angefordert.	Installateur téléchargé ; ouverture demandée.
+安装包已下载，请手动打开安装器。	安裝包已下載，請手動開啟安裝器。	Installer downloaded; open it manually.	ダウンロード完了。手動で開いてください。	다운로드 완료. 설치 프로그램을 수동으로 여세요.	Installer heruntergeladen; bitte manuell öffnen.	Installateur téléchargé ; ouvrez-le manuellement.
+插件安装包操作失败，请重试或手动下载。	外掛安裝包操作失敗，請重試或手動下載。	Installer operation failed. Retry or download manually.	操作に失敗しました。再試行するか手動でダウンロードしてください。	설치 파일 작업 실패. 다시 시도하거나 수동으로 다운로드하세요.	Installer-Aktion fehlgeschlagen. Erneut versuchen oder manuell herunterladen.	Échec de l’opération. Réessayez ou téléchargez manuellement.
+仅打开安装器，由你决定安装或更新；操作前请关闭 Photoshop。	僅開啟安裝器，由你決定安裝或更新；操作前請關閉 Photoshop。	Only opens the installer; you decide whether to install or update. Close Photoshop first.	インストーラーを開くだけです。インストールや更新はご自身で選択し、先に Photoshop を閉じてください。	설치 프로그램만 엽니다. 설치 또는 업데이트는 직접 결정하세요. 먼저 Photoshop을 닫으세요.	Öffnet nur den Installer; Installation oder Update entscheiden Sie. Photoshop vorher schließen.	Ouvre uniquement l’installateur ; vous décidez d’installer ou de mettre à jour. Fermez Photoshop avant.
+填充闭合区域或透明底色	填充閉合區域或透明底色	Fill enclosed regions or transparent background	閉じた領域または透明な背景を塗りつぶす	닫힌 영역 또는 투명 배경 채우기	Geschlossene Bereiche oder transparenten Hintergrund füllen	Remplir les zones fermées ou le fond transparent
+准备下载	準備下載	Preparing download	ダウンロード準備	다운로드 준비	Download vorbereiten	Préparation du téléchargement
+获取附件信息	取得附件資訊	Fetching attachment information	添付情報を取得	첨부 정보 가져오기	Anhanginformationen abrufen	Récupération des informations du fichier
+校验附件信息	校驗附件資訊	Validating attachment information	添付情報を検証	첨부 정보 검증	Anhanginformationen prüfen	Validation des informations du fichier
+准备保存目录	準備儲存目錄	Preparing download folder	保存先を準備	저장 폴더 준비	Speicherordner vorbereiten	Préparation du dossier
+连接安装包下载地址	連線安裝包下載位址	Connecting to installer download	ダウンロード先に接続	설치 파일 다운로드 연결	Verbindung zum Installer-Download	Connexion au téléchargement
+写入安装包	寫入安裝包	Writing installer	インストーラーを書き込み	설치 파일 쓰기	Installer schreiben	Écriture de l’installateur
+校验安装包	校驗安裝包	Verifying installer	インストーラーを検証	설치 파일 검증	Installer prüfen	Vérification de l’installateur
+保存安装包与版本记录	儲存安裝包與版本記錄	Saving installer and version record	インストーラーとバージョンを保存	설치 파일 및 버전 기록 저장	Installer und Versionsnachweis speichern	Enregistrement de l’installateur et de sa version
+下载完成	下載完成	Download complete	ダウンロード完了	다운로드 완료	Download abgeschlossen	Téléchargement terminé
+下载详情	下載詳情	Download details	ダウンロード詳細	다운로드 상세	Download-Details	Détails du téléchargement
+复制详情	複製詳情	Copy details	詳細をコピー	상세 복사	Details kopieren	Copier les détails
+操作失败	操作失敗	Operation failed	操作に失敗	작업 실패	Aktion fehlgeschlagen	Échec de l’opération
+清空选中图层	清空選取圖層	Clear selected layer	選択レイヤーを消去	선택 레이어 비우기	Ausgewählte Ebene leeren	Vider le calque sélectionné
+清空选中图层的全部格子，其他图层保持不变；需先解锁并显示该层。	清空選取圖層的所有格子，其他圖層不變；需先解鎖並顯示該層。	Clear every cell in the selected layer. Other layers stay unchanged; unlock and show the layer first.	選択レイヤーの全セルを消去します。他のレイヤーは保持されます。先にロック解除して表示してください。	선택 레이어의 모든 칸을 비웁니다. 먼저 잠금을 해제하고 표시하세요. 다른 레이어는 유지됩니다.	Alle Zellen der ausgewählten Ebene leeren. Andere Ebenen bleiben erhalten; zuerst entsperren und einblenden.	Vide toutes les cases du calque sélectionné. Les autres calques restent intacts ; déverrouillez et affichez ce calque avant.
+已清空选中图层。	已清空選取圖層。	Selected layer cleared.	選択レイヤーを消去しました。	선택 레이어를 비웠습니다.	Ausgewählte Ebene geleert.	Calque sélectionné vidé.
+图层数量或内存已达上限，无法导入新图层。	圖層數量或記憶體已達上限，無法匯入新圖層。	Layer count or memory limit reached; cannot import a new layer.	レイヤー数またはメモリ上限のためインポートできません。	레이어 수 또는 메모리 한도에 도달하여 가져올 수 없습니다.	Ebenen- oder Speicherlimit erreicht; Import nicht möglich.	Limite de calques ou de mémoire atteinte ; import impossible.
+矩形	矩形	Rectangle	長方形	직사각형	Rechteck	Rectangle
+菱形	菱形	Diamond	ひし形	마름모	Raute	Losange
+六边形	六邊形	Hexagon	六角形	육각형	Sechseck	Hexagone
+尖顶	尖頂	Pointy top	頂点が上	뾰족한 위쪽	Spitze oben	Pointe en haut
+平顶	平頂	Flat top	辺が上	평평한 위쪽	Flache Seite oben	Côté plat en haut
+尖顶六边形的高度、平顶六边形的宽度须为4的倍数；请先新建对应尺寸画布。	尖頂六邊形的高度、平頂六邊形的寬度須為4的倍數；請先新增對應尺寸畫布。	Pointy hex height or flat hex width must be a multiple of 4; create a matching canvas first.	頂点が上の高さ、辺が上の幅は4の倍数にしてください。先に適切なキャンバスを作成してください。	뾰족한 육각형의 높이 또는 평평한 육각형의 너비는 4의 배수여야 합니다. 먼저 맞는 캔버스를 만드세요.	Höhe bei Spitze oben bzw. Breite bei flacher Oberseite muss durch 4 teilbar sein; zuerst passende Fläche erstellen.	La hauteur pointue ou la largeur à sommet plat doit être un multiple de 4 ; créez d’abord un canevas adapté.
+六边形宽高为外接矩形尺寸，斜边自动计算。	六邊形寬高為外接矩形尺寸，斜邊自動計算。	Hexagon width and height define its bounding rectangle; slanted edges are calculated automatically.	六角形の幅と高さは外接長方形の寸法です。斜辺は自動計算します。	육각형의 너비와 높이는 외접 사각형 크기이며 빗변은 자동 계산합니다.	Breite und Höhe bestimmen das Begrenzungsrechteck; schräge Kanten werden automatisch berechnet.	La largeur et la hauteur définissent le rectangle englobant ; les côtés inclinés sont calculés automatiquement.
+工程素材库	工程素材庫	Project materials	工程内素材ライブラリ	프로젝트 소재 라이브러리	Projektmaterialien	Bibliothèque du projet
+素材	素材	Material	素材	소재	Material	Matériau
+选择素材填入当前格；素材层与上方绘画层独立。	選取素材填入目前格；素材層與上方繪畫層獨立。	Choose material for the current cell; drawing layers remain independent.	現在のセルに素材を配置します。描画レイヤーは独立しています。	현재 칸에 소재를 배치하며 그리기 레이어는 독립적입니다.	Material für aktuelle Zelle wählen; Zeichenebenen bleiben unabhängig.	Choisissez un matériau pour la case ; les calques de dessin restent indépendants.
+导入素材	匯入素材	Import material	素材を読み込む	소재 가져오기	Material importieren	Importer un matériau
+当前合成存为素材	目前合成存為素材	Save current composite as material	現在の合成を素材として保存	현재 합성을 소재로 저장	Komposition als Material speichern	Enregistrer la composition comme matériau
+清空当前格素材	清空目前格素材	Clear current cell material	現在のセルの素材を消去	현재 칸 소재 비우기	Material der Zelle leeren	Vider le matériau de la case
+素材库最多64项、总像素16 MiB。	素材庫最多64項、總像素16 MiB。	Library limit: 64 items and 16 MiB of pixels.	素材は最大64項目、画素データ16 MiBです。	소재는 최대 64개, 픽셀 데이터 16 MiB입니다.	Maximal 64 Materialien und 16 MiB Pixeldaten.	Maximum 64 éléments et 16 MiB de pixels.
+导出合成可见素材与绘画层；素材库随工程保存。	匯出合成可見素材與繪畫層；素材庫隨工程儲存。	Exports combine visible materials and drawing layers; the library is saved in the project.	出力は表示中の素材と描画を合成します。素材は工程に保存します。	내보내기는 표시된 소재와 그리기를 합성하며 라이브러리는 프로젝트에 저장됩니다.	Export kombiniert sichtbare Materialien und Zeichnung; die Bibliothek wird im Projekt gespeichert.	L’export fusionne matériaux et dessins visibles ; la bibliothèque est enregistrée dans le projet.
+设置为空	設定為空	Set empty	空にする	비우기	Leeren	Vider
+素材库为空，请先导入素材。	素材庫為空，請先匯入素材。	Library empty; import material first.	素材がありません。先に読み込んでください。	라이브러리가 비어 있습니다. 먼저 소재를 가져오세요.	Bibliothek leer; zuerst Material importieren.	Bibliothèque vide ; importez un matériau.
+导入图片为素材	匯入圖片為素材	Import image as material	画像を素材として読み込む	이미지를 소재로 가져오기	Bild als Material importieren	Importer l’image comme matériau
+移除素材库	移除素材庫	Remove from library	素材ライブラリから削除	소재 라이브러리에서 제거	Aus Bibliothek entfernen	Retirer de la bibliothèque
+从素材库移除，已填入格子的内容保留。	從素材庫移除，已填入格子的內容保留。	Remove library entry; placed cell contents remain.	素材のみ削除し、配置済みのセルは保持します。	소재 항목만 제거하며 배치된 칸 내용은 유지됩니다.	Bibliothekseintrag entfernen; belegte Zellen bleiben erhalten.	Retire l’entrée ; les cases déjà remplies sont conservées.
+拖入图片加入素材库	拖入圖片加入素材庫	Drop images to add materials	画像をドロップして素材に追加	이미지를 끌어 소재로 추가	Bilder hier als Material ablegen	Déposez des images pour les ajouter
+仅支持拖入本地图片文件。	僅支援拖入本機圖片檔案。	Only local image files can be dropped.	ローカル画像ファイルのみ対応します。	로컬 이미지 파일만 지원합니다.	Nur lokale Bilddateien werden unterstützt.	Seuls les fichiers image locaux sont acceptés.
+已加入素材库	已加入素材庫	Added to library	素材に追加済み	소재에 추가됨	Zur Bibliothek hinzugefügt	Ajouté à la bibliothèque
+有边界	有邊界	Bounded	境界あり	경계 있음	Begrenzt	Avec limites
+无边界	無邊界	Unbounded	境界なし	경계 없음	Unbegrenzt	Sans limites
+回到中心循环单元	回到中心循環單元	Center on repeat unit	中央の繰り返し単位に戻る	중앙 반복 단위로 이동	Wiederholungseinheit zentrieren	Centrer l’unité répétée
+拖动工具栏	拖動工具列	Drag toolbar	ツールバーを移動	도구 모음 이동	Werkzeugleiste verschieben	Déplacer la barre d’outils
+无法保存工具栏位置	無法儲存工具列位置	Cannot save toolbar position	ツールバー位置を保存できません	도구 모음 위치를 저장할 수 없습니다	Position der Werkzeugleiste kann nicht gespeichert werden	Impossible d’enregistrer la position de la barre
+显示 Slot	顯示 Slot	Show Slots	Slot を表示	Slot 표시	Slots anzeigen	Afficher les Slots
+当前 Slot	目前 Slot	Current Slot	現在の Slot	현재 Slot	Aktueller Slot	Slot actuel
+请将图片拖入素材库边框内。	請將圖片拖入素材庫邊框內。	Drop images inside the material library border.	素材ライブラリの枠内に画像をドロップしてください。	이미지를 소재 라이브러리 테두리 안에 놓으세요.	Bilder innerhalb des Materialbibliotheksrahmens ablegen.	Déposez les images à l’intérieur du cadre de la bibliothèque.

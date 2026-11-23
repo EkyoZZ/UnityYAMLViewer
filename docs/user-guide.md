@@ -940,14 +940,14 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 从“文件 → 像素 Tile”新建空白工程，或从图片工具栏打开并导入当前图片；.uytile 文件也可通过打开文件、拖入或启动参数进入独立窗口。工程以 JSON 编码保存全部 Tile 像素、循环排列、地面尺寸和模式，PNG 可导出当前格或按行列拆分全部格的可见图层合成结果。
 
 - 所有格子共享一套图层，尺寸相同，边长为 2–1024 的偶数；最多64格，每层最多16 MiB，全部图层像素最多32 MiB、最多32层。新建不同尺寸会重置 Tile 集合，可撤销。
-- 中间绘制区编辑当前 Tile，或在开启“多 Tile 循环”与“编辑整个循环单元”后编辑整组格子。设置支持 1–8 行列，点击“行,列”坐标选中格子，在下方导入图片或清空当前格；菱形排列的行列沿两条斜轴展开。默认排列为 1×1。
-- 窗口按设置／绘制／循环预览三列排列，设置独立滚动。绘制区中键平移，绘制与预览分别缩放；预览可移到独立原生窗口，在其他屏幕拖动、放大，关闭后回到右侧。独立预览只读，停靠预览仍可绘制。
-- 平面模式提供 1–32 像素方形铅笔、橡皮及取色，默认开启边缘回绕。每个笔刷像素独立映射，跨斜边和角点的笔触、橡皮也会回到对边；单格编辑回到当前 Tile，多格“编辑整个循环单元”按循环行列落到对应格。关闭回绕后越过循环单元外边界的部分被裁去。
+- 绘制区编辑单格，或在开启“多 Tile 循环”后编辑设置的整组格子。设置支持 1–8 行列，点击按行连续编号的 Slot 按钮选中格子，悬停可看行列，在下方导入图片或清空选中图层；菱形排列的行列沿两条斜轴展开。默认排列为 1×1。
+- 窗口为设置＋统一绘制区，设置独立滚动。Q切换有边界、W切换无边界，中心保留设置的循环单元，共享平移、倍率和工具；H或无边界旁定位图标回中心，倍率不变。可另开独立只读预览窗口。
+- 平面模式提供 1–32 像素方形铅笔、橡皮及取色，默认开启边缘回绕。每个笔刷像素独立映射，跨斜边和角点的笔触、橡皮也会回到对边；单格编辑回到当前 Tile，多格按循环行列落到对应格。有边界关闭回绕后裁去外边界部分；无边界编辑重复副本会映射到中心对应格。
 - 每格独立保存像素，最多 8×8 格；取消素材编号下拉和独立副本按钮。旧工程的共享格在打开时保留图像并分离，超出64张或16 MiB则拒绝打开，当前内容不变。Alt 临时取色。一笔涉及多个 Tile 时整体撤销／重做，历史像素预算为 32 MiB，超出时淘汰最旧记录。此像素笔刷替换 RGBA，不提供压感、柔边混色或写实笔刷。
 - 带高度模式保持可见像素命中与单像素绘制，不使用平面边缘回绕。
 - 平面菱形会遮罩并在 PNG 导出时清除菱形外像素；切回矩形前内存中原有外围像素仍保留。带高度模式保留整张图片，地面菱形尺寸独立设置，底部中心对齐并从后向前绘制。
 - 带高度模式优先编辑最前方非透明像素；空白处按地面格归属，被遮挡区域在左侧编辑。半透明像素也拦截落笔；不支持任意锚点、多层穿插、3D 深度或自动判断建筑结构。
-- 很小的 Tile 或极端高度比例会自动放大预览；绘制范围最多前后各 32 排、左右各 32 格，极端比例可能无法填满视区。项目为未压缩 JSON，读取上限256 MiB，新保存工程格式为3，兼容读取格式1和2。旧程序不能读取格式3。
+- 很小的 Tile 或极端高度比例会自动放大预览；绘制范围最多前后各 32 排、左右各 32 格，极端比例可能无法填满视区。项目为未压缩 JSON，读取上限256 MiB，新保存工程格式为5，兼容读取格式1–4。旧程序不能读取格式5。
 - 请保存 .uytile 以保留多 Tile 排列；另存 PNG 不覆盖入口源图片。窗口有未保存内容时关闭会提示，打开其他工程前也可先保存；前一个内容可在本次会话中通过撤销找回。
 
 独立 Photoshop UXP 插件的加载方法与当前限制见 plugins/photoshop-isometric-tile/README.md；绘画由 Photoshop 完成，插件提供循环预览、切片和收笔后的当前层回落。
@@ -1002,23 +1002,23 @@ You do not need to unlock the guide manually before expanding. The original laye
 
 ### 像素 Tile 快捷键
 
-B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 闭合区域填充；图标互斥选中，悬停显示快捷键。Ctrl+Z 撤销、Ctrl+Y 重做。[ 缩小笔宽、] 增大笔宽，每次 1 像素，范围 1–32；文本输入时不触发。绘制区支持空格＋左键、右键及中键拖动画布。工程保存和打开位于设置顶部。
+V 移动（默认，左键拖动画布）、B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 区域／透明底色填充；图标互斥选中，悬停显示快捷键。Ctrl+Z 撤销、Ctrl+Y 重做。[ 缩小笔宽、] 增大笔宽，每次 1 像素，范围 1–32；文本输入时不触发。绘制区支持空格＋左键、右键及中键拖动画布。工程保存和打开位于设置顶部。
 
-填充按相同 RGBA 的四邻域查找，循环单元外边界视为未闭合，不跨回绕边界，逻辑范围最多 4194304 像素。框画和填充仅适用于平面模式。
+填充按四邻域替换点击位置连通的相同 RGBA，不覆盖断开的同色部分；点击透明区域时，Alpha 为 0 的像素视为同类，不要求闭合，并以当前格子范围为界，不跨循环边界。逻辑范围最多 4194304 像素。框画和填充仅适用于平面模式。
 
 点击像素 Tile 工具栏色块可打开独立拾色窗口，使用 RGB／HSV、六位 HEX（可加 #）及 Alpha 调整绘制颜色。工具栏 Alpha 滑条范围为 0–100%，0% 完全透明、100% 完全不透明；修改会同步到拾色窗口。“恢复原始颜色”恢复打开拾色窗口时的颜色。
 
 ### 像素 Tile 图层与拆分导出
 
-导入当前图片作为默认锁定的 BaseLayer，上方自动创建透明绘制层。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，拖拽图层名称排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除，至少保留一层。
+单格与多格统一保留固定 BaseLayer 承载素材，上方有透明可编辑绘画层；导入当前图片将源图放入BaseLayer。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，拖拽图层名称排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除；删除最后一个普通绘画层会自动补一个透明、可编辑的普通图层。
 
-绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。导入图片／清空当前格修改当前层；新建空白／导入当前图片重新建立底图与绘制层，可撤销。预览与PNG采用普通Alpha合成，暂不提供图层混合模式、蒙版或图层不透明度。
+绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。导入图片加入工程素材库，内容填入选中格的BaseLayer；清空选中图层清除该层全部格子，新建空白／导入当前图片重新建立普通图层，均可撤销。预览与PNG采用普通Alpha合成，暂不提供图层混合模式、蒙版或图层不透明度。
 
 多格设置支持2×2、3×3、4×4快捷按钮。点击“拆分导出全部格 PNG”选择文件夹，3×3会导出9张，名称为tile_r01_c01.png等；使用可见层合成并按菱形遮罩裁切，矩形模式保留矩形，带高度模式保留图片轮廓。已有同名文件时拒绝导出，遇到写入失败会报告已完成数量。PNG不保留图层，请另存.uytile工程。
 
 ### 像素 Tile 工具栏与背景
 
-绘制工具位于绘制区左上角的竖向悬浮栏：B画笔、I取色、E橡皮、U框画、L直线、G闭合填充。直线在按下处起笔、拖动预览、松开完成，使用当前笔宽／颜色／Alpha并支持平面边缘回绕和整笔撤销；带高度模式不启用直线、框画与填充。工具栏点击不会穿透到画布落笔。
+绘制工具位于绘制区左上角的竖向悬浮栏：V移动（默认，左键拖动画布）、B画笔、I取色、E橡皮、U框画、L直线、G区域／透明底色填充。直线在按下处起笔、拖动预览、松开完成，使用当前笔宽／颜色／Alpha并支持平面边缘回绕和整笔撤销；带高度模式不启用直线、框画与填充。工具栏点击不会穿透到画布落笔。
 
 颜色和Alpha保留在绘制区顶部，笔宽提供不同大小方框快捷选项（1／4／8／16／32）及1–32滑条和数值，仍支持[／]调节。图层下方可选择透明棋盘格或自定义背景，色块与HEX可改色，同步绘制区、循环预览及独立预览；背景仅用于显示，不写入PNG，保存在.uytile工程中。
 
@@ -1026,6 +1026,90 @@ B 画笔、I 取色、E 橡皮、U 矩形轮廓、G 闭合区域填充；图标�
 
 ### 像素 Tile 中的 Photoshop 插件入口 / Photoshop plugin entry in Pixel Tile
 
-展开 Photoshop 插件区域，点击“检查 PS 插件更新”才会联网；至少间隔 60 秒。可查看当前用户已部署版本及最新独立发布版本，并打开下载页。关闭 PS 后运行安装器“安装／更新”，完成后重启。已部署版本不代表 PS 已成功加载；未发布时不会提供虚假的安装版本。
+展开 Photoshop 插件区域，点击“检查 PS 插件更新”才会联网，两次查询至少间隔 60 秒。比较的是本程序已下载且校验有效的安装包版本；本地记录读取失败、文件缺失或损坏时按未下载处理，不使用 PS 已部署版本。与远端相同或更高时不再提供下载。
 
-Expand Photoshop Plugin and click Check PS Plugin Updates to query online; checks are at least 60 seconds apart. View the current user’s deployed version and latest independent release, then open its download page. Close Photoshop, run Install/Update in the installer, and restart Photoshop. Deployment does not confirm host loading; unpublished packages are not offered as available releases.
+点击“下载并打开安装器”后，程序下载并核验附件大小与 SHA-256，再打开安装器；是否安装／更新由用户决定，操作前关闭 Photoshop。完成后显示安装包完整路径，可再次打开安装器或打开所在目录并定位文件。手动下载入口保留；手动下载到其他位置的 EXE 不自动纳入本程序下载记录。下载失败可重试，版本查询失败可稍后重试或手动下载。
+
+Only Check PS Plugin Updates accesses the network for version checks, at least 60 seconds apart. It compares the valid installer previously downloaded by this app with the remote release, rather than Photoshop’s deployed plugin. Missing, unreadable or corrupt downloads count as absent; equal or newer local versions do not offer another download.
+
+Download and Open Installer downloads and verifies the attachment size and SHA-256, then launches the installer. You decide whether to install or update; close Photoshop first. The full installer path and buttons to reopen it or reveal it in its folder remain available. Manual downloads are also available; installers saved elsewhere are not automatically tracked. Failed operations can be retried.
+
+Pixel Tile starts with Move (V), placed above Brush in the floating toolbar. Drag with the left mouse button to pan the drawing canvas without changing pixels; press B to draw. Move also prevents painting in the editable repeat preview. Existing Space+left, right-button and middle-button panning remains available.
+
+Fill (G) replaces connected matching RGBA pixels, including regions touching the tile boundary; disconnected matching regions remain unchanged. Clicking transparent pixels fills connected empty space up to the diamond or rectangle boundary, even without a closed outline; hidden RGB in fully transparent pixels is ignored. Existing colored pixels and pixels outside the tile remain unchanged. Fill applies to the active editable layer and supports undo.
+
+### 数位板拖拽缩放 / Pen drag zoom
+
+像素 Tile 悬浮工具栏底部提供“缩放（Z）”。选中后，在绘制区落笔／按住左键，以落点为中心向左拖缩小、向右拖放大，松开结束；竖向移动不影响缩放。范围为 0.25–64 倍，不落笔、不产生图像撤销记录。单独按 Z 切换缩放，Ctrl+Z 仍撤销；文本输入时不抢快捷键。原滚轮和临时平移保留，循环预览中不会误画。
+
+Select Zoom (Z) at the bottom of the Pixel Tile toolbar. Press the pen or hold the left mouse button in the drawing area, drag left to zoom out or right to zoom in around the initial contact point, then release. Vertical movement has no effect. Zoom ranges from 0.25× to 64× and does not edit pixels or create undo entries. Ctrl+Z still undoes; text editing keeps its shortcuts. Wheel zoom and temporary panning remain available; Zoom does not paint in the repeat preview.
+
+循环预览支持 V＋左键拖动，或空格＋左键／中键／右键临时平移，视图独立于绘制区。移动后仍可切换绘制工具，在停靠预览中直接绘制，笔迹与预览图像对齐。独立预览保持只读并支持平移，视图位置不写入工程。
+
+Pan the repeat preview with Move (V) and left drag, or temporarily with Space+left, middle or right drag. Its view is independent of the drawing area. Switch back to a painting tool to draw directly in the docked preview after panning. Detached previews remain read-only and support panning. View offsets are not saved in projects.
+
+缩放工具 Z 也支持循环预览：在预览内落笔后左拖缩小、右拖放大，以落点为中心，顶部缩放数值同步变化；预览保持独立的 0.25–8 倍缩放范围。独立只读预览也能调整视图。
+
+Zoom (Z) also works in repeat previews: press and drag left to zoom out or right to zoom in around the initial contact. The preview zoom value updates independently within 0.25×–8×. Detached read-only previews also support this view adjustment.
+
+PS 安装包下载失败时，展开默认收起的“下载详情”，可查看失败阶段、HTTP 状态／限流信息、校验及底层错误，并复制详情用于排查。获取附件信息发生在文件进度之前，故进度为零也可能已有网络错误；这与 Release 显示标题无关。再次下载会开始新的详情记录。
+
+If the PS installer download fails, expand Download Details to inspect the failing stage, HTTP status/rate limits, integrity checks and underlying errors. Copy Details copies the report. Attachment metadata is fetched before file progress begins, so an early failure may occur at zero bytes. Release display titles are not used for lookup. A new download starts a fresh report.
+
+图层标题旁的加号图标新增图层，减号图标删除选中图层；锁定层需先解锁；删除最后一层自动补一个透明空层。名称左键拖动排序，右键打开删除／重命名菜单。删除可撤销。
+
+Use the plus icon beside Layers to add a layer, or the minus icon to delete the selected layer. Unlock a layer before deleting it. Deleting the final layer automatically creates an editable transparent layer. Left-drag a layer name to reorder; right-click it for Delete/Rename. Deletion supports undo.
+
+普通绘画层可以编辑或删除；导入图片放入固定BaseLayer，通过设置为空或导入素材更换。“清空选中图层”清除该层所有格子，其他图层不变；为空、锁定或隐藏时禁用。多格通过素材库向所选格填入素材；批量自动排列与全局素材库暂未支持。
+
+Drawing layers are ordinary editable layers; both single- and multi-cell modes reserve BaseLayer for materials. Imported images go into BaseLayer and can be replaced or cleared through its material actions. Clear Selected Layer clears all its cells without changing other layers; it is disabled for empty, locked or hidden layers. Multi-cell material placement uses the project library and its dedicated BaseLayer. Batch arrangement and a global library are deferred.
+
+### Tile 几何模式 / Tile geometry modes
+
+工程按钮下可选矩形、菱形、六边形；六边形可选尖顶或平顶。画布宽高为外接矩形，斜边自动计算，可设置拉伸六边形。尖顶高度需为4的倍数，平顶宽度需为4的倍数，另一边仍为偶数；新建自动对齐，切换已有不兼容尺寸会提示先新建。接近正六边形时，尖顶宽约为高的0.866倍，平顶宽约为高的1.155倍。
+
+两种六边形支持蜂窝循环、跨边绘制、透明底色填充、逐格PNG透明裁切与工程保存。切换模式不删除角落源像素，可撤销；六边形不支持带高度模式。工程格式5保存朝向与素材库并兼容旧格式，旧版软件不能打开新格式。
+
+Choose Rectangle, Diamond or Hexagon below the project buttons. Hexagons support Pointy Top and Flat Top. Canvas width and height define the bounding rectangle; slanted sides are automatic and stretching is allowed. Pointy height or flat width must be a multiple of four; the other dimension remains even. New canvases align that dimension automatically; incompatible existing sizes require a new canvas. Regular proportions are approximately width/height 0.866 for pointy and 1.155 for flat.
+
+Both orientations support honeycomb repeats, wrapped drawing, transparent background fill, per-cell PNG clipping and projects. Changing modes preserves underlying corner pixels and supports undo. Raised tiles use the diamond mode. Project format 5 stores orientation and materials and reads formats 1–4; older software cannot open format 5.
+
+### 工程素材库与 BaseLayer / Project materials and BaseLayer
+
+单格和多格模式均显示缩略图素材库，可从文件导入或拖入本地图片；尺寸必须等于单格尺寸，可一次拖入多张加入库，不会自动排列。点击缩略图填入当前选中格；右键“移除素材库”只移除库条目，已填格子保留。“当前合成存为素材”将当前格可见素材与绘画结果按当前模式裁切后加入库。素材库最多64项、像素总量16 MiB，随 .uytile 工程保存。
+
+BaseLayer固定在最底部，不可删除、改名、解锁或拖动；右键“设置为空”清除当前格素材，“导入素材”从库中选择当前格素材。以上操作不清除上方普通绘画层；绘画层仍独立编辑与导出合成。删除最后一个绘画层会补一个空绘画层。旧工程已有的锁定 BaseLayer 可继续使用。
+
+Both single- and multi-cell modes provide a thumbnail material library. Import files or drop local images of the exact cell dimensions; multiple dropped files enter the library without automatic arrangement. Click a thumbnail to fill the selected cell. Right-click Remove from Library preserves all placed copies. Save Current Composite as Material captures the visible cell composition with the active shape clip. The library is embedded in .uytile, limited to 64 items and 16 MiB of pixels.
+
+BaseLayer is pinned at the bottom and cannot be deleted, renamed, unlocked or reordered. Its context menu offers Set Empty and Import Material for the current cell. Overlaid drawing layers remain intact and are composited on export. Deleting the last drawing layer creates a blank replacement. Existing locked BaseLayer content is preserved.
+
+### 统一绘制视图 / Unified drawing view
+
+有边界（Q）只显示设置的有限循环单元；无边界（W）在其四周重复并允许直接绘制，中心格子有黄色轮廓。两种模式共享平移和缩放，V移动、Z拖拽缩放照常工作。点击无边界后的定位图标或按H回到中心循环单元，保留倍率。快捷键不会抢文字输入；模式和视图偏移不写工程。独立只读预览仍可选开。极小格子和低倍率受每方向约32格的预览预算限制。
+
+Bounded (Q) shows the configured finite repeat unit. Unbounded (W) repeats it around the same center and permits direct painting into the corresponding cells, marked centrally in yellow. Both modes share pan, zoom and tools. V moves and Z drag-zooms; H or the locate icon centers the unit without changing magnification. Text fields keep their shortcuts. View mode and offset are session-only; optional detached previews remain read-only. Very small cells at low zoom retain the existing preview draw budget of roughly 32 cells in each direction.
+
+工具栏顶部双横线为拖动区，可用左键在绘制区内调整位置，松开时记住位置供下次打开使用。窗口缩小或布局变化后自动限制到可见绘制区内；高度不足时工具按钮可纵向滚动。拖工具栏不会绘制像素，位置不写入工程。
+
+Drag the two-line grip at the top of the toolbar to reposition it inside the drawing area. Releasing saves its position for future editors. Resizing or layout changes constrain it to the visible canvas; tool buttons scroll when height is limited. Moving the toolbar does not paint or modify project contents.
+
+### 设置分组与 Slot 标记 / Settings group and Slot markers
+
+“设置”默认收起，展开可调整画布尺寸、几何模式、回绕、独立预览、多格行列及快捷预设；工程按钮、Slot选择、素材库和图层保持外部可用。
+
+绘制区“网格”后为“显示 Slot”，默认关闭。开启后画面按行显示1…N，与左侧及PS插件一致；3×3为1–9，无边界重复副本显示相同对应编号。左侧按钮悬停保留原行列提示。低倍率格子太小时隐藏画面标记，不影响Slot选择。标记只用于显示，不导出到PNG。
+
+Settings starts collapsed and contains canvas dimensions, geometry, wrapping, detached preview and multi-cell layout presets. Project buttons, Slot selection, materials and layers stay outside. Show Slots follows Grid and starts off. Labels use row-major 1…N numbering, matching the left buttons and PS plugin; 3×3 is 1–9, with matching numbers on repeats. Hover the left buttons for row/column coordinates. Very small on-screen cells omit badges to avoid overlap. Badges are display-only and are not exported.
+
+开启“显示 Slot”时，当前选中Slot使用主题选中配色、加粗描边及略大编号；无边界中相同编号副本同步高亮。
+
+With Show Slots enabled, the selected Slot uses theme selection colors, a stronger outline and a slightly larger number. Matching repeats highlight together in unbounded view.
+
+填充工具提示仅为“填充(G)”。素材库拖入结果在库下方显示，失败可查看具体文件、尺寸或读取错误；需将文件放在素材库边框内。新增／删除图层使用简洁加减矢量图标。
+
+The fill tooltip is simply Fill(G). Material drop results appear below the library, including per-file size or reading errors; drop files inside the library border. Layer actions use simple vector plus/minus icons.
+
+布局预设包括1×1／2×2／3×3／4×4。单Tile或1×1时不显示Slot选择、当前Slot信息、显示Slot开关和画面编号；回到多格后恢复原显示偏好。设置、工程素材库和图层使用相同标题字号；设置默认收起，素材库默认展开且可收起，图层标题与加减按钮居中。素材库收起不改图像，但不接收库内拖入。
+
+Presets include 1×1, 2×2, 3×3 and 4×4. Single Tile or 1×1 hides Slot selection, current Slot text, Show Slots and badges; returning to multiple cells restores the display preference. Settings, Project Materials and Layers share the heading size. Settings starts closed; materials starts open and can collapse. The layer heading aligns with the plus/minus buttons. Collapsing the library does not change images but hides its drop target.

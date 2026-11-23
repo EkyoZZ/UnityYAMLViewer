@@ -156,6 +156,18 @@ pub fn installed(appdata: &Path) -> Result<Option<String>> {
     }
     identity(&path).map(Some)
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallAction { Install, Update, Overwrite, NewerInstalled }
+pub fn install_action(local: Option<&str>) -> Result<InstallAction> {
+    let Some(local)=local else {return Ok(InstallAction::Install);};
+    let local=semver::Version::parse(local).map_err(|e|format!("无法比较目录中的插件版本：{e}"))?;
+    let bundled=semver::Version::parse(&version()).map_err(|e|format!("安装器内置版本无效：{e}"))?;
+    Ok(match local.cmp(&bundled) {
+        std::cmp::Ordering::Less=>InstallAction::Update,
+        std::cmp::Ordering::Equal=>InstallAction::Overwrite,
+        std::cmp::Ordering::Greater=>InstallAction::NewerInstalled,
+    })
+}
 fn verify(directory: &Path) -> Result<()> {
     for (name, bytes) in FILES {
         let path = directory.join(name);
@@ -177,7 +189,10 @@ fn install_with_check(appdata: &Path, check: impl Fn() -> Result<()>) -> Result<
     checked_child(&parent, &dest)?;
     let exists = plain(&dest, true)?;
     if exists {
-        identity(&dest)?;
+        let local=identity(&dest)?;
+        if install_action(Some(&local))? == InstallAction::NewerInstalled {
+            return Err(format!("目录中的插件版本 {local} 比安装器内置版本 {} 更新，未覆盖。",version()));
+        }
     }
     let stage = temporary(&parent, "stage")?;
     let prepared = (|| -> Result<()> {
@@ -352,6 +367,29 @@ pub fn photoshop_running() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn version_actions_allow_equal_version_overwrite() {
+        assert_eq!(install_action(None).unwrap(),InstallAction::Install);
+        let bundled=version();
+        assert_eq!(install_action(Some(&bundled)).unwrap(),InstallAction::Overwrite);
+        assert_eq!(install_action(Some(&format!("{bundled}-older"))).unwrap(),InstallAction::Update);
+        let mut newer=semver::Version::parse(&bundled).unwrap(); newer.major+=1;
+        assert_eq!(install_action(Some(&newer.to_string())).unwrap(),InstallAction::NewerInstalled);
+        assert!(install_action(Some("未知版本")).is_err());
+    }
+    #[test]
+    fn newer_deployment_is_not_replaced_by_an_older_installer() {
+        let root=Fixture::new();
+        install_with_check(&root.0,||Ok(())).unwrap();
+        let path=target(&root.0).join("manifest.json");
+        let mut manifest:serde_json::Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mut newer=semver::Version::parse(&version()).unwrap(); newer.major+=1;
+        manifest["version"]=newer.to_string().into();
+        let original=serde_json::to_vec(&manifest).unwrap();
+        fs::write(&path,&original).unwrap();
+        assert!(install_with_check(&root.0,||Ok(())).is_err());
+        assert_eq!(fs::read(path).unwrap(),original);
+    }
     #[test]
     fn embedded_manifest_matches_deployment_id() {
         let m: serde_json::Value = serde_json::from_slice(FILES[0].1).unwrap();

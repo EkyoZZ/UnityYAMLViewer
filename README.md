@@ -23,7 +23,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **音视频工具**：多文件编辑、转码与队列／合并导出，支持播放列表、多音轨与字幕、内嵌／外部音轨波形与试听、独立字幕预览、透明视频 GPU 播放及编辑预览、序列输出、画面比例和可续编／打包的工程。字幕支持生成与语言匹配、中英日韩离线／实时翻译及缓存回放、统一或原生 ASS 显示、ASS／SSA／SRT／WebVTT 编辑与字幕转换，以及内嵌字幕原格式提取、MKV 样式保留和画面烧录。
 - **录屏**：Windows 支持全屏、多屏及窗口吸附／拖拽选区录制，提供悬浮工具条、独立录屏历史与可保存的快捷键，按预设质量自动保存 MKV／MP4 到下载目录；可选录制系统声音，结束后可进入视频编辑。
 - **网络视频**：频道列表支持分组、台标和多源切换；网页 HLS 或视频提取支持格式选择、下载与缓存，Windows 提供浏览器助手。
-- **四方连续图**：提取最小循环、多图案错位排列；支持像素 Tile 分层绘制、单格／多格回绕与拆分导出、菱形与带高度预览及工程保存，可手动检查独立 PS 插件版本并打开安装下载页。
+- **四方连续图**：提取最小循环、多图案错位排列；支持像素 Tile 分层绘制、单格／多格回绕与拆分导出、矩形／菱形／六边形与带高度预览、工程内素材库及工程保存，可手动检查并下载独立 PS 插件安装器。
 - **错误诊断**：共用日志记录录屏、后台任务失败和运行时错误，便于排查问题。
 - **日常与组件管理**：多页签、最近记录、文件定位与关联、深浅主题、七语言和在线更新；按需安装组件，识别运行库可选 CPU／GPU 或同时保留，支持检测与手动路径。
 
@@ -61,7 +61,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **Audio and video**: Edit and transcode multiple files, export queues or merged media, and use playlists, multiple tracks, subtitles, embedded/external audio waveforms with track switching and independent subtitle previews, GPU playback/editor previews including transparency, image sequences, display ratios and resumable or shareable projects. Subtitles support generation and language matching, offline/live translation among Chinese, English, Japanese and Korean, cached replay, unified or native ASS display, ASS/SSA/SRT/WebVTT editing, subtitle conversion, extraction in the embedded track's original format, style retention in MKV and burn-in.
 - **Screen recording**: On Windows, record screens or a snapped/custom-drawn region to MKV/MP4 in Downloads using quality presets, floating controls, recording history and saved shortcuts, optionally capturing system audio and opening the video editor afterward.
 - **Online video**: Channel lists support groups, logos and multiple sources; webpage HLS and video extraction support format selection, downloads and caching, with a browser assistant on Windows.
-- **Seamless repeats**: Extract repeat tiles and arrange motifs with offsets; draw layered pixel Tiles with single- or multi-cell wrapping and per-cell export, inspect diamond or raised repeats, and save projects. Manually check the independent PS plugin version and open its installation download page.
+- **Seamless repeats**: Extract repeat tiles and arrange motifs with offsets; draw layered pixel Tiles with single- or multi-cell wrapping and per-cell export, inspect rectangular, diamond, hexagonal or raised repeats, reuse a project material library, and save projects. Manually check and download the independent PS plugin installer.
 - **Diagnostics**: Shared logs record screen recording, failed background tasks and runtime errors to help troubleshoot problems.
 - **Everyday tools and components**: Tabs, recent files, file locations and associations, light/dark themes, seven languages and updates; install components on demand, keep CPU/GPU recognition runtimes separately or together, and use detection or manual paths.
 

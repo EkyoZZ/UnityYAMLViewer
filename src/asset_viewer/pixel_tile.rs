@@ -4,6 +4,8 @@ use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use image::{Rgba, RgbaImage};
 use std::path::Path;
 mod ps_plugin;
+mod materials;
+use materials::{Material, StoredMaterial};
 
 const MAX_SIDE: u32 = 1024;
 const HISTORY_BYTES: usize = 32 * 1024 * 1024;
@@ -11,6 +13,7 @@ const MAX_TILES: usize = 64;
 const LAYER_BYTES: usize = 32 * 1024 * 1024;
 #[derive(Clone, PartialEq)]
 struct Layer {
+    material: bool,
     name: String,
     visible: bool,
     locked: bool,
@@ -18,6 +21,8 @@ struct Layer {
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredLayer {
+    #[serde(default)]
+    material: bool,
     name: String,
     visible: bool,
     locked: bool,
@@ -26,6 +31,8 @@ struct StoredLayer {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Tool {
     #[default]
+    Move,
+    Zoom,
     Brush,
     Eraser,
     Eyedropper,
@@ -64,6 +71,7 @@ fn hex_color(text: &str, alpha: u8) -> Option<[u8; 4]> {
 
 #[derive(Clone, PartialEq)]
 struct Snapshot {
+    materials: Vec<Material>,
     layers: Vec<Layer>,
     active_layer: usize,
     tiles: Vec<RgbaImage>,
@@ -73,13 +81,15 @@ struct Snapshot {
     rows: usize,
     multiple: bool,
     diamond: bool,
+    hex: u8,
     elevated: bool,
     footprint: [u32; 2],
     wrap: bool,
 }
 impl Snapshot {
     fn bytes(&self) -> usize {
-        self.tiles.iter().map(|p| p.as_raw().len()).sum::<usize>()
+        self.materials.iter().map(|m| m.pixels.as_raw().len()).sum::<usize>()
+            + self.tiles.iter().map(|p| p.as_raw().len()).sum::<usize>()
             + self
                 .layers
                 .iter()
@@ -91,6 +101,8 @@ impl Snapshot {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Project {
+    #[serde(default)]
+    materials: Vec<StoredMaterial>,
     #[serde(default)]
     background_custom: bool,
     #[serde(default = "default_background")]
@@ -109,6 +121,8 @@ struct Project {
     rows: usize,
     multiple: bool,
     diamond: bool,
+    #[serde(default)]
+    hex: u8,
     elevated: bool,
     footprint: [u32; 2],
     #[serde(default = "enabled")]
@@ -117,6 +131,18 @@ struct Project {
     edit_unit: bool,
     #[serde(default = "one")]
     brush_size: u32,
+}
+// Horizontal pen drag is measured from the initial contact, independent of frame rate.
+fn drag_zoom(anchor: Pos2, initial: f32, pan: Vec2, dx: f32, center: Pos2) -> (f32, Vec2) {
+    let zoom = (initial * (dx * 0.01).clamp(-20., 20.).exp()).clamp(0.25, 64.);
+    let offset = anchor - center;
+    (zoom, offset - (offset - pan) * (zoom / initial))
+}
+// Use the same effective scale for rendering and anchored drag zoom, including
+// the minimum tile size and raised-sprite draw-budget floor.
+fn repeat_scale(zoom: f32, dpi: f32, footprint: [u32; 2], height: u32) -> f32 {
+    (zoom / dpi).max(12. / footprint[0].min(footprint[1]) as f32)
+        .max(height as f32 / footprint[1] as f32 / 8.)
 }
 fn same_file(a: &Path, b: &Path) -> bool {
     let a = a.canonicalize().unwrap_or_else(|_| a.to_owned());
@@ -130,7 +156,11 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 impl Project {
     fn validate(&self) -> Result<(), String> {
-        let valid = (1..=3).contains(&self.version)
+        let valid = (1..=5).contains(&self.version)
+            && self.hex <= 2 && !(self.hex != 0 && (self.elevated || self.diamond))
+            && (self.hex != 1 || self.height % 4 == 0)
+            && (self.hex != 2 || self.width % 4 == 0)
+            && (self.hex == 0 || self.version >= 4)
             && (2..=MAX_SIDE).contains(&self.width)
             && (2..=MAX_SIDE).contains(&self.height)
             && self.width % 2 == 0
@@ -151,7 +181,13 @@ impl Project {
                 .iter()
                 .all(|t| t.len() == self.width as usize * self.height as usize * 4)
             && self.tiles.iter().map(Vec::len).sum::<usize>() <= 16 * 1024 * 1024;
-        let layer_valid = self.layers.len() <= 32
+        let layer_valid = (self.version >= 5 || (self.materials.is_empty() && self.layers.iter().all(|l|!l.material)))
+            && self.layers.iter().filter(|l| l.material).count() <= 1
+            && self.layers.iter().enumerate().all(|(i,l)| !l.material || (i == 0 && l.locked))
+            && self.materials.len() <= 64
+            && self.materials.iter().all(|m| m.name.chars().count() <= 64 && m.pixels.len() == self.width as usize*self.height as usize*4)
+            && self.materials.iter().map(|m| m.pixels.len()).sum::<usize>() <= 16*1024*1024
+            && self.layers.len() <= 32
             && (self.layers.is_empty() || self.active_layer < self.layers.len())
             && self.layers.iter().all(|l| {
                 l.tiles.len() == self.tiles.len()
@@ -175,7 +211,25 @@ impl Project {
     }
 }
 
+fn toolbar_offset_inside(offset:Vec2,size:Vec2,area:Rect)->Vec2 {
+    let max=(area.size()-size).max(Vec2::ZERO);
+    egui::vec2(if offset.x.is_finite(){offset.x.clamp(0.,max.x)}else{4_f32.min(max.x)},
+        if offset.y.is_finite(){offset.y.clamp(0.,max.y)}else{4_f32.min(max.y)})
+}
+struct ToolbarPlacement { offset:Vec2,size:Vec2,loaded:bool,dragging:bool }
+impl Default for ToolbarPlacement {
+    fn default()->Self {Self{offset:Vec2::splat(4.),size:egui::vec2(44.,270.),loaded:false,dragging:false}}
+}
 pub(super) struct Editor {
+    materials: Vec<Material>,
+    material_drop_status: Option<(bool,String)>,
+    material_thumbnails: Vec<egui::TextureHandle>,
+    show_slots: bool,
+    infinite_view: bool,
+    rendering_merged: bool,
+    merged_pan_drag: bool,
+    merged_zoom_drag: Option<(Pos2,f32,Vec2,f32)>,
+    toolbar: ToolbarPlacement,
     ps_plugin: ps_plugin::State,
     background_custom: bool,
     background_color: [u8; 3],
@@ -204,16 +258,21 @@ pub(super) struct Editor {
     tool: Tool,
     rectangle: Option<RectangleDrag>,
     diamond: bool,
+    hex: u8,
     elevated: bool,
     footprint: [u32; 2],
     pan: Vec2,
     pan_drag: bool,
+    zoom_drag: Option<(Pos2, f32, Vec2)>,
     grid: bool,
     preview_grid: bool,
     width: u32,
     height: u32,
     zoom: f32,
     repeat_zoom: f32,
+    repeat_pan: Vec2,
+    repeat_pan_drag: bool,
+    repeat_zoom_drag: Option<(Pos2, f32, Vec2, f32)>,
     changed: bool,
     confirm_close: bool,
     message: String,
@@ -228,6 +287,15 @@ pub(super) struct Editor {
 impl Default for Editor {
     fn default() -> Self {
         Self {
+            materials: Vec::new(),
+            material_drop_status: None,
+            material_thumbnails: Vec::new(),
+            show_slots: false,
+            infinite_view: false,
+            rendering_merged: false,
+            merged_pan_drag: false,
+            merged_zoom_drag: None,
+            toolbar: Default::default(),
             ps_plugin: Default::default(),
             background_custom: false,
             background_color: default_background(),
@@ -253,19 +321,24 @@ impl Default for Editor {
             before: None,
             last: None,
             color: [80, 180, 100, 255],
-            tool: Tool::Brush,
+            tool: Tool::Move,
             rectangle: None,
             diamond: true,
+            hex: 0,
             elevated: false,
             footprint: [128, 64],
             pan: Vec2::ZERO,
             pan_drag: false,
+            zoom_drag: None,
             grid: true,
             preview_grid: true,
             width: 128,
             height: 64,
             zoom: 4.,
             repeat_zoom: 1.,
+            repeat_pan: Vec2::ZERO,
+            repeat_pan_drag: false,
+            repeat_zoom_drag: None,
             changed: false,
             confirm_close: false,
             message: String::new(),
@@ -362,7 +435,56 @@ fn cell_center(col: f32, row: f32, w: u32, h: u32, diamond: bool) -> Vec2 {
     }
 }
 
+// Pointy-top axial lattice; pixel ownership is shared by hit-testing and clipping.
+fn hex_size(cols: usize, rows: usize, w: u32, h: u32, flat: bool) -> Vec2 {
+    if flat { egui::vec2((1.+(cols-1) as f32*0.75)*w as f32,(rows as f32+(cols-1) as f32/2.)*h as f32) }
+    else { egui::vec2((cols as f32+(rows-1) as f32/2.)*w as f32,(1.+(rows-1) as f32*0.75)*h as f32) }
+}
+fn hex_center(col: i32, row: i32, w: u32, h: u32, flat: bool) -> Vec2 {
+    if flat { let p = hex_center(row, col, h, w, false); return egui::vec2(p.y, p.x); }
+    egui::vec2((col as f32 + row as f32 / 2.) * w as f32, row as f32 * h as f32 * 0.75)
+}
+fn hex_pixel(x: i32, y: i32, w: u32, h: u32, flat: bool) -> CellPixel {
+    if flat { let p = hex_pixel(y, x, h, w, false); return CellPixel { col: p.row, row: p.col, x: p.y, y: p.x }; }
+    let px = x as f64 + 0.5; let py = y as f64 + 0.5;
+    let r = (py / (h as f64 * 0.75)).floor() as i32;
+    let mut best = (f64::INFINITY, 0, 0, 0, 0);
+    for row in r-1..=r+1 {
+        let q = (px / w as f64 - row as f64 / 2.).floor() as i32;
+        for col in q-1..=q+1 {
+            let cx = (col as i64 * w as i64 + row as i64 * (w/2) as i64) as i32;
+            let cy = (row as i64 * (h/4*3) as i64) as i32;
+            let dx = (px - cx as f64) / w as f64;
+            let dy = (py - cy as f64) / h as f64;
+            let distance = 3. * dx * dx + 4. * dy * dy;
+            if distance < best.0 { best = (distance, col, row, cx, cy); }
+        }
+    }
+    CellPixel { col: best.1, row: best.2, x: (x-best.3+w as i32/2) as u32, y: (y-best.4+h as i32/2) as u32 }
+}
+fn hex_outline(rect: Rect, flat: bool) -> Vec<Pos2> {
+    let points = if flat { vec![(0.,0.5),(0.25,0.),(0.75,0.),(1.,0.5),(0.75,1.),(0.25,1.)] }
+        else { vec![(0.5,0.),(1.,0.25),(1.,0.75),(0.5,1.),(0.,0.75),(0.,0.25)] };
+    points.into_iter().map(|(x,y)| rect.min + egui::vec2(rect.width()*x, rect.height()*y)).collect()
+}
 impl Editor {
+    fn mapped_cell(&self, x: i32, y: i32, w: u32, h: u32) -> CellPixel {
+        if self.hex != 0 { hex_pixel(x,y,w,h,self.hex == 2) } else { cell_pixel(x,y,w,h,self.diamond) }
+    }
+    fn mapped_center(&self, col: i32, row: i32, w: u32, h: u32) -> Vec2 {
+        if self.hex != 0 { hex_center(col,row,w,h,self.hex == 2) } else { cell_center(col as f32,row as f32,w,h,self.diamond) }
+    }
+    fn inside_tile(&self, x: i32, y: i32, w: u32, h: u32) -> bool {
+        if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 { return false; }
+        if self.hex == 0 { return inside(x,y,w,h,self.diamond && !self.elevated); }
+        let p = hex_pixel(x-w as i32/2,y-h as i32/2,w,h,self.hex == 2);
+        p.col == 0 && p.row == 0
+    }
+    fn tile_outline(&self, painter: &egui::Painter, rect: Rect, color: Color32) {
+        if self.hex != 0 { painter.add(egui::Shape::closed_line(hex_outline(rect,self.hex == 2),egui::Stroke::new(1_f32,color))); }
+        else { Self::outline(painter,rect,self.diamond && !self.elevated,color); }
+    }
+
     fn layer_editable(&self) -> bool {
         self.layers
             .get(self.active_layer)
@@ -378,26 +500,11 @@ impl Editor {
         if !self.layers.is_empty() {
             return;
         }
-        self.layers.push(Layer {
-            name: "BaseLayer".into(),
-            visible: true,
-            locked: true,
+        self.layers.push(Layer { material: false,
+            name: format!("{} 1", tr("图层")), visible: true, locked: false,
             tiles: self.tiles.clone(),
         });
-        let blank: Vec<_> = self
-            .tiles
-            .iter()
-            .map(|p| RgbaImage::new(p.width(), p.height()))
-            .collect();
-        self.layers.push(Layer {
-            name: format!("{} 1", tr("图层")),
-            visible: true,
-            locked: false,
-            tiles: blank.clone(),
-        });
-        self.active_layer = 1;
-        self.tiles = blank;
-        self.pixels = self.tiles[self.selected].clone();
+        self.active_layer = 0;
         self.invalidate_textures();
     }
     fn paint_background(
@@ -519,7 +626,7 @@ impl Editor {
         let mut image = self.composite(tile);
         let (w, h) = image.dimensions();
         for (x, y, pixel) in image.enumerate_pixels_mut() {
-            if !inside(x as i32, y as i32, w, h, self.diamond && !self.elevated) {
+            if !self.inside_tile(x as i32, y as i32, w, h) {
                 *pixel = Rgba([0; 4]);
             }
         }
@@ -580,9 +687,11 @@ impl Editor {
     fn reset_document(&mut self, image: RgbaImage) {
         self.record_layer_change();
         self.layers.clear();
+        self.materials.clear();
+        self.material_drop_status=None;
         self.active_layer = 0;
-        self.tiles = vec![image.clone()];
-        self.pixels = image;
+        self.pixels = RgbaImage::new(image.width(),image.height());
+        self.tiles = vec![self.pixels.clone()];
         self.selected = 0;
         self.selected_slot = 0;
         self.layout.fill(0);
@@ -591,6 +700,10 @@ impl Editor {
         self.width = self.pixels.width();
         self.height = self.pixels.height();
         self.ensure_layers();
+        if let Some(base)=self.ensure_material_base() {
+            self.layers[base].tiles[0]=image.clone();
+            if image.pixels().any(|p|p[3]!=0) { self.materials.push(Material{name:format!("{} 1",tr("素材")),pixels:image}); }
+        }
     }
     fn layer_icon_button(
         ui: &mut egui::Ui,
@@ -599,7 +712,7 @@ impl Editor {
         icon: crate::icons::Icon,
         tooltip: &str,
     ) -> egui::Response {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(28., 28.), egui::Sense::hover());
+        let (_, rect) = ui.allocate_space(egui::vec2(28., 28.));
         let response = ui.interact(rect, id, egui::Sense::click());
         let visuals = ui.style().interact_selectable(&response, selected);
         ui.painter().rect(
@@ -633,21 +746,23 @@ impl Editor {
         if self.layers.is_empty() {
             return;
         }
+        let mut delete = None;
         ui.separator();
         ui.horizontal(|ui| {
-            ui.strong(tr("图层"));
+            ui.set_min_height(28.);
+            ui.label(egui::RichText::new(tr("图层")).heading().strong());
             let bytes: usize = self
                 .layers
                 .iter()
                 .map(|l| l.tiles.len() * self.pixels.as_raw().len())
                 .sum();
             if ui
-                .add_enabled(
+                .add_enabled_ui(
                     self.layers.len() < 32
                         && bytes + self.tiles.len() * self.pixels.as_raw().len() <= LAYER_BYTES,
-                    egui::Button::new("+"),
+                    |ui| crate::icons::button(ui, crate::icons::Icon::AddLayer, tr("添加图层")),
                 )
-                .on_hover_text(tr("添加图层"))
+                .inner
                 .clicked()
             {
                 self.record_layer_change();
@@ -656,7 +771,7 @@ impl Editor {
                     .iter()
                     .map(|p| RgbaImage::new(p.width(), p.height()))
                     .collect();
-                self.layers.push(Layer {
+                self.layers.push(Layer { material: false,
                     name: format!("{} {}", tr("图层"), self.layers.len()),
                     visible: true,
                     locked: false,
@@ -664,13 +779,18 @@ impl Editor {
                 });
                 self.select_layer(self.layers.len() - 1);
             }
+            if ui.add_enabled_ui(!self.layers[self.active_layer].locked,
+                |ui| crate::icons::button(ui, crate::icons::Icon::Minus, tr("删除图层")))
+                .inner.clicked() {
+                delete = Some(self.active_layer);
+            }
         });
         let mut select = None;
-        let mut delete = None;
         let mut reorder = None;
         let mut toggle_visible = None;
         let mut toggle_lock = None;
         let mut rename = None;
+        let mut material_action = None;
         let owner = ui.id().with("tile_layers_owner");
         for index in (0..self.layers.len()).rev() {
             let image = if index == self.active_layer {
@@ -695,6 +815,7 @@ impl Editor {
             let name = self.layers[index].name.clone();
             let visible = self.layers[index].visible;
             let locked = self.layers[index].locked;
+            let material_layer = self.layers[index].material;
             let frame = egui::Frame::new().inner_margin(3).stroke(egui::Stroke::new(
                 1_f32,
                 if active {
@@ -703,7 +824,7 @@ impl Editor {
                     Color32::GRAY
                 },
             ));
-            let (row, dropped) = ui.dnd_drop_zone::<(egui::Id, usize), _>(frame, |ui| {
+            let (_row, dropped) = ui.dnd_drop_zone::<(egui::Id, usize), _>(frame, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.;
                     if Self::layer_icon_button(
@@ -742,22 +863,32 @@ impl Editor {
                         select = Some(index);
                     }
                     let width = (ui.available_width() - 28. - ui.spacing().item_spacing.x).max(1.);
-                    let name_response = ui
-                        .dnd_drag_source(owner.with(("name", index)), (owner, index), |ui| {
-                            ui.add_sized(
-                                [width, 28.],
-                                egui::Button::new(&name).selected(active).truncate(),
-                            )
-                        })
-                        .inner
-                        .on_hover_text(tr("拖拽调整图层顺序"));
+                    let name_response = ui.push_id(owner.with(("name", index)), |ui| {
+                        ui.add_sized([width, 28.], egui::Button::new(&name).selected(active).truncate()
+                            .sense(egui::Sense::click_and_drag()))
+                    }).inner.on_hover_text(tr("拖拽调整图层顺序"));
+                    // Only a primary-button drag can start layer reordering.
+                    // A secondary click remains available to the context menu.
+                    if !self.layers[index].material && name_response.drag_started_by(egui::PointerButton::Primary) {
+                        name_response.dnd_set_drag_payload((owner, index));
+                    }
                     if name_response.clicked() {
                         select = Some(index);
                     }
                     name_response.context_menu(|ui| {
+                        if material_layer {
+                            if ui.button(tr("设置为空")).clicked() { material_action=Some(None); ui.close_menu(); }
+                            ui.menu_button(tr("导入素材"), |ui| {
+                                if self.materials.is_empty() { ui.label(tr("素材库为空，请先导入素材。")); }
+                                for (i,material) in self.materials.iter().enumerate() {
+                                    if ui.button(&material.name).clicked() { material_action=Some(Some(i)); ui.close_menu(); }
+                                }
+                            });
+                            return;
+                        }
                         if ui
                             .add_enabled(
-                                self.layers.len() > 1 && !locked,
+                                !locked,
                                 egui::Button::new(tr("删除图层")),
                             )
                             .clicked()
@@ -766,37 +897,28 @@ impl Editor {
                             ui.close_menu();
                         }
                         let mut text = name.clone();
-                        if ui
+                        if !self.layers[index].material && ui
                             .add(egui::TextEdit::singleline(&mut text).char_limit(64))
                             .changed()
                         {
                             rename = Some((index, text));
                         }
                     });
-                    let lock = Self::layer_lock_button(ui, owner.with(("lock", index)), locked);
-                    if lock.clicked() {
+                    let lock = ui.add_enabled_ui(!material_layer, |ui| Self::layer_lock_button(ui, owner.with(("lock", index)), locked)).inner;
+                    if lock.clicked() && !self.layers[index].material {
                         toggle_lock = Some(index);
                     }
                 });
             });
-            row.response.context_menu(|ui| {
-                if ui
-                    .add_enabled(
-                        self.layers.len() > 1 && !locked,
-                        egui::Button::new(tr("删除图层")),
-                    )
-                    .clicked()
-                {
-                    delete = Some(index);
-                    ui.close_menu();
-                }
-            });
+            // Context actions belong to the name button. Making the enclosing row
+            // clickable here would overlap the eye and lock hit targets.
             if let Some(payload) = dropped {
-                if payload.0 == owner {
+                if payload.0 == owner && ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
                     reorder = Some((payload.1, index));
                 }
             }
         }
+        if let Some(material) = material_action { self.assign_material(material); }
         if let Some((index, name)) = rename {
             self.record_layer_change();
             self.layers[index].name = name;
@@ -813,7 +935,7 @@ impl Editor {
             self.layers[index].locked = !self.layers[index].locked;
         }
         if let Some((from, to)) = reorder {
-            if from != to && from < self.layers.len() {
+            if from != to && from < self.layers.len() && !self.layers[from].material && !self.layers[to].material {
                 self.record_layer_change();
                 let selected = if self.active_layer == from {
                     to
@@ -829,17 +951,7 @@ impl Editor {
                 self.active_layer = selected;
             }
         }
-        if let Some(index) = delete {
-            self.record_layer_change();
-            self.layers.remove(index);
-            self.active_layer = if self.active_layer > index {
-                self.active_layer - 1
-            } else {
-                self.active_layer.min(self.layers.len() - 1)
-            };
-            self.tiles = self.layers[self.active_layer].tiles.clone();
-            self.pixels = self.tiles[self.selected].clone();
-        }
+        if let Some(index) = delete { self.delete_layer(index); }
         if !self.layer_editable() {
             ui.small(tr("当前图层已锁定或隐藏，不能绘制。"));
         }
@@ -850,11 +962,15 @@ impl Editor {
         self.dirty_tiles.clear();
     }
     fn whole_unit(&self) -> bool {
-        self.multiple && self.edit_unit && !self.elevated
+        self.multiple && !self.elevated
     }
     fn edit_size(&self) -> Vec2 {
         let (w, h) = self.pixels.dimensions();
+        if self.elevated && self.multiple {
+            return egui::vec2((self.columns+self.rows) as f32*self.footprint[0] as f32/2.,(self.columns+self.rows-2) as f32*self.footprint[1] as f32/2.+h as f32);
+        }
         if self.whole_unit() {
+            if self.hex != 0 { return hex_size(self.columns,self.rows,w,h,self.hex == 2); }
             if self.diamond {
                 egui::vec2(
                     (self.columns + self.rows) as f32 * w as f32 / 2.,
@@ -869,13 +985,13 @@ impl Editor {
     }
     fn plane_hit(&self, x: i32, y: i32, layout: bool) -> Option<(usize, u32, u32)> {
         let (w, h) = self.pixels.dimensions();
-        let cell = cell_pixel(x, y, w, h, self.diamond);
+        let cell = self.mapped_cell(x, y, w, h);
         let (cols, rows) = if layout && self.multiple {
             (self.columns, self.rows)
         } else {
             (1, 1)
         };
-        if !self.wrap
+        if !(self.wrap || self.rendering_merged)
             && (cell.col < 0 || cell.row < 0 || cell.col >= cols as i32 || cell.row >= rows as i32)
         {
             return None;
@@ -889,7 +1005,7 @@ impl Editor {
     }
     fn finite_plane_hit(&self, x: i32, y: i32, layout: bool) -> Option<(usize, u32, u32)> {
         let (w, h) = self.pixels.dimensions();
-        let cell = cell_pixel(x, y, w, h, self.diamond);
+        let cell = self.mapped_cell(x, y, w, h);
         let (cols, rows) = if layout && self.multiple {
             (self.columns, self.rows)
         } else {
@@ -908,7 +1024,7 @@ impl Editor {
             cell.y,
         ))
     }
-    fn fill_closed(&mut self, mut point: (i32, i32), layout: bool) {
+    fn fill_region(&mut self, mut point: (i32, i32), layout: bool) {
         self.finish_stroke();
         if !self.layer_editable() {
             return;
@@ -919,15 +1035,10 @@ impl Editor {
         } else {
             (1, 1)
         };
-        if self.wrap {
-            let cell = cell_pixel(point.0, point.1, w, h, self.diamond);
-            let shift = cell_center(
-                (cell.col.div_euclid(cols as i32) * cols as i32) as f32,
-                (cell.row.div_euclid(rows as i32) * rows as i32) as f32,
-                w,
-                h,
-                self.diamond,
-            );
+        if self.wrap || self.rendering_merged {
+            let cell = self.mapped_cell(point.0, point.1, w, h);
+            let shift = self.mapped_center(cell.col.div_euclid(cols as i32)*cols as i32,
+                cell.row.div_euclid(rows as i32)*rows as i32,w,h);
             point.0 -= shift.x as i32;
             point.1 -= shift.y as i32;
         }
@@ -936,10 +1047,17 @@ impl Editor {
         };
         let target = *self.tiles[tile].get_pixel(x, y);
         let color = Rgba(self.color);
+        // Transparent pixels may have different hidden RGB values. Treat them as
+        // one empty region; the finite tile boundary contains background fills.
+        let empty = target[3] == 0;
+        let matches_target = |pixel: Rgba<u8>| if empty { pixel[3] == 0 } else { pixel == target };
         if target == color {
             return;
         }
-        let (left, top, width, height) = if self.diamond {
+        let (left, top, width, height) = if self.hex != 0 {
+            let size = hex_size(cols,rows,w,h,self.hex == 2);
+            (-(w as i32)/2,-(h as i32)/2,size.x as usize,size.y as usize)
+        } else if self.diamond {
             (
                 -(rows as i32 * w as i32) / 2,
                 -(h as i32) / 2,
@@ -965,10 +1083,9 @@ impl Editor {
         queue.push_back(point);
         while let Some((px, py)) = queue.pop_front() {
             let Some((tile, x, y)) = self.finite_plane_hit(px, py, layout) else {
-                self.message = tr("区域未闭合，未执行填充。").into();
-                return;
+                continue;
             };
-            if *state.tiles[tile].get_pixel(x, y) != target {
+            if !matches_target(*state.tiles[tile].get_pixel(x, y)) {
                 continue;
             }
             let index = (py - top) as usize * width + (px - left) as usize;
@@ -980,12 +1097,9 @@ impl Editor {
             for next in [(px - 1, py), (px + 1, py), (px, py - 1), (px, py + 1)] {
                 if let Some((nt, nx, ny)) = self.finite_plane_hit(next.0, next.1, layout) {
                     let ni = (next.1 - top) as usize * width + (next.0 - left) as usize;
-                    if !visited[ni] && *state.tiles[nt].get_pixel(nx, ny) == target {
+                    if !visited[ni] && matches_target(*state.tiles[nt].get_pixel(nx, ny)) {
                         queue.push_back(next);
                     }
-                } else {
-                    self.message = tr("区域未闭合，未执行填充。").into();
-                    return;
                 }
             }
         }
@@ -1088,6 +1202,17 @@ impl Editor {
             );
         }
     }
+    fn set_infinite_view(&mut self,infinite:bool) {
+        if self.infinite_view==infinite { return; }
+        self.finish_stroke(); self.infinite_view=infinite;
+        self.last=None; self.preview_last=None; self.zoom_drag=None; self.merged_zoom_drag=None;
+        self.pan_drag=false; self.merged_pan_drag=false;
+    }
+    fn center_view(&mut self) {
+        self.finish_stroke(); self.pan=Vec2::ZERO;
+        self.last=None; self.preview_last=None; self.zoom_drag=None; self.merged_zoom_drag=None;
+        self.pan_drag=false; self.merged_pan_drag=false;
+    }
     fn tool_shortcuts(&mut self, ctx: &egui::Context) {
         if Self::text_input_active(ctx) || ctx.input(|i| !i.focused || i.pointer.primary_down()) {
             return;
@@ -1108,7 +1233,12 @@ impl Editor {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket)) {
             self.brush_size = (self.brush_size + 1).min(32);
         }
+        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Q)) { self.set_infinite_view(false); }
+        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::W)) { self.set_infinite_view(true); }
+        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::H)) { self.center_view(); }
         for (key, tool) in [
+            (egui::Key::V, Tool::Move),
+            (egui::Key::Z, Tool::Zoom),
             (egui::Key::B, Tool::Brush),
             (egui::Key::I, Tool::Eyedropper),
             (egui::Key::E, Tool::Eraser),
@@ -1175,6 +1305,7 @@ impl Editor {
             layer.tiles = tiles.clone();
         }
         Snapshot {
+            materials: self.materials.clone(),
             layers,
             active_layer: self.active_layer,
             tiles,
@@ -1184,6 +1315,7 @@ impl Editor {
             rows: self.rows,
             multiple: self.multiple,
             diamond: self.diamond,
+            hex: self.hex,
             elevated: self.elevated,
             footprint: self.footprint,
             wrap: self.wrap,
@@ -1225,6 +1357,49 @@ impl Editor {
             }
         }
     }
+    fn delete_layer(&mut self, index: usize) {
+        if index >= self.layers.len() || self.layers[index].locked || self.layers[index].material { return; }
+            self.record_layer_change();
+            self.layers.remove(index);
+            if self.layers.is_empty() || self.layers.iter().all(|l|l.material) {
+                self.layers.push(Layer { material: false,
+                    name: format!("{} 1", tr("图层")), visible: true, locked: false,
+                    tiles: self.tiles.iter().map(|p| RgbaImage::new(p.width(), p.height())).collect(),
+                });
+            }
+            self.active_layer = if self.active_layer > index {
+                self.active_layer - 1
+            } else {
+                self.active_layer.min(self.layers.len() - 1)
+            };
+            self.tiles = self.layers[self.active_layer].tiles.clone();
+            self.pixels = self.tiles[self.selected].clone();
+    }
+    fn clear_selected_layer(&mut self) {
+        if !self.layer_editable() { return; }
+        self.record_layer_change();
+        for tile in &mut self.tiles { *tile = RgbaImage::new(tile.width(), tile.height()); }
+        self.pixels = self.tiles[self.selected].clone();
+        self.sync_layer();
+        self.message = tr("已清空选中图层。").into();
+    }
+    #[cfg(test)]
+    fn import_layer(&mut self, image: RgbaImage) {
+        self.ensure_layers();
+        let bytes: usize = self.layers.iter().flat_map(|l| &l.tiles).map(|p| p.as_raw().len()).sum();
+        let added: usize = self.tiles.iter().map(|p| p.as_raw().len()).sum();
+        if self.layers.len() >= 32 || bytes + added > LAYER_BYTES {
+            self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
+            return;
+        }
+        self.record_layer_change();
+        let mut tiles: Vec<_> = self.tiles.iter().map(|p| RgbaImage::new(p.width(), p.height())).collect();
+        tiles[self.selected] = image;
+        self.layers.push(Layer { material: false, name: format!("{} {}", tr("图层"), self.layers.len() + 1),
+            visible: true, locked: true, tiles });
+        self.select_layer(self.layers.len() - 1);
+    }
+    #[cfg(test)]
     fn replace(&mut self, image: RgbaImage) {
         if !self.layer_editable() {
             self.message = tr("当前图层已锁定，请先解锁或选择其他图层。").into();
@@ -1237,6 +1412,7 @@ impl Editor {
             self.selected = 0;
             self.layout.fill(0);
             self.layers.clear();
+            self.materials.clear();
             self.active_layer = 0;
         }
         self.pixels = image;
@@ -1254,6 +1430,7 @@ impl Editor {
             let old = self.snapshot();
             self.pixels = state.tiles[state.selected].clone();
             self.layers = state.layers;
+            self.materials = state.materials;
             self.active_layer = state.active_layer;
             self.tiles = state.tiles;
             self.selected = state.selected;
@@ -1262,6 +1439,7 @@ impl Editor {
             self.rows = state.rows;
             self.multiple = state.multiple;
             self.diamond = state.diamond;
+            self.hex = state.hex;
             self.elevated = state.elevated;
             self.footprint = state.footprint;
             self.wrap = state.wrap;
@@ -1289,7 +1467,7 @@ impl Editor {
             let mut display = self.composite(index);
             let (w, h) = display.dimensions();
             for (x, y, p) in display.enumerate_pixels_mut() {
-                if !inside(x as i32, y as i32, w, h, self.diamond && !self.elevated) {
+                if !self.inside_tile(x as i32, y as i32, w, h) {
                     *p = Rgba([0; 4]);
                 }
             }
@@ -1396,12 +1574,12 @@ impl Editor {
             egui::Sense::click_and_drag(),
         );
         let tools = self.floating_tools(ui, area);
-        let over_tools = ui
+        let over_tools = self.toolbar.dragging || ui
             .input(|i| i.pointer.hover_pos())
             .is_some_and(|p| tools.contains(p));
         let painter = ui.painter_at(area);
         painter.rect_filled(area, 0., Color32::from_gray(45));
-        if response.hovered() && !over_tools {
+        if response.hovered() && !over_tools && self.zoom_drag.is_none() {
             let scroll = ui.input_mut(|input| {
                 let delta = input.smooth_scroll_delta.y;
                 input.smooth_scroll_delta = Vec2::ZERO;
@@ -1421,18 +1599,40 @@ impl Editor {
         let down = ui.input(|i| i.pointer.primary_down());
         let space =
             ui.input(|i| i.key_down(egui::Key::Space)) && !Self::text_input_active(ui.ctx());
-        let moving = response.dragged_by(egui::PointerButton::Middle)
+        let move_tool = self.tool == Tool::Move;
+        let moving = !over_tools && (response.dragged_by(egui::PointerButton::Middle)
             || response.dragged_by(egui::PointerButton::Secondary)
-            || (response.is_pointer_button_down_on() && down && (space || self.pan_drag));
+            || (response.is_pointer_button_down_on() && down && (move_tool || space || self.pan_drag)));
         if moving {
             self.finish_stroke();
             self.pan_drag = down;
             self.pan += ui.input(|i| i.pointer.delta());
             ui.output_mut(|output| output.cursor_icon = egui::CursorIcon::Grabbing);
-        } else if response.hovered() && space {
+        } else if response.hovered() && !over_tools && (move_tool || space) {
             ui.output_mut(|output| output.cursor_icon = egui::CursorIcon::Grab);
         }
-        let panning = moving || self.pan_drag || (space && response.hovered());
+        let zoom_tool = self.tool == Tool::Zoom;
+        if zoom_tool && !moving && !space {
+            if response.hovered() && !over_tools {
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ZoomIn);
+            }
+            if response.is_pointer_button_down_on() && down {
+                if let Some(pointer) = response.interact_pointer_pos() {
+                    if self.zoom_drag.is_none() && !over_tools {
+                        self.finish_stroke();
+                        self.zoom_drag = Some((pointer, self.zoom, self.pan));
+                    }
+                    if let Some((anchor, initial, pan)) = self.zoom_drag {
+                        (self.zoom, self.pan) = drag_zoom(anchor, initial, pan, pointer.x - anchor.x, area.center());
+                        ui.output_mut(|o| o.cursor_icon = if pointer.x < anchor.x {
+                            egui::CursorIcon::ZoomOut
+                        } else { egui::CursorIcon::ZoomIn });
+                    }
+                }
+            }
+        } else { self.zoom_drag = None; }
+        if !down { self.zoom_drag = None; }
+        let panning = zoom_tool || move_tool || moving || self.pan_drag || (space && response.hovered());
         let (w, h) = self.pixels.dimensions();
         let whole = self.whole_unit();
         let (cols, rows) = if whole {
@@ -1486,7 +1686,7 @@ impl Editor {
                 );
             } else if response.clicked() {
                 if let Some(point) = point {
-                    self.fill_closed(point, whole);
+                    self.fill_region(point, whole);
                 }
             }
         } else if response.is_pointer_button_down_on() && down || response.clicked() {
@@ -1551,7 +1751,7 @@ impl Editor {
         for row in 0..rows {
             for col in 0..cols {
                 let center =
-                    origin + cell_center(col as f32, row as f32, w, h, self.diamond) * scale;
+                    origin + self.mapped_center(col as i32, row as i32, w, h) * scale;
                 let rect = Rect::from_center_size(center, egui::vec2(w as f32, h as f32) * scale);
                 let index = if whole {
                     self.tile_at(col as i32, row as i32)
@@ -1564,14 +1764,10 @@ impl Editor {
                     Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)),
                     Color32::WHITE,
                 );
-                if self.grid {
-                    Self::outline(
-                        &painter,
-                        rect,
-                        self.diamond && !self.elevated,
-                        Color32::from_white_alpha(85),
-                    );
+                if self.grid || self.hex != 0 {
+                    self.tile_outline(&painter, rect, Color32::from_white_alpha(85));
                 }
+                self.slot_label(&painter,rect,col as i32,row as i32);
             }
         }
         self.rectangle_outline(&painter, origin, scale, false);
@@ -1612,10 +1808,10 @@ impl Editor {
                 bounds.left_bottom().to_vec2(),
             ]
         };
-        painter.add(egui::Shape::closed_line(
+        if self.hex == 0 { painter.add(egui::Shape::closed_line(
             corners.map(|p| origin + p * scale).to_vec(),
             egui::Stroke::new(1_f32, Color32::YELLOW),
-        ));
+        )); }
         if self.elevated {
             let foot = egui::vec2(self.footprint[0] as f32, self.footprint[1] as f32) * scale;
             Self::outline(
@@ -1677,10 +1873,12 @@ impl Editor {
                 RgbaImage::from_raw(p.width, p.height, bytes).expect("validated dimensions")
             })
             .collect();
+        self.material_drop_status=None;
+        self.materials = p.materials.into_iter().map(|m| Material { name: m.name, pixels: RgbaImage::from_raw(p.width,p.height,m.pixels).expect("validated material") }).collect();
         self.layers = p
             .layers
             .into_iter()
-            .map(|l| Layer {
+            .map(|l| Layer { material: l.material,
                 name: l.name,
                 visible: l.visible,
                 locked: l.locked,
@@ -1706,6 +1904,7 @@ impl Editor {
         self.rows = p.rows;
         self.multiple = p.multiple;
         self.diamond = p.diamond || p.elevated;
+        self.hex = p.hex;
         self.elevated = p.elevated;
         self.footprint = p.footprint;
         self.wrap = p.wrap;
@@ -1740,13 +1939,14 @@ impl Editor {
                 {
                     let state = self.snapshot();
                     let project = Project {
-                        version: 3,
+                        version: 5,
+                        materials: self.materials.iter().map(|m| StoredMaterial { name:m.name.clone(),pixels:m.pixels.as_raw().clone() }).collect(),
                         background_custom: self.background_custom,
                         background_color: self.background_color,
                         layers: state
                             .layers
                             .iter()
-                            .map(|l| StoredLayer {
+                            .map(|l| StoredLayer { material: l.material,
                                 name: l.name.clone(),
                                 visible: l.visible,
                                 locked: l.locked,
@@ -1763,6 +1963,7 @@ impl Editor {
                         rows: self.rows,
                         multiple: self.multiple,
                         diamond: self.diamond,
+            hex: self.hex,
                         elevated: self.elevated,
                         footprint: self.footprint,
                         wrap: self.wrap,
@@ -1775,6 +1976,7 @@ impl Editor {
                         serde_json::to_vec(&project)
                             .map_err(|e| e.to_string())
                             .and_then(|bytes| {
+                                if bytes.len()>256*1024*1024 { return Err(tr("无效的 Tile 工程或超出尺寸限制。").into()); }
                                 std::fs::write(&path, bytes).map_err(|e| e.to_string())
                             })
                     };
@@ -1836,7 +2038,7 @@ impl Editor {
         self.invalidate_textures();
         Ok(())
     }
-    fn tile_controls(&mut self, ui: &mut egui::Ui, _source_path: &Path) {
+    fn tile_settings(&mut self, ui: &mut egui::Ui) {
         let old = (self.multiple, self.columns, self.rows);
         let mut multiple = self.multiple;
         let mut columns = self.columns;
@@ -1852,7 +2054,7 @@ impl Editor {
         }
         if multiple {
             ui.horizontal(|ui| {
-                for size in [2, 3, 4] {
+                for size in [1, 2, 3, 4] {
                     if ui.button(format!("{size}×{size}")).clicked() {
                         columns = size;
                         rows = size;
@@ -1882,6 +2084,9 @@ impl Editor {
             }
             self.trim_history();
         }
+    }
+    fn has_multiple_slots(&self)->bool {self.multiple && (self.columns>1 || self.rows>1)}
+    fn tile_controls(&mut self, ui: &mut egui::Ui, _source_path: &Path) {
         if self.multiple {
             let row = (self.selected_slot / 8).min(self.rows - 1);
             let col = (self.selected_slot % 8).min(self.columns - 1);
@@ -1896,6 +2101,7 @@ impl Editor {
                     self.select(self.layout[self.selected_slot]);
                 }
             }
+            if self.has_multiple_slots() {
             let cell_width = ((ui.available_width() - 4. * (self.columns - 1) as f32)
                 / self.columns as f32)
                 .max(24.);
@@ -1909,9 +2115,10 @@ impl Editor {
                             if ui
                                 .add_sized(
                                     [cell_width, 26.],
-                                    egui::Button::new(format!("{},{}", row + 1, col + 1))
+                                    egui::Button::new((row*self.columns+col+1).to_string())
                                         .selected(self.selected_slot == slot),
                                 )
+                                .on_hover_text(format!("{},{}",row+1,col+1))
                                 .clicked()
                             {
                                 self.finish_stroke();
@@ -1923,18 +2130,19 @@ impl Editor {
                     }
                 });
             ui.label(format!(
-                "{} {},{}",
-                tr("当前格"),
-                self.selected_slot / 8 + 1,
-                self.selected_slot % 8 + 1
+                "{} {}",
+                tr("当前 Slot"),
+                (self.selected_slot / 8)*self.columns+self.selected_slot % 8+1
             ));
+            }
         }
         ui.horizontal_wrapped(|ui| {
-            if ui.button(tr("导入图片")).clicked() {
+            if ui.button(tr("导入图片为素材")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Image", &["png", "jpg", "jpeg", "webp", "bmp", "tga"])
                     .pick_file()
                 {
+                    let import_name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
                     let loaded = (|| -> Result<RgbaImage, String> {
                         let mut reader = image::ImageReader::open(path)
                             .map_err(|e| e.to_string())?
@@ -1952,27 +2160,62 @@ impl Editor {
                     })();
                     match loaded {
                         Ok(image) if image.dimensions() == self.pixels.dimensions() => {
-                            self.replace(image)
+                            let count=self.materials.len();
+                            self.add_material(import_name,image);
+                            if self.materials.len()>count { self.assign_material(Some(count)); }
                         }
                         Ok(_) => self.message = tr("Tile 尺寸必须与当前画布一致。").into(),
                         Err(error) => self.message = error,
                     }
                 }
             }
-            if ui.button(tr("清空当前格")).clicked() {
-                self.replace(RgbaImage::new(self.pixels.width(), self.pixels.height()));
+            if ui.add_enabled(self.layer_editable() && self.tiles.iter().any(|tile| tile.pixels().any(|p| p[3] != 0)),
+                egui::Button::new(tr("清空选中图层")))
+                .on_hover_text(tr("清空选中图层的全部格子，其他图层保持不变；需先解锁并显示该层。"))
+                .clicked() {
+                self.clear_selected_layer();
             }
         });
         if self.multiple && ui.button(tr("拆分导出全部格 PNG")).clicked() {
             self.export_all_cells();
         }
+        self.material_controls(ui);
+    }
+    fn center_unit_focus(&self) -> Vec2 {
+        let (w,h)=self.pixels.dimensions();
+        if self.elevated {
+            let (cols,rows)=if self.multiple {(self.columns,self.rows)} else {(1,1)};
+            return egui::vec2((cols as f32-rows as f32)*self.footprint[0] as f32/4.,(cols+rows) as f32*self.footprint[1] as f32/4.-h as f32/2.);
+        }
+        let min=egui::vec2(-if self.diamond && self.whole_unit() { self.rows as f32*w as f32/2. } else { w as f32/2. },-(h as f32)/2.);
+        min+self.edit_size()/2.
+    }
+    fn preview_display_scale(&self,dpi:f32,footprint:[u32;2],height:u32)->f32 {
+        if self.rendering_merged { self.repeat_zoom/dpi } else { repeat_scale(self.repeat_zoom,dpi,footprint,height) }
+    }
+    fn merged_canvas(&mut self,ui:&mut egui::Ui) {
+        if !self.infinite_view && !self.elevated { self.canvas(ui); return; }
+        let saved=(self.repeat_zoom,self.repeat_pan,self.preview_grid,self.repeat_pan_drag,self.repeat_zoom_drag);
+        self.repeat_zoom=self.zoom; self.repeat_pan=self.pan; self.preview_grid=self.grid;
+        self.repeat_pan_drag=self.merged_pan_drag; self.repeat_zoom_drag=self.merged_zoom_drag;
+        self.rendering_merged=true;
+        self.preview(ui,true);
+        self.rendering_merged=false;
+        self.zoom=self.repeat_zoom; self.pan=self.repeat_pan;
+        self.merged_pan_drag=self.repeat_pan_drag; self.merged_zoom_drag=self.repeat_zoom_drag;
+        (self.repeat_zoom,self.repeat_pan,self.preview_grid,self.repeat_pan_drag,self.repeat_zoom_drag)=saved;
     }
     fn preview(&mut self, ui: &mut egui::Ui, editable: bool) {
         let (area, response) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), ui.available_height().max(80.)),
             egui::Sense::click_and_drag(),
         );
-        if response.hovered() {
+        let over_tools = if self.rendering_merged {
+            let tools=self.floating_tools(ui,area);
+            self.toolbar.dragging || ui.input(|i|i.pointer.hover_pos()).is_some_and(|p|tools.contains(p))
+        } else { false };
+        let maximum = if self.rendering_merged { 64. } else { 8. };
+        if response.hovered() && !over_tools && self.repeat_zoom_drag.is_none() {
             let scroll = ui.input_mut(|input| {
                 let delta = input.smooth_scroll_delta.y;
                 input.smooth_scroll_delta = Vec2::ZERO;
@@ -1982,34 +2225,72 @@ impl Editor {
                 if editable {
                     self.finish_stroke();
                 }
-                self.repeat_zoom = (self.repeat_zoom * (scroll * 0.003).exp()).clamp(0.25, 8.);
+                self.repeat_zoom = (self.repeat_zoom * (scroll * 0.003).exp()).clamp(0.25, maximum);
                 ui.ctx().request_repaint();
             }
         }
+        let down = ui.input(|i| i.pointer.primary_down());
+        let space = ui.input(|i| i.key_down(egui::Key::Space)) && !Self::text_input_active(ui.ctx());
+        let moving = !over_tools && (response.dragged_by(egui::PointerButton::Middle)
+            || response.dragged_by(egui::PointerButton::Secondary)
+            || (response.is_pointer_button_down_on() && down
+                && (self.tool == Tool::Move || space || self.repeat_pan_drag)));
+        if moving {
+            if editable { self.finish_stroke(); }
+            self.preview_last = None;
+            self.repeat_pan_drag = down;
+            self.repeat_pan += ui.input(|i| i.pointer.delta());
+            self.repeat_pan = self.repeat_pan.clamp(Vec2::splat(-1_000_000.), Vec2::splat(1_000_000.));
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grabbing);
+        } else if response.hovered() && !over_tools && (self.tool == Tool::Move || space) {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grab);
+        }
+        let navigating = moving || self.repeat_pan_drag || space
+            || matches!(self.tool, Tool::Move | Tool::Zoom);
+        if !down { self.repeat_pan_drag = false; }
+        let (w, h) = self.pixels.dimensions();
+        let footprint = if self.elevated { self.footprint } else { [w, h] };
+        let dpi = ui.ctx().pixels_per_point();
+        if self.tool == Tool::Zoom && !moving && !space {
+            if response.hovered() && !over_tools { ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ZoomIn); }
+            if response.is_pointer_button_down_on() && down && (!over_tools || self.repeat_zoom_drag.is_some()) {
+                if let Some(pointer) = response.interact_pointer_pos() {
+                    if self.repeat_zoom_drag.is_none() {
+                        if editable { self.finish_stroke(); }
+                        self.repeat_zoom_drag = Some((pointer, self.repeat_zoom, self.repeat_pan,
+                            self.preview_display_scale(dpi, footprint, h)));
+                    }
+                    if let Some((anchor, initial, pan, initial_scale)) = self.repeat_zoom_drag {
+                        let dx = pointer.x - anchor.x;
+                        self.repeat_zoom = (initial * (dx * 0.01).clamp(-20., 20.).exp()).clamp(0.25, maximum);
+                        let ratio = repeat_scale(self.repeat_zoom, dpi, footprint, h) / initial_scale;
+                        let offset = anchor - area.center();
+                        self.repeat_pan = offset - (offset - pan) * ratio;
+                        ui.output_mut(|o| o.cursor_icon = if dx < 0. {
+                            egui::CursorIcon::ZoomOut
+                        } else { egui::CursorIcon::ZoomIn });
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+        } else { self.repeat_zoom_drag = None; }
+        if !down { self.repeat_zoom_drag = None; }
+        let scale = self.preview_display_scale(dpi, footprint, h);
+        let origin = area.center() + self.repeat_pan - if self.rendering_merged { self.center_unit_focus()*scale } else { Vec2::ZERO };
         let p = ui.painter_at(area);
         self.paint_background(&p, area, area.min, Vec2::splat(1.));
-        let (w, h) = self.pixels.dimensions();
-        let footprint = if self.elevated {
-            self.footprint
-        } else {
-            [w, h]
-        };
-        let mut scale = self.repeat_zoom / ui.ctx().pixels_per_point();
-        scale = scale.max(12. / footprint[0].min(footprint[1]) as f32);
-        // Keep pathological sprite/footprint ratios from creating an unbounded draw list.
-        scale = scale.max(h as f32 / footprint[1] as f32 / 8.);
+        let scale = repeat_scale(self.repeat_zoom, dpi, footprint, h);
         let size = egui::vec2(footprint[0] as f32, footprint[1] as f32) * scale;
         let image_size = egui::vec2(w as f32, h as f32) * scale;
-        let row_min = (-(area.height() / 2. + size.y)
-            / if self.diamond { size.y / 2. } else { size.y })
-        .floor() as i32;
-        let row_max = ((area.height() / 2. + image_size.y)
-            / if self.diamond { size.y / 2. } else { size.y })
-        .ceil() as i32;
-        let cols = ((area.width() + image_size.x) / size.x / 2.).ceil() as i32 + 1;
+        let row_step = if self.diamond { size.y / 2. } else { size.y };
+        let row_mid = ((area.center().y - origin.y) / row_step).floor() as i32;
+        let row_min = ((area.top() - origin.y - size.y) / row_step).floor() as i32;
+        let row_max = ((area.bottom() - origin.y + image_size.y) / row_step).ceil() as i32;
+        let col_mid = ((area.center().x - origin.x) / size.x).floor() as i32;
+        let cols = (((area.width() + image_size.x) / size.x / 2.).ceil() as i32 + 1).min(32);
         let mut instances = Vec::new();
-        for row in row_min.max(-32)..=row_max.min(32) {
-            for col in -cols.min(32)..=cols.min(32) {
+        for row in row_min.max(row_mid - 32)..=row_max.min(row_mid + 32) {
+            for col in col_mid - cols..=col_mid + cols {
                 let offset = egui::vec2(
                     (col as f32
                         + if self.diamond {
@@ -2020,7 +2301,7 @@ impl Editor {
                         * size.x,
                     row as f32 * size.y * if self.diamond { 0.5 } else { 1. },
                 );
-                let center = area.center() + offset;
+                let center = origin + offset;
                 let rect = Rect::from_min_size(
                     center + egui::vec2(-image_size.x / 2., size.y / 2. - image_size.y),
                     image_size,
@@ -2039,20 +2320,47 @@ impl Editor {
                 }
             }
         }
+        if self.hex != 0 {
+            instances.clear();
+            let flat = self.hex == 2;
+            let step = if flat { size.x * 0.75 } else { size.y * 0.75 };
+            let mid = if flat { (area.center().x-origin.x)/step } else { (area.center().y-origin.y)/step };
+            let count = ((if flat { area.width() } else { area.height() })/step/2.).ceil() as i32 + 2;
+            for major in mid.floor() as i32-count.min(32)..=mid.floor() as i32+count.min(32) {
+                let cross = (if flat { (area.center().y-origin.y)/size.y } else { (area.center().x-origin.x)/size.x }) - major as f32/2.;
+                let extent = ((if flat { area.height()/size.y } else { area.width()/size.x })/2.).ceil() as i32 + 2;
+                for minor in cross.floor() as i32-extent.min(32)..=cross.floor() as i32+extent.min(32) {
+                    let (col,row) = if flat { (major,minor) } else { (minor,major) };
+                    let center = origin + self.mapped_center(col,row,w,h)*scale;
+                    let rect = Rect::from_center_size(center,image_size);
+                    if rect.intersects(area) { instances.push((rect,rect,self.tile_at(col,row))); }
+                }
+            }
+        }
+        if self.rendering_merged && !self.infinite_view {
+            let (cols,rows)=if self.multiple {(self.columns,self.rows)} else {(1,1)};
+            instances.retain(|(_,ground,_)| {
+                let world=(ground.center()-origin)/scale;
+                let (col,row)=cell_at(world,footprint,self.diamond);
+                col>=0 && row>=0 && col<cols as i32 && row<rows as i32
+            });
+        }
         let point = response
             .interact_pointer_pos()
-            .filter(|v| area.contains(*v))
+            .filter(|v| area.contains(*v) && !over_tools)
             .map(|v| {
                 (
-                    ((v.x - area.center().x) / scale).floor() as i32,
-                    ((v.y - area.center().y) / scale).floor() as i32,
+                    ((v.x - origin.x) / scale).floor() as i32,
+                    ((v.y - origin.y) / scale).floor() as i32,
                 )
             });
         let special = editable
             && !self.elevated
             && !ui.input(|i| i.modifiers.alt)
             && matches!(self.tool, Tool::Rectangle | Tool::Line | Tool::Fill);
-        if special {
+        if navigating || over_tools {
+            self.preview_last = None;
+        } else if special {
             if matches!(self.tool, Tool::Rectangle | Tool::Line) {
                 self.rectangle_input(
                     point,
@@ -2064,10 +2372,10 @@ impl Editor {
                 );
             } else if response.clicked() {
                 if let Some(point) = point {
-                    self.fill_closed(point, true);
+                    self.fill_region(point, true);
                 }
             }
-        } else if editable
+        } else if editable && !matches!(self.tool, Tool::Move | Tool::Zoom)
             && ((response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down()))
                 || response.clicked())
         {
@@ -2093,7 +2401,7 @@ impl Editor {
                         let world = egui::vec2(x as f32 + 0.5, y as f32 + 0.5);
                         let mut hit = None;
                         if self.elevated {
-                            let screen = area.center() + world * scale;
+                            let screen = origin + world * scale;
                             for (rect, _, index) in instances.iter().rev() {
                                 if !rect.contains(screen) {
                                     continue;
@@ -2160,13 +2468,26 @@ impl Editor {
                 Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)),
                 Color32::WHITE,
             );
+            let world=(ground.center()-origin)/scale;
+            let (col,row)=if self.hex != 0 { let cell=self.mapped_cell(world.x.floor() as i32,world.y.floor() as i32,w,h); (cell.col,cell.row) } else { cell_at(world,footprint,self.diamond) };
+            self.slot_label(&p,ground,col,row);
             if self.preview_grid {
-                Self::outline(&p, ground, self.diamond, Color32::from_white_alpha(65));
+                if self.elevated { Self::outline(&p,ground,self.diamond,Color32::from_white_alpha(65)); }
+                else { self.tile_outline(&p, ground, Color32::from_white_alpha(65)); }
             }
         }
-        self.rectangle_outline(&p, area.center(), scale, true);
-        if editable {
-            self.brush_cursor(ui, &response, area.center(), scale);
+        if self.rendering_merged {
+            let (cols,rows)=if self.multiple {(self.columns,self.rows)} else {(1,1)};
+            for row in 0..rows { for col in 0..cols {
+                let center=origin+self.mapped_center(col as i32,row as i32,footprint[0],footprint[1])*scale;
+                let rect=Rect::from_center_size(center,size);
+                if self.elevated { Self::outline(&p,rect,self.diamond,Color32::YELLOW); }
+                else { self.tile_outline(&p,rect,Color32::YELLOW); }
+            } }
+        }
+        self.rectangle_outline(&p, origin, scale, true);
+        if editable && !navigating {
+            self.brush_cursor(ui, &response, origin, scale);
         }
     }
     fn drawing_tools(&mut self, ui: &mut egui::Ui) {
@@ -2218,17 +2539,58 @@ impl Editor {
             });
         });
     }
+    fn slot_label(&self,painter:&egui::Painter,rect:Rect,col:i32,row:i32) {
+        if !self.has_multiple_slots() || !self.show_slots || rect.width()<28. || rect.height()<16. || !painter.clip_rect().contains(rect.center()) { return; }
+        let (cols,rows)=if self.multiple {(self.columns as i32,self.rows as i32)}else{(1,1)};
+        let row=row.rem_euclid(rows);
+        let col=col.rem_euclid(cols);
+        let selected=!self.multiple || self.selected_slot == row as usize*8+col as usize;
+        let text=(row*cols+col+1).to_string();
+        let selection=painter.ctx().style().visuals.selection;
+        let foreground=if selected {selection.stroke.color}else{Color32::WHITE};
+        let galley=painter.layout_no_wrap(text,egui::FontId::proportional(if selected {14.}else{12.}),foreground);
+        let label=Rect::from_center_size(rect.center(),galley.size()+egui::vec2(8.,4.));
+        painter.rect_filled(label,3.,if selected {selection.bg_fill}else{Color32::from_black_alpha(180)});
+        if selected { painter.rect_stroke(label,3.,egui::Stroke::new(2_f32,selection.stroke.color),egui::StrokeKind::Outside); }
+        painter.galley(label.min+egui::vec2(4.,2.),galley,foreground);
+    }
     fn floating_tools(&mut self, ui: &egui::Ui, area: Rect) -> Rect {
+        let area=area.intersect(ui.clip_rect());
+        if !area.is_positive() { return Rect::NOTHING; }
         let ctx = ui.ctx().clone();
-        egui::Area::new(ui.id().with(("tile_floating_tools", ctx.viewport_id())))
+        if !self.toolbar.loaded {
+            self.toolbar.loaded=true;
+            if let Some(path)=crate::last_open_dir_config_path().map(|p|p.with_file_name("pixel_tile_toolbar.json")) {
+                if let Ok(bytes)=std::fs::read(path) {
+                    if bytes.len()<=1024 { if let Ok([x,y])=serde_json::from_slice::<[f32;2]>(&bytes) { self.toolbar.offset=egui::vec2(x,y); } }
+                }
+            }
+        }
+        self.toolbar.offset=toolbar_offset_inside(self.toolbar.offset,self.toolbar.size,area);
+        let was_dragging=self.toolbar.dragging;
+        let response=egui::Area::new(ui.id().with(("tile_floating_tools", ctx.viewport_id())))
             .order(egui::Order::Foreground)
-            .fixed_pos(area.min + egui::vec2(4., 4.))
+            .fixed_pos(area.min + self.toolbar.offset)
+            .constrain_to(area)
             .movable(false)
             .show(&ctx, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(area));
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 3.;
+                        let (handle,drag)=ui.allocate_exact_size(egui::vec2(26.,12.),egui::Sense::drag());
+                        let color=ui.visuals().text_color();
+                        for dy in [-2.,2.] { ui.painter().line_segment([handle.center()+egui::vec2(-7.,dy),handle.center()+egui::vec2(7.,dy)],egui::Stroke::new(1_f32,color)); }
+                        if drag.dragged_by(egui::PointerButton::Primary) {
+                            self.toolbar.dragging=true;
+                            self.toolbar.offset+=ui.input(|i|i.pointer.delta());
+                            ctx.request_repaint();
+                        }
+                        drag.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(tr("拖动工具栏"));
+                        egui::ScrollArea::vertical().id_salt("tile_tools_scroll").max_height((area.height()-36.).max(1.))
+                            .min_scrolled_height(0.).show(ui,|ui| {
                         for (tool, icon, label, key) in [
+                            (Tool::Move, crate::icons::Icon::Move, "移动", "V"),
                             (Tool::Brush, crate::icons::Icon::Brush, "画笔", "B"),
                             (
                                 Tool::Eyedropper,
@@ -2245,6 +2607,7 @@ impl Editor {
                             ),
                             (Tool::Line, crate::icons::Icon::LineTool, "直线", "L"),
                             (Tool::Fill, crate::icons::Icon::PaintBucket, "填充", "G"),
+                            (Tool::Zoom, crate::icons::Icon::Search, "缩放", "Z"),
                         ] {
                             let selected = self.tool == tool;
                             let visuals = ui.visuals().clone();
@@ -2286,7 +2649,7 @@ impl Editor {
                                 );
                             }
                             let tooltip = if tool == Tool::Fill {
-                                format!("{} ({key}) · {}", tr(label), tr("仅填充闭合区域"))
+                                format!("{}({key})", tr(label))
                             } else {
                                 format!("{} ({key})", tr(label))
                             };
@@ -2295,15 +2658,61 @@ impl Editor {
                                 self.tool = tool;
                             }
                         }
+                        });
                     });
                 });
             })
             .response
-            .rect
+            .rect;
+        self.toolbar.size=response.size();
+        let clamped=toolbar_offset_inside(self.toolbar.offset,self.toolbar.size,area);
+        if clamped!=self.toolbar.offset { self.toolbar.offset=clamped; ctx.request_repaint(); }
+        if !ui.input(|i|i.pointer.primary_down()) { self.toolbar.dragging=false; }
+        if was_dragging && !self.toolbar.dragging {
+            if let Some(path)=crate::last_open_dir_config_path().map(|p|p.with_file_name("pixel_tile_toolbar.json")) {
+                let result=(||->std::io::Result<()> {
+                    if let Some(parent)=path.parent() {std::fs::create_dir_all(parent)?;}
+                    std::fs::write(path,format!("[{},{}]",self.toolbar.offset.x,self.toolbar.offset.y))
+                })();
+                if let Err(error)=result {self.message=format!("{}: {error}",tr("无法保存工具栏位置"));}
+            }
+        }
+        response.intersect(area)
     }
     fn controls(&mut self, ui: &mut egui::Ui, path: &Path, source: Option<&RgbaImage>) {
         self.ps_plugin.ui(ui);
         self.project_controls(ui, path);
+        egui::CollapsingHeader::new(egui::RichText::new(tr("设置")).heading().strong()).id_salt("pixel_tile_settings_group").default_open(false).show(ui,|ui| {
+        let old_shape = (self.diamond,self.hex,self.elevated);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("模式"));
+            let mut mode = if self.hex != 0 { 2 } else if self.diamond { 1 } else { 0 };
+            egui::ComboBox::from_id_salt("tile_shape_mode").selected_text(tr(["矩形","菱形","六边形"][mode])).show_ui(ui,|ui| {
+                for (i,label) in ["矩形","菱形","六边形"].iter().enumerate() { ui.selectable_value(&mut mode,i,tr(label)); }
+            });
+            self.diamond = mode == 1;
+            if mode == 2 { if self.hex == 0 { self.hex = 1; } self.elevated = false; }
+            else { self.hex = 0; if mode == 0 { self.elevated = false; } }
+            if self.hex != 0 {
+                egui::ComboBox::from_id_salt("tile_hex_orientation").selected_text(tr(if self.hex == 1 {"尖顶"} else {"平顶"})).show_ui(ui,|ui| {
+                    ui.selectable_value(&mut self.hex,1,tr("尖顶"));
+                    ui.selectable_value(&mut self.hex,2,tr("平顶"));
+                });
+            }
+        });
+        if self.hex != 0 { ui.small(tr("六边形宽高为外接矩形尺寸，斜边自动计算。")); }
+        if (self.hex == 1 && self.pixels.height()%4 != 0) || (self.hex == 2 && self.pixels.width()%4 != 0) {
+            (self.diamond,self.hex,self.elevated) = old_shape;
+            self.message = tr("尖顶六边形的高度、平顶六边形的宽度须为4的倍数；请先新建对应尺寸画布。").into();
+        }
+        if old_shape != (self.diamond,self.hex,self.elevated) {
+            let new_shape = (self.diamond,self.hex,self.elevated);
+            (self.diamond,self.hex,self.elevated) = old_shape;
+            self.record_layer_change();
+            (self.diamond,self.hex,self.elevated) = new_shape;
+            self.pan = Vec2::ZERO; self.repeat_pan = Vec2::ZERO;
+        }
+
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("画布尺寸"));
             ui.add(egui::DragValue::new(&mut self.width).range(2..=MAX_SIDE));
@@ -2311,8 +2720,8 @@ impl Editor {
             ui.add(egui::DragValue::new(&mut self.height).range(2..=MAX_SIDE));
             if ui.button(tr("新建空白")).clicked() {
                 self.reset_document(RgbaImage::new(
-                    self.width.div_ceil(2) * 2,
-                    self.height.div_ceil(2) * 2,
+                    self.width.div_ceil(if self.hex == 2 {4} else {2}) * if self.hex == 2 {4} else {2},
+                    self.height.div_ceil(if self.hex == 1 {4} else {2}) * if self.hex == 1 {4} else {2},
                 ));
             }
             if ui
@@ -2322,6 +2731,8 @@ impl Editor {
                             && s.height() <= MAX_SIDE
                             && s.width() % 2 == 0
                             && s.height() % 2 == 0
+                            && (self.hex != 1 || s.height()%4 == 0)
+                            && (self.hex != 2 || s.width()%4 == 0)
                     }),
                     egui::Button::new(tr("导入当前图片")),
                 )
@@ -2346,7 +2757,7 @@ impl Editor {
                         let mut out = self.composite(self.selected);
                         let (w, h) = out.dimensions();
                         for (x, y, p) in out.enumerate_pixels_mut() {
-                            if !inside(x as i32, y as i32, w, h, self.diamond && !self.elevated) {
+                            if !self.inside_tile(x as i32, y as i32, w, h) {
                                 *p = Rgba([0; 4]);
                             }
                         }
@@ -2368,20 +2779,10 @@ impl Editor {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(
-                    !self.elevated,
-                    egui::Checkbox::new(&mut self.diamond, tr("菱形平铺")),
-                )
-                .changed()
-            {
-                self.finish_stroke();
-                self.invalidate_textures();
-                self.changed = true;
-            }
             if ui.checkbox(&mut self.elevated, tr("带高度 Tile")).changed() {
                 self.finish_stroke();
                 self.diamond = true;
+                self.hex = 0;
                 self.invalidate_textures();
                 self.changed = true;
             }
@@ -2396,19 +2797,8 @@ impl Editor {
             self.finish_stroke();
             self.changed = true;
         }
-        if ui
-            .add_enabled(
-                self.multiple && !self.elevated,
-                egui::Checkbox::new(&mut self.edit_unit, tr("编辑整个循环单元")),
-            )
-            .changed()
-        {
-            self.finish_stroke();
-            self.pan = Vec2::ZERO;
-            self.changed = true;
-        }
         ui.checkbox(&mut self.preview_detached, tr("独立预览窗口"));
-        self.tile_controls(ui, path);
+        self.tile_settings(ui);
         if self.elevated {
             ui.horizontal(|ui| {
                 ui.label(tr("地面菱形尺寸"));
@@ -2423,6 +2813,9 @@ impl Editor {
                 }
             });
         }
+        });
+        self.edit_unit = true;
+        self.tile_controls(ui,path);
         self.layer_controls(ui);
         self.background_controls(ui);
         if !self.message.is_empty() {
@@ -2433,13 +2826,13 @@ impl Editor {
         if !self.open {
             return;
         }
-        self.ensure_layers();
+        self.ensure_material_base();
         if self.wake {
             crate::native_window::wake(ctx, egui::Id::new(("pixel_tile", path)));
             self.wake = false;
         }
         let revision = self.revision;
-        let view_state = (self.preview_detached, self.repeat_zoom, self.preview_grid);
+        let view_state = (self.preview_detached, self.repeat_zoom, self.preview_grid, self.repeat_pan);
         let mut open = true;
         let title = if path.as_os_str().is_empty() {
             tr("像素 Tile").to_owned()
@@ -2472,13 +2865,7 @@ impl Editor {
                 let gap = 8.;
                 let left_width = 270_f32.min((area.width() - 400.).max(200.));
                 let left = Rect::from_min_size(area.min, egui::vec2(left_width, area.height()));
-                let content_width = (area.width() - left_width - 2. * gap).max(200.);
-                let center = Rect::from_min_size(
-                    egui::pos2(left.right() + gap, area.top()),
-                    egui::vec2(content_width / 2., area.height()),
-                );
-                let right =
-                    Rect::from_min_max(egui::pos2(center.right() + gap, area.top()), area.max);
+                let center=Rect::from_min_max(egui::pos2(left.right()+gap,area.top()),area.max);
                 let mut settings = ui.new_child(
                     egui::UiBuilder::new()
                         .id_salt("tile_settings")
@@ -2496,22 +2883,38 @@ impl Editor {
                         .max_rect(center),
                 );
                 paint.set_clip_rect(center.intersect(ui.clip_rect()));
-                paint.horizontal_wrapped(|ui| {
+                let header_height=24_f32.max(paint.text_style_height(&egui::TextStyle::Heading));
+                paint.allocate_ui_with_layout(egui::vec2(paint.available_width(),header_height),
+                    egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),|ui| {
+                    ui.spacing_mut().interact_size.y=header_height;
                     ui.heading(tr("绘制区"));
+                    ui.push_id("tile_boundary_tabs",|ui| {
+                        let mut mode=if self.infinite_view {"infinite"}else{"bounded"}.to_owned();
+                        if crate::theme::compact_selector(ui,&mut mode,[("bounded","有边界"),("infinite","无边界")]) {
+                            self.set_infinite_view(mode=="infinite");
+                        }
+                    }).response.on_hover_text("Q / W");
+                    if self.infinite_view {
+                        let locate=ui.add_sized([24.,24.],egui::Button::new(""));
+                        crate::icons::paint(ui,crate::icons::Icon::Locate,locate.rect.shrink(5.),ui.visuals().text_color());
+                        if locate.on_hover_text(format!("{} (H)",tr("回到中心循环单元"))).clicked() {self.center_view();}
+                    }
+                    ui.checkbox(&mut self.grid, tr("网格"));
+                    if self.has_multiple_slots() { ui.checkbox(&mut self.show_slots,tr("显示 Slot")); }
+                    if ui.button(tr("适应画布")).clicked() {
+                        self.pan = Vec2::ZERO;
+                        let size = self.edit_size();
+                        self.zoom = ((center.width() - 20.) / size.x)
+                            .min((ui.ctx().screen_rect().height() - 70.) / size.y)
+                            .max(0.25)
+                            * ui.ctx().pixels_per_point();
+                    }
+
                     ui.add(
                         egui::DragValue::new(&mut self.zoom)
                             .range(0.25..=64.)
                             .speed(0.25),
                     );
-                    ui.checkbox(&mut self.grid, tr("网格"));
-                    if ui.button(tr("适应画布")).clicked() {
-                        self.pan = Vec2::ZERO;
-                        let size = self.edit_size();
-                        self.zoom = ((ui.ctx().screen_rect().width() - 320.) / 2. / size.x)
-                            .min((ui.ctx().screen_rect().height() - 70.) / size.y)
-                            .max(0.25)
-                            * ui.ctx().pixels_per_point();
-                    }
 
                     if ui
                         .add_enabled(!self.undo.is_empty(), egui::Button::new(tr("撤销")))
@@ -2529,30 +2932,7 @@ impl Editor {
                     }
                 });
                 self.drawing_tools(&mut paint);
-                self.canvas(&mut paint);
-                let mut preview = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt("tile_preview")
-                        .max_rect(right),
-                );
-                preview.set_clip_rect(right.intersect(ui.clip_rect()));
-                preview.horizontal_wrapped(|ui| {
-                    ui.heading(tr("循环预览"));
-                    ui.add(
-                        egui::DragValue::new(&mut self.repeat_zoom)
-                            .range(0.25..=8.)
-                            .speed(0.1),
-                    );
-                    ui.checkbox(&mut self.preview_grid, tr("网格"));
-                });
-                if self.preview_detached {
-                    preview.label(tr("预览已移至独立窗口"));
-                    if preview.button(tr("回到右侧预览")).clicked() {
-                        self.preview_detached = false;
-                    }
-                } else {
-                    self.preview(&mut preview, true);
-                }
+                self.merged_canvas(&mut paint);
                 if self.confirm_close {
                     let modal_id = egui::Id::new(("pixel_tile_close", path));
                     let response = egui::Modal::new(modal_id)
@@ -2622,7 +3002,7 @@ impl Editor {
             self.preview_detached = preview_open;
         }
         if revision != self.revision
-            || view_state != (self.preview_detached, self.repeat_zoom, self.preview_grid)
+            || view_state != (self.preview_detached, self.repeat_zoom, self.preview_grid, self.repeat_pan)
         {
             ctx.request_repaint();
             ctx.request_repaint_of(egui::ViewportId(egui::Id::new(("pixel_tile", path))));
@@ -2647,6 +3027,186 @@ impl Editor {
 mod tests {
     use super::*;
     #[test]
+    fn fill_recolors_only_connected_matching_pixels_even_at_the_boundary() {
+        let mut e=tiny(1,1); e.diamond=false;
+        let original=Rgba([10,20,30,255]);
+        for y in 0..4 {for x in [0,1,6,7] {e.tiles[0].put_pixel(x,y,original);}}
+        e.pixels=e.tiles[0].clone();
+        let before=e.snapshot(); e.color=[100,150,200,255];
+        e.fill_region((-4,-2),false);
+        for y in 0..4 { for x in 0..8 {
+            let expected=if x<2 {Rgba(e.color)}else if x>=6 {original}else{Rgba([0;4])};
+            assert_eq!(*e.pixels.get_pixel(x,y),expected);
+        } }
+        assert_eq!(e.undo.len(),1);
+        e.history(false); assert!(e.snapshot()==before);
+    }
+    #[test]
+    fn toolbar_position_stays_inside_resized_drawing_regions() {
+        let size=egui::vec2(44.,270.);
+        let area=Rect::from_min_size(egui::pos2(300.,80.),egui::vec2(800.,600.));
+        let offset=toolbar_offset_inside(egui::vec2(700.,400.),size,area);
+        assert!(area.contains_rect(Rect::from_min_size(area.min+offset,size)));
+        let smaller=Rect::from_min_size(egui::pos2(260.,100.),egui::vec2(300.,300.));
+        let offset=toolbar_offset_inside(offset,size,smaller);
+        assert_eq!(offset,egui::vec2(256.,30.));
+        assert!(smaller.contains_rect(Rect::from_min_size(smaller.min+offset,size)));
+        assert_eq!(toolbar_offset_inside(Vec2::splat(-100.),size,smaller),Vec2::ZERO);
+        assert_eq!(toolbar_offset_inside(Vec2::splat(f32::NAN),size,smaller),Vec2::splat(4.));
+        let tiny=Rect::from_min_size(Pos2::ZERO,egui::vec2(20.,80.));
+        assert_eq!(toolbar_offset_inside(Vec2::splat(100.),size,tiny),Vec2::ZERO);
+    }
+    #[test]
+    fn boundary_and_center_keys_change_only_the_shared_view() {
+        let mut e=Editor::default();
+        let ctx=egui::Context::default();
+        let state=e.snapshot();
+        e.pan=egui::vec2(50.,30.); e.zoom=3.;
+        for (key,infinite) in [(egui::Key::W,true),(egui::Key::Q,false),(egui::Key::W,true)] {
+            let _=ctx.run(egui::RawInput { focused:true,events:vec![egui::Event::Key {
+                key,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::NONE,
+            }],..Default::default() },|ctx|e.tool_shortcuts(ctx));
+            assert_eq!(e.infinite_view,infinite);
+            assert_eq!(e.pan,egui::vec2(50.,30.));
+        }
+        let _=ctx.run(egui::RawInput { focused:true,events:vec![egui::Event::Key {
+            key:egui::Key::H,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::NONE,
+        }],..Default::default() },|ctx|e.tool_shortcuts(ctx));
+        assert_eq!(e.pan,Vec2::ZERO);
+        assert_eq!(e.zoom,3.);
+        assert!(e.snapshot()==state && e.undo.is_empty());
+    }
+    #[test]
+    fn unified_view_focus_matches_the_configured_unit_in_all_flat_modes() {
+        for (diamond,hex) in [(false,0),(true,0),(false,1),(false,2)] {
+            let mut e=tiny(3,2); e.diamond=diamond; e.hex=hex;
+            let mut bounds=Rect::NOTHING;
+            for row in 0..2 { for col in 0..3 {
+                bounds=bounds.union(Rect::from_center_size(e.mapped_center(col,row,8,4).to_pos2(),egui::vec2(8.,4.)));
+            } }
+            assert!((e.center_unit_focus()-bounds.center().to_vec2()).length()<0.001);
+            let pan=egui::vec2(30.,-20.); let scale=2.; let center=egui::pos2(320.,240.);
+            let origin=center+pan-e.center_unit_focus()*scale;
+            assert!((origin+e.center_unit_focus()*scale-(center+pan)).length()<0.001);
+        }
+    }
+    #[test]
+    fn both_hex_lattices_have_unique_pixels_and_periodic_mapping() {
+        for flat in [false, true] {
+            let (w,h) = (16,12);
+            let mut owned = 0;
+            for y in 0..h { for x in 0..w {
+                let cell = hex_pixel(x as i32-w as i32/2,y as i32-h as i32/2,w,h,flat);
+                if cell.col == 0 && cell.row == 0 { owned += 1; }
+            } }
+            assert_eq!(owned, w*h*3/4);
+            for y in -24..24 { for x in -32..32 {
+                let cell = hex_pixel(x,y,w,h,flat);
+                assert!(cell.x < w && cell.y < h);
+                for (dc,dr) in [(1,0),(0,1),(-2,3)] {
+                    let shift = hex_center(dc,dr,w,h,flat);
+                    let next = hex_pixel(x+shift.x as i32,y+shift.y as i32,w,h,flat);
+                    assert_eq!((next.col,next.row,next.x,next.y),(cell.col+dc,cell.row+dr,cell.x,cell.y));
+                }
+            } }
+        }
+    }
+    #[test]
+    fn hex_background_fill_export_and_history_use_the_same_shape() {
+        for hex in [1,2] {
+            let mut e = tiny(2,2);
+            e.hex = hex; e.diamond = false;
+            e.color = [20,140,60,255];
+            e.fill_region((0,0),true);
+            assert_eq!(e.undo.len(),1);
+            for tile in 0..4 {
+                let image = e.export_cell(tile);
+                for y in 0..4 { for x in 0..8 {
+                    assert_eq!(image.get_pixel(x,y)[3] != 0,e.inside_tile(x as i32,y as i32,8,4));
+                } }
+            }
+            e.history(false);
+            assert!(e.tiles.iter().all(|tile| tile.pixels().all(|p| p[3] == 0)));
+            e.history(true);
+            assert_eq!(e.hex,hex);
+        }
+    }
+    fn two_layer_fixture(e: &mut Editor) {
+        e.ensure_layers();
+        e.layers[0].locked = true;
+        let blank: Vec<_> = e.tiles.iter().map(|p| RgbaImage::new(p.width(), p.height())).collect();
+        e.layers.push(Layer { material: false, name: "Drawing".into(), visible: true, locked: false, tiles: blank });
+        e.select_layer(1);
+    }
+    #[test]
+    fn ordinary_import_clear_and_last_delete_are_undoable() {
+        let mut e = Editor::default();
+        e.ensure_layers();
+        assert_eq!(e.layers.len(), 1);
+        assert!(!e.layers[0].locked);
+        e.import_layer(RgbaImage::from_pixel(128, 64, Rgba([10, 20, 30, 255])));
+        assert_eq!(e.layers.len(), 2);
+        assert!(e.layers[1].locked);
+        e.delete_layer(1);
+        assert_eq!(e.layers.len(), 2);
+        e.layers[1].locked = false;
+        e.clear_selected_layer();
+        assert!(e.tiles[0].pixels().all(|p| p[3] == 0));
+        e.history(false);
+        assert_eq!(e.pixels.get_pixel(0, 0).0, [10, 20, 30, 255]);
+        e.delete_layer(1);
+        e.delete_layer(0);
+        assert_eq!(e.layers.len(), 1);
+        assert!(!e.layers[0].locked);
+        assert!(e.pixels.pixels().all(|p| p[3] == 0));
+        e.history(false);
+        assert_eq!(e.layers.len(), 1);
+    }
+    #[test]
+    fn preview_move_drag_changes_only_its_own_view() {
+        let ctx = egui::Context::default();
+        let mut e = tiny(1, 1);
+        let before = e.snapshot();
+        let mut frame = |events| {
+            let _ = ctx.run(egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(640., 480.))),
+                focused: true, events, ..Default::default()
+            }, |ctx| { egui::CentralPanel::default().show(ctx, |ui| e.preview(ui, true)); });
+        };
+        frame(vec![]);
+        let start = egui::pos2(200., 150.);
+        let end = start + egui::vec2(40., 30.);
+        frame(vec![egui::Event::PointerMoved(start), egui::Event::PointerButton {
+            pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE,
+        }]);
+        frame(vec![egui::Event::PointerMoved(end)]);
+        frame(vec![egui::Event::PointerButton {
+            pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(e.repeat_pan.length() > 0.);
+        assert_eq!(e.pan, Vec2::ZERO);
+        assert!(e.snapshot() == before);
+        assert!(e.undo.is_empty());
+        assert!(e.preview_last.is_none());
+    }
+    #[test]
+    fn pen_zoom_preserves_contact_point_and_reverses_at_limits() {
+        let anchor = egui::pos2(230., 170.);
+        let center = egui::pos2(150., 100.);
+        let pan = egui::vec2(20., -10.);
+        let world = (anchor - center - pan) / 4.;
+        for dx in [-10000., -80., 0., 80., 10000.] {
+            let (zoom, shifted) = drag_zoom(anchor, 4., pan, dx, center);
+            assert!((0.25..=64.).contains(&zoom));
+            assert!((center + shifted + world * zoom - anchor).length() < 0.001);
+            if dx < 0. { assert!(zoom < 4.); }
+            if dx > 0. { assert!(zoom > 4.); }
+        }
+        let (zoom, shifted) = drag_zoom(anchor, 4., pan, 0., center);
+        assert_eq!(zoom, 4.);
+        assert_eq!(shifted, pan);
+    }
+    #[test]
     fn layer_eye_click_changes_visible_composite_without_changing_pixels() {
         fn frame(ctx: &egui::Context, e: &mut Editor, events: Vec<egui::Event>) -> egui::Id {
             let mut id = egui::Id::NULL;
@@ -2668,7 +3228,7 @@ mod tests {
         }
         let ctx = egui::Context::default();
         let mut e = Editor::default();
-        e.ensure_layers();
+        two_layer_fixture(&mut e);
         e.write_pixel(0, 64, 32, Rgba([20, 180, 50, 255]));
         frame(&ctx, &mut e, vec![]);
         let id = frame(&ctx, &mut e, vec![]);
@@ -2734,7 +3294,7 @@ mod tests {
         }
         let ctx = egui::Context::default();
         let mut e = Editor::default();
-        e.ensure_layers();
+        two_layer_fixture(&mut e);
         e.layers[0].name =
             "A deliberately long layer name must never push the lock outside the sidebar".into();
         frame(&ctx, &mut e, vec![]);
@@ -2794,7 +3354,7 @@ mod tests {
     fn layers_preserve_base_lock_alpha_and_erasure_with_undo() {
         let mut e = Editor::default();
         e.replace(RgbaImage::from_pixel(128, 64, Rgba([20, 40, 60, 255])));
-        e.ensure_layers();
+        two_layer_fixture(&mut e);
         assert!(e.layers[0].locked);
         assert_eq!(e.active_layer, 1);
         e.write_pixel(0, 64, 32, Rgba([220, 40, 60, 128]));
@@ -2818,7 +3378,7 @@ mod tests {
     #[test]
     fn layered_grid_exports_individual_composites_and_validates_storage() {
         let mut e = Editor::default();
-        e.ensure_layers();
+        two_layer_fixture(&mut e);
         e.columns = 3;
         e.rows = 3;
         e.multiple = true;
@@ -2846,7 +3406,8 @@ mod tests {
         assert_eq!(count, 9);
         let state = e.snapshot();
         let project = Project {
-            version: 3,
+            version: 5,
+            materials: Vec::new(),
             background_custom: false,
             background_color: default_background(),
             width: 128,
@@ -2854,7 +3415,7 @@ mod tests {
             layers: state
                 .layers
                 .iter()
-                .map(|l| StoredLayer {
+                .map(|l| StoredLayer { material: l.material,
                     name: l.name.clone(),
                     visible: l.visible,
                     locked: l.locked,
@@ -2869,6 +3430,7 @@ mod tests {
             rows: 3,
             multiple: true,
             diamond: true,
+            hex: 0,
             elevated: false,
             footprint: [128, 64],
             wrap: true,
@@ -3085,7 +3647,32 @@ mod tests {
         assert!(e.undo.is_empty());
     }
     #[test]
-    fn rectangle_then_fill_is_one_undo_and_open_regions_are_rejected() {
+    fn transparent_diamond_fill_stays_inside_and_preserves_colored_pixels() {
+        let mut e = tiny(1, 1);
+        let (_, x, y) = e.finite_plane_hit(0, 0, false).unwrap();
+        e.tiles[0].put_pixel(x, y, Rgba([200, 100, 50, 0]));
+        let (_, bx, by) = e.finite_plane_hit(1, 0, false).unwrap();
+        e.tiles[0].put_pixel(bx, by, Rgba([1, 2, 3, 128]));
+        e.pixels = e.tiles[0].clone();
+        let before = e.snapshot();
+        e.color = [80, 30, 200, 255];
+        e.fill_region((0, 0), false);
+        for y in 0..4 {
+            for x in 0..8 {
+                let expected = if (x, y) == (bx, by) { [1, 2, 3, 128] }
+                    else if inside(x as i32, y as i32, 8, 4, true) { e.color }
+                    else { [0; 4] };
+                assert_eq!(e.pixels.get_pixel(x, y).0, expected);
+            }
+        }
+        assert_eq!(e.undo.len(), 1);
+        e.history(false);
+        assert!(e.snapshot() == before);
+        e.history(true);
+        assert_eq!(e.pixels.get_pixel(x, y).0, e.color);
+    }
+    #[test]
+    fn rectangle_fill_and_open_transparent_background_are_each_one_undo() {
         let mut e = Editor::default();
         e.diamond = false;
         e.tool = Tool::Rectangle;
@@ -3096,7 +3683,7 @@ mod tests {
         let ring = e.snapshot();
         e.color = [200, 20, 30, 255];
         e.tool = Tool::Fill;
-        e.fill_closed((0, 0), false);
+        e.fill_region((0, 0), false);
         assert_eq!(e.pixels.get_pixel(64, 32).0, e.color);
         assert_eq!(e.undo.len(), 2);
         assert_eq!(e.pixels.get_pixel(70, 32).0, [0; 4]);
@@ -3111,10 +3698,13 @@ mod tests {
         let open = e.snapshot();
         let history = e.undo.len();
         e.tool = Tool::Fill;
-        e.fill_closed((0, 0), false);
+        e.fill_region((0, 0), false);
+        assert_eq!(e.pixels.get_pixel(64, 32).0, e.color);
+        assert_eq!(e.pixels.get_pixel(70, 32).0, e.color);
+        assert_eq!(e.undo.len(), history + 1);
+        assert!(e.message.is_empty());
+        e.history(false);
         assert!(e.snapshot() == open);
-        assert_eq!(e.undo.len(), history);
-        assert!(!e.message.is_empty());
     }
     #[test]
     fn tool_and_history_keys_do_not_override_text_editing() {
@@ -3127,7 +3717,9 @@ mod tests {
             repeat: false,
             modifiers,
         };
+        assert!(e.tool == Tool::Move);
         for (key, tool) in [
+            (egui::Key::V, Tool::Move),
             (egui::Key::I, Tool::Eyedropper),
             (egui::Key::E, Tool::Eraser),
             (egui::Key::U, Tool::Rectangle),

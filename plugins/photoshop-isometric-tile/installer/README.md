@@ -4,7 +4,7 @@
 
 ## 行为
 
-- EXE 内嵌 `manifest.json`、`index.html`、`main.js`、`png.js`，无需旁带插件文件。
+- EXE 内嵌插件清单、面板脚本与图标等十个运行文件，无需旁带插件文件。
 - 固定安装到当前用户 `%APPDATA%\Adobe\UXP\Plugins\External\unityyamlviewer.isometric-preview`，不修改 Photoshop 安装目录、注册表、文件关联或 UXP 安装数据库，不申请管理员权限。
 - 安装、更新和卸载前检测 `Photoshop.exe`；运行中或无法确认进程状态时拒绝操作，要求用户关闭后重试，不自动关闭 PS。
 - 更新先在同级暂存目录准备并进行 SHA-256 校验，再重命名切换；替换失败时尝试恢复旧目录，恢复异常时显示路径。不强行删除失败现场。
@@ -33,3 +33,7 @@ cargo check --offline --tests --manifest-path plugins/photoshop-isometric-tile/i
 脚本先检查安装器进程与固定输出 EXE 是否占用；有占用时停止，关闭后仍须用户再次确认再编译。主程序不参与此次构建。源码和依赖分别维护，`Cargo.lock` 随工程保留。
 
 使用 UXP 用户目录部署方式。PS 需要支持当前插件所声明的最低版本；面板绑定与预览能力见上级目录说明。
+
+安装器按已部署版本显示安装、更新或覆盖安装；同版本允许重新部署并校验。已部署版本更高时停止覆盖，避免误降级。读取或版本比较失败会显示原因。
+
+The installer offers Install, Update or Overwrite according to the deployed version. Equal versions may be redeployed and verified. A newer deployed version blocks replacement by an older installer; unreadable or invalid version information is reported.
