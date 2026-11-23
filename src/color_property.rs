@@ -47,14 +47,16 @@ fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool) -> Op
         state.rgba = rgba;
         state.original = rgba;
         state.open = true;
+        crate::native_window::wake(ui.ctx(), id.with("window"));
     }
     response.on_hover_text(if drawing { name.to_owned() } else { crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]) });
     if state.open {
         let mut open = true;
-        crate::native_window::Window::new(name)
+        let window = crate::native_window::Window::new(name)
             .id(id.with("window")).open(&mut open).resizable(false)
-            .default_width(220.0).min_width(220.0).max_width(220.0)
-            .show(ui.ctx(), |ui| {
+            .default_width(220.0).min_width(220.0).max_width(220.0);
+        let window = if drawing { window.always_on_top() } else { window };
+        window.show(ui.ctx(), |ui| {
                 ui.set_width(220.0);
                 if !drawing { ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑颜色，保存编辑后写入文件。") } else { crate::localization::tr("仅预览，不修改属性或资源文件。") }); }
                 palette(ui, &mut state.rgba);

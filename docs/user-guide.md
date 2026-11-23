@@ -744,9 +744,9 @@ Source matrix/range metadata is preferred. Missing metadata defaults to BT.709 f
 Frames are still read back through FFmpeg’s pipe and uploaded: hardware-decoder texture sharing and zero-copy are not implemented. At 4K25, raw YUV420 is about 311 MB/s versus 829 MB/s for RGBA; these are payload estimates, not promised CPU or speed improvements. Fit-to-window sizing can further reduce preview traffic without changing source/export resolution. Video GPU resources share the existing context and shutdown lifecycle.
 
 
-图片主预览默认“平滑显示”：放大使用双线性采样，缩小配合mipmap，避免普通图片一直使用最近邻导致轮廓阶梯。“像素显示”使用最近邻，适合放大检查像素块；选项按当前图片保留，原图、导出和像素取样数据不变。平滑纹理的mipmap额外占用约三分之一显存，不能保证与Photoshop的缩放算法完全一致。
+图片主预览默认“平滑显示”：放大使用双线性采样，缩小配合mipmap，避免普通图片一直使用最近邻导致轮廓阶梯。“像素显示”使用最近邻，适合放大检查像素块；选项在本次运行的所有图片预览间共用，原图、导出和像素取样数据不变。平滑纹理的mipmap额外占用约三分之一显存，不能保证与Photoshop的缩放算法完全一致。
 
-Main image previews default to Smooth: bilinear magnification and mipmapped minification avoid nearest-neighbor stair-stepping. Pixelated mode retains nearest sampling for inspecting individual pixels. The mode is per image and does not alter originals, exports or sampled pixel values. Smooth mipmaps add roughly one third to texture memory and are not guaranteed to match Photoshop’s resampling exactly.
+Main image previews default to Smooth: bilinear magnification and mipmapped minification avoid nearest-neighbor stair-stepping. Pixelated mode retains nearest sampling for inspecting individual pixels. The mode is shared across image previews for the current session and does not alter originals, exports or sampled pixel values. Smooth mipmaps add roughly one third to texture memory and are not guaranteed to match Photoshop’s resampling exactly.
 
 图片缩放百分比按屏幕物理像素计算，100%表示一个源像素对应一个屏幕物理像素，而非一个系统缩放后的逻辑点；适应窗口的百分比会随DPI变化。绘制起点对齐物理像素。
 
@@ -935,18 +935,18 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 - The subtitle timeline uses the same rounded proportional pan thumb as video editing. Its length represents the visible time range; dragging pans the view and clicking the empty track centers the thumb there, without seeking playback. The blue fill and in-bar time text are removed, with spacing retained beneath the waveform.
 
 
-## 像素 Tile
+## 绘Tile
 
-从“文件 → 像素 Tile”新建空白工程，或从图片工具栏打开并导入当前图片；.uytile 文件也可通过打开文件、拖入或启动参数进入独立窗口。工程以 JSON 编码保存全部 Tile 像素、循环排列、地面尺寸和模式，PNG 可导出当前格或按行列拆分全部格的可见图层合成结果。
+从“文件 → 绘Tile”新建空白工程，或从图片工具栏打开并导入当前图片；.uytile 文件通过打开文件、拖入或启动参数先进入主窗口工程预览标签，点击“绘Tile”再进入编辑窗口。工程以 JSON 编码保存全部 Tile 像素、循环排列、地面尺寸和模式，PNG 可导出当前格或按行列拆分全部格的可见图层合成结果。
 
 - 所有格子共享一套图层，尺寸相同，边长为 2–1024 的偶数；最多64格，每层最多16 MiB，全部图层像素最多32 MiB、最多32层。新建不同尺寸会重置 Tile 集合，可撤销。
 - 绘制区编辑单格，或在开启“多 Tile 循环”后编辑设置的整组格子。设置支持 1–8 行列，点击按行连续编号的 Slot 按钮选中格子，悬停可看行列，在下方导入图片或清空选中图层；菱形排列的行列沿两条斜轴展开。默认排列为 1×1。
 - 窗口为设置＋统一绘制区，设置独立滚动。Q切换有边界、W切换无边界，中心保留设置的循环单元，共享平移、倍率和工具；H或无边界旁定位图标回中心，倍率不变。可另开独立只读预览窗口。
 - 平面模式提供 1–32 像素方形铅笔、橡皮及取色，默认开启边缘回绕。每个笔刷像素独立映射，跨斜边和角点的笔触、橡皮也会回到对边；单格编辑回到当前 Tile，多格按循环行列落到对应格。有边界关闭回绕后裁去外边界部分；无边界编辑重复副本会映射到中心对应格。
 - 每格独立保存像素，最多 8×8 格；取消素材编号下拉和独立副本按钮。旧工程的共享格在打开时保留图像并分离，超出64张或16 MiB则拒绝打开，当前内容不变。Alt 临时取色。一笔涉及多个 Tile 时整体撤销／重做，历史像素预算为 32 MiB，超出时淘汰最旧记录。此像素笔刷替换 RGBA，不提供压感、柔边混色或写实笔刷。
-- 带高度模式保持可见像素命中与单像素绘制，不使用平面边缘回绕。
-- 平面菱形会遮罩并在 PNG 导出时清除菱形外像素；切回矩形前内存中原有外围像素仍保留。带高度模式保留整张图片，地面菱形尺寸独立设置，底部中心对齐并从后向前绘制。
-- 带高度模式优先编辑最前方非透明像素；空白处按地面格归属，被遮挡区域在左侧编辑。半透明像素也拦截落笔；不支持任意锚点、多层穿插、3D 深度或自动判断建筑结构。
+- 高度 Tile 暂不开放新建和编辑；已有工程可只读预览，保留原像素、布局及高度参数，不自动转成平面工程。
+- 平面菱形会遮罩并在 PNG 导出时清除菱形外像素；切回矩形前内存中原有外围像素仍保留。旧高度工程只读预览保留整张图片，以底部地面尺寸排列。
+- 高度 Tile 的台面／侧面回落尚未验证，不提供绘制或回落保证，也不支持自动判断建筑结构。
 - 很小的 Tile 或极端高度比例会自动放大预览；绘制范围最多前后各 32 排、左右各 32 格，极端比例可能无法填满视区。项目为未压缩 JSON，读取上限256 MiB，新保存工程格式为5，兼容读取格式1–4。旧程序不能读取格式5。
 - 请保存 .uytile 以保留多 Tile 排列；另存 PNG 不覆盖入口源图片。窗口有未保存内容时关闭会提示，打开其他工程前也可先保存；前一个内容可在本次会话中通过撤销找回。
 
@@ -1014,7 +1014,7 @@ V 移动（默认，左键拖动画布）、B 画笔、I 取色、E 橡皮、U �
 
 绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。导入图片加入工程素材库，内容填入选中格的BaseLayer；清空选中图层清除该层全部格子，新建空白／导入当前图片重新建立普通图层，均可撤销。预览与PNG采用普通Alpha合成，暂不提供图层混合模式、蒙版或图层不透明度。
 
-多格设置支持2×2、3×3、4×4快捷按钮。点击“拆分导出全部格 PNG”选择文件夹，3×3会导出9张，名称为tile_r01_c01.png等；使用可见层合成并按菱形遮罩裁切，矩形模式保留矩形，带高度模式保留图片轮廓。已有同名文件时拒绝导出，遇到写入失败会报告已完成数量。PNG不保留图层，请另存.uytile工程。
+多格设置支持2×2、3×3、4×4快捷按钮。点击“拆分导出全部格 PNG”选择文件夹，3×3会导出9张，名称为tile_r01_c01.png等；使用可见层合成并按菱形遮罩裁切，矩形模式保留矩形。已有同名文件时拒绝导出，遇到写入失败会报告已完成数量。PNG不保留图层，请另存.uytile工程。
 
 ### 像素 Tile 工具栏与背景
 
@@ -1072,7 +1072,7 @@ Drawing layers are ordinary editable layers; both single- and multi-cell modes r
 
 Choose Rectangle, Diamond or Hexagon below the project buttons. Hexagons support Pointy Top and Flat Top. Canvas width and height define the bounding rectangle; slanted sides are automatic and stretching is allowed. Pointy height or flat width must be a multiple of four; the other dimension remains even. New canvases align that dimension automatically; incompatible existing sizes require a new canvas. Regular proportions are approximately width/height 0.866 for pointy and 1.155 for flat.
 
-Both orientations support honeycomb repeats, wrapped drawing, transparent background fill, per-cell PNG clipping and projects. Changing modes preserves underlying corner pixels and supports undo. Raised tiles use the diamond mode. Project format 5 stores orientation and materials and reads formats 1–4; older software cannot open format 5.
+Both orientations support honeycomb repeats, wrapped drawing, transparent background fill, per-cell PNG clipping and projects. Changing modes preserves underlying corner pixels and supports undo. Existing raised projects are read-only; creation and editing are unavailable. Project format 5 stores orientation and materials and reads formats 1–4; older software cannot open format 5.
 
 ### 工程素材库与 BaseLayer / Project materials and BaseLayer
 
@@ -1113,3 +1113,228 @@ The fill tooltip is simply Fill(G). Material drop results appear below the libra
 布局预设包括1×1／2×2／3×3／4×4。单Tile或1×1时不显示Slot选择、当前Slot信息、显示Slot开关和画面编号；回到多格后恢复原显示偏好。设置、工程素材库和图层使用相同标题字号；设置默认收起，素材库默认展开且可收起，图层标题与加减按钮居中。素材库收起不改图像，但不接收库内拖入。
 
 Presets include 1×1, 2×2, 3×3 and 4×4. Single Tile or 1×1 hides Slot selection, current Slot text, Show Slots and badges; returning to multiple cells restores the display preference. Settings, Project Materials and Layers share the heading size. Settings starts closed; materials starts open and can collapse. The layer heading aligns with the plus/minus buttons. Collapsing the library does not change images but hides its drop target.
+
+
+图片预览的适应窗口／1:1、平滑／像素显示、R／G／B／A／RGB／RGBA 通道与应用 Alpha 在本次运行内共用，切换文件标签、多图浏览或打开新图片均沿用当前选择。切换适应窗口／1:1 会重置已打开图片的缩放和平移；之后的滚轮缩放与拖动仍属于当前图片。设置中的“默认适应窗口显示”只在下次启动时初始化缩放模式，不改变当前会话。
+
+Image previews share Fit/1:1, Smooth/Pixel sampling, R/G/B/A/RGB/RGBA channels and Apply Alpha for the current session, including file tabs, multi-image browsing and newly opened images. Switching Fit/1:1 resets cached image zoom and pan; subsequent wheel zoom and dragging remain specific to each image. The default fit setting initializes the mode on the next app launch and does not change the current session.
+
+
+绘Tile绘制工具行按铅笔／画笔、颜色、不透明度、笔尖尺寸排列；尺寸预览为固定外框内的单个笔尖，随尺寸滑块或数值变化，亦支持 [ / ] 调整。
+
+Tile Painter places pencil/brush tabs, color, Opacity and tip size on one drawing-tools row. A single fixed-frame tip indicator grows or shrinks with the size slider, numeric input or [ / ] keys.
+
+
+绘Tile画笔模式中，笔尖尺寸图标旁的下拉可选择柔边圆／硬边圆，并调节 0–100% 硬度；对应画笔橡皮也使用该硬度。硬度会随工程保存，旧工程默认为 0%。画笔支持流量、间距、压感预设及七种基础混合模式。
+
+In Tile Painter brush mode, the dropdown beside the tip-size indicator offers soft/hard round presets and 0–100% hardness, also applied to the brush eraser. Hardness is saved in projects; older projects default to 0%. Brushes support flow, spacing, pressure presets and seven basic blend modes.
+
+
+绘Tile画笔的模式下拉位于大小数值框之后，支持正常、正片叠底、滤色、叠加、变暗、变亮和差值。模式仅与当前绘画层已有像素混合，透明区域使用原画笔色；不采样 BaseLayer 或其他图层，橡皮不使用混合模式。模式随工程保存，旧工程默认正常。
+
+Tile Painter places the blend-mode dropdown after the size value. Normal, Multiply, Screen, Overlay, Darken, Lighten and Difference mix with pixels on the active drawing layer; transparent regions retain the brush color. Other layers and BaseLayer are not sampled, and erasers ignore blend modes. Projects save the mode; older projects default to Normal.
+
+
+绘Tile取色工具（I）与 Alt 临时取色吸取可见图层的合成 RGBA，不限于当前绘画层；有边界与无边界一致，隐藏图层不参与，透明区域仍返回透明色。取色时显示吸管光标。
+
+Tile Painter’s eyedropper (I) and temporary Alt picking sample the visible-layer RGBA composite in bounded and unbounded views, including beneath empty drawing layers. Hidden layers are excluded; transparent areas remain transparent. Picking shows an eyedropper cursor.
+
+
+画笔使用边缘抗锯齿与硬度衰减，同一笔内按流量累积覆盖，受压力不透明度与整笔不透明度限制；抬笔后可继续叠色。铅笔独立使用无抗锯齿的硬边像素笔尖。
+
+Brushes use antialiased tip coverage and hardness falloff. Within one stroke, flow accumulates coverage up to pressure-opacity and stroke-opacity limits; a new stroke can add color again. Pencils independently retain hard pixel tips without antialiasing.
+
+
+绘Tile画笔样式菜单包含柔边／硬边圆的压力大小和压力不透明度预设，也可独立勾选两项并设置最小直径。支持驱动提供的 Windows Ink 压力；使用 Wacom 时须让驱动向程序提供 Windows Ink 输入。WinTab专用输入暂不支持。菜单显示接触时检测到的压力；鼠标或无压力数据时保持固定尺寸与不透明度。压感参数保存于工程，只作用平面画笔和画笔橡皮；铅笔和带高度单像素路径不使用压力。流量与间距在同一样式菜单调节，也可启用压力控制流量。
+
+Tile Painter’s brush-style menu includes soft/hard round pressure-size and pressure-opacity presets. Both controls can be enabled independently, with a minimum diameter setting. Pressure uses driver-provided Windows Ink input, including Wacom configurations that expose Windows Ink; WinTab-only input is unsupported. The menu shows pressure while in contact. Mouse or missing pressure uses fixed settings. Projects save pressure options, applied only to planar brushes and brush erasers, not pencils or raised single-pixel drawing. Flow and spacing are available in the same style menu, with optional pressure-controlled flow.
+
+
+工程素材库中的缩略图保持原始宽高比并在单元中居中完整显示。列表底部大小滑条从最小每行5个逐步放大到最大每行1个，超出区域可滚动；缩略图大小只在本次会话保留。
+
+Project-library thumbnails fit centrally within each cell while preserving the original aspect ratio. The bottom size slider grows from five thumbnails per row to one; overflow scrolls. Thumbnail size is retained only for the current session.
+
+
+图层复制：选中 BaseLayer 后按 Ctrl+J，仅将当前选中格复制到新的普通绘画层；右键 BaseLayer 可改选“复制所有格为图层”，保留各格位置。普通图层无选区时 Ctrl+J／右键复制整个图层，有选区时仅保留选区像素。副本位于源层上方并自动选中、显示与解锁，支持撤销；复制受现有图层数量和内存上限限制。
+
+Layer duplication: Ctrl+J on BaseLayer copies only the selected cell into a new drawing layer. Its context menu also offers all cells, preserving their positions. Ctrl+J and Duplicate layer copy an ordinary layer in full without a selection, or only selected pixels when a selection exists. Copies appear above their source, selected, visible and unlocked, with undo support and existing layer/memory limits.
+
+
+绘Tile选取工具共用 M：切入时保留上次矩形／椭圆／套索／多边形模式，已在选取工具时再次 M 才循环切换。前三种拖动建立，多边形逐点点击后双击、点击起点或 Enter 完成。Ctrl+D取消，Escape取消未完成选取；选区限制绘画、擦除和填充，不限制取色。选区不保存于工程，结构变化会清除，撤销恢复对应选区，带高度模式暂不支持。无边界重复格共用对应像素选区。
+
+已选中的选取工具或铅笔／画笔工具再次点击可展开带图标的模式菜单。拖动手柄右键可选择横向／竖向排列，并随工具栏位置保留；横向菜单上下展开，竖向左右展开，靠边时换侧避让。
+
+Tile Painter selections share M: entering recalls the last rectangle/ellipse/lasso/polygon mode; pressing M while selected cycles modes. Drag the first three; click polygon vertices and finish with a double-click, the first vertex or Enter. Ctrl+D deselects; Escape cancels a draft. Selection limits paint, erase and fill, not picking. It is session-only, clears on structural changes while undo restores its saved state and is unsupported in raised mode. Repeated cells share the corresponding pixel mask.
+
+Click an active selection or pencil/brush tool again to open its icon menu. Right-click the drag handle for horizontal/vertical layout, saved with toolbar position. Menus open vertically for horizontal bars and sideways for vertical bars, reversing near edges.
+
+
+选区工作：切换图层时选区保留，绘制、擦除和填充作用于当前选中层，Ctrl+J／右键复制图层只保留选区内像素。选取工具下，Shift拖动增选，Alt拖动减选；选区内普通拖动移动轮廓，Ctrl拖动进入持续剪切移动当前层像素状态（锁定或隐藏层不可用），有限边界外内容裁切，无边界使用重复映射。单击外部取消选区，外部拖动建立新选区；在选区内右键可取消。普通轮廓移动不改图像，Ctrl移动支持一次撤销；撤销后恢复操作前的选区。多边形增减模式由首个顶点的修饰键确定。
+
+Selection editing: selections survive layer changes; painting, erasing and filling affect the active layer, and layer copies keep only selected pixels. With the selection tool, Shift adds and Alt subtracts. Drag inside to move the outline; Ctrl-drag enters persistent cut-pixel movement on the active layer, with one-step undo (locked/hidden layers are protected). Finite boundaries clip destinations, while unbounded views map repeats. Click outside to deselect, drag outside to replace, or right-click inside to deselect. Moving outlines does not alter pixels; undo restores the saved selection. Polygon add/subtract mode follows the modifiers at its first vertex.
+
+
+### 绘Tile工程预览 / Tile Painter project previews
+
+打开 .uytile 后，主窗口显示独立工程标签、文件名及“绘Tile”入口；基本信息显示布局与形状（如“2×2 菱形 Tile”）、单格像素尺寸、图层与素材数量。工程读取和带网格预览在后台生成，预览等比居中适应可用区域；当前会话缓存结果，编辑后后台刷新，不向工程追加预览图片。点击“绘Tile”才进入编辑，已有编辑实例会唤回，不重新加载覆盖修改。高度工程显示类型及只读提示，并禁用编辑入口；本版不提供高度Tile新建与编辑。
+
+Opening .uytile creates a project-preview tab with its filename and a Tile Painter entry. Information includes layout and shape (for example, “2×2 Diamond Tile”), cell pixel size, layers and material count. Reading and rasterizing the grid preview run in the background; it fits centrally with preserved aspect ratio. A session cache refreshes after edits without embedding an image in the project file. The entry opens or recalls that project’s editor without reloading over edits. Raised projects are labeled read-only with editing disabled; raised Tile creation and editing are unavailable.
+
+
+### 子组绕回 / Subgroup wrap
+
+工程素材库和图层之间的“子组绕回”默认关闭，仅支持多格矩形／菱形。子组行列必须整除整体布局，例如4×4工程可设2×2子组；选中Slot决定当前子组。开启后，跨子组边缘的笔触在抬笔时绕回并联动其他组的对应边缘，内部绘制独立；只影响当前绘画层，一笔可整体撤销，选区仍限制目标写入。请先选中正确子组内的Slot；在该组外绘制会按其周期映射。六边形暂不支持；子组设置随工程保存，尺寸不整除时恢复1×1。
+
+Subgroup wrap sits between the project library and layers, off by default, for multi-cell rectangle/diamond layouts. Group dimensions must divide the overall layout, such as 2×2 groups within 4×4. The selected Slot determines the active group. Crossing strokes wrap and link equivalent edges of all groups on release, while interiors stay independent. Only the active drawing layer changes, with one-stroke undo and selection-constrained destinations. Select a Slot in the intended group first; drawing outside it follows that group’s period. Hexagons are unsupported. Projects save subgroup settings; incompatible dimensions reset to 1×1.
+
+图层快捷键：Delete删除当前未锁定普通层；BaseLayer不能删除，只能右键“清空当前格素材”。Ctrl+J按选区拷贝新层；Ctrl+Shift+J在有选区时剪切到新层，同时清除原层选区内容，一次撤销恢复。BaseLayer、锁定／隐藏层不允许剪切，无选区不执行剪切。
+
+Layer shortcuts: Delete removes the active unlocked ordinary layer. BaseLayer cannot be deleted; use its context menu to clear the selected cell material. Ctrl+J copies selected pixels to a new layer; Ctrl+Shift+J cuts a selection to a new layer and clears those source pixels, with one-step undo. BaseLayer and locked/hidden layers are protected from cutting; cutting requires a selection.
+
+压感状态菜单：接触时显示当前压力，抬笔后显示本会话上次压力；尚未收到过数据时提示按笔测试。抬笔无当前压力不代表设备未识别。
+
+Pressure status shows current pressure while in contact, then the last received value after lifting. If no data has ever arrived, it prompts a pen test. No current pressure after pen-up does not mean the device was undetected.
+
+
+### Tile画笔流量 / Tile brush flow
+
+画笔样式菜单提供流量0–100%（默认100%）和笔触间距1–100%笔径（默认10%），只作用于画笔与画笔橡皮。流量控制每个落点的累积，整笔不透明度控制上限：降低流量后同一笔往返可逐步变实，但不会超过设定的不透明度；抬笔后的新笔可以继续叠加。压力可分别控制大小、不透明度、流量，并新增柔圆／硬圆压力不透明度和流量预设。鼠标无压力仍用固定参数。参数随工程保存，旧工程默认100%流量、10%间距、压力流量关闭。
+
+输入按图像空间的距离采样，保留指针亚像素位置并插值压力，间距随压力笔径变化；静止且压力不变时不按帧率堆积，不提供按住不动持续喷涂的喷枪行为。铅笔仍是独立像素硬边，不使用流量、压感或抗锯齿。此工具面向Tile绘制，不提供完整Photoshop/PhotoCraft笔刷系统。
+
+Brush styles offer Flow 0–100% (default 100%) and spacing 1–100% of diameter (default 10%), for brushes and brush erasers. Flow controls per-dab buildup; stroke opacity sets its upper limit. Repeated passes within one stroke build gradually without exceeding that limit; new strokes can add more. Pressure can separately control size, opacity and flow, with soft/hard round opacity-and-flow presets. Mouse input uses fixed parameters. Projects save these settings; older projects default to full flow, 10% spacing and pressure flow off.
+
+Dabs follow image-space distance, subpixel pointer positions and interpolated pressure, with spacing adapting to pressure diameter. Stationary input with unchanged pressure does not accumulate per frame; timed airbrush spraying is unsupported. Pencils remain independent hard pixel tips without flow, pressure or antialiasing. This remains a Tile tool, not a complete Photoshop/PhotoCraft brush system.
+
+
+画笔样式菜单上排的8枚圆形图标与“常规画笔”笔触预览列表双向联动。点击任一图标会选择同一预设、展开列表并定位；点击列表同样更新上排高亮和硬度／压力开关。卡片笔触仅作类型示意，实际效果还受当前颜色、大小、不透明度、流量和间距影响，这些用户参数不会因选择预设而重置。
+
+The eight round icons and General Brushes stroke-preview list select the same presets in both directions. Clicking an icon expands and scrolls the list to its preset; list clicks update the icon highlight and hardness/pressure settings. Cards illustrate preset types; actual strokes also depend on current color, size, opacity, flow and spacing, which preset selection does not reset.
+
+
+Ctrl在选区内移动一次后，松开Ctrl或鼠标，再普通拖动选区仍移动同一内容，直至取消／重新建立选区。途中实时显示，背景不会被重新截取带走；每次拖动可撤销。切换图层不把原层剪切内容带至新层。
+
+Once Ctrl moves pixels inside a selection, later drags keep moving that same content after releasing Ctrl or the mouse, until deselection or a new selection. Movement previews live without picking up the traversed background, with undo per drag. Changing layers does not transfer the original layer’s cut content.
+
+
+Ctrl+J复制或Ctrl+Shift+J剪切选区到新层后，Ctrl+Z同时恢复源层及操作前的选区；Ctrl+Y重做也恢复对应选区，持续剪切移动内容一并保留。选区计入撤销内存预算，但仍不保存到工程文件。
+
+After Ctrl+J copies or Ctrl+Shift+J cuts a selection to a new layer, Ctrl+Z restores both the source layer and its prior selection. Redo restores the corresponding selection and persistent cut content too. Selection data counts toward history memory limits but remains excluded from saved project files.
+
+### 绘Tile图层组、链接与蒙版
+
+图层面板可设置混合模式、不透明度、填充和锁定，添加基础样式、像素蒙版或调整层。先选中图层或组，Ctrl点击增减多选，Shift点击选择可见列表中的连续范围。点击“编组”将选中对象放入新组；组图标菜单中的“移动到组”可移入或移出组，箭头折叠成员。复制和Delete支持多选，BaseLayer始终受保护。
+
+组默认“穿透”，允许组内调整影响下方图层；选择具体混合模式会关闭穿透，先合成组内内容。组不透明度和蒙版作用于整体结果。“解散组”保留成员，但移除组自身蒙版和外观设置，必要时先保存工程。
+
+“链接图层”让选中对象一起移动，“取消链接”解除该链接组。V移动当前图层／组、多选和链接对象，空格加左键或右键拖动平移画布。父组锁定会限制成员操作。
+
+点击内容或蒙版缩略图选择编辑目标；两者间的链接按钮控制联动。链接时一起移动，断开后选中蒙版只移动蒙版、选中内容只移动内容。组蒙版同样支持独立移动。蒙版菜单支持反相、启用和删除；“应用蒙版”仅适用于像素层。效果按格裁切，当前不提供蒙版羽化、密度和矢量蒙版。
+
+当前外观面板只修改活动对象；多选用于编组、链接、移动、复制和删除。新工程格式包含层级和蒙版等属性，需要支持schema 9的程序读取。
+
+### Tile groups, links and masks
+
+Ctrl-click toggles layer/group selection; Shift-click selects a range in the visible list. Group the selection, choose its parent from the folder icon’s Move to group menu, or collapse its children. Duplicate and Delete support multiple objects; BaseLayer stays protected. Ungroup preserves children but removes the container's mask and appearance.
+
+Groups default to pass-through, allowing internal adjustments to affect the backdrop. Choosing a blend mode isolates the group. Group masks and opacity affect the combined result. Link layers to move them together; V moves layers/groups and linked or selected objects, while Space+left drag or right drag pans the canvas.
+
+Select a content or mask thumbnail as the editing target. Their link button controls joint movement; unlink to move the selected mask or content independently. This also applies to group masks. The appearance panel edits only the active object. Effects are clipped per cell; mask density, feathering and vector masks are unavailable. New projects require schema-9 support.
+
+### 图层面板图标
+
+图层标题旁依次为链接、fx、蒙版、调整、组、方框加号（新增图层）和垃圾桶（删除）。鼠标悬停查看说明；锁定使用棋盘格、画笔、移动箭头与锁图标。不透明度和填充可直接输入百分比或左右拖动输入框。清空当前图层位于图层右键菜单。
+
+The layer header shows Link, fx, Mask, Adjustments, Group, boxed plus (new layer), and Trash (delete). Hover for descriptions. Lock controls use transparency, brush, movement and padlock icons. Enter opacity/fill percentages directly or drag their fields horizontally. Clear layer is available from the layer context menu.
+
+右键点击蒙版缩略图可启用／停用、删除、应用、反相、切换与内容的链接，也可转成选区或与已有选区做加、减和交叉。普通像素层可应用蒙版，组与调整层保留非破坏性蒙版。当前选区为硬边，灰度蒙版按50%阈值转换，柔边选择尚不支持。
+
+Right-click a mask thumbnail to enable/disable, delete, apply, invert, link/unlink, or combine it with a selection. Applying is limited to ordinary pixel layers. Mask-to-selection uses a 50% threshold because selections currently have hard edges.
+
+开启“锁定绘制”会清除并禁用“锁定透明度”；解除绘制锁后可重新开启透明度锁。透明度锁用于绘制时保留图层原Alpha，不会改变原有透明度。
+
+Lock Painting clears and disables Lock Transparency. After unlocking painting, transparency locking can be enabled again. Lock Transparency preserves the layer's existing alpha while painting.
+
+绘制区第二行是当前工具的选项栏：切换工具会显示对应设置。移动选择图层／组；选区选择模式或取消；吸管显示可见合成取样结果；缩放提供100%重置。画笔／擦子保留各自适用的笔触参数，填充显示颜色与不透明度。
+
+The second drawing-area row follows the active tool. Move selects layer/group targets; Selection shows its modes and deselect; Eyedropper displays the visible-composite sample; Zoom offers a 100% reset. Brush/eraser controls show applicable stroke settings, while Fill shows color and opacity.
+
+绘制时主窗口保留上一张工程预览，后台静默刷新。更新最多每秒启动一次，并等待内容稳定约250毫秒及当前笔画结束，因此预览会有短暂延迟，避免影响绘制。
+
+While drawing, the main window keeps the previous project preview and refreshes silently. Updates start at most once per second, after roughly 250 ms without content changes and after the stroke ends. A short preview delay reduces drawing overhead.
+
+绘Tile的背景使用独立的“棋盘格／自定义”Tab，颜色控件紧接自定义。改色会切换至自定义，切回棋盘格仍保留所选颜色；此设置仅属于当前绘Tile工程，不与其他功能的背景显示共用。
+
+Tile Painter has independent Checkerboard/Custom background tabs with a color control beside Custom. Editing the color activates Custom; returning to Checkerboard preserves it. This project setting is separate from other preview backgrounds.
+
+图层操作栏的擦子图标用于一键清空当前像素图层，保留图层，可撤销；垃圾桶用于删除图层。编辑蒙版时请先点内容缩略图再清空图层。
+
+The eraser icon in the layer header clears the active pixel layer without deleting it and supports undo. The trash icon deletes the layer. Select the content thumbnail before clearing while editing a mask.
+
+点击图层栏的蒙版图标可直接添加白色蒙版并进入蒙版编辑；已有蒙版时该添加按钮禁用。管理蒙版请右键点击其缩略图。
+
+Click the layer-header mask icon to add a white mask and edit it immediately. The add button is disabled when a mask exists; use the mask thumbnail’s context menu to manage it.
+
+图层或组锁定后仍可点击眼睛切换显示／隐藏；父组隐藏时其成员仍随组隐藏。
+
+Locked layers and groups can still be shown or hidden using their eye icons. Children remain hidden while their parent group is hidden.
+
+移动工具可勾选“自动选择”，并用“图层／组”Tab选择画布点击目标；按下后拖动可先选中再移动。关闭自动选择时只移动当前选择的对象。自动选择会跳过透明处、蒙版隐藏内容、BaseLayer和全部锁定对象；组模式选择最外层组。独立移动蒙版时，请关闭自动选择并点击蒙版缩略图。
+
+Enable Auto selection in the Move tool and choose the Layer/Group tab to select objects on the canvas before moving them. With it off, movement uses the current selection. Transparent or masked pixels, BaseLayer and fully locked objects are skipped; Group selects the outermost group. Turn Auto selection off to move an unlinked mask independently.
+
+### 曲线和剪贴调整
+
+曲线可切换RGB及各通道。点击空白添加控制点，拖动控制点或选中点的圆形手柄编辑贝塞尔曲线；双击内部点删除。“平滑曲线”重算当前通道切线，“重置曲线”恢复四通道恒等曲线。旧五点曲线会转换为可编辑节点，起初保留折线形状。
+
+按住Alt点击同父级相邻图层之间的空隙，可切换上层剪贴到下方基底；右键图层也可创建／释放剪贴蒙版。连续剪贴的曲线、色阶等共用同一个基底，其透明区域不受影响。基底需为像素层或组；调整层不能作基底，剪贴组暂按隔离方式合成。
+
+调整层显示各自图标；点击图标或内容缩略图编辑内容，点击蒙版缩略图编辑蒙版，选中边框显示当前目标。横竖工具栏切换会重新适配尺寸。打开工程若有未保存修改，必须先确认替换，取消会保留内容。
+
+### Curves and clipping adjustments
+
+Choose RGB or a channel, click to add points, and drag anchors or their round handles to edit cubic Bezier curves. Double-click an interior point to remove it. Smooth curve recalculates the current channel’s tangents; Reset restores all channels. Legacy five-point curves become editable nodes while initially retaining their piecewise-linear shape.
+
+Alt-click the gap between sibling layers, or use the layer context menu, to toggle clipping. Consecutive clipped adjustments share the nearest underlying base and leave its transparent area unaffected. Pixel layers and groups can be bases; adjustments cannot. Clipped groups use isolated composition.
+
+Adjustment layers show type icons, and selection borders distinguish content from mask editing. Toolbar orientation changes resize its frame. Opening another project with unsaved changes requires confirmation; Cancel retains the current contents.
+
+图层行的眼睛始终位于最前面，后方是层级缩进、展开箭头和内容图标。组展开／收起时文件夹外观同步变化，不显示透明棋盘格。
+
+拖动图层或组的名称到目标组行中间可放入组；拖到行上／下边缘可调整位置或移到该行所属层级。拖动期间出现的“拖到此处移出组”区域可移到根级。高亮框表示进入组，横线表示插入位置。选中组后新增图层或调整层会位于组内最上方，并展开组显示。
+
+Eye icons stay in a fixed leading column, followed by hierarchy indentation, disclosure arrows and content icons. Folder appearance follows expansion and does not use a transparency checkerboard. Drag names onto a group’s center to enter it, or onto row edges to reorder or move to that sibling level. The root drop area moves objects out of groups. Adding a layer while a group is selected inserts it at the top and expands the group.
+
+矩形工具勾选“填充”后会填满内部，使用当前颜色与不透明度；取消勾选恢复描边。填充受选区和图层锁定限制，并可撤销。启用了图层样式的对象在名称右侧显示fx。
+
+清空或删除图层／组前会显示目标和确认提示，取消不改动内容，确认后仍可撤销。
+
+Enable Fill in the Rectangle tool to fill its interior using the current color and opacity; disable it for outlines. Selections and locks still apply, and the operation supports undo. Layers/groups with enabled styles show fx beside their names. Clearing or deleting requires confirmation of the displayed targets; cancellation leaves contents intact.
+
+多边形选区第一下点击后即可移动鼠标预览首条边。逐点点击后，起点的小圆圈提示闭合位置；至少三个点时靠近起点会高亮，点击即可闭合，也可双击或按Enter完成。草稿不自动画回起点的边，套索操作保持不变。
+
+Polygon selections preview an edge immediately after the first click. A small start-point ring indicates closure; after at least three points, moving near it highlights and snaps the preview so clicking closes the polygon. Double-click or Enter also completes it. Drafts remain open polylines; lasso behavior is unchanged.
+
+缩放工具提供常用百分比下拉，显示值与顶部缩放输入框一致；拖拽缩放、输入或选择预设均同步更新。
+
+The Zoom tool offers common percentage presets and shows the same value as the top zoom field. Dragging, manual entry and preset selection stay synchronized.
+
+选区工具栏可选择颜色和不透明度，再点击“填充选区”或按Alt+Enter。填充当前层／蒙版选区内的内容，保留选区并支持撤销；无有效选区或目标锁定时不执行。
+
+Choose color and opacity in the Selection toolbar, then click Fill selection or press Alt+Enter. This fills the selection on the active layer/mask, preserves the selection and supports undo. It does nothing without a valid selection or when the target is locked.
+
+点击调整层行末的三角箭头，或图层／组行末的fx，会选中对应对象并打开参数框；再次点击同一入口收起，切换其他图层也会收起。锁定时可查看参数但不可修改。
+
+Click an adjustment layer’s trailing triangle or a layer/group’s fx marker to select it and open its parameters. Click the same control again to close it; switching layers also closes it. Locked objects remain viewable but not editable.
+
+亮度／对比度调整提供数值框和滑条：亮度-150～150，对比度-50～100。两者同步更新；旧工程超出新对比度范围的值会保留到主动编辑。
+
+Brightness/Contrast offers synchronized fields and sliders: brightness −150 to 150, contrast −50 to 100. Legacy out-of-range contrast values remain unchanged until edited.
+
+色阶框提供输入直方图及黑场、Gamma、白场滑块，下方可调输出黑白值；数值框和滑块相互同步。直方图在展开时按输入内容生成，重新展开可刷新。色相／饱和度／明度通过对应彩色滑条或数值编辑。
+
+Levels provides an input histogram, black/Gamma/white handles and output black/white controls, all linked to numeric fields. The input histogram is generated on opening; reopen to refresh it. Hue, saturation and lightness use colored sliders with numeric entry.
+
+父组隐藏时，子图层和嵌套组的眼睛显示灰色、不高亮；各对象自身的显示开关仍保留，恢复父组后按自身标记显示。
+
+When a parent group is hidden, children’s eye icons turn gray without highlighting. Their own visibility flags remain intact and take effect when the parent is shown again.

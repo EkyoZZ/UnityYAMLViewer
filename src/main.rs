@@ -891,16 +891,6 @@ impl ViewerApp {
     }
 
     fn open_file_with_options(&mut self, path: PathBuf, remember_directory: bool, record_recent: bool) {
-        if path.extension().is_some_and(|e|e.eq_ignore_ascii_case("uytile")) {
-            match self.assets.open_tile_project(&path) {
-                Ok(())=>{
-                    if record_recent&&!self.restoring_session {self.recent_files.record(path.clone());self.recent_files.persist();}
-                    if remember_directory&&!self.restoring_session {self.last_open_dir=path.parent().map(PathBuf::from);self.persist_last_open_dir();}
-                },
-                Err(e)=>self.status=e,
-            }
-            return;
-        }
         if record_recent && self.folder_preview_path.as_ref() == Some(&path) {
             self.folder_preview_path = None;
         }
@@ -924,7 +914,7 @@ impl ViewerApp {
             if record_recent { self.remember_recent_file(); }
             return;
         }
-        if self.assets.has_network_source(&path) || remote_file::is_hls(&path) || ((media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file()) {
+        if self.assets.has_network_source(&path) || remote_file::is_hls(&path) || ((media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_tile_project(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path))) && path.is_file()) {
             self.save_active_tab();
             self.tabs.push(ViewerTab { path, raw: "".into(), documents: Vec::new(), selected: None, status: String::new(), encoding: String::new() });
             self.activate_tab(self.tabs.len() - 1);
@@ -944,7 +934,7 @@ impl ViewerApp {
 
     fn reload_current_file(&mut self, ctx: &egui::Context) {
         let Some(path) = self.path.clone() else { return; };
-        if self.assets.has_network_source(&path) || media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
+        if self.assets.has_network_source(&path) || media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_tile_project(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) { self.assets.forget(&path); ctx.request_repaint(); return; }
         if self.edits.contains_key(&path) { return; }
         if !self.load_queue.contains(&path) && !self.loading.as_ref().is_some_and(|job|job.path==path) {
             if let Some(id)=self.selected.and_then(|index|self.documents.get(index)).map(|doc|doc.file_id.clone()) {self.load_selection.insert(path.clone(),id);}
@@ -1895,7 +1885,7 @@ impl eframe::App for ViewerApp {
                             self.video_extract.open(ctx);
                             ui.close_menu();
                         }
-                        if ui.button(localization::tr("像素 Tile")).clicked() {
+                        if ui.button(localization::tr("绘Tile")).clicked() {
                             self.assets.open_pixel_tile(ctx);
                             ui.close_menu();
                         }
@@ -2124,7 +2114,7 @@ impl eframe::App for ViewerApp {
         self.refresh_node_flags();
         self.script_properties.update(self.path.as_deref(), ctx);
         let delimited_tab = self.path.as_ref().is_some_and(|path| !self.assets.has_network_source(path) && !remote_file::is_hls(path) && path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
-        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| self.assets.has_network_source(path) || media_preview::is_project(path) || playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| self.assets.has_network_source(path) || media_preview::is_project(path) || playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_tile_project(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
@@ -2667,7 +2657,7 @@ impl eframe::App for ViewerApp {
                 }
                 script_properties::ReferenceOpen::Asset(path, file_id) => {
                     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
+                    if media_preview::is_project(&path) || playlist::is_playlist(&path) || media_preview::is_media(&path) || asset_viewer::is_tile_project(&path) || asset_viewer::is_image(&path) || asset_viewer::is_office_document(&path) || asset_viewer::is_text(&path) || (spine_preview::is_spine(&path) || model_preview::is_model(&path)) {
                         self.open_file_with_directory_tracking(path, false);
                         self.query.clear();
                         ctx.request_repaint();
@@ -2758,9 +2748,8 @@ impl eframe::App for ViewerApp {
                             self.settings.persist();
                             self.assets.set_default_image_browse(self.settings.default_image_browse);
                         }
-                        if theme::toggle_switch(ui, localization::tr("默认适应窗口显示"), &mut self.settings.default_image_fit).changed() {
+                        if theme::toggle_switch(ui, localization::tr("默认适应窗口显示"), &mut self.settings.default_image_fit).on_hover_text(localization::tr("重启软件后生效")).changed() {
                             self.settings.persist();
-                            self.assets.set_default_image_fit(self.settings.default_image_fit);
                         }
                     });
                     ui.end_row();

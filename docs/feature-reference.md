@@ -168,3 +168,19 @@ Icon generation: install Pillow and run `python assets/generate_icons.py`. It pr
 - 工具条屏幕列表使用现有 egui ComboBox，无独立菜单窗口；打开列表时临时扩展同一透明视口并裁掉无内容的空白区域。透明清屏、圆角及自绘阴影留出外边距，避免依赖原生窗口阴影或裁掉投影。提示使用 Body 字号，完成区无分割线。
 - System audio defaults on and persists in screen_record.json, including a default for legacy files. WASAPI shared-mode loopback opens only the default eRender/eConsole output endpoint. PCM/float packets and idle silence stream through a bounded local loopback connection to FFmpeg as AAC 128 kbit/s stereo beside H.264, without audio-file caching. Disabling audio opens no audio device and uses -an. Device selection, migration after output changes, live toggling and microphone mixing are not supported. Synchronization/device compatibility require runtime verification.
 - The screen selector uses the existing egui ComboBox in the same transparent viewport; expansion and native clipping reserve space for its popup. Transparent clearing and padded app-drawn shadows replace dependence on native shadows. Hints use Body text and completion has no divider.
+
+## Tile层级合成与蒙版范围
+
+工程schema 9使用组ID及父ID保存嵌套层级，组与图层总数最多32，图像与蒙版共用32 MiB限制。图层链接ID与蒙版／内容链接是不同关系。蒙版默认白色并链接；有限平移露出部分白色，开启回绕时按格映射。组采用穿透或隔离合成，整组覆盖混合使用预乘Alpha；组样式或低填充会隔离。外观、像素蒙版和四种基础调整统一作用于工程预览、吸色与导出。
+
+Layers and groups share a 32-node and 32 MiB image-plus-mask budget. Schema 9 stores parent/group IDs, layer links and separate content/mask linkage. Groups use pass-through or isolated composition; group coverage uses premultiplied-alpha interpolation. Effects and reduced group fill isolate the group. Effects are computed and clipped per cell. Adjustments use basic RGB math and editable cubic Bezier curves, without full Photoshop color-management parity.
+
+贝塞尔曲线每通道最多32个节点，端点输入固定0／255，支持独立手柄；渲染使用256项LUT。剪贴限同父级连续层，以像素层／组为基底，组会隔离合成，不含PS高级混合范围或特殊填充兼容。
+
+Bezier curves allow up to 32 nodes per channel with fixed input endpoints and independent handles; rendering uses 256-entry lookup tables. Clipping is limited to contiguous siblings with pixel-layer/group bases and isolates groups, without advanced PS blending ranges or special-fill parity.
+
+矩形内部填充最大工作框4 Mi像素，正常Alpha合成并对回绕像素去重；填充期间笔尖大小／硬度／流量不参与。
+Rectangle fills are limited to a 4 Mi-pixel work box, use normal alpha composition and deduplicate wrapped pixels; brush diameter, hardness and flow do not apply.
+
+色阶输入0–255、Gamma 0.1–10、输出0–255（可反相），合并RGB直方图对Alpha加权并缓存至本次参数框关闭。H/S/L范围为±180／±100／±100。
+Levels uses 0–255 input/output and Gamma 0.1–10; output can invert. Its combined RGB histogram is alpha-weighted and cached for the current popup session. H/S/L ranges are ±180/±100/±100.

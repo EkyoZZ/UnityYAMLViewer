@@ -84,6 +84,7 @@ pub(crate) fn preview_color([r,g,b,a]: [u8;4]) -> Color32 {
     Color32::from_rgba_premultiplied(multiply(r),multiply(g),multiply(b),a)
 }
 
+pub fn is_tile_project(path:&Path)->bool { extension(path)=="uytile" }
 pub fn is_bitmap(path: &Path) -> bool {
     matches!(extension(path).as_str(), "png" | "jpg" | "jpeg" | "tga" | "bmp" | "webp")
 }
@@ -222,6 +223,21 @@ struct ImageTab {
     pan: egui::Vec2,
 }
 impl ImageTab {
+    fn sync_preview(&mut self, pixelated: bool, channel: Channel, apply_alpha: bool, path: &Path, ctx: &egui::Context) {
+        if self.pixelated == pixelated && self.channel == channel && self.apply_alpha == apply_alpha { return; }
+        self.pixelated = pixelated;
+        self.channel = channel;
+        self.apply_alpha = apply_alpha;
+        if self.pending.is_some() || self.texture.is_some() || self.original.is_some() {
+            self.load(path.to_owned(), ctx.clone());
+        }
+    }
+    fn reset_scale(&mut self, fit: bool) {
+        self.zoom = (!fit).then_some(1.0);
+        self.pan = egui::Vec2::ZERO;
+        self.zoom_initialized = true;
+    }
+
     fn smooth_image(&mut self)->Option<Arc<crate::render_system::video::Frame>>{
         if self.pixelated||!crate::render_system::available(){self.smooth_image=None;return None;}
         let source=self.original.as_ref()?;
@@ -275,10 +291,14 @@ struct NetworkTab {
 #[derive(Default)]
 pub struct Assets {
     pixel_tile: pixel_tile::Editor,
+    tile_projects: HashMap<PathBuf,pixel_tile::project_preview::ProjectPreview>,
     rtf:rtf_preview::Preview,
     markdown: markdown::Preview,
     command_markdown: markdown::Preview,
     session_image_fit: bool,
+    session_image_pixelated: bool,
+    session_image_channel: Channel,
+    session_image_apply_alpha: bool,
     displayed_image: Option<PathBuf>,
     image_prefetch: Option<(PathBuf, mpsc::Receiver<Loaded>)>,
     prefetch_skipped: HashSet<PathBuf>,
@@ -302,10 +322,6 @@ impl Assets {
     pub fn open_pixel_tile(&mut self,ctx:&egui::Context) {
         self.pixel_tile.open=true;
         crate::native_window::wake(ctx,egui::Id::new(("pixel_tile",Path::new(""))));
-    }
-    pub fn open_tile_project(&mut self,path:&Path)->Result<(),String> {
-        self.pixel_tile.open=true;
-        self.pixel_tile.load_project(path)
     }
     /// Additional browsing frames have a 64 MiB estimated CPU/GPU budget.
     /// The active frame, fallback frame and independent editors are not cache entries.
@@ -361,9 +377,12 @@ impl Assets {
         let next=nearby.into_iter().find(|candidate|is_bitmap(candidate)&&!self.prefetch_skipped.contains(candidate)
             &&!self.images.get(candidate).is_some_and(|tab|tab.texture.is_some()||tab.pending.is_some()||tab.error.is_some()));
         let Some(next)=next else{return;};
-        let tab=self.images.get(&next);
-        let channel=tab.map_or(Channel::Rgba,|tab|tab.channel);
-        let apply_alpha=tab.is_some_and(|tab|tab.apply_alpha);
+        let channel = self.session_image_channel;
+        let apply_alpha = self.session_image_apply_alpha;
+        let tab = self.images.entry(next.clone()).or_default();
+        tab.channel = channel;
+        tab.apply_alpha = apply_alpha;
+        tab.pixelated = self.session_image_pixelated;
         let (send,receive)=mpsc::channel();
         self.image_prefetch=Some((next.clone(),receive));
         let ctx=ctx.clone();
@@ -443,7 +462,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);if !self.images.get(path).is_some_and(|t|t.pixel_tile.active()){self.images.remove(path);}if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
+    pub fn forget(&mut self, path: &Path) { if !self.tile_projects.get(path).is_some_and(|p|p.active()){self.tile_projects.remove(path);} if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);if !self.images.get(path).is_some_and(|t|t.pixel_tile.active()){self.images.remove(path);}if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -462,6 +481,7 @@ impl Assets {
         crate::native_window::wake(ctx,egui::Id::new(("nine_slice",path)));true
     }
     pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
+        for (path,preview) in &mut self.tile_projects {preview.show_editor(ctx,path);}
         self.pixel_tile.show(ctx,Path::new(""),None);
         for changed in self.browser.poll_optimization() {
             if let Some(tab) = self.images.get_mut(&changed) {
@@ -643,6 +663,7 @@ impl Assets {
     pub fn network_downloads_active(&self) -> bool { !self.network_downloads.is_empty() }
     pub fn cancel_network_downloads(&mut self) { self.network_downloads.clear(); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
+        if is_tile_project(path) {self.tile_projects.entry(path.to_owned()).or_insert_with(||pixel_tile::project_preview::ProjectPreview::new(path,ui.ctx())).show(ui,path);return;}
         if crate::media_preview::is_project(path) {crate::media_preview::show_project_tab(ui,path);return;}
         let browsed = if is_browsable_image(path) { Some(self.browser.show(ui,path)) } else { None };
         let path = browsed.as_deref().unwrap_or(path);
@@ -734,19 +755,18 @@ impl Assets {
             return;
         }
         let can_open_preview=self.images.values().filter(|t|t.editor.open||t.editor.busy()).count()<10;
-        let initial_zoom = if self.session_image_fit { None } else { Some(1.0) };
         let can_optimize = !self.images.iter().any(|(image, tab)| {
             image.parent() == path.parent() && extension(image) == "png"
                 && (tab.editor.open || tab.editor.busy() || tab.info.writing())
         });
         let tab = self.images.entry(path.to_owned()).or_default();
+        tab.sync_preview(self.session_image_pixelated, self.session_image_channel, self.session_image_apply_alpha, path, ui.ctx());
         if !tab.zoom_initialized {
-            tab.zoom = initial_zoom;
-            tab.zoom_initialized = true;
+            tab.reset_scale(self.session_image_fit);
         }
         if let Some(message)=nine_slice::Editor::refresh_message(ui.ctx(),path) {
             tab.original=None;tab.pending=None;tab.texture=None;tab.error=None;
-            tab.editor.replaced(message);tab.pan=egui::Vec2::ZERO;tab.zoom=None;
+            tab.editor.replaced(message);tab.reset_scale(self.session_image_fit);
         }
         if tab.pending.is_none() && tab.original.is_none() && tab.error.is_none() { tab.load(path.to_owned(), ui.ctx().clone()); }
         if let Some(result) = tab.pending.as_ref().and_then(|receiver| receiver.try_recv().ok()) {
@@ -796,32 +816,27 @@ impl Assets {
                 tab.sequence.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("sequence",path)));
             }
-            if ui.button(crate::localization::tr("像素 Tile")).clicked() {
+            if ui.button(crate::localization::tr("绘Tile")).clicked() {
                 tab.pixel_tile.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("pixel_tile",path)));
             }
             }
         });
+        let old_fit = self.session_image_fit;
+        let old_preview = (self.session_image_pixelated, self.session_image_channel, self.session_image_apply_alpha);
         ui.horizontal_wrapped(|ui| {
-            let previous = tab.channel;
-            let previous_alpha=tab.apply_alpha;
             ui.add_enabled_ui(tab.pending.is_none() && !tab.editor.open && !tab.editor.busy(), |ui| {
-                let mut channel=tab.channel.label().to_owned();
-                crate::theme::compact_selector(ui,&mut channel,[("R","R"),("G","G"),("B","B"),("A","A"),("RGB","RGB"),("RGBA","RGBA")]);
-                tab.channel=match channel.as_str() {"R"=>Channel::R,"G"=>Channel::G,"B"=>Channel::B,"A"=>Channel::A,"RGB"=>Channel::Rgb,_=>Channel::Rgba};
-                if matches!(tab.channel,Channel::R|Channel::G|Channel::B) {
-                    crate::theme::compact_toggle_switch(ui,crate::localization::tr("应用 Alpha"),&mut tab.apply_alpha);
+                let mut channel = self.session_image_channel.label().to_owned();
+                crate::theme::compact_selector(ui, &mut channel, [("R","R"),("G","G"),("B","B"),("A","A"),("RGB","RGB"),("RGBA","RGBA")]);
+                self.session_image_channel = match channel.as_str() { "R"=>Channel::R,"G"=>Channel::G,"B"=>Channel::B,"A"=>Channel::A,"RGB"=>Channel::Rgb,_=>Channel::Rgba };
+                if matches!(self.session_image_channel, Channel::R | Channel::G | Channel::B) {
+                    crate::theme::compact_toggle_switch(ui, crate::localization::tr("应用 Alpha"), &mut self.session_image_apply_alpha);
                 }
             });
-            if previous != tab.channel || previous_alpha!=tab.apply_alpha { tab.load(path.to_owned(), ui.ctx().clone()); }
-            if crate::theme::image_scale_selector(ui, &mut self.session_image_fit) {
-                tab.zoom = (!self.session_image_fit).then_some(1.0);
-                tab.pan = egui::Vec2::ZERO;
-            }
-            let mut sampling=if tab.pixelated{"pixel"}else{"smooth"}.to_owned();
-            crate::theme::compact_selector(ui,&mut sampling,[("smooth","平滑显示"),("pixel","像素显示")]);
-            let pixelated=sampling=="pixel";
-            if tab.pixelated!=pixelated {tab.pixelated=pixelated;tab.load(path.to_owned(),ui.ctx().clone());}
+            crate::theme::image_scale_selector(ui, &mut self.session_image_fit);
+            let mut sampling = if self.session_image_pixelated { "pixel" } else { "smooth" }.to_owned();
+            crate::theme::compact_selector(ui, &mut sampling, [("smooth","平滑显示"),("pixel","像素显示")]);
+            self.session_image_pixelated = sampling == "pixel";
             tab.background.controls(ui,&mut tab.background_color);
             if is_browsable_image(path) {
                 self.browser.controls(ui);
@@ -845,6 +860,14 @@ impl Assets {
         if reload {tab.original=None;tab.pan=egui::Vec2::ZERO;tab.zoom=None;tab.load(path.to_owned(),ui.ctx().clone());}
         if let Some(error) = &tab.error { ui.label(error); }
         if tab.texture.is_some() { self.displayed_image=Some(path.to_owned()); }
+        let preview_changed = old_preview != (self.session_image_pixelated, self.session_image_channel, self.session_image_apply_alpha);
+        if preview_changed { self.image_prefetch = None; }
+        if old_fit != self.session_image_fit || preview_changed {
+            for (cached_path, cached) in &mut self.images {
+                if old_fit != self.session_image_fit { cached.reset_scale(self.session_image_fit); }
+                if preview_changed { cached.sync_preview(self.session_image_pixelated, self.session_image_channel, self.session_image_apply_alpha, cached_path, ui.ctx()); }
+            }
+        }
         let display_path=if browsing {self.displayed_image.as_deref().unwrap_or(path)} else {path};
         let tab=self.images.get_mut(display_path).expect("displayed image tab");
         let Some(texture) = &tab.texture else { ui.spinner(); return; };
@@ -967,6 +990,34 @@ fn shader_layout(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
 
 #[cfg(test)]
 mod physical_image_zoom_tests {
+    #[test]
+    fn preview_scale_resets_cached_image_zoom_and_pan() {
+        let mut assets = super::Assets::default();
+        assets.set_default_image_fit(true);
+        for name in ["first.png", "second.png"] {
+            let mut tab = super::ImageTab::default();
+            tab.zoom = Some(4.0);
+            tab.pan = eframe::egui::vec2(20.0, 30.0);
+            assets.images.insert(name.into(), tab);
+        }
+        for tab in assets.images.values_mut() { tab.reset_scale(false); }
+        assert!(assets.images.values().all(|tab| tab.zoom == Some(1.0) && tab.pan == eframe::egui::Vec2::ZERO));
+        for tab in assets.images.values_mut() { tab.reset_scale(true); }
+        assert!(assets.images.values().all(|tab| tab.zoom.is_none()));
+    }
+
+    #[test]
+    fn image_tabs_share_sampling_channels_and_alpha() {
+        let ctx = eframe::egui::Context::default();
+        let mut tabs = [super::ImageTab::default(), super::ImageTab::default()];
+        for tab in &mut tabs {
+            tab.sync_preview(true, super::Channel::G, true, std::path::Path::new("not-loaded.png"), &ctx);
+            assert!(tab.pixelated && tab.apply_alpha);
+            assert!(tab.channel == super::Channel::G);
+            assert!(tab.pending.is_none());
+        }
+    }
+
     use super::*;
     #[test]
     fn one_hundred_percent_maps_source_to_physical_pixels_at_all_dpi(){

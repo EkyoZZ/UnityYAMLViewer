@@ -2010,7 +2010,7 @@ Ctrl+Shift+F9 停止录制（其他窗口中也可使用）。	Ctrl+Shift+F9 停
 写入错误日志失败	寫入錯誤日誌失敗	Failed to write error log	エラーログの書き込みに失敗	오류 로그 기록 실패	Fehlerprotokoll konnte nicht geschrieben werden	Échec d’écriture du journal d’erreurs
 
 正在启动录屏…	正在啟動錄影…	Starting recording…	録画を開始しています…	녹화 시작 중…	Aufnahme wird gestartet…	Démarrage de l’enregistrement…
-像素 Tile	像素 Tile	Pixel Tile	ピクセル Tile	픽셀 Tile	Pixel-Tile	Tile pixel
+绘Tile	繪Tile	Tile Painter	Tile ペイント	Tile 페인터	Tile-Maler	Peinture Tile
 画布尺寸	畫布尺寸	Canvas size	キャンバスサイズ	캔버스 크기	Leinwandgröße	Taille du canevas
 新建空白	新增空白	New blank	空白を作成	빈 캔버스	Neue leere Fläche	Nouveau canevas vide
 导入当前图片	匯入目前圖片	Import current image	現在の画像を取り込む	현재 이미지 가져오기	Aktuelles Bild importieren	Importer l’image actuelle
@@ -2161,3 +2161,156 @@ PS 插件尚未正式发布	PS 外掛尚未正式發佈	PS plugin has not been r
 显示 Slot	顯示 Slot	Show Slots	Slot を表示	Slot 표시	Slots anzeigen	Afficher les Slots
 当前 Slot	目前 Slot	Current Slot	現在の Slot	현재 Slot	Aktueller Slot	Slot actuel
 请将图片拖入素材库边框内。	請將圖片拖入素材庫邊框內。	Drop images inside the material library border.	素材ライブラリの枠内に画像をドロップしてください。	이미지를 소재 라이브러리 테두리 안에 놓으세요.	Bilder innerhalb des Materialbibliotheksrahmens ablegen.	Déposez les images à l’intérieur du cadre de la bibliothèque.
+
+铅笔	鉛筆	Pencil	鉛筆	연필	Bleistift	Crayon
+笔尖尺寸	筆尖尺寸	Tip size	ペン先サイズ	펜촉 크기	Spitzengröße	Taille de pointe
+画笔橡皮擦	筆刷橡皮擦	Brush eraser	ブラシ消しゴム	브러시 지우개	Pinselradierer	Gomme pinceau
+铅笔橡皮擦	鉛筆橡皮擦	Pencil eraser	鉛筆消しゴム	연필 지우개	Bleistiftradierer	Gomme crayon
+
+重启软件后生效	重新啟動軟體後生效	Takes effect after restarting the app	アプリの再起動後に有効	앱을 다시 시작하면 적용됩니다	Wirksam nach einem Neustart der Anwendung	Prend effet après le redémarrage de l’application
+
+不透明度	不透明度	Opacity	不透明度	불투명도	Deckkraft	Opacité
+
+画笔样式	筆刷樣式	Brush style	ブラシスタイル	브러시 스타일	Pinselstil	Style de pinceau
+柔边圆	柔邊圓	Soft round	ソフト円	부드러운 원형	Weicher Rundpinsel	Rond doux
+硬边圆	硬邊圓	Hard round	ハード円	단단한 원형	Harter Rundpinsel	Rond dur
+硬度	硬度	Hardness	硬さ	경도	Härte	Dureté
+
+正常	正常	Normal	通常	일반	Normal	Normal
+正片叠底	色彩增值	Multiply	乗算	곱하기	Multiplizieren	Produit
+滤色	濾色	Screen	スクリーン	스크린	Negativ multiplizieren	Superposition
+叠加	覆蓋	Overlay	オーバーレイ	오버레이	Ineinanderkopieren	Incrustation
+变暗	變暗	Darken	比較（暗）	어둡게	Abdunkeln	Obscurcir
+变亮	變亮	Lighten	比較（明）	밝게	Aufhellen	Éclaircir
+差值	差值	Difference	差の絶対値	차이	Differenz	Différence
+画笔混合模式	筆刷混合模式	Brush blending mode	ブラシ描画モード	브러시 혼합 모드	Pinsel-Mischmodus	Mode de fusion du pinceau
+
+压力控制大小	壓力控制大小	Pressure controls size	筆圧でサイズを制御	필압으로 크기 제어	Druck steuert Größe	Pression sur la taille
+压力控制不透明度	壓力控制不透明度	Pressure controls opacity	筆圧で不透明度を制御	필압으로 불투명도 제어	Druck steuert Deckkraft	Pression sur l’opacité
+最小直径	最小直徑	Minimum diameter	最小直径	최소 직경	Mindestdurchmesser	Diamètre minimal
+当前压力	目前壓力	Current pressure	現在の筆圧	현재 필압	Aktueller Druck	Pression actuelle
+未检测到笔压力，使用固定参数	未偵測到筆壓，使用固定參數	No pen pressure detected; using fixed settings	筆圧未検出：固定設定を使用	필압 감지 안 됨: 고정 설정 사용	Kein Stiftdruck erkannt; feste Werte aktiv	Pression non détectée : réglages fixes
+柔边圆压力大小	柔邊圓壓力大小	Soft round pressure size	ソフト円・筆圧サイズ	부드러운 원형 필압 크기	Weicher Rundpinsel: Druckgröße	Rond doux : taille par pression
+硬边圆压力大小	硬邊圓壓力大小	Hard round pressure size	ハード円・筆圧サイズ	단단한 원형 필압 크기	Harter Rundpinsel: Druckgröße	Rond dur : taille par pression
+柔边圆压力不透明度	柔邊圓壓力不透明度	Soft round pressure opacity	ソフト円・筆圧不透明度	부드러운 원형 필압 불투명도	Weicher Rundpinsel: Druckdeckkraft	Rond doux : opacité par pression
+硬边圆压力不透明度	硬邊圓壓力不透明度	Hard round pressure opacity	ハード円・筆圧不透明度	단단한 원형 필압 불투명도	Harter Rundpinsel: Druckdeckkraft	Rond dur : opacité par pression
+
+缩略图大小：最小每行5个，最大每行1个	縮圖大小：最小每行5個，最大每行1個	Thumbnail size: five per row at minimum, one at maximum	サムネイルサイズ：最小で1行5枚、最大で1枚	썸네일 크기: 최소 한 줄 5개, 최대 1개	Miniaturgröße: mindestens fünf je Zeile, maximal eine	Taille des miniatures : cinq par ligne au minimum, une au maximum
+
+复制当前选中格为图层	複製目前選取格為圖層	Copy selected cell to layer	選択セルをレイヤーに複製	선택 셀을 레이어로 복제	Ausgewählte Zelle als Ebene kopieren	Copier la case sélectionnée en calque
+复制所有格为图层	複製所有格為圖層	Copy all cells to layer	全セルをレイヤーに複製	모든 셀을 레이어로 복제	Alle Zellen als Ebene kopieren	Copier toutes les cases en calque
+复制图层	複製圖層	Duplicate layer	レイヤーを複製	레이어 복제	Ebene duplizieren	Dupliquer le calque
+副本	副本	Copy	コピー	복사본	Kopie	Copie
+
+矩形选取	矩形選取	Rectangular selection	長方形選択	사각형 선택	Rechteckauswahl	Sélection rectangulaire
+椭圆选取	橢圓選取	Elliptical selection	楕円選択	타원 선택	Ellipsenauswahl	Sélection elliptique
+套索选取	套索選取	Lasso selection	なげなわ選択	올가미 선택	Lassoauswahl	Sélection au lasso
+多边形选取	多邊形選取	Polygonal selection	多角形選択	다각형 선택	Polygonauswahl	Sélection polygonale
+取消选区	取消選區	Deselect	選択解除	선택 해제	Auswahl aufheben	Désélectionner
+选取区域过大，请缩小范围。	選取區域過大，請縮小範圍。	Selection area too large; reduce its size.	選択範囲が大きすぎます。小さくしてください。	선택 영역이 너무 큽니다. 줄여 주세요.	Auswahl zu groß; bitte verkleinern.	Zone de sélection trop grande ; réduisez-la.
+横向排列	橫向排列	Horizontal layout	横向き配置	가로 배치	Horizontal anordnen	Disposition horizontale
+竖向排列	直向排列	Vertical layout	縦向き配置	세로 배치	Vertikal anordnen	Disposition verticale
+
+工程预览；请进入绘Tile进行编辑。	工程預覽；請進入繪Tile進行編輯。	Project preview; open Tile Painter to edit.	工程プレビュー。編集するには Tile ペイントを開いてください。	프로젝트 미리보기입니다. 편집하려면 Tile 페인터를 여세요.	Projektvorschau; zum Bearbeiten Tile-Maler öffnen.	Aperçu du projet ; ouvrez Peinture Tile pour modifier.
+高度Tile本版暂不支持编辑，仅提供只读预览。	高度Tile本版暫不支援編輯，僅提供唯讀預覽。	Raised Tiles are read-only in this version.	このバージョンの高さ付き Tile は読み取り専用です。	이 버전에서는 높이 Tile의 읽기 전용 미리보기만 지원합니다.	Höhen-Tiles sind in dieser Version schreibgeschützt.	Les Tiles en hauteur sont en lecture seule dans cette version.
+带高度	帶高度	Raised	高さ付き	높이 포함	Mit Höhe	En hauteur
+尖顶六边形	尖頂六邊形	Pointy hexagon	頂点上の六角形	뾰족한 육각형	Spitzes Sechseck	Hexagone pointu
+平顶六边形	平頂六邊形	Flat-top hexagon	平頂六角形	평평한 육각형	Flaches Sechseck	Hexagone à sommet plat
+
+子组绕回	子組繞回	Subgroup wrap	サブグループ折り返し	하위 그룹 래핑	Untergruppen-Wiederholung	Bouclage par sous-groupes
+启用子组边缘联动	啟用子組邊緣聯動	Link subgroup edges	サブグループ境界を連動	하위 그룹 경계 연동	Untergruppenränder verknüpfen	Lier les bords des sous-groupes
+子组绕回仅支持多格矩形或菱形布局。	子組繞回僅支援多格矩形或菱形排列。	Subgroup wrap supports multi-cell rectangle or diamond layouts.	複数セルの長方形・菱形配置で利用できます。	다중 셀 사각형/마름모 배치에서 지원됩니다.	Für rechteckige oder rautenförmige Mehrzellenlayouts.	Disponible pour les dispositions multicases rectangulaires ou en losange.
+当前子组	目前子組	Current subgroup	現在のサブグループ	현재 하위 그룹	Aktuelle Untergruppe	Sous-groupe actuel
+选中格决定当前子组；边缘抬笔后联动，内部独立。	選取格決定目前子組；邊緣抬筆後聯動，內部獨立。	The selected cell sets the subgroup; edges link on release, interiors stay independent.	選択セルで対象を決定。ペンを離すと境界を連動し、内部は独立。	선택 셀이 그룹을 정합니다. 펜을 떼면 경계를 연동하며 내부는 독립적입니다.	Gewählte Zelle bestimmt die Gruppe; Ränder werden beim Loslassen verknüpft, Innenbereiche bleiben unabhängig.	La case choisit le groupe ; les bords sont liés au relâchement, les intérieurs restent indépendants.
+通过剪切的图层	剪下的圖層	Layer via Cut	選択範囲を切り取ったレイヤー	잘라낸 레이어	Ebene durch Ausschneiden	Calque par couper
+
+当前无接触，上次压力	目前無接觸，上次壓力	No contact; last pressure	非接触・前回の筆圧	현재 접촉 없음, 마지막 필압	Kein Kontakt; letzter Druck	Sans contact ; dernière pression
+尚未收到压力，请用笔按压测试	尚未收到壓力，請用筆按壓測試	No pressure received yet; press the pen to test	筆圧未受信。ペンを押してテスト	필압 미수신: 펜을 눌러 테스트하세요	Noch kein Druck empfangen; mit Stift testen	Aucune pression reçue ; testez en appuyant le stylet
+
+流量	流量	Flow	流量	흐름	Fluss	Débit
+笔触间距	筆觸間距	Dab spacing	筆先の間隔	브러시 간격	Pinselabstand	Espacement
+压力控制流量	壓力控制流量	Pressure controls flow	筆圧で流量を制御	필압으로 흐름 제어	Druck steuert Fluss	Pression sur le débit
+柔边圆压力不透明度和流量	柔邊圓壓力不透明度和流量	Soft round pressure opacity and flow	ソフト円・筆圧不透明度と流量	부드러운 원형 필압 불투명도와 흐름	Weicher Rundpinsel: Druckdeckkraft und Fluss	Rond doux : opacité et débit par pression
+硬边圆压力不透明度和流量	硬邊圓壓力不透明度和流量	Hard round pressure opacity and flow	ハード円・筆圧不透明度と流量	단단한 원형 필압 불투명도와 흐름	Harter Rundpinsel: Druckdeckkraft und Fluss	Rond dur : opacité et débit par pression
+
+常规画笔	一般筆刷	General brushes	一般ブラシ	일반 브러시	Allgemeine Pinsel	Pinceaux généraux
+组	組	Group	グループ	그룹	Gruppe	Groupe
+编组	編組	Group selection	グループ化	그룹 만들기	Gruppieren	Grouper
+链接图层	連結圖層	Link layers	レイヤーをリンク	레이어 연결	Ebenen verknüpfen	Lier les calques
+取消链接	取消連結	Unlink	リンクを解除	연결 해제	Verknüpfung lösen	Délier
+解散组	解散組	Ungroup	グループ解除	그룹 해제	Gruppierung aufheben	Dissocier
+无分组	無分組	Ungrouped	グループなし	그룹 없음	Ohne Gruppe	Sans groupe
+穿透	穿透	Pass through	通過	통과	Hindurchwirken	Transfert
+链接蒙版与内容	連結遮色片與內容	Link mask and content	マスクと内容をリンク	마스크와 내용 연결	Maske und Inhalt verknüpfen	Lier le masque au contenu
+选中对象包含受保护图层，无法删除。	選取物件包含受保護圖層，無法刪除。	Selection contains protected layers and cannot be deleted.	保護されたレイヤーを含むため削除できません。	보호된 레이어가 있어 삭제할 수 없습니다.	Auswahl enthält geschützte Ebenen und kann nicht gelöscht werden.	La sélection contient des calques protégés et ne peut pas être supprimée.
+组内存在锁定图层，无法删除组。	組內存在鎖定圖層，無法刪除組。	The group contains locked layers and cannot be deleted.	ロックされたレイヤーを含むグループは削除できません。	잠긴 레이어가 있어 그룹을 삭제할 수 없습니다.	Die Gruppe enthält gesperrte Ebenen und kann nicht gelöscht werden.	Le groupe contient des calques verrouillés et ne peut pas être supprimé.
+解散后移除组蒙版和组样式，保留成员图层。	解散後移除組遮色片和組樣式，保留成員圖層。	Ungrouping removes the group mask and styles, keeping its layers.	グループ解除はグループのマスクとスタイルを削除し、レイヤーを保持します。	그룹 해제 시 그룹 마스크와 스타일은 제거되고 레이어는 유지됩니다.	Beim Aufheben entfallen Gruppenmaske und Stile; Ebenen bleiben erhalten.	La dissociation supprime le masque et les styles du groupe et conserve ses calques.
+排除	排除	Exclusion	除外	제외	Ausschluss	Exclusion
+线性减淡	線性加亮	Linear dodge	覆い焼き（リニア）	선형 닷지	Linear abwedeln	Densité linéaire moins
+减去	減去	Subtract	減算	빼기	Subtrahieren	Soustraction
+柔光	柔光	Soft light	ソフトライト	소프트 라이트	Weiches Licht	Lumière tamisée
+强光	強光	Hard light	ハードライト	하드 라이트	Hartes Licht	Lumière crue
+颜色减淡	加亮顏色	Color dodge	覆い焼きカラー	색상 닷지	Farbig abwedeln	Densité couleur moins
+颜色加深	加深顏色	Color burn	焼き込みカラー	색상 번	Farbig nachbelichten	Densité couleur plus
+划分	劃分	Divide	除算	나누기	Dividieren	Division
+线性加深	線性加深	Linear burn	焼き込み（リニア）	선형 번	Linear nachbelichten	Densité linéaire plus
+色相	色相	Hue	色相	색조	Farbton	Teinte
+饱和度	飽和度	Saturation	彩度	채도	Sättigung	Saturation
+明度	明度	Lightness	明度	명도	Helligkeit	Luminosité
+亮度/对比度	亮度/對比	Brightness/Contrast	明るさ・コントラスト	밝기/대비	Helligkeit/Kontrast	Luminosité/Contraste
+色阶	色階	Levels	レベル補正	레벨	Tonwertkorrektur	Niveaux
+曲线	曲線	Curves	トーンカーブ	곡선	Gradationskurven	Courbes
+色相/饱和度	色相/飽和度	Hue/Saturation	色相・彩度	색조/채도	Farbton/Sättigung	Teinte/Saturation
+锁定	鎖定	Lock	ロック	잠금	Sperren	Verrouiller
+透明度	透明度	Transparency	透明度	투명도	Transparenz	Transparence
+绘制	繪製	Painting	描画	그리기	Malen	Peinture
+颜色叠加	顏色覆蓋	Color overlay	カラーオーバーレイ	색상 오버레이	Farbüberlagerung	Incrustation couleur
+蒙版	遮色片	Mask	マスク	마스크	Maske	Masque
+添加白色蒙版	新增白色遮色片	Add white mask	白いマスクを追加	흰색 마스크 추가	Weiße Maske hinzufügen	Ajouter un masque blanc
+启用蒙版	啟用遮色片	Enable mask	マスクを有効化	마스크 활성화	Maske aktivieren	Activer le masque
+反相蒙版	反相遮色片	Invert mask	マスクを反転	마스크 반전	Maske umkehren	Inverser le masque
+应用蒙版	套用遮色片	Apply mask	マスクを適用	마스크 적용	Maske anwenden	Appliquer le masque
+删除蒙版	刪除遮色片	Delete mask	マスクを削除	마스크 삭제	Maske löschen	Supprimer le masque
+调整	調整	Adjustments	色調補正	조정	Korrekturen	Réglages
+编辑像素	編輯像素	Edit pixels	ピクセルを編集	픽셀 편집	Pixel bearbeiten	Modifier les pixels
+编辑蒙版	編輯遮色片	Edit mask	マスクを編集	마스크 편집	Maske bearbeiten	Modifier le masque
+图层样式	圖層樣式	Layer styles	レイヤースタイル	레이어 스타일	Ebenenstile	Styles de calque
+模糊	模糊	Blur	ぼかし	흐림	Weichzeichnen	Flou
+效果按单格计算，边缘会裁切。	效果按單格計算，邊緣會裁切。	Effects are calculated per cell and clipped at its edges.	効果はセル単位で計算し、端で切り取ります。	효과는 셀별로 계산되며 가장자리에서 잘립니다.	Effekte werden je Zelle berechnet und an den Rändern beschnitten.	Les effets sont calculés par cellule et rognés aux bords.
+亮度	亮度	Brightness	明るさ	밝기	Helligkeit	Luminosité
+对比度	對比	Contrast	コントラスト	대비	Kontrast	Contraste
+黑场	黑場	Black point	黒点	검정점	Schwarzpunkt	Point noir
+白场	白場	White point	白点	흰점	Weißpunkt	Point blanc
+重置曲线	重設曲線	Reset curves	カーブをリセット	곡선 초기화	Kurven zurücksetzen	Réinitialiser les courbes
+图层已锁定移动或不可编辑。	圖層已鎖定移動或無法編輯。	Layer movement is locked or unavailable.	レイヤーの移動がロックされているか利用できません。	레이어 이동이 잠겨 있거나 사용할 수 없습니다.	Ebenenbewegung ist gesperrt oder nicht verfügbar.	Le déplacement du calque est verrouillé ou indisponible.
+移动到组	移動到組	Move to group	グループへ移動	그룹으로 이동	In Gruppe verschieben	Déplacer vers le groupe
+停用图层蒙版	停用圖層遮色片	Disable layer mask	レイヤーマスクを無効化	레이어 마스크 비활성화	Ebenenmaske deaktivieren	Désactiver le masque de fusion
+启用图层蒙版	啟用圖層遮色片	Enable layer mask	レイヤーマスクを有効化	레이어 마스크 활성화	Ebenenmaske aktivieren	Activer le masque de fusion
+删除图层蒙版	刪除圖層遮色片	Delete layer mask	レイヤーマスクを削除	레이어 마스크 삭제	Ebenenmaske löschen	Supprimer le masque de fusion
+应用图层蒙版	套用圖層遮色片	Apply layer mask	レイヤーマスクを適用	레이어 마스크 적용	Ebenenmaske anwenden	Appliquer le masque de fusion
+蒙版转为选区	遮色片轉為選取範圍	Mask to selection	マスクを選択範囲に	마스크를 선택 영역으로	Maske als Auswahl	Masque vers sélection
+添加蒙版到选区	新增遮色片至選取範圍	Add mask to selection	マスクを選択範囲に追加	선택 영역에 마스크 추가	Maske zur Auswahl hinzufügen	Ajouter le masque à la sélection
+从选区中减去蒙版	從選取範圍減去遮色片	Subtract mask from selection	選択範囲からマスクを削除	선택 영역에서 마스크 빼기	Maske von Auswahl abziehen	Soustraire le masque de la sélection
+蒙版与选区交叉	遮色片與選取範圍交集	Intersect mask with selection	マスクと選択範囲の共通部分	마스크와 선택 영역 교차	Maske mit Auswahl schneiden	Intersection du masque et de la sélection
+取消蒙版与内容链接	取消遮色片與內容連結	Unlink mask and content	マスクと内容のリンクを解除	마스크와 내용 연결 해제	Maske und Inhalt trennen	Délier le masque et le contenu
+取样所有可见图层	取樣所有可見圖層	Sample all visible layers	表示中の全レイヤーをサンプル	보이는 모든 레이어 샘플링	Alle sichtbaren Ebenen aufnehmen	Échantillonner tous les calques visibles
+左右拖拽缩放	左右拖曳縮放	Drag horizontally to zoom	左右ドラッグでズーム	좌우로 드래그하여 확대/축소	Zum Zoomen horizontal ziehen	Glisser horizontalement pour zoomer
+平滑曲线	平滑曲線	Smooth curve	カーブを滑らかに	곡선 부드럽게	Kurve glätten	Lisser la courbe
+点击添加控制点，拖动圆形手柄，双击内部点删除。	點擊新增控制點，拖曳圓形控制柄，雙擊內部點刪除。	Click to add points, drag round handles, double-click interior points to delete.	クリックで点を追加、丸いハンドルをドラッグ、内部の点はダブルクリックで削除。	클릭하여 점 추가, 원형 핸들 드래그, 내부 점을 두 번 클릭하여 삭제.	Klicken fügt Punkte hinzu, runde Griffe ziehen, innere Punkte per Doppelklick löschen.	Cliquer pour ajouter, glisser les poignées rondes, double-cliquer sur un point intérieur pour le supprimer.
+创建剪贴蒙版	建立剪裁遮色片	Create clipping mask	クリッピングマスクを作成	클리핑 마스크 만들기	Schnittmaske erstellen	Créer un masque d’écrêtage
+释放剪贴蒙版	釋放剪裁遮色片	Release clipping mask	クリッピングマスクを解除	클리핑 마스크 해제	Schnittmaske lösen	Annuler le masque d’écrêtage
+当前有未保存的修改，打开工程将替换当前编辑内容。是否继续？	目前有未儲存的修改，開啟工程將取代目前編輯內容。是否繼續？	There are unsaved changes. Opening a project will replace the current contents. Continue?	未保存の変更があります。プロジェクトを開くと現在の内容が置き換わります。続行しますか？	저장하지 않은 변경이 있습니다. 프로젝트를 열면 현재 내용이 바뀝니다. 계속할까요?	Ungespeicherte Änderungen vorhanden. Das Öffnen ersetzt den aktuellen Inhalt. Fortfahren?	Des modifications ne sont pas enregistrées. Ouvrir un projet remplacera le contenu actuel. Continuer ?
+放弃修改并打开	放棄修改並開啟	Discard changes and open	変更を破棄して開く	변경 사항 버리고 열기	Änderungen verwerfen und öffnen	Abandonner et ouvrir
+模式	模式	Mode	モード	모드	Modus	Mode
+拖到此处移出组	拖曳至此處移出群組	Drop here to move out of group	ここにドロップしてグループから移動	여기에 놓아 그룹 밖으로 이동	Hier ablegen, um die Gruppe zu verlassen	Déposer ici pour sortir du groupe
+复制组	複製群組	Duplicate group	グループを複製	그룹 복제	Gruppe duplizieren	Dupliquer le groupe
+删除组	刪除群組	Delete group	グループを削除	그룹 삭제	Gruppe löschen	Supprimer le groupe
+确认清空	確認清空	Confirm clear	消去の確認	비우기 확인	Leeren bestätigen	Confirmer l’effacement
+确认删除	確認刪除	Confirm deletion	削除の確認	삭제 확인	Löschen bestätigen	Confirmer la suppression
+将清空当前编辑目标的内容，是否继续？	將清空目前編輯目標的內容，是否繼續？	Clear the current editing target’s contents?	現在の編集対象の内容を消去しますか？	현재 편집 대상의 내용을 비울까요?	Inhalt des aktuellen Bearbeitungsziels leeren?	Effacer le contenu de la cible actuelle ?
+将删除选中的图层或组及组内内容，是否继续？	將刪除選取的圖層或群組及組內內容，是否繼續？	Delete the selected layers or groups and their contents?	選択したレイヤーやグループとその内容を削除しますか？	선택한 레이어나 그룹과 그 내용을 삭제할까요?	Ausgewählte Ebenen oder Gruppen samt Inhalt löschen?	Supprimer les calques ou groupes sélectionnés et leur contenu ?
+清空	清空	Clear	消去	비우기	Leeren	Effacer
+填充选区	填滿選取範圍	Fill selection	選択範囲を塗りつぶし	선택 영역 채우기	Auswahl füllen	Remplir la sélection
+已填充选区。	已填滿選取範圍。	Selection filled.	選択範囲を塗りつぶしました。	선택 영역을 채웠습니다.	Auswahl gefüllt.	Sélection remplie.
+输出色阶	輸出色階	Output levels	出力レベル	출력 레벨	Ausgabewerte	Niveaux de sortie
+由父组锁定	由父群組鎖定	Locked by parent group	親グループによりロック	부모 그룹에 의해 잠김	Durch übergeordnete Gruppe gesperrt	Verrouillé par le groupe parent

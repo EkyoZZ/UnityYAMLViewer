@@ -4516,3 +4516,236 @@ show 输出离屏时提前 return，原来跳过末尾 finish_tools，导致拖�
 - 用户明确反馈“已测试主程序能成功下载并运行”。主程序手动查询后下载安装包、完成现有校验并启动安装器的用户链路实测通过。此结论仅覆盖下载和运行安装器，不代表新版本比较界面已验证或PS插件全部功能通过。
 
 - 安装器版本比较核验：cargo check --tests --locked --offline --manifest-path plugins/photoshop-isometric-tile/installer/Cargo.toml 通过（target/ps-installer-version-action-check.log），新增Rust用例仅编译未运行。git diff --check和七语言摘要完整性检查通过，未生成EXE。
+
+
+## 2026-11-23 绘Tile 本地验证构建完成（未发布）
+
+- 经用户明确授权，编译前主程序进程与固定 EXE 独占访问检查通过；cargo build --release --locked --offline 成功，耗时 1分12秒。
+- 产物 target/release/unity_yaml_viewer.exe，文件版本 1.3.7，产品版本 1.3.7，34083840 字节，SHA-256 8cd10c623e92d2c40b31bec9ed771df99ac429799504aa71e716fb0250cc59c9；本地 .sha256 已同步。
+- 包含硬边圆形铅笔、铅笔／柔边画笔 Tab、共用 B 与对应 E 橡皮、工具图标及绘Tile入口更名。压感、硬度／流量／间距调节尚未实现，带高度模式仍为单像素限制。
+- 未自动启动、未发布；实际界面与绘制行为仍待用户验证。构建日志 target/tile-painter-release-build.log，产物核验 target/tile-painter-release-verification.json。
+
+
+## 2026-11-23 绘Tile 与图片预览调整本地构建（未发布）
+
+- 用户明确授权，构建前主程序进程与固定 EXE 独占访问检查通过；cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe；文件／产品版本 1.3.7／1.3.7，34187264 字节，SHA-256 30c0ba991db28145cbfab9ab4d51efb9c0a1907b72c88d2b309cef743adb8d9e。本地 .sha256 已同步。
+- 包含图片预览共用缩放模式／采样／通道／应用Alpha、默认适应窗口仅重启初始化、绘Tile单行工具与单一尺寸预览、不透明度文案、半透明亮边显示修正、未锁图标灰色、清空图层按钮归位、素材导入入口合并、可用加减图标提亮加粗。
+- 未自动启动或发布；实际跨图预览、重启初始化、绘制效果、界面布局与各主题按钮仍待用户运行验证。画笔压感、独立硬度／流量／间距仍未实现。
+- 日志 target/tile-refinements-release-build.log，核验 target/tile-refinements-release-verification.json。
+
+
+## 2026-11-23 画笔样式与取色修正本地构建（未发布）
+
+- 用户授权，构建前主程序进程及固定 EXE 独占访问检查通过；cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe；文件／产品版本 1.3.7／1.3.7，34056192 字节，SHA-256 53517d960c80f89b316c7356bdd2329fda14fb898e41fbeadcdc9d2ac4fc2373。本地 .sha256 同步。
+- 包含柔边／硬边圆及硬度、七种画笔混合模式（大小数值框后）、工程参数保存、无边界合成取色、有边界有限范围取色、吸管光标、绘制颜色／预览背景色独立窗口置顶及点击唤回。
+- 未自动启动或发布。实际取色边界、吸管热点、各模式／硬度、工程读写及调色窗口层级待用户运行验证；流量、压感与其他 PS 模式未实现。
+- 日志 target/tile-brush-picker-release-build.log，核验 target/tile-brush-picker-release-verification.json。
+
+
+## 2026-11-23 选区／压感与素材库本地构建（未发布）
+
+- 用户授权，构建前主程序进程及固定 EXE 独占访问检查通过；cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe；文件／产品版本 1.3.7／1.3.7，34345984 字节，SHA-256 ea735efd061643ec07a741280242a823b7877f5bb5642da93ac355c27758e6f9。本地 .sha256 同步。
+- 包含样式箭头／硬度滑条修正、百分比缩放、画笔衰减与抗锯齿／单笔覆盖、Windows Ink 压力大小／不透明度、素材缩略图等比居中与5至1列大小滑条、BaseLayer分范围复制／普通图层复制及Ctrl+J、四模式选区及M记忆、选区增减／移动／Ctrl剪切移动与复制裁切、工具组再次点击展开、手柄右键横竖排列及菜单边缘换侧。选取工具紧随移动工具。
+- 未自动启动或发布。界面、选区编辑／右键／复制／撤销、菜单边缘布局、软硬笔触与Wacom实机压力仍待运行验证；单元用例此前仅编译未运行。流量、WinTab专用驱动、压感曲线编辑、选区羽化／旋转缩放及系统剪贴板未实现。
+- 日志 target/tile-selection-pressure-release-build.log，核验 target/tile-selection-pressure-release-verification.json。
+
+
+## 2026-11-23 用户指定绘制参考：PhotoCraft
+
+- 用户指定 https://github.com/storytold/photocraft 作为后续绘制参考。已在线核对README：项目自称纯Rust的Photoshop clean-room reimplementation（净室重实现），不据此称为Adobe源码逆向。仓库workspace标注MIT OR Apache-2.0；本轮只读参考，未复制其源码或添加依赖。
+- 已读 crates/paint/src/lib.rs、render.rs、dynamics.rs：独立笔画缓冲、笔尖间距与动态输入、压力插值、流量逐落点累积但受笔画不透明度上限限制，再与笔前像素合成；可参考以改进当前最大覆盖近似。流量仍按用户约定最后接入，不能据阅读标记已实现。
+- 已读 crates/tablet/src/lib.rs：Windows Ink补充笔状态，以及WinTab后备、倾斜／旋转／笔尾信息；当前项目Windows Ink压力大小已用户验证，不因参考而替换现有输入链路。
+- 已读 crates/compose/src/lib.rs 与 crates/ops/src/lib.rs：显示RGB合成参考与CPU/GPU对照、写时复制像素块／事务快照历史；用于后续颜色／撤销行为对照，不保证其全部功能已独立验证。
+- 来源：https://raw.githubusercontent.com/storytold/photocraft/main/crates/paint/src/render.rs 、https://raw.githubusercontent.com/storytold/photocraft/main/crates/paint/src/dynamics.rs 、https://raw.githubusercontent.com/storytold/photocraft/main/crates/tablet/src/lib.rs 、https://raw.githubusercontent.com/storytold/photocraft/main/crates/compose/src/lib.rs 、https://raw.githubusercontent.com/storytold/photocraft/main/crates/ops/src/lib.rs 。链接随main变化，正式采纳实现前应记录当时提交并按实际文件保留许可归属。
+
+
+## 2026-11-23 PhotoCraft参考范围与Tile流量实现
+
+- 用户明确只优化Tile绘制体验，完整编辑需求直接使用PhotoCraft，不重复造完整编辑器。本轮独立实现距离落点／流量缓冲与压力流量，未复制外部源码、未加依赖。以笔画前快照合成，区分流量与整笔不透明度；旧最大覆盖近似替换。
+- 仅流量／间距／压感流量及当前Tile交互；不扩展完整笔刷、滤镜或PSD编辑体系。工程可选参数保持旧文件兼容，版本1.3.7，未重建EXE；检查证据 target/tile-brush-flow-check.log，Rust用例仅编译，实机待验证。
+
+
+## 2026-11-23 工程预览／子组／流量预设本地构建（未发布）
+
+- 用户明确授权，构建前主程序进程及固定 EXE 独占访问检查通过；cargo build --release --locked --offline 成功。
+- 产物 target/release/unity_yaml_viewer.exe；文件／产品版本 1.3.7／1.3.7，34558464 字节，SHA-256 57fed713e90e9b6444db4f38ec2d2411af4120c809d5d110478a5b809c3d3a33。本地 .sha256 已同步。
+- 包含工具组菜单输入锁重入修正、工程标签后台预览与布局形状信息、高度Tile只读限制、子组边缘抬笔联动、Delete保护BaseLayer与Ctrl+Shift+J剪切新层、压感抬笔状态提示、Tile画笔距离采样／亚像素／流量／间距／压力流量，以及8种预设圆图标与笔触列表双向联动。
+- 未自动启动、未发布。实际菜单、预览刷新、子组与选区组合、图层快捷键、流量手感、预设联动及旧工程读写待用户验证；Rust用例此前仅编译未运行。Wacom压力大小既有用户验证不代表本轮所有流量压感行为通过。
+- 日志 target/tile-flow-presets-release-build.log，核验 target/tile-flow-presets-release-verification.json。
+
+## 2026-11-23 Tile图层组／蒙版链接适配（未构建）
+
+当前1.3.7源码新增layer_groups.rs和layer_properties.rs，实现层级组与基础图层外观；多选Ctrl／Shift、图层间链接、独立的蒙版内容链接、V移动和Tile回绕。schema 7保存，旧1–6兼容读取。详细范围与限制见当前版本记录；未生成新的EXE。
+
+参考：https://github.com/storytold/photocraft/blob/main/crates/doc/src/lib.rs （LayerMask.linked、Layer.link_group、Group）；https://github.com/storytold/photocraft/blob/main/crates/compose/src/composite.rs （composite_layer_plain的穿透／隔离及预乘覆盖插值）。为现有Tile模型独立适配，无源码复制。公开API目录请求曾网络超时，后通过raw源码核对模型。
+
+检查：cargo check --tests --locked --offline通过；新增测试仅编译未运行，界面及设备交互待验证。
+
+## 2026-11-23 图层组与蒙版链接本地构建（未发布）
+
+- 用户明确授权编译；构建前未发现unity_yaml_viewer进程，固定target/release/unity_yaml_viewer.exe独占访问通过。
+- cargo build --release --locked --offline成功，日志target/tile-groups-release-build.log；保留依赖及media_trim既有警告。
+- EXE文件／产品版本1.3.7／1.3.7，34565632字节，SHA-256 110a7372641a16cb09c8a13eafab719aee15c79af8bfe7d030e26977966167f8；本地unity_yaml_viewer.exe.sha256已更新。
+- 本次包含图层外观、组容器与穿透合成、多选链接、蒙版内容独立移动及此前选区轮廓／菜单调整。未自动启动、未发布；新增测试仅编译检查，实际交互、旧工程读写与导出效果仍待用户验证。
+
+## 2026-11-23 图层面板图标化（源码，未重建）
+
+按用户PS截图合并图层首行操作，新增图层使用方框加号、删除使用垃圾桶，锁定改图标；不透明度／填充保留直接输入和水平DragValue，不提供滑条下拉。组文字行移入文件夹图标菜单，清空操作保留图层右键菜单。cargo check --tests --locked --offline通过；未重建EXE，界面待实测，版本1.3.7。
+
+## 2026-11-23 蒙版缩略图右键（源码，未构建）
+
+右键蒙版缩略图提供启用、删除、应用、选区替换／加／减／交叉、反相及内容链接。灰度转硬选区以128为阈值；组及调整层禁用应用。cargo check --tests --locked --offline通过，新增用例仅编译，未生成EXE，界面待验证。
+
+## 2026-11-23 锁定图标联动（源码）
+
+绘制锁清除并禁用透明度锁；父组绘制锁也禁用成员透明度锁操作。cargo check --tests --locked --offline通过，未重建EXE，版本1.3.7，界面待验证。
+
+## 2026-11-23 移动光标层级（源码）
+
+移动三角光标改用独立Tooltip绘制层，避免画布及图层遮挡；未重建EXE，待实际界面验证。
+
+## 2026-11-23 工具上下文选项栏（源码）
+
+第二行按移动、选区、吸管、缩放、笔刷／擦子、形状及填充切换，隐藏无效参数。未扩展自动选层／对齐／变换。cargo check --tests --locked --offline通过，未重建EXE，界面待验证。
+
+## 2026-11-23 放弃修改恢复工程预览（源码）
+
+显式discard_requested事件使ProjectPreview重新异步加载保存文件，替换接收通道，防止空默认文档和过期渲染覆盖。新增回归用例仅编译，未运行；未生成EXE，版本1.3.7。
+
+## 2026-11-23 工程预览静默限频（源码）
+
+移除已有预览的后台更新转圈，保留首次加载状态。任务启动最小间隔1秒、变化稳定250ms、抬笔后取快照，无并发队列；纹理复用。cargo check --tests --locked --offline通过，未重建EXE，实际卡顿改善待验证。
+
+## 2026-11-23 绘Tile背景Tab（源码）
+
+背景仅棋盘格／自定义，颜色控件同排，无灰色；状态沿用本工程独立字段，不与全局背景共用。cargo check --tests --locked --offline通过，未重建EXE，界面待验证。
+
+## 2026-11-23 擦子图标清空图层（源码）
+
+图层操作栏复用Eraser图标调用clear_selected_layer，保留原权限与撤销；蒙版目标下禁用以区分图层清空。cargo check --tests --locked --offline通过，未生成EXE。
+
+## 2026-11-23 图层面板与预览调整本地构建（未发布）
+
+- 用户明确授权，构建前未发现unity_yaml_viewer运行，固定EXE独占访问通过。cargo build --release --locked --offline成功，日志target/tile-ui-refinements-release-build.log，保留依赖及media_trim既有警告。
+- 产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.7／1.3.7，34902016字节，SHA-256 47f47bc19032465732db28b88e0c22d5485bbeb0f895ebec969c1df2b6a46933；本地.sha256已更新。
+- 包含图层操作与锁定图标、蒙版右键、绘制锁与透明度锁联动、三角光标顶层、上下文工具栏、放弃修改恢复工程预览、静默限频刷新、独立背景Tab及擦子图标清空图层。
+- 未自动启动、未发布；实际交互与流畅度待用户验证，新增回归用例目前仅通过编译检查。应用版本保持1.3.7。
+
+## 2026-11-23 图标清晰度（源码）
+
+移动／画笔／擦子／搜索／新增／删除采用原生像素对齐绘制，面板统一正方形16px，垃圾桶简化重画，透明度锁改实心棋盘格。未重建EXE，不同DPI实际清晰度待验证。
+
+## 2026-11-23 直接添加蒙版（源码）
+
+顶部蒙版按钮单击添加白色链接蒙版并切到蒙版编辑；已有时禁用，不再开菜单，管理统一缩略图右键。cargo check --tests --locked --offline通过，未重建EXE。
+
+## 2026-11-23 清理孤立图层链接（源码）
+
+删除单层／多选／组、解散组及工程加载时清理单成员link_id；删除原快照支持撤销恢复链接。新增回归用例仅编译，cargo check --tests --locked --offline通过，未重建EXE。
+
+## 2026-11-23 锁图标像素对齐（源码）
+
+Lock／Unlock统一原生矢量，图层行与锁定栏复用；灰色与选中状态保持，未重建EXE，实际清晰度待验证。
+
+## 2026-11-23 锁定对象眼睛开关（源码）
+
+移除自身／祖先锁定对显示切换的限制，保留撤销和其他编辑权限；未重建EXE，界面待验证。
+
+## 2026-11-23 移动自动选择与Tab（源码）
+
+增加默认关闭的自动选择，图层／组改相邻Tab；启用时按可见像素和蒙版命中，关闭时只移动当前对象。组取最外层，保留多选／链接移动。新增用例仅编译，cargo check --tests --locked --offline通过，未重建EXE。
+
+## 2026-11-23 曲线／剪贴／图层目标／工具栏／打开保护（源码，未构建）
+
+新增curve_editor.rs：RGB和通道三次贝塞尔锚点／手柄、增删点、平滑、LUT；旧五点保持读取与节点转换，新存schema 8，应用1.3.7。新增同父级Alt间隙剪贴与右键切换、连续剪贴调整合成，调整图标与内容／蒙版互斥高亮。浮动工具栏方向独立缓存、取消滚动默认宽度并收缩。打开工程有未保存内容时暂存路径并弹确认，取消不替换。
+
+检查日志target/tile-curves-clipping-ui-check.log、target/tile-project-open-guard-check.log及target/tile-toolbar-orientation-check.log；cargo check --tests --locked --offline通过，用例仅编译未运行，未生成EXE。限制：组剪贴隔离、调整层不能作剪贴基底，无PS全功能色彩／直方图兼容。
+
+## 2026-11-23 组拖放／行对齐／新层位置（源码）
+
+组仅文件夹图标，开闭两态；眼睛最前固定、箭头统一列。组中部拖入、边缘排序与跨父级、根区域移出，多选根对象保留像素与索引映射，拒绝循环及受保护对象。组选中时新增层在孩子顶部并展开。新增用例仅编译；未重建EXE，实际拖放待验证。
+
+## 2026-11-23 外侧软硬笔尖预览（源码）
+
+外侧图标复用round_tip_coverage生成的缓存纹理，跟随硬度，尺寸仍在固定框内变化；铅笔预览不变。未重建EXE，实际显示待验证。
+
+## 2026-11-23 组右键文字（源码）
+
+复制／删除按组显示，组隐藏Ctrl+Shift+J剪切新层。未重建EXE，菜单待验证。
+
+## 2026-11-23 曲线与图层组交互本地构建（未发布）
+
+- 用户明确授权编译；构建前无unity_yaml_viewer进程，固定EXE独占访问检查通过。cargo build --release --locked --offline成功，日志target/tile-layers-curves-release-build.log。
+- 产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.7／1.3.7，34876416字节，SHA-256 e9b7d08834355d7d456bd2cca728abd5b06e7c361fd01d4c29cd9cfd6f520099；本地.sha256已更新。
+- 包含图标清晰度、蒙版直接添加、孤立链接清理、锁定眼睛开关、自动选择Tab、贝塞尔曲线和schema 8、Alt剪贴、调整图标与目标高亮、工具栏方向尺寸、打开未保存工程保护、组拖入拖出与新层顶部插入、软硬笔尖同步及组右键文字。
+- 构建保留依赖警告，以及identity_curves旧曲线测试辅助未在release使用、media_trim configure未使用警告。未自动启动、未发布；新增用例此前仅编译未运行，实际界面、曲线手柄、连续剪贴与拖放待用户验证。
+
+## 2026-11-23 矩形填充／清空删除确认／fx（源码）
+
+矩形新增内部填充，正常Alpha与回绕去重、选区和锁定约束，4Mi工作框；填充时隐藏笔尖参数。清空／删除图层与组各UI入口统一确认，取消不改动、确认可撤销。启用样式行显示fx并预留宽度。cargo check --tests --locked --offline通过，用例仅编译，未生成EXE，界面待验证。
+
+## 2026-11-23 图层行空隙收紧（源码）
+
+普通层移除空箭头占位，组箭头10、文件夹区域28、层级步进6、间距2，眼睛保持最前固定。未重建EXE，布局待验证。
+
+## 2026-11-23 多边形选区实时首段（源码）
+
+首点即开放预览，起点圆圈与8物理像素吸附闭合，按用户确认不改套索。cargo check --tests --locked --offline通过，新增用例仅编译，未重建EXE。
+
+## 2026-11-23 工具选项固定高度（源码）
+
+固定预留工具选项行，子Ui控件垂直居中；画布分配不再依赖各工具控件高度。未重建EXE，不同字号与切换待验证。
+
+## 2026-11-23 缩放比例下拉（源码）
+
+缩放工具显示self.zoom，改为25–6400%常用预设下拉，与顶栏和鼠标拖拽同步；切预设按比例调整pan保留中心。未重建EXE，交互待验证。
+
+## 2026-11-23 选区填色（源码）
+
+选区栏共享颜色／不透明度和填充按钮；Alt+Enter全绘制工具生效，按选区正常Alpha合成，保留选区与单步撤销，尊重锁定。新增用例仅编译；未重建EXE。
+
+## 2026-11-24 调整与fx参数框（源码）
+
+调整层行末三角、样式行fx切换独立参数框，点击选择对象和内容目标，再点／切层收起；移除侧栏常驻参数以避免列表跳动。复用现有编辑与撤销，锁定只读。新增用例仅编译，未重建EXE，交互待验证。
+
+## 2026-11-24 亮度／对比度滑条（源码）
+
+按参考图标签+数值、下方滑条，亮度-150～150，对比度用户确认-50～100；旧超范围值不在打开界面时截断。cargo check --tests --locked --offline通过，未重建EXE。
+
+## 2026-11-24 色阶／HSL控件（源码）
+
+新增levels_editor.rs，输入RGB直方图及黑／Gamma／白多滑块、输出渐变双滑块；输入上下文按组／剪贴计算并缓存至下次展开。HSL增加彩色滑条。输出色阶进入schema 9，旧值默认0／255，应用1.3.7。新增用例仅编译，未生成EXE，实际滑块待验证。
+
+## 2026-11-24 填充与调整控件本地构建（未发布）
+
+- 用户明确授权；构建前无unity_yaml_viewer运行，固定EXE独占访问通过。cargo build --release --locked --offline成功，日志target/tile-adjustments-ui-release-build.log。
+- 产物target/release/unity_yaml_viewer.exe，文件／产品版本1.3.7／1.3.7，34926080字节，SHA-256 7f7b3c70fdc61ddd948fec584c56f51a0fd5a0b24e04451e196f9dfa8756b4a2；本地.sha256已更新。
+- 包含矩形填充、清空／删除确认、fx标记、图层间隔、多边形预览、统一工具栏高度、缩放预设同步、Alt+Enter选区填色、调整／fx展开框、亮度／对比度滑条、色阶直方图与输出色阶及HSL彩色滑条；工程新存schema 9，应用版本仍1.3.7。
+- 仅本地构建，未自动启动、未发布；新增用例此前仅编译未运行，界面、快捷键和颜色结果待用户验证。保留依赖及未使用辅助函数警告。
+
+## 2026-11-24 参数框收缩（源码）
+
+去重复调整标题／正文标签，内容宽260，Window自动尺寸+内部自动收缩滚动；独立紧凑窗口缓存。未重建EXE，实际高度和位置待验证。
+
+## 2026-11-24 统一参数框宽度（源码）
+
+统一DETAIL_WIDTH=240，与曲线绘图区相同；曲线提示显式换行，不撑宽窗口，保留自动高度。未重建EXE，界面待验证。
+
+## 2026-11-24 调整层右键剪切项（源码）
+
+调整层同组一样隐藏Ctrl+Shift+J通过剪切的新层，仅普通像素层显示；执行端已有保护。未重建EXE。
+
+## 2026-11-24 继承隐藏的眼睛灰显（源码）
+
+眼睛高亮取visible&&ancestors_visible，未有效显示的Eye／EyeOff灰色；不改自身visible标记、不禁用开关。未重建EXE，主题与嵌套待验证。
+
+## 2026-11-24 继承父组锁图标（源码）
+
+父组锁行为保持，仅子对象显示灰色闭锁、不高亮，顶部继承锁不高亮；自身锁标记不变。未重建EXE，主题显示待验证。
+
+## 2026-11-24 继承锁BaseLayer禁用样式（源码）
+
+继承锁行内按钮直接复用BaseLayer相同helper与禁用状态，顶部继承锁也保留锁定但禁用。自有locked不变，眼睛独立。未重建EXE，颜色待验证。

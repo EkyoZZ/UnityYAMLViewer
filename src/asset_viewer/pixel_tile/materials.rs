@@ -16,7 +16,7 @@ impl Editor {
         if self.layers.len() >= 32 || total + added > LAYER_BYTES { self.message = tr("图层数量或内存已达上限，无法导入新图层。").into(); return None; }
         self.finish_stroke(); self.sync_layer(); self.invalidate_textures(); self.changed=true;
         let tiles = self.tiles.iter().map(|p| RgbaImage::new(p.width(),p.height())).collect();
-        self.layers.insert(0,Layer { material:true, name:"BaseLayer".into(), visible:true, locked:true, tiles });
+        self.layers.insert(0,Layer { settings:Default::default(), material:true, name:"BaseLayer".into(), visible:true, locked:true, tiles });
         self.active_layer += 1;
         Some(0)
     }
@@ -55,7 +55,7 @@ impl Editor {
         let Some(base) = self.ensure_material_base() else { return; };
         ui.separator();
         egui::CollapsingHeader::new(egui::RichText::new(tr("工程素材库")).heading().strong())
-            .id_salt("pixel_tile_materials_group").default_open(true).show(ui,|ui| {
+            .id_salt("pixel_tile_materials_group").default_open(true).show_unindented(ui,|ui| {
         ui.small(tr("选择素材填入当前格；素材层与上方绘画层独立。"));
         ui.horizontal_wrapped(|ui| {
             if ui.button(tr("导入素材")).clicked() {
@@ -70,30 +70,45 @@ impl Editor {
                 self.add_material(format!("{} {}",tr("素材"),self.materials.len()+1),image);
             }
         });
-        if ui.button(tr("清空当前格素材")).clicked() { self.assign_material(None); }
         let mut apply = None; let mut remove = None;
         let library = egui::Frame::new().inner_margin(4).stroke(egui::Stroke::new(1_f32,ui.visuals().widgets.noninteractive.bg_stroke.color)).show(ui,|ui| {
-            egui::ScrollArea::vertical().id_salt("project_materials").max_height(200.).show(ui,|ui| {
+            egui::ScrollArea::vertical().id_salt("project_materials").max_height(280.)
+                .auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui,|ui| {
                 ui.set_min_height(112.);
-                ui.horizontal_wrapped(|ui| {
+                let available = ui.available_width().max(1.);
+                let gap = 4.;
+                let minimum = ((available - 4. * gap) / 5.).max(1.);
+                let side = minimum + (available - minimum) * self.material_thumbnail_zoom.clamp(0., 1.);
+                let columns = (((available + gap) / (side + gap) + 0.001).floor() as usize).clamp(1, 5);
+                egui::Grid::new("material_thumbnail_grid").num_columns(columns).spacing(egui::vec2(gap,gap)).show(ui, |ui| {
                     for i in 0..self.materials.len() {
-                        let thumb=image::imageops::thumbnail(&self.materials[i].pixels,40,40);
-                        let data=egui::ColorImage::from_rgba_unmultiplied([thumb.width() as usize,thumb.height() as usize],thumb.as_raw());
+                        let resolution = (side - 8.).max(1.).ceil() as u32;
+                        let thumb=image::imageops::thumbnail(&self.materials[i].pixels,resolution,resolution);
+                        let data=super::tile_preview_image(&thumb);
                         while self.material_thumbnails.len()<=i { self.material_thumbnails.push(ui.ctx().load_texture(format!("material-{i}"),data.clone(),egui::TextureOptions::NEAREST)); }
                         self.material_thumbnails[i].set(data,egui::TextureOptions::NEAREST);
                         let selected=self.layers[base].tiles[self.selected]==self.materials[i].pixels;
-                        let response=ui.add_sized([48.,48.],egui::Button::new("").selected(selected));
+                        let response=ui.add_sized([side,side],egui::Button::new("").selected(selected));
                         let rect=response.rect.shrink(4.);
                         super::super::seamless::checker_background(ui.painter(),rect,rect.min,Vec2::splat(1.),&super::super::ImageBackground::Checkerboard,None);
-                        ui.painter().image(self.material_thumbnails[i].id(),Rect::from_center_size(rect.center(),egui::vec2(thumb.width() as f32,thumb.height() as f32)),Rect::from_min_max(Pos2::ZERO,egui::pos2(1.,1.)),Color32::WHITE);
+                        let source_size = egui::vec2(self.materials[i].pixels.width() as f32, self.materials[i].pixels.height() as f32);
+                        let factor = (rect.width() / source_size.x).min(rect.height() / source_size.y);
+                        let image_rect = Rect::from_center_size(rect.center(), source_size * factor);
+                        ui.painter().image(self.material_thumbnails[i].id(),image_rect,Rect::from_min_max(Pos2::ZERO,egui::pos2(1.,1.)),Color32::WHITE);
                         if response.clicked() { apply=Some(i); }
                         response.on_hover_text(&self.materials[i].name).context_menu(|ui| {
                             if ui.button(tr("移除素材库")).on_hover_text(tr("从素材库移除，已填入格子的内容保留。")).clicked() { remove=Some(i); ui.close_menu(); }
                         });
+                        if (i + 1) % columns == 0 { ui.end_row(); }
                     }
                 });
                 if self.materials.is_empty() { ui.label(tr("拖入图片加入素材库")); }
             });
+        });
+        ui.scope(|ui| {
+            ui.spacing_mut().slider_width = (ui.available_width() - 4.).max(40.);
+            crate::theme::slider(ui, true, egui::Slider::new(&mut self.material_thumbnail_zoom, 0.0..=1.0).show_value(false))
+                .on_hover_text(tr("缩略图大小：最小每行5个，最大每行1个"));
         });
         let region=library.response.rect.intersect(ui.clip_rect());
         let pointer=if cfg!(windows) {crate::native_window::file_drop_position(ui.ctx())}
