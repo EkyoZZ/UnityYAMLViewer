@@ -4749,3 +4749,10 @@ Lock／Unlock统一原生矢量，图层行与锁定栏复用；灰色与选中�
 ## 2026-11-24 继承锁BaseLayer禁用样式（源码）
 
 继承锁行内按钮直接复用BaseLayer相同helper与禁用状态，顶部继承锁也保留锁定但禁用。自有locked不变，眼睛独立。未重建EXE，颜色待验证。
+
+## 2026-11-24 参数框与继承状态本地构建（未发布）
+
+- 用户明确授权；构建前无unity_yaml_viewer进程，固定EXE独占访问通过。cargo build --release --locked --offline成功，日志target/tile-panels-lock-state-release-build.log。
+- EXE文件／产品版本1.3.7／1.3.7，34912768字节，SHA-256 756ee6ec88e91a0ec17c34324a06e83d968569f72d681a0dc44468cbd9a889c9；target/release/unity_yaml_viewer.exe.sha256已更新。
+- 包含参数框自动收缩、标题简化、统一240曲线宽度、调整层隐藏剪切菜单、父组隐藏时子对象眼睛灰显、继承锁复用BaseLayer禁用样式；子对象自身状态保留，眼睛独立。
+- 未自动启动、未发布；实际参数框宽高、菜单及组状态仍待用户验证，应用版本保持1.3.7。
