@@ -9,15 +9,17 @@ impl Editor {
         self.ensure_layers();
         if let Some(i) = self.layers.iter().position(|l| l.material) { return Some(i); }
         if self.layers.first().is_some_and(|l| l.name == "BaseLayer" && l.locked) {
-            self.finish_stroke(); self.sync_layer(); self.invalidate_textures(); self.changed=true; self.layers[0].material = true; self.layers[0].name = "BaseLayer".into(); return Some(0);
+            self.finish_stroke(); self.sync_layer(); self.invalidate_textures(); self.layers[0].material = true; self.layers[0].name = "BaseLayer".into(); return Some(0);
         }
         let added: usize = self.tiles.iter().map(|p| p.as_raw().len()).sum();
         let total: usize = self.layers.iter().flat_map(|l| &l.tiles).map(|p| p.as_raw().len()).sum();
         if self.layers.len() >= 32 || total + added > LAYER_BYTES { self.message = tr("图层数量或内存已达上限，无法导入新图层。").into(); return None; }
-        self.finish_stroke(); self.sync_layer(); self.invalidate_textures(); self.changed=true;
+        self.finish_stroke(); self.sync_layer(); self.invalidate_textures();
         let tiles = self.tiles.iter().map(|p| RgbaImage::new(p.width(),p.height())).collect();
         self.layers.insert(0,Layer { settings:Default::default(), material:true, name:"BaseLayer".into(), visible:true, locked:true, tiles });
         self.active_layer += 1;
+        self.layer_anchor += 1;
+        for index in &mut self.selected_layers { *index += 1; }
         Some(0)
     }
     pub(super) fn add_material(&mut self, name: String, pixels: RgbaImage) {
@@ -35,6 +37,13 @@ impl Editor {
             Some(i) => match self.materials.get(i) { Some(m) => m.pixels.clone(), None => return },
             None => RgbaImage::new(self.pixels.width(),self.pixels.height()),
         };
+        self.set_cell_base(base, pixels);
+    }
+    pub(super) fn import_current_cell(&mut self, image: &RgbaImage) {
+        let Some(base) = self.ensure_material_base() else { return; };
+        self.set_cell_base(base, self.centered_image(image.clone()));
+    }
+    fn set_cell_base(&mut self, base: usize, pixels: RgbaImage) {
         if self.layers[base].tiles[self.selected] == pixels { return; }
         self.record_layer_change();
         self.layers[base].tiles[self.selected] = pixels;
@@ -131,9 +140,6 @@ impl Editor {
             self.message=format!("{}: {added}",tr("已加入素材库"));
             if !errors.is_empty() { self.message.push_str(&format!("\n{}",errors.join("\n"))); }
             self.material_drop_status=Some((!errors.is_empty(),self.message.clone()));
-        }
-        if !over && ui.input(|i|!i.raw.dropped_files.is_empty()) {
-            self.material_drop_status=Some((true,tr("请将图片拖入素材库边框内。").to_owned()));
         }
         if let Some((failed,status))=&self.material_drop_status {
             let color=if *failed {ui.visuals().error_fg_color}else{ui.visuals().text_color()};

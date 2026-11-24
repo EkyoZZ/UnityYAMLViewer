@@ -66,7 +66,7 @@ impl Editor {
                 ui.label(format!("{}: {} / {}",tr("当前子组"),(self.selected_slot/8/r)*(self.columns/c)+self.selected_slot%8/c+1,(self.columns/c)*(self.rows/r)));
             }
             ui.small(tr("选中格决定当前子组；边缘抬笔后联动，内部独立。"));
-            if (enabled,size)!=(self.subgroup_enabled,self.subgroup_size) {self.finish_stroke();self.subgroup_enabled=enabled;self.subgroup_size=size;self.changed=true;}
+            if (enabled,size)!=(self.subgroup_enabled,self.subgroup_size) {self.finish_stroke();self.subgroup_enabled=enabled;self.subgroup_size=size;}
         });
     }
     pub(super) fn subgroup_outline(&self,painter:&egui::Painter,origin:Pos2,scale:f32){

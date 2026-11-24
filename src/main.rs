@@ -1670,6 +1670,7 @@ impl eframe::App for ViewerApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         self.assets.show_slice_previews(ctx);
+        if let Some(path)=ctx.data_mut(|d|d.remove_temp::<std::path::PathBuf>(egui::Id::new("image_open_tile_project"))){self.open_file(path);}
         localization::set_language(&self.settings.language);
         self.updater.poll();
         if self.path.as_ref().is_some_and(|path| !self.edits.contains_key(path))

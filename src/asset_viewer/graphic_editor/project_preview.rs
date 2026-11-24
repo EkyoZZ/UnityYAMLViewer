@@ -88,7 +88,7 @@ impl ProjectPreview {
     }
 }
 fn from_snapshot(state:Snapshot)->Editor {
-    let mut e=Editor::default();e.layers=state.layers;e.active_layer=state.active_layer;e.tiles=state.tiles;e.selected=state.selected;e.pixels=e.tiles[e.selected].clone();e.layout=state.layout;e.columns=state.columns;e.rows=state.rows;e.multiple=state.multiple;e.diamond=state.diamond;e.hex=state.hex;e.elevated=state.elevated;e.footprint=state.footprint;e
+    let mut e=Editor::default();e.fx_light=state.fx_light;e.layers=state.layers;e.active_layer=state.active_layer;e.tiles=state.tiles;e.selected=state.selected;e.pixels=e.tiles[e.selected].clone();e.layout=state.layout;e.columns=state.columns;e.rows=state.rows;e.multiple=state.multiple;e.diamond=state.diamond;e.hex=state.hex;e.elevated=state.elevated;e.footprint=state.footprint;e
 }
 fn render(editor:&Editor)->RgbaImage {
     let (w,h)=editor.pixels.dimensions();let (cols,rows)=if editor.multiple{(editor.columns,editor.rows)}else{(1,1)};
@@ -120,6 +120,30 @@ fn render(editor:&Editor)->RgbaImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn project_and_live_snapshot_preview_use_the_same_shadow_direction() {
+        let source=RgbaImage::from_fn(8,8,|x,y| if x==3 && y==3 {Rgba([170,180,190,255])} else {Rgba([0;4])});
+        let project=serde_json::json!({
+            "version":10,"width":8,"height":8,"selected":0,"tiles":[source.as_raw()],"layout":vec![0usize;64],
+            "columns":1,"rows":1,"multiple":false,"diamond":false,"elevated":false,"footprint":[8,8],
+            "fx_light":{"angle":0,"altitude":30},
+            "layers":[{"name":"fx","visible":true,"locked":false,"tiles":[source.as_raw()],
+                "settings":{"fill":0,"shadow":true,"shadow_radius":0,"shadow_opacity":100,
+                    "shadow_shape":{"direction":[90,2],"global":true}}}]
+        });
+        let path=std::env::temp_dir().join(format!("tile-fx-light-{}-{}.uytile",std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::write(&path,serde_json::to_vec(&project).unwrap()).unwrap();
+        let mut editor=Editor::default();
+        let loaded=editor.load_project(&path);
+        std::fs::remove_file(path).unwrap();
+        loaded.unwrap();
+        let image=editor.composite(0);
+        assert_eq!(image.get_pixel(1,3)[3],255);
+        assert_eq!(image.get_pixel(3,3)[3],0);
+        assert_eq!(from_snapshot(editor.snapshot()).composite(0),image);
+        assert_eq!(editor.export_cell(0),image);
+    }
     #[test]
     fn discard_reloads_saved_project_and_rejects_stale_render(){
         let image=RgbaImage::from_pixel(8,4,Rgba([55,100,150,255]));

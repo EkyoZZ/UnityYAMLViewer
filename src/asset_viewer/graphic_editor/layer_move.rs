@@ -6,8 +6,189 @@ pub(super) struct Drag {
     members: Vec<usize>,
     mask_only: bool,
     last_delta: Option<(i32, i32)>,
+    alignment: Option<Alignment>,
+}
+
+struct Alignment {
+    moving: Rect,
+    targets: Vec<Rect>,
+    lines: [Option<f32>; 2],
+}
+
+impl Alignment {
+    fn snap(&mut self, delta: Vec2, scale: f32) -> Vec2 {
+        let mut result = delta;
+        self.lines = [None; 2];
+        for axis in 0..2 {
+            let edges = |rect: Rect| [rect.min[axis], rect.center()[axis], rect.max[axis]];
+            let mut closest = 6. / scale;
+            for target in &self.targets {
+                for at in edges(*target) {
+                    for source in edges(self.moving) {
+                        let correction = at - source - delta[axis];
+                        if correction.abs() < closest && correction.fract() == 0. {
+                            closest = correction.abs();
+                            result[axis] = delta[axis] + correction;
+                            self.lines[axis] = Some(at);
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
 }
 impl Editor {
+    pub(super) fn nudge_layers(&mut self, ctx: &egui::Context) {
+        let mut moves = Vec::new();
+        ctx.input_mut(|input| {
+            input.events.retain(|event| {
+                let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                else {
+                    return true;
+                };
+                let step = match *modifiers {
+                    egui::Modifiers::NONE => 1.,
+                    egui::Modifiers::SHIFT => 10.,
+                    _ => return true,
+                };
+                let direction = match key {
+                    egui::Key::ArrowLeft => -Vec2::X,
+                    egui::Key::ArrowRight => Vec2::X,
+                    egui::Key::ArrowUp => -Vec2::Y,
+                    egui::Key::ArrowDown => Vec2::Y,
+                    _ => return true,
+                };
+                moves.push(direction * step);
+                false
+            })
+        });
+        if moves.is_empty() {
+            return;
+        }
+        let members = self.move_members(self.active_layer, false);
+        if members.is_empty() || members.iter().any(|&index| !self.move_allowed(index)) {
+            self.message = tr("图层已锁定移动或不可编辑。").into();
+            return;
+        }
+        self.finish_stroke();
+        self.sync_layer();
+        let layout = self.whole_unit() || self.infinite_view;
+        for delta in moves {
+            let before = self.snapshot();
+            self.apply_layer_translation_target(
+                &before,
+                &members,
+                delta,
+                layout,
+                self.infinite_view,
+                false,
+            );
+            self.before = Some(before);
+            self.finish_stroke();
+        }
+    }
+
+    pub(super) fn guide_layer_bounds(&self, layout: bool) -> Option<Rect> {
+        let members = self.move_members(self.active_layer, false);
+        self.move_alignment(&members, layout, false)
+            .map(|alignment| alignment.moving)
+    }
+
+    fn move_alignment(
+        &self,
+        members: &[usize],
+        layout: bool,
+        include_targets: bool,
+    ) -> Option<Alignment> {
+        let (w, h) = self.pixels.dimensions();
+        let half = egui::vec2(w as f32, h as f32) * 0.5;
+        let mut cells = Vec::new();
+        if layout {
+            for row in 0..self.rows {
+                for col in 0..self.columns {
+                    cells.push((
+                        self.tile_at(col as i32, row as i32),
+                        self.mapped_center(col as i32, row as i32, w, h) - half,
+                    ));
+                }
+            }
+        } else {
+            cells.push((self.selected, self.mapped_center(0, 0, w, h) - half));
+        }
+        let mut canvas = Rect::NOTHING;
+        for &(_, offset) in &cells {
+            canvas = canvas.union(Rect::from_min_size(offset.to_pos2(), half * 2.));
+        }
+        let mut moving = Rect::NOTHING;
+        let mut targets = vec![canvas];
+        for (index, layer) in self.layers.iter().enumerate() {
+            let selected = members.contains(&index);
+            if layer.settings.group_id != 0
+                || layer.settings.adjustment.is_some()
+                || (!selected
+                    && (!include_targets || !layer.visible || !self.ancestors_visible(index)))
+            {
+                continue;
+            }
+            let mut bounds = Rect::NOTHING;
+            let mut local = std::collections::HashMap::new();
+            for &(tile, offset) in &cells {
+                let rect = local.entry(tile).or_insert_with(|| {
+                    let mut rect = Rect::NOTHING;
+                    for (x, y, pixel) in layer.tiles[tile].enumerate_pixels() {
+                        if pixel[3] != 0 {
+                            let p = egui::pos2(x as f32, y as f32);
+                            rect.extend_with(p);
+                            rect.extend_with(p + Vec2::splat(1.));
+                        }
+                    }
+                    rect
+                });
+                if rect.is_positive() {
+                    bounds = bounds.union(rect.translate(offset));
+                }
+            }
+            if bounds.is_positive() {
+                if selected {
+                    moving = moving.union(bounds);
+                } else {
+                    targets.push(bounds);
+                }
+            }
+        }
+        moving.is_positive().then_some(Alignment {
+            moving,
+            targets,
+            lines: [None; 2],
+        })
+    }
+
+    pub(super) fn paint_move_alignment(&self, painter: &egui::Painter, origin: Pos2, scale: f32) {
+        let Some(alignment) = self
+            .layer_drag
+            .as_ref()
+            .and_then(|drag| drag.alignment.as_ref())
+        else {
+            return;
+        };
+        let clip = painter.clip_rect();
+        let stroke = egui::Stroke::new(1_f32, Color32::from_rgb(199, 116, 255));
+        for (axis, at) in alignment.lines.into_iter().enumerate() {
+            if let Some(at) = at {
+                let mut start = clip.min;
+                let mut end = clip.max;
+                start[axis] = origin[axis] + at * scale;
+                end[axis] = start[axis];
+                painter.line_segment([start, end], stroke);
+            }
+        }
+    }
     #[cfg(test)]
     fn apply_layer_translation(
         &mut self,
@@ -36,6 +217,73 @@ impl Editor {
         };
         for &index in members {
             let source = &before.layers[index];
+            if let Some(text) = source
+                .settings
+                .text
+                .as_ref()
+                .filter(|t| !mask_only && !t.repeat)
+            {
+                let mut next = text.clone();
+                next.offset = [
+                    (text.offset[0] + delta.x.round() as i32).clamp(-8192, 8192),
+                    (text.offset[1] + delta.y.round() as i32).clamp(-8192, 8192),
+                ];
+                self.layers[index].settings.text = Some(next);
+            }
+            if let Some(text) = source
+                .settings
+                .text
+                .as_ref()
+                .filter(|t| !mask_only && t.repeat)
+            {
+                let dx = (delta.x.round() as i32).rem_euclid(w as i32);
+                let dy = (delta.y.round() as i32).rem_euclid(h as i32);
+                let layer = &mut self.layers[index];
+                let previous = |x: u32, y: u32| {
+                    (
+                        ((x as i32 - dx).rem_euclid(w as i32)) as u32,
+                        ((y as i32 - dy).rem_euclid(h as i32)) as u32,
+                    )
+                };
+                layer.tiles = source
+                    .tiles
+                    .iter()
+                    .map(|im| {
+                        RgbaImage::from_fn(w, h, |x, y| {
+                            let (px, py) = previous(x, y);
+                            *im.get_pixel(px, py)
+                        })
+                    })
+                    .collect();
+                if source.settings.mask_linked {
+                    layer.settings.mask = source.settings.mask.as_ref().map(|masks| {
+                        masks
+                            .iter()
+                            .map(|m| {
+                                (0..w * h)
+                                    .map(|i| {
+                                        let (px, py) = previous(i % w, i / w);
+                                        m[(py * w + px) as usize]
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    });
+                }
+                let shifted = |coord: i32, d: i32, side: u32| {
+                    if d == 0 {
+                        coord
+                    } else {
+                        let s = side as i32;
+                        (coord + d + s / 2).rem_euclid(s) - s / 2
+                    }
+                };
+                layer.settings.text.as_mut().unwrap().offset = [
+                    shifted(text.offset[0], dx, w),
+                    shifted(text.offset[1], dy, h),
+                ];
+                continue;
+            }
             let move_content =
                 !mask_only && source.settings.group_id == 0 && source.settings.adjustment.is_none();
             let move_mask = mask_only || source.settings.mask_linked;
@@ -102,6 +350,17 @@ impl Editor {
                         }
                     }
                 }
+            }
+            if !mask_only
+                && let Some(text) = self.layers[index]
+                    .settings
+                    .text
+                    .as_ref()
+                    .filter(|t| !t.repeat)
+                && let Some(fonts) = &self.font_samples.catalog
+                && let Ok(im) = text.raster(w, h, fonts)
+            {
+                tiles = vec![im];
             }
             self.layers[index].tiles = tiles;
             self.layers[index].settings.mask = mask;
@@ -198,16 +457,23 @@ impl Editor {
                     Pos2::new(p.x.floor(), p.y.floor())
                 })
                 .unwrap_or(point);
+            let alignment = (!mask_only && !infinite)
+                .then(|| self.move_alignment(&members, layout, true))
+                .flatten();
             self.layer_drag = Some(Drag {
                 start,
                 before,
                 members,
                 mask_only,
                 last_delta: None,
+                alignment,
             });
         }
         if let Some(mut drag) = self.layer_drag.take() {
-            let delta = point - drag.start;
+            let mut delta = point - drag.start;
+            if let Some(alignment) = &mut drag.alignment {
+                delta = alignment.snap(delta, scale);
+            }
             let key = (delta.x as i32, delta.y as i32);
             if drag.last_delta == Some(key) {
                 if response.drag_stopped_by(egui::PointerButton::Primary) {
@@ -280,9 +546,11 @@ mod tests {
         assert_eq!(e.tiles[to].get_pixel(1, 2).0, [200, 100, 50, 255]);
         assert_eq!(e.tiles[0].get_pixel(7, 2)[3], 0);
         assert_eq!(e.layers[index].settings.mask.as_ref().unwrap()[to][17], 0);
-        assert!(e.layers[0]
-            .tiles
-            .iter()
-            .all(|t| t.pixels().all(|p| p[3] == 0)));
+        assert!(
+            e.layers[0]
+                .tiles
+                .iter()
+                .all(|t| t.pixels().all(|p| p[3] == 0))
+        );
     }
 }

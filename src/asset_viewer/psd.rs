@@ -33,7 +33,7 @@ impl<R: Read + Seek> Reader<R> {
     }
 }
 
-fn decode<R: Read + Seek>(mut input: R) -> Result<image::RgbaImage, String> {
+pub(super) fn decode<R: Read + Seek>(mut input: R) -> Result<image::RgbaImage, String> {
     let length = input.seek(SeekFrom::End(0)).map_err(|error| error.to_string())?;
     input.seek(SeekFrom::Start(0)).map_err(|error| error.to_string())?;
     let mut reader = Reader { input, length };
@@ -68,12 +68,25 @@ fn decode<R: Read + Seek>(mut input: R) -> Result<image::RgbaImage, String> {
     reader.seek(layer_end)?;
     if has_alpha && channels <= colors { return Err("PSD is missing merged transparency".into()); }
     let compression = reader.u16()?;
-    if compression > 1 { return Err("PSD preview supports Raw and RLE compression only; ZIP is not supported".into()); }
+    if compression > 3 { return Err("Unknown PSD composite compression".into()); }
     let mut row_lengths = Vec::new();
     if compression == 1 {
         for _ in 0..channels * height as usize { row_lengths.push(reader.u16()? as usize); }
     }
     let mut output = image::RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 255]));
+    if compression>=2 {
+        if channels as u64*u64::from(width)*u64::from(height)>256*1024*1024{return Err("PSD ZIP composite exceeds preview limit".into());}
+        let mut zip=flate2::read::ZlibDecoder::new(reader.input);
+        let mut row=vec![0;width as usize];
+        for channel in 0..channels {
+            for y in 0..height {
+                zip.read_exact(&mut row).map_err(|e|e.to_string())?;
+                if compression==3{for x in 1..row.len(){row[x]=row[x].wrapping_add(row[x-1]);}}
+                apply_row(&mut output,&row,y,channel,colors,mode,has_alpha);
+            }
+        }
+        if zip.read(&mut [0]).map_err(|e|e.to_string())?!=0{return Err("Unexpected ZIP composite data".into());}
+    }else{
     for channel in 0..channels {
         let keep = channel < colors || (has_alpha && channel == colors);
         for y in 0..height as usize {
@@ -85,18 +98,30 @@ fn decode<R: Read + Seek>(mut input: R) -> Result<image::RgbaImage, String> {
             }
             let bytes = reader.bytes(count)?;
             let row = if compression == 0 { bytes } else { unpack_row(&bytes, width as usize)? };
-            for (x, value) in row.into_iter().enumerate() {
-                let pixel = output.get_pixel_mut(x as u32, y as u32);
-                if channel == colors { pixel[3] = value; }
-                else if mode == 1 { pixel[0] = value; pixel[1] = value; pixel[2] = value; }
-                else { pixel[channel] = value; }
-            }
+            apply_row(&mut output,&row,y as u32,channel,colors,mode,has_alpha);
+        }
+    }
+    }
+    // Photoshop mattes the merged RGB against white. Some other writers store
+    // straight RGB, which can be recognized if a component is below the matte.
+    if has_alpha && output.pixels().all(|p|p.0[..3].iter().all(|v|*v>=255-p[3])){
+        for p in output.pixels_mut(){
+            let a=u32::from(p[3]);
+            for c in &mut p.0[..3]{*c=if a==0 {0} else {((u32::from(*c)-(255-a))*255+a/2).div_euclid(a).min(255) as u8};}
         }
     }
     Ok(output)
 }
 
-fn unpack_row(bytes: &[u8], width: usize) -> Result<Vec<u8>, String> {
+fn apply_row(out:&mut image::RgbaImage,row:&[u8],y:u32,channel:usize,colors:usize,mode:u16,has_alpha:bool){
+    if channel>=colors && !(channel==colors && has_alpha){return;}
+    for (x,&value) in row.iter().enumerate(){
+        let p=out.get_pixel_mut(x as u32,y);
+        if channel==colors {p[3]=value;}else if mode==1{p.0[..3].fill(value);}else{p[channel]=value;}
+    }
+}
+
+pub(super) fn unpack_row(bytes: &[u8], width: usize) -> Result<Vec<u8>, String> {
     let mut row = Vec::with_capacity(width);
     let mut position = 0;
     while position < bytes.len() {

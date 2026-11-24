@@ -15,6 +15,14 @@ mod curve_editor;
 mod levels_editor;
 mod layer_groups;
 mod layer_move;
+mod layer_drop;
+mod split;
+mod png_export;
+mod image_size;
+mod guides;
+mod text_layer;
+mod transform;
+pub(super) mod bitmap_workspace;
 pub(super) mod project_preview;
 use materials::{Material, StoredMaterial};
 
@@ -134,6 +142,7 @@ enum Tool {
     Rectangle,
     Line,
     Fill,
+    Text,
 }
 #[derive(Clone, Copy)]
 struct RectangleDrag {
@@ -159,6 +168,9 @@ fn one() -> u32 {
 
 #[derive(Clone, PartialEq)]
 struct Snapshot {
+    selected_slot: usize,
+    subgroup_size: [u32; 2],
+    fx_light: layer_properties::effects::Light,
     selection:selection::HistorySelection,
     selected_layers:Vec<usize>,
     layer_anchor:usize,
@@ -180,7 +192,7 @@ struct Snapshot {
 }
 impl Snapshot {
     fn bytes(&self) -> usize {
-        self.layers.iter().map(|l|l.settings.bytes()).sum::<usize>() + self.selection.bytes() + self.materials.iter().map(|m| m.pixels.as_raw().len()).sum::<usize>()
+        self.layers.iter().map(|l|l.settings.bytes() + l.settings.effects.extra_bytes()).sum::<usize>() + self.selection.bytes() + self.materials.iter().map(|m| m.pixels.as_raw().len()).sum::<usize>()
             + self.tiles.iter().map(|p| p.as_raw().len()).sum::<usize>()
             + self
                 .layers
@@ -193,6 +205,8 @@ impl Snapshot {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Project {
+    #[serde(default)]
+    fx_light: layer_properties::effects::Light,
     #[serde(default)]
     materials: Vec<StoredMaterial>,
     #[serde(default)]
@@ -249,8 +263,8 @@ struct Project {
     pressure_flow:bool,
 }
 // Horizontal pen drag is measured from the initial contact, independent of frame rate.
-fn drag_zoom(anchor: Pos2, initial: f32, pan: Vec2, dx: f32, center: Pos2) -> (f32, Vec2) {
-    let zoom = (initial * (dx * 0.01).clamp(-20., 20.).exp()).clamp(0.25, 64.);
+fn drag_zoom(anchor: Pos2, initial: f32, pan: Vec2, dx: f32, center: Pos2, minimum:f32) -> (f32, Vec2) {
+    let zoom = (initial * (dx * 0.01).clamp(-20., 20.).exp()).clamp(minimum, 64.);
     let offset = anchor - center;
     (zoom, offset - (offset - pan) * (zoom / initial))
 }
@@ -272,7 +286,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 impl Project {
     fn validate(&self) -> Result<(), String> {
-        let valid = (1..=9).contains(&self.version)
+        let valid = (1..=12).contains(&self.version) && self.fx_light.valid()
             && self.hex <= 2 && !(self.hex != 0 && (self.elevated || self.diamond))
             && (self.hex != 1 || self.height % 4 == 0)
             && (self.hex != 2 || self.width % 4 == 0)
@@ -309,6 +323,8 @@ impl Project {
             && self.layers.iter().all(|l| {
                 l.tiles.len() == self.tiles.len()
                     && l.settings.valid(l.tiles.len(),self.width as usize*self.height as usize)
+                    && (l.settings.text.is_none() || (self.version >= 12 && !l.material))
+                    && (self.version >= 11 || !l.settings.effects.has_extra())
                     && l.name.len() <= 256
                     && l.tiles
                         .iter()
@@ -366,8 +382,33 @@ impl Default for ToolbarPlacement {
     fn default()->Self {Self{offset:Vec2::splat(4.),size:egui::vec2(44.,270.),loaded:false,dragging:false,horizontal:false}}
 }
 pub(super) struct Editor {
+    image_alpha: bool,
+    image_size_draft: Option<image_size::Draft>,
+    split_preview: bool,
+    split_grid: [usize; 2],
+    plain_image:bool,
+    guides: guides::Guides,
+    image_target:Option<std::path::PathBuf>,
+    image_version:Option<bitmap_workspace::FileVersion>,
+    image_readonly:bool,
+    image_source_protected:bool,
+    image_saved_as_merged_psd:bool,
+    psd_resources:Vec<u8>,
+    image_saved:Option<std::path::PathBuf>,
     rectangle_fill:bool,
+    text_dialog:Option<text_layer::Dialog>,
+    inline_text:Option<text_layer::Inline>,
+    font_samples:text_layer::font_samples::Cache,
+    transform:Option<transform::Session>,
+    transform_bounds_cache:Option<((usize,usize,bool,u64),Option<Rect>)>,
+    show_transform:bool,
+    transform_smooth:bool,
+    transform_linked:bool,
     layer_detail:Option<(usize,bool,String,Pos2)>,
+    style_clipboard:Option<layer_properties::effects::Effects>,
+    fx_page: layer_properties::effects::Page,
+    fx_light: layer_properties::effects::Light,
+    fx_dragging: bool,
     detail_histogram_fresh:bool,
     selected_layers:Vec<usize>,
     layer_anchor:usize,
@@ -390,7 +431,7 @@ pub(super) struct Editor {
     background_color: [u8; 3],
     layers: Vec<Layer>,
     active_layer: usize,
-    layer_thumbnails: Vec<egui::TextureHandle>,
+    layer_thumbnails: Vec<Option<(egui::TextureHandle, u64, usize)>>,
     pub open: bool,
     pixels: RgbaImage,
     tiles: Vec<RgbaImage>,
@@ -464,11 +505,19 @@ pub(super) struct Editor {
 impl Default for Editor {
     fn default() -> Self {
         Self {
+            split_preview: false, split_grid: [1, 1],
+            image_alpha: true, image_size_draft: None,
+            plain_image:false,guides:Default::default(),image_target:None,image_version:None,image_readonly:false,image_source_protected:false,image_saved_as_merged_psd:false,image_saved:None,psd_resources:Vec::new(),
             materials: Vec::new(),
             material_drop_status: None,
             material_thumbnails: Vec::new(),
             material_thumbnail_zoom: 0.,
+            text_dialog:None,
+            inline_text:None,
+            font_samples:Default::default(),transform:None,transform_bounds_cache:None,show_transform:false,transform_smooth:false,transform_linked:true,
             layer_detail:None,
+            style_clipboard:None,
+            fx_page: Default::default(), fx_light: Default::default(), fx_dragging: false,
             detail_histogram_fresh:false,
             selected_layers:Vec::new(),layer_anchor:0,
             mask_editing:false,
@@ -680,7 +729,7 @@ impl Editor {
         if self.hex != 0 { hex_pixel(x,y,w,h,self.hex == 2) } else { cell_pixel(x,y,w,h,self.diamond) }
     }
     fn mapped_center(&self, col: i32, row: i32, w: u32, h: u32) -> Vec2 {
-        if self.hex != 0 { hex_center(col,row,w,h,self.hex == 2) } else { cell_center(col as f32,row as f32,w,h,self.diamond) }
+        if self.hex != 0 { hex_center(col,row,w,h,self.hex == 2) } else { cell_center(col as f32,row as f32,w,h,self.diamond) + if self.plain_image{egui::vec2((w%2)as f32,(h%2)as f32)*0.5}else{Vec2::ZERO} }
     }
     fn inside_tile(&self, x: i32, y: i32, w: u32, h: u32) -> bool {
         if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 { return false; }
@@ -696,7 +745,7 @@ impl Editor {
     fn layer_editable(&self) -> bool {
         self.layers
             .get(self.active_layer)
-            .is_none_or(|layer| !layer.locked && !self.ancestor_locked(self.active_layer) && self.ancestors_visible(self.active_layer) && layer.visible && if self.mask_editing{layer.settings.mask.is_some()}else{layer.settings.group_id==0 && !layer.settings.lock_pixels && !self.ancestor_paint_locked(self.active_layer) && layer.settings.adjustment.is_none()})
+            .is_none_or(|layer| !layer.locked && !self.ancestor_locked(self.active_layer) && self.ancestors_visible(self.active_layer) && layer.visible && if self.mask_editing{layer.settings.mask.is_some()}else{layer.settings.group_id==0 && !layer.settings.lock_pixels && !self.ancestor_paint_locked(self.active_layer) && layer.settings.adjustment.is_none() && layer.settings.text.is_none()})
     }
     fn sync_layer(&mut self) {
         self.tiles[self.selected] = self.pixels.clone();
@@ -727,7 +776,7 @@ impl Editor {
             rect,
             origin,
             pixel_size,
-            if self.background_custom {
+            if self.background_custom || (self.plain_image && !self.image_alpha) {
                 &super::ImageBackground::Custom
             } else {
                 &super::ImageBackground::Checkerboard
@@ -737,7 +786,6 @@ impl Editor {
     }
     fn background_controls(&mut self,ui:&mut egui::Ui){
         ui.separator();
-        let before=(self.background_custom,self.background_color);
         ui.horizontal(|ui|{
             ui.spacing_mut().item_spacing.x=3.;ui.label(tr("背景色"));
             ui.horizontal(|ui|{
@@ -752,7 +800,6 @@ impl Editor {
                 self.background_custom=true;
             }
         });
-        self.changed|=before!=(self.background_custom,self.background_color);
     }
     fn pick_visible_pixel(&mut self, tile: usize, x: u32, y: u32) {
         self.color = self.composite(tile).get_pixel(x, y).0;
@@ -824,7 +871,7 @@ impl Editor {
         self.invalidate_textures();
     }
     fn cut_selection_to_layer(&mut self,index:usize) {
-        if index>=self.layers.len() || self.layers[index].material || self.layers[index].locked || self.layers[index].settings.lock_alpha || self.layers[index].settings.lock_pixels || self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.group_id!=0 || self.ancestor_locked(index) || self.mask_editing || !self.layers[index].visible {return;}
+        if index>=self.layers.len() || self.layers[index].settings.text.is_some() || self.layers[index].material || self.layers[index].locked || self.layers[index].settings.lock_alpha || self.layers[index].settings.lock_pixels || self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.group_id!=0 || self.ancestor_locked(index) || self.mask_editing || !self.layers[index].visible {return;}
         let Some(mask)=self.selection.mask.as_ref().filter(|m|!m.is_empty()).cloned() else{return;};
         let count=self.layers.len();
         self.duplicate_layer(index,true);
@@ -839,7 +886,7 @@ impl Editor {
         if self.layers[index].settings.group_id!=0{self.duplicate_group(index);return;}
         let bytes: usize = self.layers.iter().map(|layer|layer.tiles.iter().map(|tile|tile.as_raw().len()).sum::<usize>()+layer.settings.bytes()).sum();
         let added: usize = self.tiles.iter().map(|tile| tile.as_raw().len()).sum::<usize>()+self.layers[index].settings.bytes()+if self.layers[index].settings.adjustment.is_some()&&self.layers[index].settings.mask.is_none()&&self.selection.mask.is_some(){self.tiles.iter().map(|t|t.as_raw().len()/4).sum::<usize>()}else{0};
-        if self.layers.len() >= 32 || bytes.saturating_add(added) > LAYER_BYTES {
+        if self.layers.len() >= 32 || bytes.saturating_add(added) > self.layer_budget() {
             self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
             return;
         }
@@ -850,7 +897,7 @@ impl Editor {
             if self.selection.mask.is_some() {for (x,y,pixel) in image.enumerate_pixels_mut(){if !self.selection.allows(tile,x,y){*pixel=Rgba([0;4]);}}}
             image
         }).collect();
-        let mut settings=source.settings.clone();settings.lock_alpha=false;settings.lock_pixels=false;settings.lock_position=false;
+        let mut settings=source.settings.clone();if self.selection.mask.is_some(){settings.text=None;}settings.lock_alpha=false;settings.lock_pixels=false;settings.lock_position=false;
         if settings.adjustment.is_some()&&self.selection.mask.is_some(){let masks=settings.mask.get_or_insert_with(||source.tiles.iter().map(|t|vec![255;(t.width()*t.height())as usize]).collect());for(tile,mask)in masks.iter_mut().enumerate(){for(i,value)in mask.iter_mut().enumerate(){if !self.selection.allows(tile,i as u32%self.pixels.width(),i as u32/self.pixels.width()){*value=0;}}}}
         let copy = Layer { settings, material: false, name: format!("{} {}", source.name, tr("副本")), visible: true, locked: false, tiles };
         self.layers.insert(index + 1, copy);
@@ -871,9 +918,17 @@ impl Editor {
         self.invalidate_textures();
     }
     fn reset_document(&mut self, image: RgbaImage) {
+        self.guides.clear();
+        self.inline_text = None;
+        self.record_layer_change();
+        self.set_single_tile(image);
+    }
+    fn set_single_tile(&mut self, image: RgbaImage) {
+        self.transform=None;
+        self.text_dialog=None;
         self.selection.clear();
         self.mask_editing=false;
-        self.record_layer_change();
+        self.fx_light = Default::default();
         self.layers.clear();
         self.selected_layers.clear();self.layer_anchor=0;
         self.materials.clear();
@@ -886,13 +941,19 @@ impl Editor {
         self.layout.fill(0);
         self.columns = 1;
         self.rows = 1;
+        self.multiple = false;
+        self.split_preview = false;
+        self.split_grid = [1, 1];
         self.width = self.pixels.width();
         self.height = self.pixels.height();
+        if !self.elevated { self.footprint = [self.width, self.height]; }
         self.ensure_layers();
         if let Some(base)=self.ensure_material_base() {
             self.layers[base].tiles[0]=image.clone();
             if image.pixels().any(|p|p[3]!=0) { self.materials.push(Material{name:format!("{} 1",tr("素材")),pixels:image}); }
         }
+        self.selected_layers=vec![self.active_layer];
+        self.layer_anchor=self.active_layer;
     }
     fn layer_icon_button(
         ui: &mut egui::Ui,
@@ -951,28 +1012,28 @@ impl Editor {
         let mut material_action = None;
         let mut duplicate = None;
         let mut cut_duplicate = None;
+        let mut edit_text = None;
+        let mut inline_text = None;
+        let mut rasterize = None;
         let mut select_mask=None;
         let mut toggle_mask_link=None;
         let mut detail_toggle=None;
         let mut clip_toggle=None;
         let mut previous_layer_row:Option<usize>=None;
         let owner = ui.id().with("tile_layers_owner");
+        self.layer_thumbnails.resize_with(self.layers.len(), || None);
         for index in self.group_display_order() {
-            let image = if index == self.active_layer {
-                &self.pixels
-            } else {
-                &self.layers[index].tiles[self.selected]
-            };
-            let thumb = image::imageops::thumbnail(image, 36, 28);
-            let data = tile_preview_image(&thumb);
-            while self.layer_thumbnails.len() <= index {
-                self.layer_thumbnails.push(ui.ctx().load_texture(
-                    format!("tile-layer-thumb-{}", self.layer_thumbnails.len()),
-                    data.clone(),
-                    egui::TextureOptions::NEAREST,
-                ));
+            if self.layer_thumbnails[index].as_ref().is_none_or(|(_,revision,cell)| (*revision,*cell)!=(self.revision,self.selected)) {
+                let source = if index == self.active_layer { &self.pixels } else { &self.layers[index].tiles[self.selected] };
+                let ratio = (36.0 / source.width() as f32).min(28.0 / source.height() as f32);
+                let thumb = image::imageops::thumbnail(source, (source.width() as f32*ratio).round().max(1.) as u32, (source.height() as f32*ratio).round().max(1.) as u32);
+                let data = tile_preview_image(&thumb);
+                let entry = self.layer_thumbnails[index].get_or_insert_with(|| (ui.ctx().load_texture(
+                    format!("tile-layer-thumb-{index}"), data.clone(), egui::TextureOptions::NEAREST), self.revision, self.selected));
+                entry.0.set(data, egui::TextureOptions::NEAREST);
+                entry.1=self.revision;
+                entry.2=self.selected;
             }
-            self.layer_thumbnails[index].set(data, egui::TextureOptions::NEAREST);
             let active = index == self.active_layer;
             let row_selected=active||self.selected_layers.contains(&index);
             let name = self.layers[index].name.clone();
@@ -1008,7 +1069,7 @@ impl Editor {
                         toggle_visible = Some(index);
                     }
                     let depth=self.group_depth(index);if depth>0{ui.add_space(depth as f32*6.);}
-                    if self.layers[index].settings.group_id!=0{let response=ui.add_sized([10.,28.],egui::Button::new("").frame(false));let center=response.rect.center();let points=if self.layers[index].settings.collapsed{vec![center+egui::vec2(-2.,-4.),center+egui::vec2(2.,0.),center+egui::vec2(-2.,4.)]}else{vec![center+egui::vec2(-4.,-2.),center+egui::vec2(0.,2.),center+egui::vec2(4.,-2.)]};ui.painter().add(egui::Shape::line(points,egui::Stroke::new(1.4_f32,ui.visuals().text_color())));if response.clicked(){self.layers[index].settings.collapsed=!self.layers[index].settings.collapsed;self.changed=true;}}
+                    if self.layers[index].settings.group_id!=0{let response=ui.add_sized([10.,28.],egui::Button::new("").frame(false));let center=response.rect.center();let points=if self.layers[index].settings.collapsed{vec![center+egui::vec2(-2.,-4.),center+egui::vec2(2.,0.),center+egui::vec2(-2.,4.)]}else{vec![center+egui::vec2(-4.,-2.),center+egui::vec2(0.,2.),center+egui::vec2(4.,-2.)]};ui.painter().add(egui::Shape::line(points,egui::Stroke::new(1.4_f32,ui.visuals().text_color())));if response.clicked(){self.layers[index].settings.collapsed=!self.layers[index].settings.collapsed;}}
                     if self.layers[index].settings.clipped{let(rect,_)=ui.allocate_exact_size(egui::vec2(12.,20.),egui::Sense::hover());let c=ui.visuals().text_color();let a=rect.center()-egui::vec2(3.,5.);let b=rect.center()+egui::vec2(3.,4.);ui.painter().add(egui::Shape::line(vec![a,egui::pos2(a.x,b.y),b],egui::Stroke::new(1.3_f32,c)));ui.painter().add(egui::Shape::convex_polygon(vec![b,b+egui::vec2(-3.,-3.),b+egui::vec2(-3.,3.)],c,egui::Stroke::NONE));}
                     let (rect, response) =
                         ui.allocate_exact_size(egui::vec2(if self.layers[index].settings.group_id!=0{28.}else{36.}, 28.), egui::Sense::click());
@@ -1020,9 +1081,10 @@ impl Editor {
                         &super::ImageBackground::Checkerboard,
                         None,
                     );
-                    let thumb_size = egui::vec2(thumb.width() as f32, thumb.height() as f32);
+                    let texture = &self.layer_thumbnails[index].as_ref().unwrap().0;
+                    let thumb_size = texture.size_vec2();
                     ui.painter().image(
-                        self.layer_thumbnails[index].id(),
+                        texture.id(),
                         Rect::from_center_size(rect.center(), thumb_size),
                         Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)),
                         Color32::WHITE,
@@ -1031,19 +1093,32 @@ impl Editor {
                     if self.layers[index].settings.group_id!=0{layer_properties::paint_group_icon(ui,rect,!self.layers[index].settings.collapsed);}
                     if let Some(adjust)=&self.layers[index].settings.adjustment{layer_properties::paint_adjustment_icon(ui,rect,adjust);}
                     if active&&!self.mask_editing{ui.painter().rect_stroke(rect,1.,egui::Stroke::new(2_f32,ui.visuals().selection.stroke.color),egui::StrokeKind::Inside);}
+                    if let Some(text)=&self.layers[index].settings.text {
+                        self.font_samples.tick(ui.ctx());
+                        ui.painter().rect_filled(rect, 2., ui.visuals().extreme_bg_color);
+                        ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,"T",egui::FontId::proportional(20.),ui.visuals().text_color());
+                        if self.font_samples.catalog.as_ref().is_some_and(|f|!f.contains(&text.family)) {
+                            let c=rect.right_bottom()-egui::vec2(7.,7.);
+                            ui.painter().add(egui::Shape::convex_polygon(vec![c+egui::vec2(0.,-7.),c+egui::vec2(-7.,6.),c+egui::vec2(7.,6.)],Color32::from_rgb(255,206,60),egui::Stroke::NONE));
+                            ui.painter().text(c+egui::vec2(0.,1.),egui::Align2::CENTER_CENTER,"!",egui::FontId::proportional(12.),Color32::BLACK);
+                            response.clone().on_hover_text(format!("{} {}",tr("缺少字体"),text.family));
+                        }
+                        if response.double_clicked() {edit_text=Some((index,rect));}
+                    }
                     if response.clicked() {
                         select = Some(index);
                     }
                     if self.layers[index].settings.mask.is_some(){
                         if layer_properties::mask_link_button(ui,self.layers[index].settings.mask_linked).clicked(){toggle_mask_link=Some(index);}
                         let mask_response=layer_properties::mask_button(ui,&self.layers[index].settings.mask.as_ref().unwrap()[self.selected],self.pixels.width(),self.pixels.height(),active&&self.mask_editing,index);
+                        if !self.layers[index].settings.mask_enabled{let rect=mask_response.rect.shrink(3.);ui.painter().line_segment([rect.left_bottom(),rect.right_top()],egui::Stroke::new(2_f32,Color32::from_rgb(235,45,45)));}
                         if mask_response.clicked(){select_mask=Some(index);}
                         mask_response.context_menu(|ui|{
                             let mut action:Option<u8>=None;
                             ui.add_enabled_ui(!locked&&!material_layer,|ui|{
                                 if ui.button(tr(if self.layers[index].settings.mask_enabled{"停用图层蒙版"}else{"启用图层蒙版"})).clicked(){action=Some(0);}
                                 if ui.button(tr("删除图层蒙版")).clicked(){action=Some(1);}
-                                if ui.add_enabled(self.layers[index].settings.group_id==0&&self.layers[index].settings.adjustment.is_none(),egui::Button::new(tr("应用图层蒙版"))).clicked(){action=Some(2);}
+                                if ui.add_enabled(self.layers[index].settings.group_id==0&&self.layers[index].settings.adjustment.is_none()&&self.layers[index].settings.text.is_none(),egui::Button::new(tr("应用图层蒙版"))).clicked(){action=Some(2);}
                             });
                             ui.separator();
                             for(code,label)in[(3,"蒙版转为选区"),(4,"添加蒙版到选区"),(5,"从选区中减去蒙版"),(6,"蒙版与选区交叉")]{if ui.add_enabled(code<5||self.selection.mask.is_some(),egui::Button::new(tr(label))).clicked(){action=Some(code);}}
@@ -1052,9 +1127,10 @@ impl Editor {
                             if let Some(action)=action{ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("tile_mask_context_action"),(index,action)));ui.close_menu();}
                         });
                     }
-                    let width = (ui.available_width() - if self.layers[index].settings.link_id!=0{48.}else{28.} - if self.layers[index].settings.has_effects(){24.}else{0.} - if self.layers[index].settings.adjustment.is_some(){20.}else{0.} - ui.spacing().item_spacing.x).max(1.);
+                    let width = (ui.available_width() - if self.layers[index].settings.link_id!=0{48.}else{28.} - if self.layers[index].settings.has_effects()||self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx){24.}else{0.} - if self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.text.is_some(){20.}else{0.} - ui.spacing().item_spacing.x).max(1.);
                     let name_response = ui.push_id(owner.with(("name", index)), |ui| {
                         ui.add_sized([width, 28.], egui::Button::new(&name).selected(row_selected).truncate()
+                            .corner_radius(0)
                             .sense(egui::Sense::click_and_drag()))
                     }).inner.on_hover_text(tr("拖拽调整图层顺序"));
                     // Only a primary-button drag can start layer reordering.
@@ -1062,11 +1138,17 @@ impl Editor {
                     if !locked && !self.layers[index].settings.lock_position && !self.layers[index].material && name_response.drag_started_by(egui::PointerButton::Primary) {
                         name_response.dnd_set_drag_payload((owner, index));
                     }
-                    if name_response.clicked() {
+                    if name_response.double_clicked() && self.layers[index].settings.text.is_some() {
+                        inline_text = Some(index);
+                    } else if name_response.clicked() {
                         select = Some(index);
                     }
                     name_response.context_menu(|ui| {
                         if !material_layer&&!locked&&ui.button(tr(if self.layers[index].settings.clipped{"释放剪贴蒙版"}else{"创建剪贴蒙版"})).clicked(){clip_toggle=Some(index);ui.close_menu();}
+                        if self.layers[index].settings.text.is_some() {
+                            if ui.add_enabled(self.rectangle_text_allowed() && self.text_unlocked(index), egui::Button::new(tr("编辑文字图层"))).clicked(){edit_text=Some((index,name_response.rect));ui.close_menu();}
+                            if ui.add_enabled(self.text_unlocked(index),egui::Button::new(tr("栅格化文字"))).clicked(){rasterize=Some(index);ui.close_menu();}
+                        }
                         if self.layer_editable()&&index==self.active_layer&&ui.button(tr("清空选中图层")).clicked(){ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("tile_clear_layer"),true));ui.close_menu();}
                         if material_layer {
                             if ui.button(format!("{}  Ctrl+J", tr("复制当前选中格为图层"))).clicked() { duplicate = Some((index, false)); ui.close_menu(); }
@@ -1081,8 +1163,9 @@ impl Editor {
                             });
                             return;
                         }
+                        self.style_context_menu(ui,index,false);
                         if ui.button(format!("{}  Ctrl+J", tr(if group_layer{"复制组"}else{"复制图层"}))).clicked() { duplicate = Some((index, true)); ui.close_menu(); }
-                        if !group_layer&&self.layers[index].settings.adjustment.is_none()&&ui.add_enabled(!locked && self.layers[index].visible && self.selection.mask.as_ref().is_some_and(|m|!m.is_empty()),egui::Button::new(format!("{}  Ctrl+Shift+J",tr("通过剪切的图层")))).clicked(){cut_duplicate=Some(index);ui.close_menu();}
+                        if !group_layer&&self.layers[index].settings.text.is_none()&&self.layers[index].settings.adjustment.is_none()&&ui.add_enabled(!locked && self.layers[index].visible && self.selection.mask.as_ref().is_some_and(|m|!m.is_empty()),egui::Button::new(format!("{}  Ctrl+Shift+J",tr("通过剪切的图层")))).clicked(){cut_duplicate=Some(index);ui.close_menu();}
                         if ui
                             .add_enabled(
                                 !locked,
@@ -1101,8 +1184,8 @@ impl Editor {
                             rename = Some((index, text));
                         }
                     });
-                    if self.layers[index].settings.adjustment.is_some(){let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&!*fx);let response=ui.add_sized([16.,28.],egui::Button::new("").frame(false).selected(expanded));let c=response.rect.center();let points=if expanded{vec![c+egui::vec2(-4.,-2.),c+egui::vec2(0.,2.),c+egui::vec2(4.,-2.)]}else{vec![c+egui::vec2(-2.,-4.),c+egui::vec2(2.,0.),c+egui::vec2(-2.,4.)]};ui.painter().add(egui::Shape::line(points,egui::Stroke::new(1.4_f32,ui.visuals().text_color())));let rect=response.rect;if response.on_hover_text(tr("调整")).clicked(){detail_toggle=Some((index,false,rect));}}
-                    if self.layers[index].settings.has_effects(){let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx);let response=ui.add_sized([20.,28.],egui::Button::new(egui::RichText::new("fx").italics().size(14.)).frame(false).selected(expanded));let rect=response.rect;if response.on_hover_text(tr("图层样式")).clicked(){detail_toggle=Some((index,true,rect));}}
+                    if self.layers[index].settings.adjustment.is_some() || (self.layers[index].settings.text.is_some() && self.rectangle_text_allowed()){let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&!*fx);let response=ui.add_sized([16.,28.],egui::Button::new("").frame(false).selected(expanded));let c=response.rect.center();let points=if expanded{vec![c+egui::vec2(-4.,-2.),c+egui::vec2(0.,2.),c+egui::vec2(4.,-2.)]}else{vec![c+egui::vec2(-2.,-4.),c+egui::vec2(2.,0.),c+egui::vec2(-2.,4.)]};ui.painter().add(egui::Shape::line(points,egui::Stroke::new(1.4_f32,ui.visuals().text_color())));let rect=response.rect;if response.on_hover_text(tr(if self.layers[index].settings.text.is_some(){"编辑文字图层"}else{"调整"})).clicked(){detail_toggle=Some((index,false,rect));}}
+                    if self.layers[index].settings.has_effects()||self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx){let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx);let response=ui.add_sized([20.,28.],egui::Button::new(egui::RichText::new("fx").italics().size(14.)).frame(false).selected(expanded));let rect=response.rect;response.context_menu(|ui|{self.style_context_menu(ui,index,true);});if response.on_hover_text(tr("图层样式")).clicked(){detail_toggle=Some((index,true,rect));}}
                     if self.layers[index].settings.link_id!=0 {let(rect,_)=ui.allocate_exact_size(egui::vec2(16.,16.),egui::Sense::hover());let c=ui.visuals().text_color();let center=rect.center();for dx in [-3.,3.]{ui.painter().rect_stroke(Rect::from_center_size(center+egui::vec2(dx,0.),egui::vec2(9.,6.)),3.,egui::Stroke::new(1.3_f32,c),egui::StrokeKind::Inside);}ui.painter().line_segment([center-egui::vec2(3.,0.),center+egui::vec2(3.,0.)],egui::Stroke::new(1.3_f32,c));}
                     let inherited_lock=self.ancestor_locked(index);
                     let lock=ui.add_enabled_ui(!material_layer&&!inherited_lock,|ui|Self::layer_lock_button(ui,owner.with(("lock",index)),self.layers[index].locked||inherited_lock)).inner;
@@ -1131,6 +1214,8 @@ impl Editor {
             let(_,drop)=ui.dnd_drop_zone::<(egui::Id,usize),_>(frame,|ui|{ui.set_min_width((ui.available_width()-10.).max(1.));ui.label(tr("拖到此处移出组"));});
             if let Some(payload)=drop{if payload.0==owner{reorder=Some((payload.1,0,None,true));}}
         }
+        if let Some((index,rect))=edit_text {self.toggle_layer_detail(index,false,rect,ui.ctx().screen_rect());}
+        if let Some(index)=rasterize {self.rasterize_text(index);}
         if let Some(index)=clip_toggle{self.toggle_clipping(index);}
         if let Some(index)=toggle_mask_link{if !self.layers[index].locked&&!self.ancestor_locked(index){self.record_layer_change();self.layers[index].settings.mask_linked=!self.layers[index].settings.mask_linked;}}
         if let Some((index,action))=ui.ctx().data_mut(|d|d.remove_temp::<(usize,u8)>(egui::Id::new("tile_mask_context_action"))){self.mask_context_action(index,action);}
@@ -1144,6 +1229,9 @@ impl Editor {
         }
         if let Some(index) = select {
             self.select_layer_click(index,ui.input(|i|i.modifiers));
+        }
+        if let Some(index) = inline_text {
+            self.begin_inline_text(index, None);
         }
         if let Some(index) = toggle_visible {
             self.record_layer_change();
@@ -1159,11 +1247,13 @@ impl Editor {
         if let Some((index,fx,rect))=detail_toggle{self.toggle_layer_detail(index,fx,rect,ui.ctx().screen_rect());}
         self.layer_detail_ui(ui);
         self.layer_action_confirmation(ui);
-        if !self.layer_editable() {
+        if !self.layer_editable() && self.layers[self.active_layer].settings.text.is_none() {
             ui.small(tr("当前图层已锁定或隐藏，不能绘制。"));
         }
     }
     fn invalidate_textures(&mut self) {
+        self.transform_bounds_cache=None;
+        self.layer_thumbnails.clear();
         self.dirty_texture = true;
         self.dirty_all = true;
         self.dirty_tiles.clear();
@@ -1414,7 +1504,7 @@ impl Editor {
         }
     }
     fn set_infinite_view(&mut self,infinite:bool) {
-        if self.infinite_view==infinite { return; }
+        if self.plain_image || self.infinite_view==infinite { return; }
         self.finish_stroke(); self.selection.draft.clear(); self.infinite_view=infinite;
         self.last=None; self.preview_last=None; self.zoom_drag=None; self.merged_zoom_drag=None;
         self.pan_drag=false; self.merged_pan_drag=false;
@@ -1425,8 +1515,29 @@ impl Editor {
         self.pan_drag=false; self.merged_pan_drag=false;
     }
     fn tool_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.pending_layer_action.is_some()||self.pending_open.is_some(){return;}
-        if Self::text_input_active(ctx) || ctx.input(|i| !i.focused || i.pointer.primary_down()) {
+        if self.pending_layer_action.is_some()||self.pending_open.is_some()||self.text_dialog.as_ref().is_some_and(|d|d.target.is_none()){return;}
+        if self.inline_text.is_some() || Self::text_input_active(ctx) || ctx.input(|i| !i.focused || i.pointer.primary_down()) {
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::R)) {
+            self.guides.rulers = !self.guides.rulers;
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Semicolon)) {
+            self.guides.visible = !self.guides.visible;
+            return;
+        }
+        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::T)){if matches!(self.tool,Tool::Move|Tool::Select){self.begin_transform();}return;}
+        if self.transform.is_some() {
+            if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)){self.finish_transform(false);return;}
+            if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter)){self.finish_transform(true);return;}
+            let switching=ctx.input(|i|i.modifiers.is_none() && [egui::Key::V,egui::Key::M,egui::Key::B,egui::Key::I,egui::Key::E,egui::Key::U,egui::Key::L,egui::Key::G,egui::Key::Z,egui::Key::T].iter().any(|k|i.key_pressed(*k)));
+            if !switching || !self.finish_transform(true){return;}
+        }
+        self.nudge_layers(ctx);
+        if self.rectangle_text_allowed() && ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::T)) {
+            self.finish_stroke();
+            self.tool = Tool::Text;
             return;
         }
         if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Delete)) {if self.mask_editing{self.request_layer_action(true,self.active_layer);}else{self.request_layer_action(false,self.active_layer);}return;}
@@ -1462,7 +1573,7 @@ impl Editor {
             self.brush_size = (self.brush_size + 1).min(32);
         }
         if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Q)) { self.set_infinite_view(false); }
-        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::W)) { self.set_infinite_view(true); }
+        if !self.plain_image && ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::W)) { self.set_infinite_view(true); }
         if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::H)) { self.center_view(); }
         for (key, tool) in [
             (egui::Key::V, Tool::Move),
@@ -1536,6 +1647,9 @@ impl Editor {
             layer.tiles = tiles.clone();
         }
         Snapshot {
+            selected_slot: self.selected_slot,
+            subgroup_size: self.subgroup_size,
+            fx_light: self.fx_light,
             selection:self.selection.history(),
             selected_layers:self.selected_layers.clone(),layer_anchor:self.layer_anchor,
             mask_editing:self.mask_editing,
@@ -1555,7 +1669,12 @@ impl Editor {
             wrap: self.wrap,
         }
     }
-    fn select(&mut self, index: usize) {
+    fn select_slot(&mut self, slot: usize) {
+        let index = self.layout[slot];
+        if self.selected_slot == slot && self.selected == index { return; }
+        self.finish_stroke();
+        self.selected_slot = slot;
+        if self.selected == index { return; }
         self.tiles[self.selected] = self.pixels.clone();
         self.selected = index;
         self.pixels = self.tiles[index].clone();
@@ -1597,18 +1716,21 @@ impl Editor {
             }
         }
     }
+    fn ensure_layer_after_removal(&mut self) {
+        if self.layers.iter().all(|l| l.material) {
+            self.layers.push(Layer { settings:Default::default(), material:false,
+                name:format!("{} 1",tr("图层")), visible:true, locked:false,
+                tiles:self.tiles.iter().map(|im|RgbaImage::new(im.width(),im.height())).collect(),
+            });
+        }
+    }
     fn delete_layer(&mut self, index: usize) {
         if index >= self.layers.len() || self.layers[index].locked || self.layers[index].material || self.ancestor_locked(index) { return; }
         if self.layers[index].settings.group_id!=0{self.delete_group(index);return;}
             self.record_layer_change();
             self.layers.remove(index);
             self.cleanup_single_links();
-            if self.layers.is_empty() || self.layers.iter().all(|l|l.material) {
-                self.layers.push(Layer { settings:Default::default(), material: false,
-                    name: format!("{} 1", tr("图层")), visible: true, locked: false,
-                    tiles: self.tiles.iter().map(|p| RgbaImage::new(p.width(), p.height())).collect(),
-                });
-            }
+            self.ensure_layer_after_removal();
             self.active_layer = if self.active_layer > index {
                 self.active_layer - 1
             } else {
@@ -1627,22 +1749,6 @@ impl Editor {
         self.pixels = self.tiles[self.selected].clone();
         self.sync_layer();
         self.message = tr("已清空选中图层。").into();
-    }
-    #[cfg(test)]
-    fn import_layer(&mut self, image: RgbaImage) {
-        self.ensure_layers();
-        let bytes: usize = self.layers.iter().flat_map(|l| &l.tiles).map(|p| p.as_raw().len()).sum();
-        let added: usize = self.tiles.iter().map(|p| p.as_raw().len()).sum();
-        if self.layers.len() >= 32 || bytes + added > LAYER_BYTES {
-            self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
-            return;
-        }
-        self.record_layer_change();
-        let mut tiles: Vec<_> = self.tiles.iter().map(|p| RgbaImage::new(p.width(), p.height())).collect();
-        tiles[self.selected] = image;
-        self.layers.push(Layer { settings:Default::default(), material: false, name: format!("{} {}", tr("图层"), self.layers.len() + 1),
-            visible: true, locked: true, tiles });
-        self.select_layer(self.layers.len() - 1);
     }
     #[cfg(test)]
     fn replace(&mut self, image: RgbaImage) {
@@ -1669,17 +1775,22 @@ impl Editor {
         self.invalidate_textures();
     }
     fn history(&mut self, redo: bool) {
+        self.finish_transform(false);
         self.finish_stroke();
         let stack = if redo { &mut self.redo } else { &mut self.undo };
         if let Some(state) = stack.pop() {
             let old = self.snapshot();
             self.pixels = state.tiles[state.selected].clone();
+            self.fx_light = state.fx_light;
             self.layers = state.layers;
             self.materials = state.materials;
             self.active_layer = state.active_layer;
             self.selected_layers=state.selected_layers;self.layer_anchor=state.layer_anchor;
             self.tiles = state.tiles;
             self.selected = state.selected;
+            self.selected_slot = state.selected_slot;
+            self.subgroup_size = state.subgroup_size;
+            (self.width, self.height) = self.pixels.dimensions();
             self.layout = state.layout;
             self.columns = state.columns;
             self.rows = state.rows;
@@ -1715,10 +1826,11 @@ impl Editor {
             }
             let mut display = self.composite(index);
             let (w, h) = display.dimensions();
-            for (x, y, p) in display.enumerate_pixels_mut() {
+            if self.diamond || self.hex!=0 {for (x, y, p) in display.enumerate_pixels_mut() {
                 if !self.inside_tile(x as i32, y as i32, w, h) {
                     *p = Rgba([0; 4]);
                 }
+            }
             }
             while self.preview_samples.len()<=index{self.preview_samples.push(RgbaImage::new(0,0));}
             self.preview_samples[index]=display.clone();
@@ -1853,15 +1965,30 @@ impl Editor {
             egui::StrokeKind::Outside,
         );
     }
+    fn minimum_zoom(&self)->f32 { if self.plain_image {0.01} else {0.25} }
     fn canvas(&mut self, ui: &mut egui::Ui) {
-        let (area, response) = ui.allocate_exact_size(
+        let (outer, allocation) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), ui.available_height().max(100.)),
-            egui::Sense::click_and_drag(),
+            egui::Sense::hover(),
         );
+        let area = self.guides.area(outer);
+        let response = ui.interact(area, allocation.id.with("canvas"), egui::Sense::click_and_drag());
         let tools = self.floating_tools(ui, area);
         let over_tools = self.toolbar.dragging || ui
             .input(|i| i.pointer.hover_pos())
             .is_some_and(|p| tools.contains(p));
+        let guide_scale = self.zoom / ui.ctx().pixels_per_point();
+        let guide_origin = area.center() + self.pan - self.edit_size() * (guide_scale / 2.);
+        let (w, h) = self.pixels.dimensions();
+        let whole = self.whole_unit();
+        let (cols, rows) = if whole { (self.columns, self.rows) } else { (1, 1) };
+        let first = if self.plain_image {
+            egui::vec2(-((w / 2) as f32), -((h / 2) as f32))
+        } else {
+            egui::vec2(-if self.diamond {rows as f32 * w as f32 / 2.} else {w as f32 / 2.}, -(h as f32) / 2.)
+        };
+        let guide_drag = self.guide_input(ui, outer, area, guide_origin, guide_scale, first, whole, over_tools);
+        let over_tools = over_tools || guide_drag || self.inline_text.is_some();
         let painter = ui.painter_at(area);
         painter.rect_filled(area, 0., Color32::from_gray(45));
         if response.hovered() && !over_tools && self.zoom_drag.is_none() {
@@ -1873,7 +2000,7 @@ impl Editor {
             if scroll != 0. {
                 self.finish_stroke();
                 let old = self.zoom;
-                self.zoom = (old * (scroll * 0.003).exp()).clamp(0.25, 64.);
+                self.zoom = (old * (scroll * 0.003).exp()).clamp(self.minimum_zoom(), 64.);
                 if let Some(pointer) = response.hover_pos() {
                     let offset = pointer - area.center();
                     self.pan = offset - (offset - self.pan) * (self.zoom / old);
@@ -1908,7 +2035,7 @@ impl Editor {
                         self.zoom_drag = Some((pointer, self.zoom, self.pan));
                     }
                     if let Some((anchor, initial, pan)) = self.zoom_drag {
-                        (self.zoom, self.pan) = drag_zoom(anchor, initial, pan, pointer.x - anchor.x, area.center());
+                        (self.zoom, self.pan) = drag_zoom(anchor, initial, pan, pointer.x - anchor.x, area.center(),self.minimum_zoom());
                         ui.output_mut(|o| o.cursor_icon = if pointer.x < anchor.x {
                             egui::CursorIcon::ZoomOut
                         } else { egui::CursorIcon::ZoomIn });
@@ -1918,21 +2045,6 @@ impl Editor {
         } else { self.zoom_drag = None; }
         if !down { self.zoom_drag = None; }
         let panning = zoom_tool || move_tool || moving || self.pan_drag || (space && response.hovered());
-        let (w, h) = self.pixels.dimensions();
-        let whole = self.whole_unit();
-        let (cols, rows) = if whole {
-            (self.columns, self.rows)
-        } else {
-            (1, 1)
-        };
-        let first = egui::vec2(
-            -if self.diamond {
-                rows as f32 * w as f32 / 2.
-            } else {
-                w as f32 / 2.
-            },
-            -(h as f32) / 2.,
-        );
         let bounds = Rect::from_min_size(first.to_pos2(), self.edit_size());
         let scale = self.zoom / ui.ctx().pixels_per_point();
         let origin = area.center() + self.pan - bounds.center().to_vec2() * scale;
@@ -1955,12 +2067,23 @@ impl Editor {
                     ((p.y - origin.y) / scale).floor() as i32,
                 )
             });
-        self.selection_context(ui,&response,origin,scale,whole,false);
+        if self.transform.is_none(){self.selection_context(ui,&response,origin,scale,whole,false);}
         let special = !self.elevated
             && !ui.input(|i| i.modifiers.alt)
             && matches!(self.tool, Tool::Rectangle | Tool::Line | Tool::Fill);
-        if panning {
+        let transforming=!panning && !over_tools && self.transform_input(ui,&response,origin,scale);
+        let editing_text = !panning && !over_tools && !transforming && self.transform.is_none()
+            && self.tool == Tool::Move && response.double_clicked()
+            && point.is_some_and(|(x, y)| self.inline_text_hit(egui::pos2(x as f32, y as f32), whole, false));
+        if panning || over_tools || transforming || editing_text {
             self.last = None;
+        } else if self.tool == Tool::Text {
+            if self.rectangle_text_allowed() && response.hovered() {
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Text);
+            }
+            if response.clicked_by(egui::PointerButton::Primary) && let Some((x, y)) = point {
+                self.text_tool_click(egui::pos2(x as f32, y as f32), whole, false);
+            }
         } else if self.tool == Tool::Move && !self.elevated {
             self.layer_move_input(ui,&response,origin,scale,whole,false);
         } else if self.tool == Tool::Select && !self.elevated {
@@ -2061,9 +2184,9 @@ impl Editor {
             }
         }
         self.rectangle_outline(&painter, origin, scale, false);
-        self.selection_outline(&painter,origin,scale);
+        if self.transform.is_none(){self.selection_outline(&painter,origin,scale);}
         self.subgroup_outline(&painter,origin,scale);
-        if self.grid && scale >= 6. {
+        if !self.plain_image && self.grid && scale >= 6. {
             let clip = visible.intersect(area);
             let stroke = egui::Stroke::new(0.5_f32, Color32::from_white_alpha(30));
             let x0 = ((clip.left() - origin.x) / scale).ceil() as i32;
@@ -2100,7 +2223,7 @@ impl Editor {
                 bounds.left_bottom().to_vec2(),
             ]
         };
-        if self.hex == 0 { painter.add(egui::Shape::closed_line(
+        if self.hex == 0 && !self.plain_image { painter.add(egui::Shape::closed_line(
             corners.map(|p| origin + p * scale).to_vec(),
             egui::Stroke::new(1_f32, Color32::YELLOW),
         )); }
@@ -2113,9 +2236,15 @@ impl Editor {
                 Color32::LIGHT_BLUE,
             );
         }
+        self.transform_outline(&painter,origin,scale);
+        self.guides.paint(ui, outer, area, visible.min, scale);
         if !over_tools {
+            self.paint_move_alignment(&painter, origin, scale);
+        }
+        if !over_tools && !transforming && self.transform.is_none() {
             self.brush_cursor(ui, &response, origin, scale);
         }
+        self.inline_text_canvas(ui, area, origin, scale);
     }
     fn tile_at(&self, col: i32, row: i32) -> usize {
         if self.multiple {
@@ -2136,8 +2265,11 @@ impl Editor {
         if bytes.len() > 256 * 1024 * 1024 {
             return Err(tr("无效的 Tile 工程或超出尺寸限制。").into());
         }
-        let p: Project = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        let mut p: Project = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         p.validate()?;
+        if p.version < 10 {
+            for layer in &mut p.layers { layer.settings.effects.legacy_appearance = layer.settings.has_effects(); }
+        }
         let mut seen = std::collections::BTreeSet::new();
         let duplicates = if p.multiple {
             (0..p.rows)
@@ -2166,6 +2298,10 @@ impl Editor {
             })
             .collect();
         self.material_drop_status=None;
+        self.transform=None;
+        self.text_dialog=None;
+        self.guides.clear();
+        self.inline_text = None;
         self.materials = p.materials.into_iter().map(|m| Material { name: m.name, pixels: RgbaImage::from_raw(p.width,p.height,m.pixels).expect("validated material") }).collect();
         self.layers = p
             .layers
@@ -2185,6 +2321,7 @@ impl Editor {
             .collect();
         self.cleanup_single_links();
         self.active_layer = p.active_layer;self.selected_layers=vec![self.active_layer];self.layer_anchor=self.active_layer;
+        self.fx_light = p.fx_light;
         self.background_custom = p.background_custom;
         self.background_color = p.background_color;
         self.selected = p.selected;
@@ -2196,6 +2333,8 @@ impl Editor {
         self.columns = p.columns;
         self.rows = p.rows;
         self.multiple = p.multiple;
+        self.split_preview = false;
+        self.split_grid = [1, 1];
         self.diamond = p.diamond || p.elevated;
         self.hex = p.hex;
         self.elevated = p.elevated;
@@ -2230,7 +2369,7 @@ impl Editor {
             .find(|&slot| self.layout[slot] == self.selected)
             .unwrap_or(0);
         self.invalidate_textures();
-        self.changed = duplicates != 0;
+        self.changed = false;
         self.trim_history();
         self.message = path.display().to_string();
         self.wake = true;
@@ -2248,7 +2387,8 @@ impl Editor {
                 {
                     let state = self.snapshot();
                     let project = Project {
-                        version: 9,
+                        version: if state.layers.iter().any(|l| l.settings.text.is_some()) {12} else if state.layers.iter().any(|l| l.settings.effects.has_extra()) {11} else {10},
+                        fx_light: self.fx_light,
                         materials: self.materials.iter().map(|m| StoredMaterial { name:m.name.clone(),pixels:m.pixels.as_raw().clone() }).collect(),
                         background_custom: self.background_custom,
                         background_color: self.background_color,
@@ -2315,7 +2455,7 @@ impl Editor {
                     .add_filter(tr("绘Tile"), &["uytile"])
                     .pick_file()
                 {
-                    self.request_open_project(path);
+                    if super::is_bitmap(source_path)||super::is_psd(source_path){ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("image_open_tile_project"),path));}else{self.request_open_project(path);}
                 }
             }
         });
@@ -2367,69 +2507,32 @@ impl Editor {
         self.invalidate_textures();
         Ok(())
     }
-    fn tile_settings(&mut self, ui: &mut egui::Ui) {
-        let old = (self.multiple, self.columns, self.rows);
-        let mut multiple = self.multiple;
-        let mut columns = self.columns;
-        let mut rows = self.rows;
-        ui.checkbox(&mut multiple, tr("多 Tile 循环"));
-        if multiple {
-            ui.horizontal(|ui| {
-                ui.label(tr("循环列数"));
-                ui.add(egui::DragValue::new(&mut columns).range(1..=8));
-                ui.label(tr("循环行数"));
-                ui.add(egui::DragValue::new(&mut rows).range(1..=8));
-            });
+    fn set_preview_layout(&mut self, multiple: bool, columns: usize, rows: usize) {
+        let previous = (self.multiple, self.columns, self.rows);
+        if previous == (multiple, columns, rows) { return; }
+        self.finish_stroke();
+        (self.multiple, self.columns, self.rows) = (multiple, columns, rows);
+        if multiple && let Err(error) = self.independent_slots() {
+            (self.multiple, self.columns, self.rows) = previous;
+            self.message = error;
+            return;
         }
-        if multiple {
-            ui.horizontal(|ui| {
-                for size in [1, 2, 3, 4] {
-                    if ui.button(format!("{size}×{size}")).clicked() {
-                        columns = size;
-                        rows = size;
-                    }
-                }
-            });
-        }
-        if (multiple, columns, rows) != old {
-            self.finish_stroke();
-            let before = self.snapshot();
-            self.multiple = multiple;
-            self.columns = columns;
-            self.rows = rows;
-            if multiple {
-                if let Err(error) = self.independent_slots() {
-                    (self.multiple, self.columns, self.rows) = old;
-                    self.message = error;
-                } else {
-                    self.undo.push(before);
-                    self.redo.clear();
-                    self.changed = true;
-                }
-            } else {
-                self.undo.push(before);
-                self.redo.clear();
-                self.changed = true;
-            }
-            self.trim_history();
-        }
+        // Refresh the project preview while leaving document edits and undo history alone.
+        self.revision = self.revision.wrapping_add(1);
     }
     fn has_multiple_slots(&self)->bool {self.multiple && (self.columns>1 || self.rows>1)}
-    fn tile_controls(&mut self, ui: &mut egui::Ui, _source_path: &Path) {
-        if self.multiple {
+    fn tile_controls(&mut self, ui: &mut egui::Ui, source_path: &Path, source: Option<&RgbaImage>) {
+        if self.multiple && !self.split_preview {
             let row = (self.selected_slot / 8).min(self.rows - 1);
             let col = (self.selected_slot % 8).min(self.columns - 1);
-            self.selected_slot = row * 8 + col;
-            if self.layout[self.selected_slot] != self.selected {
-                if let Some(slot) = (0..self.rows)
+            let clamped = row * 8 + col;
+            let slot = if self.layout[clamped] == self.selected { clamped } else {
+                (0..self.rows)
                     .flat_map(|r| (0..self.columns).map(move |c| r * 8 + c))
                     .find(|&slot| self.layout[slot] == self.selected)
-                {
-                    self.selected_slot = slot;
-                } else {
-                    self.select(self.layout[self.selected_slot]);
-                }
-            }
+                    .unwrap_or(clamped)
+            };
+            self.select_slot(slot);
             if self.has_multiple_slots() {
             let cell_width = ((ui.available_width() - 4. * (self.columns - 1) as f32)
                 / self.columns as f32)
@@ -2450,9 +2553,7 @@ impl Editor {
                                 .on_hover_text(format!("{},{}",row+1,col+1))
                                 .clicked()
                             {
-                                self.finish_stroke();
-                                self.selected_slot = slot;
-                                self.select(self.layout[slot]);
+                                self.select_slot(slot);
                             }
                         }
                         ui.end_row();
@@ -2465,8 +2566,21 @@ impl Editor {
             ));
             }
         }
-        if self.multiple && ui.button(tr("拆分导出全部格 PNG")).clicked() {
-            self.export_all_cells();
+        if !self.split_preview || !self.has_multiple_slots() {
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(source.is_some(), egui::Button::new(tr("导入当前图片"))).clicked()
+                    && let Some(image) = source {
+                    self.import_current_cell(image);
+                }
+                let label = if self.has_multiple_slots() { "导出当前格 PNG" } else { "另存 PNG" };
+                if ui.button(tr(label)).clicked() { self.export_tile_png(source_path, false); }
+            });
+        }
+        if self.has_multiple_slots() && !self.split_preview {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(tr("拆分导出全部格 PNG")).clicked() { self.export_all_cells(); }
+                if ui.button(tr("合并导出 PNG")).clicked() { self.export_tile_png(source_path, true); }
+            });
         }
         self.material_controls(ui);
     }
@@ -2495,14 +2609,29 @@ impl Editor {
         (self.repeat_zoom,self.repeat_pan,self.preview_grid,self.repeat_pan_drag,self.repeat_zoom_drag)=saved;
     }
     fn preview(&mut self, ui: &mut egui::Ui, editable: bool) {
-        let (area, response) = ui.allocate_exact_size(
+        let (outer, allocation) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), ui.available_height().max(80.)),
-            egui::Sense::click_and_drag(),
+            egui::Sense::hover(),
         );
+        let area = if self.rendering_merged { self.guides.area(outer) } else { outer };
+        let response = ui.interact(area, allocation.id.with("preview"), egui::Sense::click_and_drag());
         let over_tools = if self.rendering_merged {
             let tools=self.floating_tools(ui,area);
             self.toolbar.dragging || ui.input(|i|i.pointer.hover_pos()).is_some_and(|p|tools.contains(p))
         } else { false };
+        let (width, height) = self.pixels.dimensions();
+        let footprint = if self.elevated { self.footprint } else { [width, height] };
+        let dpi = ui.ctx().pixels_per_point();
+        let guide_scale = repeat_scale(self.repeat_zoom, dpi, footprint, height);
+        let guide_focus = if self.rendering_merged { self.center_unit_focus() } else { Vec2::ZERO };
+        let guide_offset = guide_focus - self.edit_size() * 0.5;
+        let guide_origin = area.center() + self.repeat_pan
+            - guide_focus * self.preview_display_scale(dpi, footprint, height)
+            + guide_offset * guide_scale;
+        let guide_drag = self.rendering_merged && self.guide_input(
+            ui, outer, area, guide_origin, guide_scale, guide_offset, true, over_tools,
+        );
+        let over_tools = over_tools || guide_drag || (self.rendering_merged && self.inline_text.is_some());
         let maximum = if self.rendering_merged { 64. } else { 8. };
         if response.hovered() && !over_tools && self.repeat_zoom_drag.is_none() {
             let scroll = ui.input_mut(|input| {
@@ -2537,9 +2666,7 @@ impl Editor {
         let navigating = moving || self.repeat_pan_drag || space
             || self.tool == Tool::Zoom;
         if !down { self.repeat_pan_drag = false; }
-        let (w, h) = self.pixels.dimensions();
-        let footprint = if self.elevated { self.footprint } else { [w, h] };
-        let dpi = ui.ctx().pixels_per_point();
+        let (w, h) = (width, height);
         if self.tool == Tool::Zoom && !moving && !space {
             if response.hovered() && !over_tools { ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ZoomIn); }
             if response.is_pointer_button_down_on() && down && (!over_tools || self.repeat_zoom_drag.is_some()) {
@@ -2643,13 +2770,25 @@ impl Editor {
                     ((v.y - origin.y) / scale).floor() as i32,
                 )
             });
-        if editable {self.selection_context(ui,&response,origin,scale,true,self.infinite_view);}
+        if editable && self.transform.is_none() {self.selection_context(ui,&response,origin,scale,true,self.infinite_view);}
         let special = editable
             && !self.elevated
             && !ui.input(|i| i.modifiers.alt)
             && matches!(self.tool, Tool::Rectangle | Tool::Line | Tool::Fill);
-        if navigating || over_tools {
+        let transforming=editable && !navigating && !over_tools && self.transform_input(ui,&response,origin,scale);
+        let editing_text = self.rendering_merged && !navigating && !over_tools && !transforming
+            && self.transform.is_none() && self.tool == Tool::Move && response.double_clicked()
+            && point.is_some_and(|(x, y)| self.inline_text_hit(egui::pos2(x as f32, y as f32), true, self.infinite_view));
+        if navigating || over_tools || transforming || editing_text {
             self.preview_last = None;
+        } else if self.tool == Tool::Text {
+            if self.rendering_merged && self.rectangle_text_allowed() && response.hovered() {
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Text);
+            }
+            if self.rendering_merged && response.clicked_by(egui::PointerButton::Primary)
+                && let Some((x, y)) = point {
+                self.text_tool_click(egui::pos2(x as f32, y as f32), true, self.infinite_view);
+            }
         } else if editable && self.tool == Tool::Select && !self.elevated && !ui.input(|i|i.modifiers.alt) {
             self.selection_input(ui,&response,origin,scale,true,self.infinite_view);
         } else if special {
@@ -2779,20 +2918,26 @@ impl Editor {
             } }
         }
         self.rectangle_outline(&p, origin, scale, true);
-        self.selection_outline(&p,origin,scale);
+        if self.transform.is_none(){self.selection_outline(&p,origin,scale);}
         self.subgroup_outline(&p,origin,scale);
-        if editable && !navigating {
+        if editable {self.transform_outline(&p,origin,scale);}
+        if self.rendering_merged {
+            self.guides.paint(ui, outer, area, origin + guide_offset * scale, scale);
+        }
+        if editable && !over_tools && !navigating && !transforming && self.transform.is_none() {
             self.brush_cursor(ui, &response, origin, scale);
         }
+        if self.rendering_merged { self.inline_text_canvas(ui, area, origin, scale); }
     }
     fn contextual_tool_options(&mut self,ui:&mut egui::Ui)->bool{
         let tool_icon=|ui:&mut egui::Ui,icon:crate::icons::Icon,label:&str|{let(rect,response)=ui.allocate_exact_size(egui::vec2(26.,24.),egui::Sense::hover());crate::icons::paint(ui,icon,rect.shrink(5.),ui.visuals().text_color());response.on_hover_text(tr(label));};
         match self.tool{
-            Tool::Move=>{ui.horizontal(|ui|{tool_icon(ui,crate::icons::Icon::Move,"移动");ui.checkbox(&mut self.move_auto_select,tr("自动选择"));ui.add_enabled_ui(self.move_auto_select,|ui|{ui.horizontal(|ui|{ui.spacing_mut().item_spacing.x=0.;for(group,label)in[(false,"图层"),(true,"组")]{let corners=egui::CornerRadius{nw:if group{0}else{4},sw:if group{0}else{4},ne:if group{4}else{0},se:if group{4}else{0}};if ui.add(egui::Button::new(tr(label)).selected(self.layer_move_group==group).corner_radius(corners)).clicked(){self.layer_move_group=group;}}});});});true},
+            Tool::Move=>{ui.horizontal(|ui|{tool_icon(ui,crate::icons::Icon::Move,"移动");ui.checkbox(&mut self.move_auto_select,tr("自动选择"));ui.add_enabled_ui(self.move_auto_select,|ui|{ui.horizontal(|ui|{ui.spacing_mut().item_spacing.x=0.;for(group,label)in[(false,"图层"),(true,"组")]{let corners=egui::CornerRadius{nw:if group{0}else{4},sw:if group{0}else{4},ne:if group{4}else{0},se:if group{4}else{0}};if ui.add(egui::Button::new(tr(label)).selected(self.layer_move_group==group).corner_radius(corners)).clicked(){self.layer_move_group=group;}}});});self.transform_switch(ui);});true},
             Tool::Select=>{ui.horizontal(|ui|{for mode in selection::Mode::ALL{let response=ui.add_sized([26.,24.],egui::Button::new("").selected(self.selection.mode==mode));crate::icons::paint(ui,mode.icon(),response.rect.shrink(5.),ui.visuals().text_color());if response.on_hover_text(tr(mode.label())).clicked(){self.finish_stroke();self.selection.draft.clear();self.selection.mode=mode;}}if ui.add_enabled(self.selection.mask.is_some(),egui::Button::new(tr("取消选区"))).clicked(){self.selection.clear();}
                 if let Some(color)=crate::color_property::show_editable(ui,tr("绘制颜色"),self.color.map(|v|v as f64/255.)){self.color=color.map(|v|(v.clamp(0.,1.)*255.).round()as u8);}
                 ui.scope(|ui|{ui.spacing_mut().slider_width=100.;ui.label(tr("不透明度"));let mut opacity=self.color[3]as f32*100./255.;if ui.add(egui::Slider::new(&mut opacity,0. ..=100.).max_decimals(0)).changed(){self.color[3]=(opacity*255./100.).round()as u8;}ui.label("%");});
                 if ui.add_enabled(self.layer_editable()&&self.selection.draft.is_empty()&&self.selection.mask.as_ref().is_some_and(|m|!m.is_empty()),egui::Button::new(tr("填充选区"))).on_hover_text("Alt+Enter").clicked(){self.fill_selection_color();}
+                self.transform_switch(ui);
             });true},
             Tool::Eyedropper=>{ui.horizontal(|ui|{tool_icon(ui,crate::icons::Icon::Eyedropper,"吸管");ui.label(tr("取样所有可见图层"));let(rect,_)=ui.allocate_exact_size(egui::vec2(30.,20.),egui::Sense::hover());super::seamless::checker_background(ui.painter(),rect,rect.min,Vec2::splat(1.),&super::ImageBackground::Checkerboard,None);ui.painter().rect_filled(rect,0.,Color32::from_rgba_unmultiplied(self.color[0],self.color[1],self.color[2],self.color[3]));ui.label(format!("#{:02X}{:02X}{:02X} · {} {:.0}%",self.color[0],self.color[1],self.color[2],tr("不透明度"),self.color[3]as f32/255.*100.));});true},
             Tool::Zoom=>{ui.horizontal(|ui|{tool_icon(ui,crate::icons::Icon::Search,"缩放");ui.label(tr("左右拖拽缩放"));let value=format!("{:.2}",self.zoom*100.);egui::ComboBox::from_id_salt("tile_zoom_presets").width(90.).height(260.).selected_text(format!("{}%",value.trim_end_matches('0').trim_end_matches('.'))).show_ui(ui,|ui|{for percent in [25,50,75,100,150,200,300,400,500,800,1000,1600,3200,6400]{let next=percent as f32/100.;if ui.selectable_label((self.zoom-next).abs()<0.0001,format!("{percent}%")).clicked(){self.pan*=next/self.zoom.max(0.001);self.zoom=next;}}});});true},
@@ -2803,7 +2948,7 @@ impl Editor {
         let height=(ui.spacing().interact_size.y.max(26.)+4.).ceil();
         let(rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),height),egui::Sense::hover());
         let mut options=ui.new_child(egui::UiBuilder::new().id_salt("tile_tool_options_row").max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        self.drawing_tool_contents(&mut options);
+        if self.transform.is_some(){self.transform_options(&mut options);}else{self.drawing_tool_contents(&mut options);}
     }
     fn drawing_tool_contents(&mut self, ui: &mut egui::Ui) {
         self.pen.read(ui);
@@ -2965,7 +3110,8 @@ impl Editor {
         let was_dragging=self.toolbar.dragging;
         let horizontal=self.toolbar.horizontal;
         let layout=if horizontal {egui::Layout::left_to_right(egui::Align::Center)}else{egui::Layout::top_down(egui::Align::Center)};
-        let default_size=if horizontal{egui::vec2(292.,42.)}else{egui::vec2(42.,292.)};
+        let length=if self.rectangle_text_allowed(){322.}else{292.};
+        let default_size=if horizontal{egui::vec2(length,42.)}else{egui::vec2(42.,length)};
         let response=egui::Area::new(ui.id().with(("tile_floating_tools", ctx.viewport_id(),horizontal)))
             .default_size(default_size)
             .order(egui::Order::Foreground)
@@ -3020,7 +3166,16 @@ impl Editor {
                             (Tool::Fill, crate::icons::Icon::PaintBucket, "填充", "G"),
                             (Tool::Zoom, crate::icons::Icon::Search, "缩放", "Z"),
                         ] {
-                            let selected = self.tool == tool;
+                            if tool == Tool::Zoom && self.rectangle_text_allowed()
+                                && ui.add_sized([26.,26.], egui::Button::new(egui::RichText::new("T").strong())
+                                    .selected(self.transform.is_none() && self.tool == Tool::Text))
+                                    .on_hover_text(format!("{} (T)", tr("添加文字图层"))).clicked()
+                                && self.finish_transform(true)
+                            {
+                                self.finish_stroke();
+                                self.tool = Tool::Text;
+                            }
+                            let selected = self.transform.is_none() && self.tool == tool;
                             let visuals = ui.visuals().clone();
                             let enabled = !self.elevated
                                 || !matches!(tool, Tool::Rectangle | Tool::Line | Tool::Fill | Tool::Select);
@@ -3047,7 +3202,7 @@ impl Editor {
                                     )
                                 })
                                 .inner;
-                            let color = if self.tool == tool {
+                            let color = if selected {
                                 ui.visuals().selection.stroke.color
                             } else {
                                 ui.visuals().text_color()
@@ -3068,7 +3223,7 @@ impl Editor {
                             let popup=ui.id().with(("tool_modes",tool as u8));
                             #[cfg(test)]
                             ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("tile_group_test",tool as u8)),(response.rect,popup)));
-                            if response.clicked() {
+                            if response.clicked() && self.finish_transform(true) {
                                 self.finish_stroke();self.selection.draft.clear();
                                 if selected && matches!(tool,Tool::Select|Tool::Brush) {ui.memory_mut(|m|m.toggle_popup(popup));}
                                 else {self.tool=tool;}
@@ -3131,40 +3286,29 @@ impl Editor {
         }
         response.intersect(area)
     }
-    fn controls(&mut self, ui: &mut egui::Ui, path: &Path, source: Option<&RgbaImage>) {
+    fn tile_sidebar(&mut self, ui: &mut egui::Ui, path: &Path, source: Option<&RgbaImage>) {
         self.ps_plugin.ui(ui);
         self.project_controls(ui, path);
         egui::CollapsingHeader::new(egui::RichText::new(tr("设置")).heading().strong()).id_salt("pixel_tile_settings_group").default_open(false).show(ui,|ui| {
-        let old_shape = (self.diamond,self.hex,self.elevated);
+        let (mut diamond,mut hex,mut elevated)=(self.diamond,self.hex,self.elevated);
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("模式"));
-            let mut mode = if self.hex != 0 { 2 } else if self.diamond { 1 } else { 0 };
+            let mut mode = if hex != 0 { 2 } else if diamond { 1 } else { 0 };
             egui::ComboBox::from_id_salt("tile_shape_mode").selected_text(tr(["矩形","菱形","六边形"][mode])).show_ui(ui,|ui| {
                 for (i,label) in ["矩形","菱形","六边形"].iter().enumerate() { ui.selectable_value(&mut mode,i,tr(label)); }
             });
-            self.diamond = mode == 1;
-            if mode == 2 { if self.hex == 0 { self.hex = 1; } self.elevated = false; }
-            else { self.hex = 0; if mode == 0 { self.elevated = false; } }
-            if self.hex != 0 {
-                egui::ComboBox::from_id_salt("tile_hex_orientation").selected_text(tr(if self.hex == 1 {"尖顶"} else {"平顶"})).show_ui(ui,|ui| {
-                    ui.selectable_value(&mut self.hex,1,tr("尖顶"));
-                    ui.selectable_value(&mut self.hex,2,tr("平顶"));
+            diamond = mode == 1;
+            if mode == 2 { if hex == 0 { hex = 1; } elevated = false; }
+            else { hex = 0; if mode == 0 { elevated = false; } }
+            if hex != 0 {
+                egui::ComboBox::from_id_salt("tile_hex_orientation").selected_text(tr(if hex == 1 {"尖顶"} else {"平顶"})).show_ui(ui,|ui| {
+                    ui.selectable_value(&mut hex,1,tr("尖顶"));
+                    ui.selectable_value(&mut hex,2,tr("平顶"));
                 });
             }
         });
         if self.hex != 0 { ui.small(tr("六边形宽高为外接矩形尺寸，斜边自动计算。")); }
-        if (self.hex == 1 && self.pixels.height()%4 != 0) || (self.hex == 2 && self.pixels.width()%4 != 0) {
-            (self.diamond,self.hex,self.elevated) = old_shape;
-            self.message = tr("尖顶六边形的高度、平顶六边形的宽度须为4的倍数；请先新建对应尺寸画布。").into();
-        }
-        if old_shape != (self.diamond,self.hex,self.elevated) {
-            self.selection.clear();
-            let new_shape = (self.diamond,self.hex,self.elevated);
-            (self.diamond,self.hex,self.elevated) = old_shape;
-            self.record_layer_change();
-            (self.diamond,self.hex,self.elevated) = new_shape;
-            self.pan = Vec2::ZERO; self.repeat_pan = Vec2::ZERO;
-        }
+        self.set_preview_shape(diamond,hex,elevated);
 
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("画布尺寸"));
@@ -3177,69 +3321,17 @@ impl Editor {
                     self.height.div_ceil(if self.hex == 1 {4} else {2}) * if self.hex == 1 {4} else {2},
                 ));
             }
-            if ui
-                .add_enabled(
-                    source.is_some_and(|s| {
-                        s.width() <= MAX_SIDE
-                            && s.height() <= MAX_SIDE
-                            && s.width() % 2 == 0
-                            && s.height() % 2 == 0
-                            && (self.hex != 1 || s.height()%4 == 0)
-                            && (self.hex != 2 || s.width()%4 == 0)
-                    }),
-                    egui::Button::new(tr("导入当前图片")),
-                )
-                .clicked()
-            {
-                if let Some(s) = source {
-                    self.reset_document(s.clone());
-                    self.width = s.width();
-                    self.height = s.height();
-                }
-            }
-            if ui.button(tr("另存 PNG")).clicked() {
-                self.finish_stroke();
-                if let Some(dest) = rfd::FileDialog::new()
-                    .set_file_name("tile.png")
-                    .add_filter("PNG", &["png"])
-                    .save_file()
-                {
-                    if same_file(&dest, path) {
-                        self.message = tr("请另存到其他文件，保留源图片。").into();
-                    } else {
-                        let mut out = self.composite(self.selected);
-                        let (w, h) = out.dimensions();
-                        for (x, y, p) in out.enumerate_pixels_mut() {
-                            if !self.inside_tile(x as i32, y as i32, w, h) {
-                                *p = Rgba([0; 4]);
-                            }
-                        }
-                        match out.save_with_format(&dest, image::ImageFormat::Png) {
-                            Ok(()) => {
-                                if self.tiles.len() == 1 && self.layers.is_empty() {
-                                    self.changed = false;
-                                }
-                                self.message = format!(
-                                    "{}: {}",
-                                    tr("已保存当前 Tile；多 Tile 排列请保存工程。"),
-                                    dest.display()
-                                );
-                            }
-                            Err(e) => self.message = e.to_string(),
-                        }
-                    }
-                }
-            }
         });
+        let mut wrap = self.wrap;
         if ui
             .add_enabled(
                 !self.elevated,
-                egui::Checkbox::new(&mut self.wrap, tr("边缘回绕")),
+                egui::Checkbox::new(&mut wrap, tr("边缘回绕")),
             )
             .changed()
         {
             self.finish_stroke();
-            self.changed = true;
+            self.wrap = wrap;
         }
         ui.checkbox(&mut self.preview_detached, tr("独立预览窗口"));
         self.tile_settings(ui);
@@ -3247,19 +3339,14 @@ impl Editor {
             ui.horizontal(|ui| {
                 ui.label(tr("地面菱形尺寸"));
                 for v in &mut self.footprint {
-                    if ui
-                        .add(egui::DragValue::new(v).range(2..=MAX_SIDE))
-                        .changed()
-                    {
-                        self.changed = true;
-                    }
+                    ui.add(egui::DragValue::new(v).range(2..=MAX_SIDE));
                     *v = (*v).div_ceil(2) * 2;
                 }
             });
         }
         });
         self.edit_unit = true;
-        self.tile_controls(ui,path);
+        self.tile_controls(ui,path,source);
         self.subgroup_controls(ui);
         self.layer_controls(ui);
         self.background_controls(ui);
@@ -3267,7 +3354,24 @@ impl Editor {
             ui.label(&self.message);
         }
     }
+    fn set_preview_shape(&mut self, diamond: bool, hex: u8, elevated: bool) {
+        if (self.diamond,self.hex,self.elevated) == (diamond,hex,elevated) { return; }
+        if (hex == 1 && self.pixels.height()%4 != 0) || (hex == 2 && self.pixels.width()%4 != 0) {
+            self.message = tr("尖顶六边形的高度、平顶六边形的宽度须为4的倍数；请先新建对应尺寸画布。").into();
+            return;
+        }
+        self.finish_stroke();
+        self.selection.clear();
+        (self.diamond,self.hex,self.elevated) = (diamond,hex,elevated);
+        self.pan = Vec2::ZERO;
+        self.repeat_pan = Vec2::ZERO;
+        self.invalidate_textures();
+        self.revision = self.revision.wrapping_add(1);
+    }
     pub fn show(&mut self, ctx: &egui::Context, path: &Path, source: Option<&RgbaImage>) {
+        self.show_window(ctx,path,source,None,false,false);
+    }
+    fn show_window(&mut self,ctx:&egui::Context,path:&Path,source:Option<&RgbaImage>,mut tab:Option<&mut bool>,other_dirty:bool,unavailable:bool){
         if !self.open {
             return;
         }
@@ -3280,7 +3384,7 @@ impl Editor {
             if !open{self.open=false;}
             return;
         }
-        self.ensure_material_base();
+        if !self.plain_image {self.ensure_material_base();}
         if self.wake {
             crate::native_window::wake(ctx, egui::Id::new(("pixel_tile", path)));
             self.wake = false;
@@ -3288,7 +3392,9 @@ impl Editor {
         let revision = self.revision;
         let view_state = (self.preview_detached, self.repeat_zoom, self.preview_grid, self.repeat_pan);
         let mut open = true;
-        let title = if path.as_os_str().is_empty() {
+        let min_zoom=self.minimum_zoom();
+        let display_path = if self.plain_image {self.image_target.as_deref().unwrap_or(path)} else {path};
+        let title = if tab.is_some(){format!("{} · {}",if self.plain_image {"Image"} else {"Tile"},display_path.file_name().unwrap_or_default().to_string_lossy())}else if path.as_os_str().is_empty() {
             tr("绘Tile").to_owned()
         } else {
             format!(
@@ -3307,13 +3413,20 @@ impl Editor {
             .min_height(500.)
             .scrollable(false)
             .show(ctx, |ui| {
-                if self.changed && ui.input(|i| i.viewport().close_requested()) {
+                if ui.input(|i| i.viewport().close_requested()) { self.finish_transform(true); self.finish_stroke(); }
+                if (self.changed || other_dirty) && ui.input(|i| i.viewport().close_requested()) {
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::CancelClose);
                     self.confirm_close = true;
                 }
-                if !self.confirm_close {
-                    self.tool_shortcuts(ui.ctx());
+                if !unavailable && !self.confirm_close {
+                    self.confirm_inline_text_outside(ui);
+                    if self.plain_image && self.transform.is_none() && self.text_dialog.is_none() && self.pending_layer_action.is_none() && !Self::text_input_active(ui.ctx()) {
+                        let save_as=ui.input_mut(|i|i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT,egui::Key::S));
+                        let save=ui.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::S));
+                        if save_as || (save && !self.image_readonly){self.save_image(path,save_as);}
+                    }
+                    if !self.showing_split_guides() { self.tool_shortcuts(ui.ctx()); }
                 }
                 let area = ui.available_rect_before_wrap();
                 let gap = 8.;
@@ -3325,11 +3438,27 @@ impl Editor {
                         .id_salt("tile_settings")
                         .max_rect(left),
                 );
+                if let Some(mode)=tab.as_deref_mut(){
+                    let mut selection=if *mode{"tile"}else{"image"}.to_owned();
+                    let changed=settings.add_enabled_ui(!self.confirm_close && self.pending_layer_action.is_none() && self.pending_open.is_none() && self.text_dialog.as_ref().is_none_or(|d|d.target.is_some()),|ui|crate::theme::compact_selector(ui,&mut selection,[("image","Image"),("tile","Tile")])).inner;
+                    if changed && self.finish_transform(true){*mode=selection=="tile";return;}
+                    settings.separator();
+                }
+                if self.transform.is_some(){settings.disable();}
                 settings.set_clip_rect(left.intersect(ui.clip_rect()));
                 egui::ScrollArea::vertical()
                     .id_salt("tile_settings_scroll")
                     .auto_shrink([false, false])
-                    .show(&mut settings, |ui| self.controls(ui, path, source));
+                    .show(&mut settings, |ui| {
+                        if unavailable {ui.label(&self.message);}
+                        else if self.plain_image {self.image_controls(ui,path);}
+                        else {self.tile_sidebar(ui,path,source);}
+                    });
+                if !unavailable && !self.confirm_close && self.pending_layer_action.is_none()
+                    && self.pending_open.is_none() && self.transform.is_none() && self.text_dialog.as_ref().is_none_or(|d|d.target.is_some()) {
+                    self.layer_file_drop(ui,area);
+                }
+                if unavailable && !self.confirm_close {return;}
                 self.sync_texture(ui.ctx());
                 let mut paint = ui.new_child(
                     egui::UiBuilder::new()
@@ -3337,57 +3466,63 @@ impl Editor {
                         .max_rect(center),
                 );
                 paint.set_clip_rect(center.intersect(ui.clip_rect()));
+                if self.showing_split_guides() { self.split_canvas(&mut paint); } else {
                 let header_height=24_f32.max(paint.text_style_height(&egui::TextStyle::Heading));
                 paint.allocate_ui_with_layout(egui::vec2(paint.available_width(),header_height),
                     egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),|ui| {
                     ui.spacing_mut().interact_size.y=header_height;
                     ui.heading(tr("绘制区"));
-                    ui.push_id("tile_boundary_tabs",|ui| {
+                    if !self.plain_image {ui.push_id("tile_boundary_tabs",|ui| {
                         let mut mode=if self.infinite_view {"infinite"}else{"bounded"}.to_owned();
                         if crate::theme::compact_selector(ui,&mut mode,[("bounded","有边界"),("infinite","无边界")]) {
                             self.set_infinite_view(mode=="infinite");
                         }
-                    }).response.on_hover_text("Q / W");
+                    }).response.on_hover_text("Q / W");}
                     if self.infinite_view {
                         let locate=ui.add_sized([24.,24.],egui::Button::new(""));
                         crate::icons::paint(ui,crate::icons::Icon::Locate,locate.rect.shrink(5.),ui.visuals().text_color());
                         if locate.on_hover_text(format!("{} (H)",tr("回到中心循环单元"))).clicked() {self.center_view();}
                     }
-                    ui.checkbox(&mut self.grid, tr("网格"));
+                    if !self.plain_image {
+                        ui.checkbox(&mut self.grid, tr("网格"));
+                    }
+                    ui.checkbox(&mut self.guides.rulers, tr("标尺")).on_hover_text("Ctrl+R");
+                    ui.checkbox(&mut self.guides.visible, tr("辅助线")).on_hover_text("Ctrl+;");
                     if self.has_multiple_slots() { ui.checkbox(&mut self.show_slots,tr("显示 Slot")); }
                     if ui.button(tr("适应画布")).clicked() {
                         self.pan = Vec2::ZERO;
                         let size = self.edit_size();
                         self.zoom = ((center.width() - 20.) / size.x)
                             .min((ui.ctx().screen_rect().height() - 70.) / size.y)
-                            .max(0.25)
+                            .max(min_zoom)
                             * ui.ctx().pixels_per_point();
                     }
 
                     let mut zoom_percent = self.zoom * 100.;
                     if ui.add(egui::DragValue::new(&mut zoom_percent)
-                        .range(25.0..=6400.0).speed(25.0).max_decimals(2).suffix("%"))
+                        .range(min_zoom*100.0..=6400.0).speed(25.0).max_decimals(2).suffix("%"))
                         .changed() {
                         self.zoom = zoom_percent / 100.;
                     }
 
                     if ui
-                        .add_enabled(!self.undo.is_empty(), egui::Button::new(tr("撤销")))
+                        .add_enabled(self.transform.is_none() && !self.undo.is_empty(), egui::Button::new(tr("撤销")))
                         .on_hover_text(format!("{} (Ctrl+Z)", tr("撤销")))
                         .clicked()
                     {
                         self.history(false);
                     }
                     if ui
-                        .add_enabled(!self.redo.is_empty(), egui::Button::new(tr("重做")))
+                        .add_enabled(self.transform.is_none() && !self.redo.is_empty(), egui::Button::new(tr("重做")))
                         .on_hover_text(format!("{} (Ctrl+Y)", tr("重做")))
                         .clicked()
                     {
                         self.history(true);
                     }
                 });
-                self.drawing_tools(&mut paint);
-                self.merged_canvas(&mut paint);
+                if !unavailable {self.drawing_tools(&mut paint);self.merged_canvas(&mut paint);}
+                }
+                if !self.confirm_close {self.text_dialog_ui(ui);}
                 if self.confirm_close {
                     let modal_id = egui::Id::new(("pixel_tile_close", path));
                     let response = egui::Modal::new(modal_id)
@@ -3398,12 +3533,12 @@ impl Editor {
                         .show(ui.ctx(), |ui| {
                             ui.set_width(400.);
                             ui.vertical_centered(|ui| {
-                                ui.heading(tr("绘Tile"));
+                                ui.heading(tr(if tab.is_some() {"编辑图像"}else{"绘Tile"}));
                             });
                             ui.separator();
                             ui.add_space(8.);
                             ui.vertical_centered(|ui| {
-                                ui.add(egui::Label::new(tr("有未保存的绘制，是否关闭？")).wrap());
+                                ui.add(egui::Label::new(tr(if tab.is_some() && other_dirty {"其他编辑页也有未保存的绘制，是否放弃并关闭整个窗口？"}else{"有未保存的绘制，是否关闭？"})).wrap());
                             });
                             ui.add_space(18.);
                             ui.horizontal(|ui| {
@@ -3433,6 +3568,7 @@ impl Editor {
                     }
                 }
             });
+        if self.open && open { self.fx_window(ctx,path); }
         if self.open && self.preview_detached {
             let mut preview_open = true;
             crate::native_window::Window::new(format!("{} · {}", tr("循环预览"), title))
@@ -3470,11 +3606,15 @@ impl Editor {
         }
         if !open {
             self.finish_stroke();
-            if self.changed {
+            if self.changed || other_dirty {
                 self.confirm_close = true;
                 ctx.request_repaint_of(egui::ViewportId(egui::Id::new(("pixel_tile", path))));
             } else {
                 self.open = false;
+                self.image_size_draft = None;
+                self.transform=None;
+                self.text_dialog=None;
+                if self.layer_detail.as_ref().is_some_and(|d|d.1) { self.layer_detail = None; }
             }
         }
     }
@@ -3811,9 +3951,11 @@ mod tests {
         e.ensure_layers();
         assert_eq!(e.layers.len(), 1);
         assert!(!e.layers[0].locked);
-        e.import_layer(RgbaImage::from_pixel(128, 64, Rgba([10, 20, 30, 255])));
+        e.record_layer_change();
+        e.insert_image_layer("Layer".into(),RgbaImage::from_pixel(128, 64, Rgba([10, 20, 30, 255])));
         assert_eq!(e.layers.len(), 2);
-        assert!(e.layers[1].locked);
+        assert!(!e.layers[1].locked);
+        e.layers[1].locked=true;
         e.delete_layer(1);
         assert_eq!(e.layers.len(), 2);
         e.layers[1].locked = false;
@@ -3863,13 +4005,13 @@ mod tests {
         let pan = egui::vec2(20., -10.);
         let world = (anchor - center - pan) / 4.;
         for dx in [-10000., -80., 0., 80., 10000.] {
-            let (zoom, shifted) = drag_zoom(anchor, 4., pan, dx, center);
+            let (zoom, shifted) = drag_zoom(anchor, 4., pan, dx, center,0.25);
             assert!((0.25..=64.).contains(&zoom));
             assert!((center + shifted + world * zoom - anchor).length() < 0.001);
             if dx < 0. { assert!(zoom < 4.); }
             if dx > 0. { assert!(zoom > 4.); }
         }
-        let (zoom, shifted) = drag_zoom(anchor, 4., pan, 0., center);
+        let (zoom, shifted) = drag_zoom(anchor, 4., pan, 0., center,0.25);
         assert_eq!(zoom, 4.);
         assert_eq!(shifted, pan);
     }
@@ -4073,6 +4215,7 @@ mod tests {
         assert_eq!(count, 9);
         let state = e.snapshot();
         let project = Project {
+            fx_light: Default::default(),
             version: 5,
             materials: Vec::new(),
             background_custom: false,
@@ -4148,7 +4291,7 @@ mod tests {
                 .len(),
             4
         );
-        e.select(e.layout[9]);
+        e.select_slot(9);
         let image = RgbaImage::from_pixel(128, 64, Rgba([12, 34, 56, 78]));
         e.replace(image.clone());
         assert_eq!(e.tiles[e.layout[9]], image);

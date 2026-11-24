@@ -145,15 +145,9 @@ impl Crop {
             let label_width=["宽度","高度"].iter().map(|label|ui.painter().layout_no_wrap(tr(label).to_owned(),font.clone(),ui.visuals().text_color()).size().x).fold(0.0_f32,f32::max);
             let spacing=ui.spacing().item_spacing.x;
             let input_width=88.0;
-            let link_width=ui.spacing().icon_width+ui.spacing().icon_spacing;
             ui.horizontal(|ui|{
                 ui.spacing_mut().item_spacing.x=0.0;
-                let button=ui.add_sized([link_width,52.0],egui::Button::new("").frame(false));
-                if button.clicked(){self.linked=!self.linked;if self.linked{self.percent[1]=self.percent[0];}}
-                let tint=if self.linked{crate::theme::BLUE}else{egui::Color32::from_gray(128)};
-                egui::Image::new(egui::include_image!("../assets/icons/size-link.svg")).tint(tint).paint_at(ui,button.rect);
-                button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Checkbox,button.enabled(),tr("锁定宽高比例")));
-                button.on_hover_text(tr("锁定宽高比例；重新锁定时以宽度为准恢复比例。"));
+                if crate::theme::size_link(ui,&mut self.linked) && self.linked { self.percent[1]=self.percent[0]; }
                 ui.allocate_ui_with_layout(egui::vec2(label_width+spacing+input_width,52.0),egui::Layout::top_down(egui::Align::Min),|ui|{
                     ui.spacing_mut().item_spacing.x=spacing;
                     egui::Grid::new("picture_size_inputs_fixed").num_columns(2).min_col_width(0.0).max_col_width(input_width).show(ui,|ui|{

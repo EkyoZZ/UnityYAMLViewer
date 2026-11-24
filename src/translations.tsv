@@ -276,6 +276,7 @@ UI 内置 Sprite 暂用颜色矩形近似显示。	UI 內建 Sprite 暫用顏色
 合成预览已完成	合成預覽已完成	Preview composition complete	プレビューの描画が完了しました	미리보기 합성 완료	Vorschau fertig gerendert	Composition de l’aperçu terminée
 已暂停合成预览	已暫停合成預覽	Preview composition paused	プレビューの描画を一時停止中	미리보기 합성 일시 정지됨	Vorschau-Rendering pausiert	Composition de l’aperçu en pause
 辅助线	輔助線	Guides	ガイド線	보조선	Hilfslinien	Repères
+标尺	尺規	Rulers	定規	눈금자	Lineale	Règles
 正在展开 Prefab…	正在展開 Prefab…	Expanding prefabs…	Prefab を展開中…	Prefab 펼치는 중…	Prefabs werden aufgelöst…	Développement des Prefabs…
 Prefab 展开存在限制	Prefab 展開存在限制	Prefab expansion limitations	Prefab 展開の制限	Prefab 펼치기 제한	Einschränkungen bei Prefab-Auflösung	Limites du développement des Prefabs
 正在构建预览实例…	正在構建預覽實例…	Building preview instances…	プレビューのインスタンスを構築中…	미리보기 인스턴스 구성 중…	Vorschauinstanzen werden erstellt…	Construction des instances de l’aperçu…
@@ -2012,6 +2013,19 @@ Ctrl+Shift+F9 停止录制（其他窗口中也可使用）。	Ctrl+Shift+F9 停
 正在启动录屏…	正在啟動錄影…	Starting recording…	録画を開始しています…	녹화 시작 중…	Aufnahme wird gestartet…	Démarrage de l’enregistrement…
 绘Tile	繪Tile	Tile Painter	Tile ペイント	Tile 페인터	Tile-Maler	Peinture Tile
 画布尺寸	畫布尺寸	Canvas size	キャンバスサイズ	캔버스 크기	Leinwandgröße	Taille du canevas
+图像大小	影像大小	Image size	画像サイズ	이미지 크기	Bildgröße	Taille de l’image
+原始尺寸	原始尺寸	Original dimensions	元のサイズ	원래 크기	Originalgröße	Dimensions d’origine
+锚点	錨點	Anchor	基準位置	기준점	Ankerpunkt	Point d’ancrage
+插值方式	插值方式	Interpolation	補間方式	보간 방식	Interpolation	Interpolation
+相对	相對	Relative	相対	상대값	Relativ	Relative
+正值扩展画布，负值裁切，零保持原尺寸。宽高分别调整。	正值擴展畫布，負值裁切，零維持原尺寸。寬高分別調整。	Adjust each dimension independently. Positive values extend the canvas, negative values crop it, and zero keeps its size.	幅と高さを個別に調整します。正の値で拡張、負の値で切り抜き、0 で元のサイズを維持します。	너비와 높이를 따로 조절합니다. 양수는 캔버스를 확장하고 음수는 자르며 0은 원래 크기를 유지합니다.	Breite und Höhe einzeln anpassen. Positive Werte erweitern die Leinwand, negative beschneiden sie. Bei null bleibt die Größe erhalten.	Réglez chaque dimension séparément. Une valeur positive agrandit le canevas, une valeur négative le rogne et zéro conserve la dimension.
+邻近（硬边缘）	最接近像素（銳利邊緣）	Nearest Neighbor (Hard Edges)	ニアレストネイバー法（ハードな輪郭）	최단입점 (선명한 가장자리)	Pixelwiederholung (harte Kanten)	Au plus proche (contours nets)
+两次线性	雙線性	Bilinear	バイリニア法	쌍선형	Bilinear	Bilinéaire
+两次立方	雙立方	Bicubic	バイキュービック法	쌍입방	Bikubisch	Bicubique
+兰佐斯（Lanczos3）	蘭佐斯（Lanczos3）	Lanczos3	Lanczos3	Lanczos3	Lanczos3	Lanczos3
+调整后的图层与蒙版超过内存上限。	調整後的圖層與遮色片超過記憶體上限。	Resized layers and masks exceed the memory limit.	変更後のレイヤーとマスクがメモリ上限を超えます。	크기를 변경한 레이어와 마스크가 메모리 한도를 초과합니다.	Ebenen und Masken würden das Speicherlimit überschreiten.	Les calques et masques redimensionnés dépassent la limite de mémoire.
+调整后的文字超出可编辑范围。	調整後的文字超出可編輯範圍。	Resized text exceeds the editable range.	変更後の文字が編集可能な範囲を超えます。	크기를 변경한 텍스트가 편집 가능한 범위를 벗어납니다.	Der angepasste Text überschreitet den bearbeitbaren Bereich.	Le texte redimensionné dépasse la plage modifiable.
+普通图片使用背景色填充透明区域，PSD 保留透明度。	一般圖片以背景色填滿透明區域，PSD 保留透明度。	Flat images use the background color for transparency. PSD keeps transparency.	通常の画像は透明部分を背景色で塗りつぶします。PSD は透明度を保持します。	일반 이미지는 투명 영역을 배경색으로 채우며 PSD는 투명도를 유지합니다.	Bei Bildformaten ohne Ebenen wird Transparenz mit der Hintergrundfarbe gefüllt. PSD behält die Transparenz.	Les images aplaties utilisent la couleur de fond pour les zones transparentes. Le PSD conserve la transparence.
 新建空白	新增空白	New blank	空白を作成	빈 캔버스	Neue leere Fläche	Nouveau canevas vide
 导入当前图片	匯入目前圖片	Import current image	現在の画像を取り込む	현재 이미지 가져오기	Aktuelles Bild importieren	Importer l’image actuelle
 另存 PNG	另存 PNG	Save PNG as	PNG を別名保存	PNG로 다른 이름 저장	PNG speichern unter	Enregistrer PNG sous
@@ -2314,3 +2328,133 @@ PS 插件尚未正式发布	PS 外掛尚未正式發佈	PS plugin has not been r
 已填充选区。	已填滿選取範圍。	Selection filled.	選択範囲を塗りつぶしました。	선택 영역을 채웠습니다.	Auswahl gefüllt.	Sélection remplie.
 输出色阶	輸出色階	Output levels	出力レベル	출력 레벨	Ausgabewerte	Niveaux de sortie
 由父组锁定	由父群組鎖定	Locked by parent group	親グループによりロック	부모 그룹에 의해 잠김	Durch übergeordnete Gruppe gesperrt	Verrouillé par le groupe parent
+
+复制图层样式	複製圖層樣式	Copy layer style	レイヤースタイルをコピー	레이어 스타일 복사	Ebenenstil kopieren	Copier le style de calque
+粘贴图层样式	貼上圖層樣式	Paste layer style	レイヤースタイルをペースト	레이어 스타일 붙여넣기	Ebenenstil einfügen	Coller le style de calque
+清除图层样式	清除圖層樣式	Clear layer style	レイヤースタイルを消去	레이어 스타일 지우기	Ebenenstil löschen	Effacer le style de calque
+边缘	邊緣	Edge	エッジ	가장자리	Kante	Bord
+大小	大小	Size	サイズ	크기	Größe	Taille
+等高线	等高線	Contour	輪郭	윤곽선	Kontur	Contour
+雕刻清晰	雕刻清晰	Chisel hard	シゼルハード	단단하게 깎기	Hart meißeln	Ciselage marqué
+雕刻柔和	雕刻柔和	Chisel soft	シゼルソフト	부드럽게 깎기	Weich meißeln	Ciselage léger
+抖动	抖動	Jitter	ジッター	지터	Zufallsvariation	Variation
+对称渐变	對稱漸層	Reflected	反射	반사형	Reflektiert	Réfléchi
+反向	反向	Reverse	逆方向	반전	Umkehren	Inverser
+范围	範圍	Range	範囲	범위	Bereich	Étendue
+方法	方法	Technique	テクニック	기법	Technik	Technique
+方向	方向	Direction	方向	방향	Richtung	Direction
+仿色	仿色	Dither	ディザ	디더	Dithering	Tramage
+浮雕	浮雕	Emboss	エンボス	엠보스	Relief	Estampage
+高光模式	亮部模式	Highlight mode	ハイライトモード	밝은 영역 모드	Lichtermodus	Mode des tons clairs
+光源位置	光源位置	Source	光源	광원 위치	Quelle	Source
+光照	光照	Shading	陰影	음영	Schattierung	Ombrage
+光照高度	光照高度	Altitude	高度	고도	Lichthöhe	Élévation
+环形	環形	Ring	リング	링	Ring	Anneau
+混合模式	混合模式	Blend mode	描画モード	혼합 모드	Füllmethode	Mode de fusion
+渐变	漸層	Gradient	グラデーション	그레이디언트	Verlauf	Dégradé
+渐变叠加	漸層覆蓋	Gradient overlay	グラデーションオーバーレイ	그레이디언트 오버레이	Verlaufsüberlagerung	Incrustation en dégradé
+渐变样式	漸層樣式	Gradient style	グラデーションのスタイル	그레이디언트 스타일	Verlaufsstil	Style du dégradé
+角度	角度	Angle	角度	각도	Winkel	Angle
+角度渐变	角度漸層	Angular	角度	각도형	Winkelverlauf	Angulaire
+结束颜色	結束顏色	End color	終了色	끝 색상	Endfarbe	Couleur finale
+精确	精確	Precise	精細	정밀	Präzise	Précise
+径向	放射狀	Radial	円形	방사형	Radial	Radial
+居中	置中	Center	中央	가운데	Mitte	Centre
+距离	距離	Distance	距離	거리	Abstand	Distance
+扩展	擴展	Spread	スプレッド	스프레드	Überfüllen	Grossi
+内部	內部	Inside	内側	안쪽	Innen	Intérieur
+内发光	內光暈	Inner glow	光彩（内側）	내부 광선	Schein nach innen	Lueur interne
+内斜面	內斜面	Inner bevel	ベベル（内側）	내부 경사	Innen abgeflacht	Biseau interne
+内阴影	內陰影	Inner shadow	シャドウ（内側）	내부 그림자	Schatten nach innen	Ombre interne
+品质	品質	Quality	画質	품질	Qualität	Qualité
+启用	啟用	Enable	有効	사용	Aktivieren	Activer
+起始颜色	起始顏色	Start color	開始色	시작 색상	Startfarbe	Couleur initiale
+柔和	柔和	Softer	さらにソフトに	부드럽게	Weicher	Plus tamisée
+软化	柔化	Soften	ソフト	부드럽게	Weichzeichnen	Flou
+深度	深度	Depth	深さ	깊이	Tiefe	Profondeur
+使用全局光	使用全域光源	Use global light	包括光源を使用	전체 조명 사용	Globales Licht verwenden	Utiliser l’éclairage global
+填充类型	填滿類型	Fill type	塗りつぶしタイプ	채우기 유형	Füllart	Type de remplissage
+图层挖空投影	圖層挖空陰影	Layer knocks out drop shadow	レイヤーがドロップシャドウをノックアウト	레이어가 그림자를 녹아웃	Ebene spart Schlagschatten aus	Ombre portée masquée par le calque
+外部	外部	Outside	外側	바깥쪽	Außen	Extérieur
+外发光	外光暈	Outer glow	光彩（外側）	외부 광선	Schein nach außen	Lueur externe
+外斜面	外斜面	Outer bevel	ベベル（外側）	외부 경사	Außen abgeflacht	Biseau externe
+向上	向上	Up	上へ	위로	Nach oben	Haut
+向下	向下	Down	下へ	아래로	Nach unten	Bas
+消除锯齿	消除鋸齒	Anti-alias	アンチエイリアス	앤티 앨리어스	Glätten	Lisser
+斜面和浮雕	斜角和浮雕	Bevel and emboss	ベベルとエンボス	경사와 엠보스	Abgeflachte Kante und Relief	Biseautage et estampage
+斜面样式	斜角樣式	Bevel style	ベベルのスタイル	경사 스타일	Reliefstil	Style du biseau
+阴影模式	陰影模式	Shadow mode	シャドウモード	어두운 영역 모드	Tiefenmodus	Mode des tons foncés
+与图层对齐	與圖層對齊	Align with layer	レイヤーに整列	레이어와 정렬	An Ebene ausrichten	Aligner sur le calque
+杂色	雜訊	Noise	ノイズ	노이즈	Rauschen	Bruit
+枕状浮雕	枕狀浮雕	Pillow emboss	ピローエンボス	필로 엠보스	Kissenrelief	Estampage oreiller
+锥形	錐形	Cone	円錐	원뿔	Kegel	Cône
+阻塞	阻塞	Choke	チョーク	초크	Unterfüllen	Maigri
+重置当前效果	重設目前效果	Reset this effect	この効果をリセット	현재 효과 재설정	Diesen Effekt zurücksetzen	Réinitialiser cet effet
+请输入 1 至 16 行文字，最多 512 个字符。	請輸入 1 至 16 行文字，最多 512 個字元。	Enter 1–16 lines, up to 512 characters.	1～16 行、合計 512 文字以内で入力してください。	1~16줄, 최대 512자를 입력하세요.	1–16 Zeilen mit insgesamt bis zu 512 Zeichen eingeben.	Saisissez 1 à 16 lignes, dans la limite de 512 caractères.
+缺少字体	缺少字型	Missing font	見つからないフォント	누락된 글꼴	Fehlende Schrift	Police manquante
+所选字体无法绘制这些文字。	選取的字型無法繪製這些文字。	This font cannot render the text.	このフォントでは文字を描画できません。	이 글꼴로 문자를 그릴 수 없습니다.	Diese Schrift kann den Text nicht darstellen.	Cette police ne peut pas afficher le texte.
+文字图像过大，请缩小字号或缩短文字。	文字影像過大，請縮小字級或縮短文字。	The text image is too large. Reduce the font size or shorten the text.	文字画像が大きすぎます。文字を小さくするか、文章を短くしてください。	문자 이미지가 너무 큽니다. 글자 크기나 글 길이를 줄이세요.	Das Textbild ist zu groß. Schrift verkleinern oder Text kürzen.	L’image du texte est trop grande. Réduisez la taille ou la longueur du texte.
+添加文字图层	新增文字圖層	Add text layer	テキストレイヤーを追加	문자 레이어 추가	Textebene hinzufügen	Ajouter un calque de texte
+编辑文字图层	編輯文字圖層	Edit text layer	テキストレイヤーを編集	문자 레이어 편집	Textebene bearbeiten	Modifier le calque de texte
+字符	字元	Character	文字	문자	Zeichen	Caractère
+段落	段落	Paragraph	段落	단락	Absatz	Paragraphe
+输入水印文字	輸入浮水印文字	Enter watermark text	透かしの文字を入力	워터마크 문자 입력	Wasserzeichentext eingeben	Saisir le texte du filigrane
+请选择替代字体，或安装原字体后刷新。	請選取替代字型，或安裝原字型後重新整理。	Choose a substitute, or install the original font and refresh.	代替フォントを選ぶか、元のフォントをインストールして更新してください。	대체 글꼴을 선택하거나 원본 글꼴을 설치한 뒤 새로 고치세요.	Ersatzschrift wählen oder die Originalschrift installieren und aktualisieren.	Choisissez une autre police ou installez la police d’origine et actualisez.
+旋转	旋轉	Rotation	回転	회전	Drehung	Rotation
+字距	字距	Letter spacing	字間	자간	Zeichenabstand	Espacement des lettres
+行距	行距	Line spacing	行間	줄 간격	Zeilenabstand	Interligne
+正在读取系统字体	正在讀取系統字型	Loading installed fonts	インストール済みフォントを読み込み中	설치된 글꼴을 불러오는 중	Installierte Schriften werden geladen	Chargement des polices installées
+刷新字体	重新整理字型	Refresh fonts	フォントを更新	글꼴 새로 고침	Schriften aktualisieren	Actualiser les polices
+两端对齐，末行居左	左右對齊，末行靠左	Justify, last line left	両端揃え、最終行は左	양쪽 맞춤, 마지막 줄 왼쪽	Blocksatz, letzte Zeile links	Justifier, dernière ligne à gauche
+两端对齐，末行居中	左右對齊，末行置中	Justify, last line centered	両端揃え、最終行は中央	양쪽 맞춤, 마지막 줄 가운데	Blocksatz, letzte Zeile mittig	Justifier, dernière ligne centrée
+两端对齐，末行居右	左右對齊，末行靠右	Justify, last line right	両端揃え、最終行は右	양쪽 맞춤, 마지막 줄 오른쪽	Blocksatz, letzte Zeile rechts	Justifier, dernière ligne à droite
+全部两端对齐	全部左右對齊	Justify all lines	全行両端揃え	모든 줄 양쪽 맞춤	Alle Zeilen im Blocksatz	Justifier toutes les lignes
+段落宽度	段落寬度	Paragraph width	段落幅	단락 너비	Absatzbreite	Largeur de paragraphe
+0 表示按文字自然宽度排版	0 表示依文字自然寬度排版	Use 0 for natural text width	0 は文字列の自然幅	0은 자연스러운 텍스트 너비	0 für natürliche Textbreite	0 pour la largeur naturelle du texte
+左缩进	左縮排	Left indent	左インデント	왼쪽 들여쓰기	Linker Einzug	Retrait à gauche
+右缩进	右縮排	Right indent	右インデント	오른쪽 들여쓰기	Rechter Einzug	Retrait à droite
+首行缩进	首行縮排	First-line indent	最初の行のインデント	첫 줄 들여쓰기	Erstzeileneinzug	Retrait de première ligne
+段前间距	段前間距	Space before	段落前の間隔	단락 앞 간격	Abstand davor	Espace avant
+段后间距	段後間距	Space after	段落後の間隔	단락 뒤 간격	Abstand danach	Espace après
+当前目标没有可变换的内容。	目前目標沒有可變形的內容。	This target has no transformable content.	この対象には変形できる内容がありません。	이 대상에는 변형할 수 있는 내용이 없습니다.	Dieses Ziel enthält keinen transformierbaren Inhalt.	Cette cible ne contient aucun élément transformable.
+自由变换	任意變形	Free transform	自由変形	자유 변형	Frei transformieren	Transformation manuelle
+等比缩放	等比縮放	Keep proportions	縦横比を固定	비율 유지	Proportionen beibehalten	Conserver les proportions
+平滑插值	平滑內插	Smooth interpolation	滑らかに補間	부드러운 보간	Weiche Interpolation	Interpolation lissée
+显示变换控件	顯示變形控制項	Show transform controls	変形コントロールを表示	변형 컨트롤 표시	Transformationssteuerung anzeigen	Afficher les poignées de transformation
+栅格化文字	點陣化文字	Rasterize text	テキストをラスタライズ	문자 래스터화	Text rastern	Pixelliser le texte
+每种效果最多 10 项	每種效果最多 10 項	Up to 10 instances per effect	各効果は最大 10 個	효과별 최대 10개	Bis zu 10 Instanzen je Effekt	Jusqu’à 10 instances par effet
+添加同类效果	新增同類效果	Add another instance	同じ効果を追加	같은 효과 추가	Weitere Instanz hinzufügen	Ajouter une instance
+移除此效果	移除此效果	Remove this instance	この効果を削除	이 효과 제거	Diese Instanz entfernen	Retirer cette instance
+编辑图像	編輯影像	Edit Image	画像を編集	이미지 편집	Bild bearbeiten	Modifier l’image
+当前图像超出编辑画布限制。	目前影像超出編輯畫布限制。	This image exceeds the editing canvas limit.	この画像は編集可能なキャンバスの上限を超えています。	이미지가 편집 캔버스 한도를 초과합니다.	Das Bild überschreitet die zulässige Bearbeitungsgröße.	L’image dépasse la taille de canevas prise en charge.
+原图不符合 Tile 尺寸限制，已打开独立的空白 Tile 画布。	原圖不符合 Tile 尺寸限制，已開啟獨立的空白 Tile 畫布。	The source image does not meet the Tile size limits. A separate blank Tile canvas is open.	元画像が Tile のサイズ条件を満たさないため、独立した空の Tile キャンバスを開きました。	원본 크기가 Tile 조건에 맞지 않아 별도의 빈 Tile 캔버스를 열었습니다.	Das Quellbild erfüllt die Tile-Größenvorgaben nicht. Eine separate leere Tile-Zeichenfläche ist geöffnet.	Les dimensions de l’image ne conviennent pas au mode Tile. Un canevas Tile vierge a été ouvert.
+其他编辑页也有未保存的绘制，是否放弃并关闭整个窗口？	另一個編輯頁有未儲存的繪製，要捨棄並關閉整個視窗嗎？	The other tab has unsaved edits. Discard changes and close the entire window?	もう一方のタブに未保存の編集があります。変更を破棄してウィンドウ全体を閉じますか？	다른 탭에 저장하지 않은 편집이 있습니다. 변경 사항을 버리고 전체 창을 닫을까요?	Der andere Tab hat ungespeicherte Änderungen. Änderungen verwerfen und das ganze Fenster schließen?	L’autre onglet contient des modifications non enregistrées. Les abandonner et fermer toute la fenêtre ?
+此 PSD 以合成图打开，请另存为新文件。	此 PSD 以合成影像開啟，請另存為新檔案。	This PSD opened as a composite. Use Save As to create a new file.	この PSD は合成画像として開きました。別名で新しいファイルに保存してください。	이 PSD는 합성 이미지로 열렸습니다. 다른 이름으로 새 파일에 저장하세요.	Diese PSD wurde als zusammengesetztes Bild geöffnet. Bitte unter einem neuen Namen speichern.	Ce PSD a été ouvert en tant qu’image composite. Enregistrez-le dans un nouveau fichier.
+此图含动画或高位深数据，当前画面可另存为新文件。	此圖含動畫或高位元深度資料，可將目前畫面另存為新檔案。	This image contains animation or high-bit-depth data. Save the current view as a new file.	アニメーションまたは高ビット深度の画像です。現在の表示を別名で保存できます。	애니메이션 또는 고비트 심도 데이터가 있습니다. 현재 화면을 새 파일로 저장할 수 있습니다.	Das Bild enthält Animationen oder Daten mit hoher Farbtiefe. Die aktuelle Ansicht kann als neue Datei gespeichert werden.	Cette image contient une animation ou des données à haute profondeur de couleur. Enregistrez la vue actuelle dans un nouveau fichier.
+PSD（合成图）	PSD（合成影像）	PSD (flattened composite)	PSD（合成画像）	PSD(병합 이미지)	PSD (zusammengeführtes Bild)	PSD (image aplatie)
+PSD（像素图层）	PSD（像素圖層）	PSD (pixel layers)	PSD（ピクセルレイヤー）	PSD(픽셀 레이어)	PSD (Pixelebenen)	PSD (calques de pixels)
+当前效果需合并后导出 PSD，请另存为新文件。	目前的效果需合併後匯出 PSD，請另存為新檔案。	These effects require a flattened PSD. Use Save As to create a new file.	現在の効果を含む PSD は統合して書き出します。別名で新しいファイルに保存してください。	현재 효과는 병합된 PSD로 내보내야 합니다. 다른 이름으로 저장하세요.	Diese Effekte erfordern ein zusammengeführtes PSD. Bitte als neue Datei speichern.	Ces effets nécessitent un PSD aplati. Enregistrez-le dans un nouveau fichier.
+不支持的图像保存格式	不支援的影像儲存格式	Unsupported image output format	未対応の画像保存形式	지원하지 않는 이미지 저장 형식	Nicht unterstütztes Bildausgabeformat	Format d’enregistrement non pris en charge
+输入文字	輸入文字	Enter text	テキストを入力	텍스트 입력	Text eingeben	Saisir le texte
+图像	影像	Image	画像	이미지	Bild	Image
+PSD 合成预览	PSD 合成預覽	PSD composite preview	PSD 合成プレビュー	PSD 합성 미리보기	PSD-Gesamtvorschau	Aperçu composite du PSD
+可通过“编辑图像”打开受支持的 PSD 像素图层。	可透過「編輯影像」開啟支援的 PSD 像素圖層。	Use Edit Image to open supported PSD pixel layers.	「画像を編集」で対応する PSD ピクセルレイヤーを開けます。	이미지 편집으로 지원되는 PSD 픽셀 레이어를 열 수 있습니다.	Unter „Bild bearbeiten“ können unterstützte PSD-Pixelebenen geöffnet werden.	Utilisez « Modifier l’image » pour ouvrir les calques de pixels PSD pris en charge.
+正在读取图像	正在讀取影像	Reading image	画像を読み込み中	이미지 읽는 중	Bild wird gelesen	Lecture de l’image
+读取失败	讀取失敗	Read failed	読み込みに失敗	읽기 실패	Lesen fehlgeschlagen	Échec de la lecture
+Image	Image	Image	Image	Image	Image	Image
+Tile	Tile	Tile	Tile	Tile	Tile	Tile
+此 PSD 缺少兼容合成图。	此 PSD 缺少相容合成影像。	This PSD has no compatible composite image.	この PSD には互換用の合成画像がありません。	이 PSD에 호환용 합성 이미지가 없습니다.	Diese PSD enthält kein kompatibles Gesamtbild.	Ce PSD ne contient pas d’image composite de compatibilité.
+已导入普通图层	已匯入一般圖層	Pixel layers imported	ピクセルレイヤーを読み込みました	픽셀 레이어를 가져왔습니다	Pixelebenen importiert	Calques de pixels importés
+导出当前格 PNG	匯出目前格 PNG	Export current cell PNG	現在のセルを PNG 出力	현재 셀 PNG 내보내기	Aktuelle Zelle als PNG	Exporter la cellule en PNG
+合并导出 PNG	合併匯出 PNG	Export merged PNG	結合して PNG 出力	병합 PNG 내보내기	Zusammen als PNG	Exporter le PNG assemblé
+拆分 Tile	拆分 Tile	Split Tile	タイルを分割	타일 분할	Kachel teilen	Découper la tuile
+多 Tile	多 Tile	Multi-Tile	複数タイル	여러 타일	Mehrere Kacheln	Plusieurs tuiles
+每轴格数	每軸格數	Cells per axis	各軸のセル数	축당 셀 수	Zellen je Achse	Cellules par axe
+应用拆分	套用拆分	Apply split	分割を適用	분할 적용	Teilung anwenden	Appliquer la découpe
+合并可见图层并拆分	合併可見圖層並拆分	Merge visible layers and split	表示レイヤーを結合して分割	표시 레이어 병합 후 분할	Sichtbare Ebenen vereinen und teilen	Fusionner les calques visibles et découper
+拆分预览	拆分預覽	Split preview	分割プレビュー	분할 미리보기	Teilungsvorschau	Aperçu de découpe
+拆分行列无效。	拆分行列無效。	Invalid split grid.	分割の行列数が無効です。	분할 행과 열이 잘못되었습니다.	Ungültiges Teilungsraster.	Grille de découpe invalide.
+请调整行列，使每格的宽和高均为偶数像素。	請調整行列，使每格的寬和高均為偶數像素。	Choose a grid that gives each cell an even width and height in pixels.	各セルの幅と高さが偶数ピクセルになるよう行列数を調整してください。	각 셀의 너비와 높이가 짝수 픽셀이 되도록 행과 열을 조정하세요.	Das Raster so wählen, dass Breite und Höhe jeder Zelle gerade Pixelzahlen sind.	Choisissez une grille donnant à chaque cellule une largeur et une hauteur paires en pixels.
+拆分支持矩形和菱形 Tile。	拆分支援矩形和菱形 Tile。	Splitting supports rectangular and diamond tiles.	矩形と菱形のタイルを分割できます。	사각형 및 마름모 타일을 분할할 수 있습니다.	Rechteckige und rautenförmige Kacheln lassen sich teilen.	La découpe prend en charge les tuiles rectangulaires et en losange.
+拆分后的素材超过 64 项。	拆分後的素材超過 64 項。	Splitting would exceed the limit of 64 materials.	分割後の素材数が上限の64点を超えます。	분할 후 소재가 64개를 초과합니다.	Die Teilung würde die Grenze von 64 Materialien überschreiten.	La découpe dépasserait la limite de 64 matériaux.
+已有不同内容的格子，请从单张图拆分。	已有不同內容的格子，請從單張圖拆分。	Cells already contain different content. Split a single image instead.	内容の異なるセルがあります。単一の画像から分割してください。	내용이 다른 셀이 있습니다. 단일 이미지에서 분할하세요.	Die Zellen haben unterschiedliche Inhalte. Bitte ein einzelnes Bild teilen.	Les cellules ont déjà des contenus différents. Découpez une image unique.

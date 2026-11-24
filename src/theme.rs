@@ -106,6 +106,19 @@ pub fn compact_selector<const N:usize>(ui:&mut egui::Ui,value:&mut String,labels
     let previous=value.clone();selector_inner(ui,value,true,labels);*value!=previous
 }
 
+pub(crate) fn size_link(ui: &mut egui::Ui, linked: &mut bool) -> bool {
+    use crate::localization::tr;
+    let width = ui.spacing().icon_width + ui.spacing().icon_spacing;
+    let button = ui.add_sized([width,52.0],egui::Button::new("").frame(false));
+    let clicked = button.clicked();
+    if clicked { *linked = !*linked; }
+    let tint = if *linked { BLUE } else { egui::Color32::from_gray(128) };
+    egui::Image::new(egui::include_image!("../assets/icons/size-link.svg")).tint(tint).paint_at(ui,button.rect);
+    button.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Checkbox,button.enabled(),tr("锁定宽高比例")));
+    button.on_hover_text(tr("锁定宽高比例；重新锁定时以宽度为准恢复比例。"));
+    clicked
+}
+
 pub(crate) fn image_scale_selector(ui: &mut egui::Ui, fit: &mut bool) -> bool {
     let mut mode = if *fit { "fit" } else { "native" }.to_owned();
     let clicked = selector_inner_scaled(ui, &mut mode, true, [("fit", "适应窗口"), ("native", "1 : 1")], 1.0);

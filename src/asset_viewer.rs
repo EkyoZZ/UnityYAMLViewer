@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32};
 use egui::emath::GuiRounding as _;
 pub(crate) mod nine_slice;
 mod seamless;
-mod pixel_tile;
+mod graphic_editor;
 mod sequence;
 mod image_history;
 pub(crate) mod image_info;
@@ -206,7 +206,7 @@ struct ImageTab {
     info:image_info::State,
     editor: nine_slice::Editor,
     seamless: seamless::Editor,
-    pixel_tile: pixel_tile::Editor,
+    graphic_editor: graphic_editor::bitmap_workspace::Workspace,
     sequence: sequence::Editor,
     watermark:watermark::Editor,
     original: Option<Arc<image::RgbaImage>>,
@@ -290,8 +290,8 @@ struct NetworkTab {
 
 #[derive(Default)]
 pub struct Assets {
-    pixel_tile: pixel_tile::Editor,
-    tile_projects: HashMap<PathBuf,pixel_tile::project_preview::ProjectPreview>,
+    tile_editor: graphic_editor::Editor,
+    tile_projects: HashMap<PathBuf,graphic_editor::project_preview::ProjectPreview>,
     rtf:rtf_preview::Preview,
     markdown: markdown::Preview,
     command_markdown: markdown::Preview,
@@ -320,7 +320,7 @@ pub struct Assets {
 }
 impl Assets {
     pub fn open_pixel_tile(&mut self,ctx:&egui::Context) {
-        self.pixel_tile.open=true;
+        self.tile_editor.open=true;
         crate::native_window::wake(ctx,egui::Id::new(("pixel_tile",Path::new(""))));
     }
     /// Additional browsing frames have a 64 MiB estimated CPU/GPU budget.
@@ -462,7 +462,7 @@ impl Assets {
     pub fn resolve_playlist_dirty(&mut self,path:&Path,save:bool)->bool{self.playlists.resolve_dirty(path,save)}
     pub fn playlist_in_use(&self)->Vec<PathBuf>{self.playlists.in_use()}
     pub fn pause_media(&mut self) {self.playlists.pause();for tab in self.media.values_mut(){tab.deactivate();}}
-    pub fn forget(&mut self, path: &Path) { if !self.tile_projects.get(path).is_some_and(|p|p.active()){self.tile_projects.remove(path);} if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);if !self.images.get(path).is_some_and(|t|t.pixel_tile.active()){self.images.remove(path);}if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
+    pub fn forget(&mut self, path: &Path) { if !self.tile_projects.get(path).is_some_and(|p|p.active()){self.tile_projects.remove(path);} if extension(path)=="rtf"{self.rtf.invalidate(path);} if extension(path)=="md" {self.markdown.invalidate();} self.prefetch_skipped.remove(path);if self.image_prefetch.as_ref().is_some_and(|(loading,_)|loading==path){self.image_prefetch=None;} self.browser.forget(path); self.material_graphs.remove(path); self.playlists.forget(path); self.media.remove(path);if !self.images.get(path).is_some_and(|t|t.graphic_editor.active()){self.images.remove(path);}if self.displayed_image.as_deref()==Some(path){self.displayed_image=None;} self.spine.remove(path); self.models.remove(path); self.svgs.remove(path); self.pdfs.remove(path);self.spreadsheets.remove(path); }
     pub fn pause_material_graphs(&mut self){for preview in self.material_graphs.values_mut(){preview.deactivate();}}
     pub fn show_material_graph(&mut self,ui:&mut egui::Ui,path:&Path,text:&str){
         for (other,preview) in &mut self.material_graphs {if other!=path{preview.deactivate();}}
@@ -482,15 +482,17 @@ impl Assets {
     }
     pub fn show_slice_previews(&mut self,ctx:&egui::Context) {
         for (path,preview) in &mut self.tile_projects {preview.show_editor(ctx,path);}
-        self.pixel_tile.show(ctx,Path::new(""),None);
+        self.tile_editor.show(ctx,Path::new(""),None);
         for changed in self.browser.poll_optimization() {
             if let Some(tab) = self.images.get_mut(&changed) {
                 tab.info = Default::default();
             }
         }
         self.browser.show_optimization_report(ctx);
+        let mut saved_paths=Vec::new();
         for (path,tab) in &mut self.images {
-            tab.pixel_tile.show(ctx,path,tab.original.as_deref());
+            tab.graphic_editor.show(ctx,path,tab.original.as_deref());
+            if let Some(saved)=tab.graphic_editor.take_saved(){saved_paths.push(saved);}
             if let Some(original)=&tab.original {tab.sequence.show(ctx,path,original);}
             tab.watermark.show(ctx,path,tab.original.as_ref());
             if !tab.editor.open&&!tab.editor.busy()&&!tab.seamless.active(){
@@ -507,6 +509,12 @@ impl Assets {
                 tab.seamless.show(ctx,path,original);
                 if tab.editor.show(ctx,path,original,texture){tab.original=None;tab.texture=None;tab.pending=None;}
             }
+        }
+        for saved in saved_paths {
+            if let Some(tab)=self.images.get_mut(&saved) {
+                tab.info=Default::default();tab.original=None;tab.texture=None;tab.load(saved.clone(),ctx.clone());
+            }
+            self.browser.forget(&saved);
         }
     }
     pub fn set_network_source(&mut self, path: PathBuf, source: crate::network_video::Source) {
@@ -663,7 +671,7 @@ impl Assets {
     pub fn network_downloads_active(&self) -> bool { !self.network_downloads.is_empty() }
     pub fn cancel_network_downloads(&mut self) { self.network_downloads.clear(); }
     pub fn show(&mut self, ui: &mut egui::Ui, path: &Path, text: &str) {
-        if is_tile_project(path) {self.tile_projects.entry(path.to_owned()).or_insert_with(||pixel_tile::project_preview::ProjectPreview::new(path,ui.ctx())).show(ui,path);return;}
+        if is_tile_project(path) {self.tile_projects.entry(path.to_owned()).or_insert_with(||graphic_editor::project_preview::ProjectPreview::new(path,ui.ctx())).show(ui,path);return;}
         if crate::media_preview::is_project(path) {crate::media_preview::show_project_tab(ui,path);return;}
         let browsed = if is_browsable_image(path) { Some(self.browser.show(ui,path)) } else { None };
         let path = browsed.as_deref().unwrap_or(path);
@@ -784,18 +792,26 @@ impl Assets {
         }
         ui.horizontal_wrapped(|ui| {
             file_context_menu(&ui.heading(path.file_name().unwrap_or_default().to_string_lossy()),path);
-            if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.info=Default::default();tab.original = None; tab.editor.reset(); tab.load(path.to_owned(), ui.ctx().clone()); }
+            if ui.add_enabled(!tab.editor.busy(),egui::Button::new(crate::localization::tr("重载"))).clicked() { tab.info=Default::default();tab.original = None; tab.editor.reset(); if !tab.graphic_editor.active(){tab.graphic_editor=Default::default();} tab.load(path.to_owned(), ui.ctx().clone()); }
             let read_only_notice = match extension(path).as_str() {
-                "psd" => Some(("PSD合成图只读预览", "PSD 合成图只读预览：仅支持 8 位 RGB／灰度、Raw／RLE；不解析图层、不应用 ICC 色彩管理，不提供图片扩展工具。")),
+                "psd" => Some(("PSD 合成预览", "可通过“编辑图像”打开受支持的 PSD 像素图层。")),
                 "ico" => Some(("ICO图标只读预览", "ICO 仅支持查看图标，不提供图片扩展工具。")),
                 _ => None,
             };
             if let Some((label, detail)) = read_only_notice {
+                let accent = if ui.visuals().dark_mode {
+                    egui::Color32::from_rgb(151, 202, 207)
+                } else {
+                    egui::Color32::from_rgb(29, 102, 110)
+                };
+                let border = ui.visuals().window_fill.lerp_to_gamma(accent, 0.55_f32);
                 egui::Frame::new()
-                    .stroke(ui.visuals().widgets.inactive.bg_stroke)
+                    .stroke(egui::Stroke::new(1.0, border))
                     .corner_radius(3)
                     .inner_margin(egui::Margin::symmetric(5, 1))
-                    .show(ui, |ui| ui.small(crate::localization::tr(label)))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(crate::localization::tr(label)).small().color(accent))
+                    })
                     .response
                     .on_hover_text(crate::localization::tr(detail));
             }
@@ -816,10 +832,10 @@ impl Assets {
                 tab.sequence.open=true;
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("sequence",path)));
             }
-            if ui.button(crate::localization::tr("绘Tile")).clicked() {
-                tab.pixel_tile.open=true;
-                crate::native_window::wake(ui.ctx(),egui::Id::new(("pixel_tile",path)));
             }
+            if (is_bitmap(path)||is_psd(path)) && ui.add_enabled(tab.original.is_some()||is_psd(path),egui::Button::new(crate::localization::tr("编辑图像"))).clicked() {
+                tab.graphic_editor.open=true;
+                crate::native_window::wake(ui.ctx(),egui::Id::new(("pixel_tile",path)));
             }
         });
         let old_fit = self.session_image_fit;

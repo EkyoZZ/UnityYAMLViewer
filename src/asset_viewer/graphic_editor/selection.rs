@@ -26,6 +26,7 @@ impl HistorySelection {
 }
 #[derive(Default)]
 pub(super) struct Selection {
+    pub(super) generation:u64,
     pub mode: Mode,
     pub mask: Option<std::collections::HashSet<Pixel>>,
     pub draft: Vec<Pos2>,
@@ -38,11 +39,20 @@ pub(super) struct Selection {
     floating:Option<Floating>,
 }
 impl Selection {
+    pub(super) fn guide_bounds(&self) -> Option<Rect> {
+        let mut bounds = Rect::NOTHING;
+        for &(x, y) in &self.world {
+            let corner = Pos2::new(x as f32, y as f32);
+            bounds.extend_with(corner);
+            bounds.extend_with(corner + Vec2::splat(1.));
+        }
+        bounds.is_positive().then_some(bounds)
+    }
     pub(super) fn history(&self)->HistorySelection{HistorySelection{mode:self.mode,mask:self.mask.clone(),world:self.world.clone(),cut_layer:self.cut_layer,floating:self.floating.clone()}}
     pub(super) fn restore(&mut self,state:HistorySelection,revision:u64){self.mode=state.mode;self.mask=state.mask;self.world=state.world;self.cut_layer=state.cut_layer;self.floating=state.floating;if let Some(f)=self.floating.as_mut(){f.revision=revision;}self.draft.clear();self.moving=None;self.rebuild_edges();}
     pub(super) fn cursor(&self)->egui::CursorIcon{if self.moving.is_some(){egui::CursorIcon::Grabbing}else{egui::CursorIcon::Crosshair}}
     pub fn allows(&self,tile:usize,x:u32,y:u32)->bool {self.mask.as_ref().is_none_or(|m|m.contains(&(tile,x,y)))}
-    pub fn clear(&mut self) {self.mask=None;self.draft.clear();self.world.clear();self.edges.clear();self.contours.clear();self.moving=None;self.cut_layer=None;self.floating=None;}
+    pub fn clear(&mut self) {self.generation=self.generation.wrapping_add(1);self.mask=None;self.draft.clear();self.world.clear();self.edges.clear();self.contours.clear();self.moving=None;self.cut_layer=None;self.floating=None;}
     fn polygon_close_at(&self,pointer:Pos2,origin:Pos2,scale:f32,dpi:f32)->bool{self.draft.len()>=3&&self.draft.first().is_some_and(|first|(origin+first.to_vec2()*scale).distance(pointer)*dpi<=8.)}
     fn draft_preview(&self,origin:Pos2,scale:f32,pointer:Option<Pos2>,dpi:f32)->(Vec<Pos2>,Option<(Pos2,bool)>){let mut points:Vec<_>=self.path().iter().map(|p|origin+p.to_vec2()*scale).collect();if self.mode==Mode::Polygon&&!self.draft.is_empty(){let first=points[0];let close=pointer.is_some_and(|p|self.polygon_close_at(p,origin,scale,dpi));if let Some(pointer)=pointer{points.push(if close{first}else{pointer});}(points,Some((first,close)))}else{if points.len()>1{points.push(points[0]);}(points,None)}}
     fn path(&self)->Vec<Pos2> {
@@ -55,6 +65,7 @@ impl Selection {
         }
     }
     fn rebuild_edges(&mut self) {
+        self.generation=self.generation.wrapping_add(1);
         self.edges.clear();
         for &(x,y) in &self.world {
             let a=Pos2::new(x as f32,y as f32);let b=a+egui::vec2(1.,1.);

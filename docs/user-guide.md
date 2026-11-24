@@ -940,7 +940,8 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 从“文件 → 绘Tile”新建空白工程，或从图片工具栏打开并导入当前图片；.uytile 文件通过打开文件、拖入或启动参数先进入主窗口工程预览标签，点击“绘Tile”再进入编辑窗口。工程以 JSON 编码保存全部 Tile 像素、循环排列、地面尺寸和模式，PNG 可导出当前格或按行列拆分全部格的可见图层合成结果。
 
 - 所有格子共享一套图层，尺寸相同，边长为 2–1024 的偶数；最多64格，每层最多16 MiB，全部图层像素最多32 MiB、最多32层。新建不同尺寸会重置 Tile 集合，可撤销。
-- 绘制区编辑单格，或在开启“多 Tile 循环”后编辑设置的整组格子。设置支持 1–8 行列，点击按行连续编号的 Slot 按钮选中格子，悬停可看行列，在下方导入图片或清空选中图层；菱形排列的行列沿两条斜轴展开。默认排列为 1×1。
+- 在“设置 → 多 Tile”中选择 1–8 行列即可排列格子，默认 1×1。点击按行编号的 Slot 切换当前格。菱形的行列沿两条斜轴展开。
+- 在“设置 → 拆分 Tile”中，1×1 显示整张图。选 2×2 后可预览切线，点击“应用拆分”才生成四个独立格。矩形沿水平和垂直方向切分，菱形沿两条斜轴等分。例如 64×32 的大菱形可切成四个 32×16 的小菱形，按原位置拼回。每格宽高须为偶数像素。普通像素层与蒙版逐层拆分，有可编辑文字或启用的 FX 时，按钮会明确显示“合并可见图层并拆分”。一次撤销可恢复拆分前的完整工程。
 - 窗口为设置＋统一绘制区，设置独立滚动。Q切换有边界、W切换无边界，中心保留设置的循环单元，共享平移、倍率和工具；H或无边界旁定位图标回中心，倍率不变。可另开独立只读预览窗口。
 - 平面模式提供 1–32 像素方形铅笔、橡皮及取色，默认开启边缘回绕。每个笔刷像素独立映射，跨斜边和角点的笔触、橡皮也会回到对边；单格编辑回到当前 Tile，多格按循环行列落到对应格。有边界关闭回绕后裁去外边界部分；无边界编辑重复副本会映射到中心对应格。
 - 每格独立保存像素，最多 8×8 格；取消素材编号下拉和独立副本按钮。旧工程的共享格在打开时保留图像并分离，超出64张或16 MiB则拒绝打开，当前内容不变。Alt 临时取色。一笔涉及多个 Tile 时整体撤销／重做，历史像素预算为 32 MiB，超出时淘汰最旧记录。此像素笔刷替换 RGBA，不提供压感、柔边混色或写实笔刷。
@@ -1010,11 +1011,16 @@ V 移动（默认，左键拖动画布）、B 画笔、I 取色、E 橡皮、U �
 
 ### 像素 Tile 图层与拆分导出
 
-单格与多格统一保留固定 BaseLayer 承载素材，上方有透明可编辑绘画层；导入当前图片将源图放入BaseLayer。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，拖拽图层名称排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除；删除最后一个普通绘画层会自动补一个透明、可编辑的普通图层。
+单格与多格均由 BaseLayer 承载底图，上方可添加透明绘画层。图层列表按从上到下的显示顺序排列，提供当前格缩略图；点击名称或缩略图选中，拖拽图层名称排序，右侧锁开关用于锁定／解锁。圆点切换显隐，+ 新建透明层。右键图层名称可重命名或删除；锁定层须先解锁才能删除；删除最后一个普通绘画层会自动补一个透明、可编辑的普通图层。
 
-绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。导入图片加入工程素材库，内容填入选中格的BaseLayer；清空选中图层清除该层全部格子，新建空白／导入当前图片重新建立普通图层，均可撤销。预览与PNG采用普通Alpha合成，暂不提供图层混合模式、蒙版或图层不透明度。
+绘制、橡皮和回绕仅作用于当前可见且未锁定层，橡皮不会擦除下方底图。图层对整组格子生效。从素材库可把素材填入选中格的 BaseLayer。清空选中图层会清除该层全部格子的像素，新建空白会重建画布，两项均可撤销。预览与 PNG 均按可见图层、混合模式、不透明度和蒙版合成。
 
-多格设置支持2×2、3×3、4×4快捷按钮。点击“拆分导出全部格 PNG”选择文件夹，3×3会导出9张，名称为tile_r01_c01.png等；使用可见层合成并按菱形遮罩裁切，矩形模式保留矩形。已有同名文件时拒绝导出，遇到写入失败会报告已完成数量。PNG不保留图层，请另存.uytile工程。
+在“多 Tile”中，选好 Slot 后，其下方的“导入当前图片”会将图片居中放入该格的 BaseLayer，保留上方图层和其他格子，“导出当前格 PNG”保存该格的可见图层。1×1 时使用“另存 PNG”。有多个格子时，下方另有两个导出按钮。
+
+- **拆分导出全部格 PNG** 选择文件夹后每格保存一张图。3×3 会得到 9 张 PNG，文件名如 `tile_r01_c01.png`。已有同名文件时会提示选择其他文件夹。
+- **合并导出 PNG** 按实际排列将整组保存为一张原始像素尺寸的透明 PNG。矩形按行列拼接，菱形和六边形沿各自的格轴拼接。PNG 中只包含可见图层的合成结果，预览背景、网格和编号不会写入。保存图层和排列请使用 `.uytile` 工程。
+
+Below the selected slot, **Import current image** replaces that cell's BaseLayer image and preserves the other layers and cells. **Export current cell PNG** saves that cell alone. A 1×1 layout offers **Save as PNG**. Larger layouts also offer **Export all cells** for one PNG per cell, and **Export merged PNG** for one transparent image of the entire arrangement at native resolution. The merged file preserves rectangular, diamond and hexagonal placement and omits the preview background, grid and labels. Save a `.uytile` project to keep layers editable.
 
 ### 像素 Tile 工具栏与背景
 
@@ -1229,9 +1235,21 @@ After Ctrl+J copies or Ctrl+Shift+J cuts a selection to a new layer, Ctrl+Z rest
 
 “链接图层”让选中对象一起移动，“取消链接”解除该链接组。V移动当前图层／组、多选和链接对象，空格加左键或右键拖动平移画布。父组锁定会限制成员操作。
 
-点击内容或蒙版缩略图选择编辑目标；两者间的链接按钮控制联动。链接时一起移动，断开后选中蒙版只移动蒙版、选中内容只移动内容。组蒙版同样支持独立移动。蒙版菜单支持反相、启用和删除；“应用蒙版”仅适用于像素层。效果按格裁切，当前不提供蒙版羽化、密度和矢量蒙版。
+点击内容或蒙版缩略图选择编辑目标；两者间的链接按钮控制联动。链接时一起移动，断开后选中蒙版只移动蒙版、选中内容只移动内容。组蒙版同样支持独立移动。蒙版菜单支持反相、启用和删除；“应用蒙版”仅适用于像素层。普通图层和组的效果按格裁切，当前不提供蒙版羽化、密度和矢量蒙版。
 
-当前外观面板只修改活动对象；多选用于编组、链接、移动、复制和删除。新工程格式包含层级和蒙版等属性，需要支持schema 9的程序读取。
+点击图层面板顶部的 fx，勾选要叠加的效果。点击效果名称可查看该项参数。描边可放在内部、居中或外部。内阴影和投影可直接拖动角度盘，再用距离控制偏移。阴影和斜面可选择使用工程的全局光，修改光照后，所有勾选该项的效果一起更新。
+
+填充控制图层内容。设为 0% 后，启用的描边、阴影等样式仍按各自的不透明度绘制。图层不透明度控制内容和全部样式，适合将它们一起淡出。可从图层行的 fx 右键复制、粘贴或清除样式，也可在参数页单独重置当前效果。
+
+fx 打开独立的置顶窗口，可以拖到画布旁或另一台显示器。描边、内阴影、颜色叠加、渐变叠加和投影的第一行有 **+**，新增行有 **−**。每类最多十项，同类中上方的项覆盖下方的项。普通图层和组按格裁切效果。文字图层的描边、阴影和发光会跨格回绕。
+
+**矩形文字水印**　选矩形 Tile，按 **T** 或点工具栏的 **T** 添加文字。新建窗口显示 3×3 平铺预览。已有文字层点行末箭头或双击 **T** 缩略图，切换“字符”和“段落”，有效修改立即反映在画布。可以选系统字体，调字号、字距、颜色、角度及不透明度，也可以设置对齐、段落宽度、缩进和段前段后间距。段落宽度为 0 时采用自然宽度，大于 0 时自动换行。每个矩形格使用相同的水印，字形超出格边会从对侧接回。若只导出透明水印，隐藏底图和其他背景层，再导出 PNG。
+
+字体选择器在后台为可见字体生成样张并缓存到本机。缺少原字体时，T 图标有黄色叹号，展开后可看到缺少的字体名。工程保留已渲染的外观，可以正常预览和导出。安装字体后点 **刷新字体** 即可重新识别。文字图层也可右键栅格化，便于逐像素编辑。
+
+**自由变换**　在移动（V）或选区（M）工具下按 **Ctrl+T**。也可以勾选“显示变换控件”，直接拖动控点进入。四角和边中点缩放，角外旋转，框内移动。顶部可输入中心位置、宽高百分比和角度，选择等比缩放或平滑插值。双击画布或按 Enter 确认，Esc 取消。确认后按结果重算边界，切换其他绘制工具会提交本次变换并显示其选项。支持活动像素层、选区内像素、像素蒙版和完整矩形文字层。若只变换文字的一部分，请先栅格化。
+
+工程含可编辑文字时保存为格式 12，含同类多项 fx 时至少为 11，普通图层样式为 10。现版本可读取格式 1～12。
 
 ### Tile groups, links and masks
 
@@ -1239,7 +1257,21 @@ Ctrl-click toggles layer/group selection; Shift-click selects a range in the vis
 
 Groups default to pass-through, allowing internal adjustments to affect the backdrop. Choosing a blend mode isolates the group. Group masks and opacity affect the combined result. Link layers to move them together; V moves layers/groups and linked or selected objects, while Space+left drag or right drag pans the canvas.
 
-Select a content or mask thumbnail as the editing target. Their link button controls joint movement; unlink to move the selected mask or content independently. This also applies to group masks. The appearance panel edits only the active object. Effects are clipped per cell; mask density, feathering and vector masks are unavailable. New projects require schema-9 support.
+Select a content or mask thumbnail as the editing target. Their link button controls joint movement; unlink to move the selected mask or content independently. This also applies to group masks. The appearance panel edits the active layer or group. Mask density, feathering and vector masks are unavailable.
+
+Open fx at the top of the Layers panel. Check an effect to enable it and select its name to inspect its settings. Place a stroke inside, outside, or centered on the edge. Drag the angle dial and adjust distance to position a shadow. Shadows and bevels can share the project's global light. Changing that light updates every effect that uses it.
+
+Fill controls the layer content. At 0% fill, strokes, shadows and other enabled styles retain their own opacity. Layer opacity fades the content and all its styles together. Right-click the fx badge on a layer to copy, paste or clear styles. Each effect also has its own reset button.
+
+The fx window stays on top and can be moved beside the canvas or to another monitor. Stroke, inner shadow, color overlay, gradient overlay and drop shadow have a **+** on the first row and a **−** on each added row. Each supports up to ten instances. Higher rows cover lower rows of the same effect. Ordinary layer and group effects are clipped per cell. Text outlines, shadows and glows wrap across edges.
+
+**Rectangular text watermarks.** Press **T** or click the toolbar’s **T** on a rectangular tile. The creation dialog previews a 3×3 repeat. Use the layer’s arrow or double-click its **T** thumbnail to edit its Character and Paragraph tabs. Valid changes appear on the canvas. Set the installed font, size, letter spacing, color, angle and opacity, or change paragraph alignment, width, indents and spacing. A width of 0 uses the natural text width. Positive widths enable wrapping. Each rectangular cell repeats the same watermark and carries overflowing glyphs onto its opposite edge. Hide the base image and other backgrounds before exporting a transparent watermark PNG.
+
+Font samples for visible rows render in the background and are cached locally. A yellow warning on the **T** thumbnail marks a missing font. Open the layer to see its name. Saved artwork can still be previewed and exported. After installing the font, click **Refresh fonts**. The layer menu can also rasterize text for pixel editing.
+
+**Free transform.** Press **Ctrl+T** in Move (V) or Selection (M), or enable **Show transform controls** and drag a handle. Resize with corners or edge midpoints, rotate outside the corners and move inside the frame. The options bar provides center position, width and height percentages, rotation, proportional scaling and smooth pixel interpolation. Double-click the canvas or press Enter to commit. Escape cancels. The handles follow the new bounds after confirmation. Choosing another drawing tool commits the transform and restores that tool’s options. The target can be an active pixel layer, selected pixels, a pixel mask or an entire rectangular text layer. Rasterize text first to transform only part of it.
+
+Projects with editable text use format 12. Repeated effects require format 11 or later, and ordinary styles use format 10. Formats 1 through 12 can be opened.
 
 ### 图层面板图标
 
@@ -1323,9 +1355,9 @@ The Zoom tool offers common percentage presets and shows the same value as the t
 
 Choose color and opacity in the Selection toolbar, then click Fill selection or press Alt+Enter. This fills the selection on the active layer/mask, preserves the selection and supports undo. It does nothing without a valid selection or when the target is locked.
 
-点击调整层行末的三角箭头，或图层／组行末的fx，会选中对应对象并打开参数框；再次点击同一入口收起，切换其他图层也会收起。锁定时可查看参数但不可修改。
+点击调整层或文字层行末的三角箭头，选中该层并展开属性。再次点击或切换图层即可收起。图层或组行末的 fx 打开置顶样式窗口。
 
-Click an adjustment layer’s trailing triangle or a layer/group’s fx marker to select it and open its parameters. Click the same control again to close it; switching layers also closes it. Locked objects remain viewable but not editable.
+Click the triangle on an adjustment or text layer to select it and expand its properties. Click again or switch layers to close the properties. A layer or group’s fx badge opens the always-on-top style window.
 
 亮度／对比度调整提供数值框和滑条：亮度-150～150，对比度-50～100。两者同步更新；旧工程超出新对比度范围的值会保留到主动编辑。
 
@@ -1338,3 +1370,43 @@ Levels provides an input histogram, black/Gamma/white handles and output black/w
 父组隐藏时，子图层和嵌套组的眼睛显示灰色、不高亮；各对象自身的显示开关仍保留，恢复父组后按自身标记显示。
 
 When a parent group is hidden, children’s eye icons turn gray without highlighting. Their own visibility flags remain intact and take effect when the parent is shown again.
+
+### 普通图片与 PSD / Images and PSD
+
+打开普通图片或 PSD 后点“编辑图像”，默认进入 **Image**。左上角 **Image / Tile** 切换会保留两边的编辑和撤销记录。打开 `.uytile` 工程只进入 Tile。Image 中的画布使用原图尺寸，文字到边缘裁切。需要四方连续文字水印时切到 Tile 并选择矩形。
+
+窗口标题随 Image / Tile 和文件名变化。可以把一张或多张本地图片拖到画布或图层列表，每张成为一个普通图层。小图居中，超出画布时等比缩小。Tile 中拖到素材库边框内会加入素材库，拖到画布则放入当前格。只切页、选格或调整预览后可直接退出。新建画布、落笔、编辑图层或应用拆分后，关闭时会提示未保存的修改。
+
+**画布尺寸**和**图像大小**均可按百分比或像素输入目标宽高。锁定比例时宽高联动，解锁后可分别设置。切换单位会保留目标尺寸。
+
+**画布尺寸**默认使用像素，宽高独立。勾选“相对”后，比例锁自动解锁并禁用，宽高分别表示增减量。以 128 × 64 px 的画布为例，宽填 +32 px、高填 −16 px，结果是 160 × 48 px。改用百分比时，同一组增减量显示为 +25% 和 −25%。填 0 保留该方向尺寸。取消“相对”会显示目标宽高，此时可手动重新锁定比例。九点锚点决定哪一侧固定，默认居中。新扩展的区域透明，已有像素保持原大小。
+
+**图像大小**默认按百分比等比缩放整张图。“邻近（硬边缘）”适合像素画，“两次线性”（Bilinear）、“两次立方”（Bicubic，默认）和“兰佐斯（Lanczos3）”可平滑插值。两种尺寸操作都在点击“确定”后更新图层及其蒙版，一次撤销即可恢复。图层样式保留原有像素参数。
+
+**透明度** 默认勾选。取消勾选后，画布按背景色预览，旁边的提示显示实际填充色。保存普通图片时，透明像素填为该色，半透明边缘按透明度混合。分层 PSD 和合成 PSD 始终保留透明度。重新勾选可恢复编辑中的透明内容。JPEG 始终输出不透明图像，勾选 透明度 时使用白底。
+
+**保存**（Ctrl+S）写回当前文件。**另存为**（Ctrl+Shift+S）可选择 PNG、JPEG、WebP、BMP、TGA 或 PSD，之后的保存会写回新文件。“PSD（像素图层）”保留像素图层、受支持的可编辑样式和合成预览，同类描边与投影按原顺序保存。含调整层时可另存为合成 PSD。遇到原生文字、智能对象、任意渐变色标或其他超出支持范围的数据时，可读取兼容合成图并另存。分层 PSD 支持 8 位 RGB。
+
+Image 和 Tile 的主绘制区支持像素标尺。按 **Ctrl+R** 开关标尺，从顶部拖出水平辅助线，从左侧拖出垂直辅助线。使用移动工具调整已有辅助线，拖回标尺可删除。按 **Ctrl+;** 开关青色辅助线的显示。辅助线随当前会话保留。文字工具 **T** 位于缩放工具之前。
+
+按 **T** 后单击画布可在点击位置开始输入文字，单击已有文字则编辑原图层。点击输入框外确认，新文字会放到图层列表最上方。段落页使用对齐、缩进和间距图标，悬停可查看名称。
+
+Open an ordinary bitmap or PSD and choose **Edit Image**. **Image / Tile** keeps each tab’s edits and undo history. A `.uytile` project opens only in Tile. Image uses the original canvas size and clips text at its edges. Use a rectangular Tile to make a seamless watermark.
+
+The title shows the active tab and filename. Drop local images on the canvas or layer list to add one pixel layer per file. Images are centered and scaled down proportionally when needed. In Tile, dropping on the canvas adds content to the selected cell. Dropping inside the material library adds a material. Switching tabs, selecting cells and adjusting previews alone lets you close directly. Creating a canvas, painting, editing layers or applying a split prompts for unsaved changes on close.
+
+In Tile settings, **Multi-Tile** arranges cells for repeating and painting. **Split Tile** starts at 1×1 with the original image intact. Select 2×2 to preview guides, then choose **Apply split** to create four independently editable regions. Rectangles split across rows and columns. Diamonds split equally along both diagonal axes. A 64×32 diamond yields four 32×16 diamonds. Cell widths and heights must be even. Pixel layers and masks split individually. Documents with text or active FX offer **Merge visible layers and split**. Undo restores the complete original.
+
+**Canvas size** and **Image size** accept target dimensions in pixels or percentages. Link the dimensions to maintain the original aspect ratio, or unlink them to set each independently. Switching units preserves the target dimensions.
+
+**Canvas size** starts in pixels with independent dimensions. Select **Relative** to unlock and disable the aspect ratio control. Enter the amount to add or remove on each axis. For a 128 × 64 px canvas, +32 px in width and −16 px in height gives 160 × 48 px. Switching to percentages shows the same changes as +25% and −25%. Zero keeps that dimension. Clearing **Relative** shows the target dimensions and lets you relink them manually. The nine-point anchor determines which side stays fixed and defaults to the center. New space is transparent and existing pixels retain their size.
+
+**Image size** scales the entire image and starts in percentages with the aspect ratio locked. Nearest Neighbor preserves hard pixel edges. Bilinear, Bicubic (default) and Lanczos3 provide smooth interpolation. Choose **OK** in either panel to update layers and masks in one undo step. Layer styles retain their pixel settings.
+
+**Transparency** is on by default. Turn it off to preview the background color and fill transparent areas with that color when saving a flat image. Both layered and composite PSDs always retain transparency. Partially transparent edges blend with the background. Turning Transparency back on restores the transparency in the editable document. JPEG is always opaque and uses white when Transparency is on.
+
+**Save** (Ctrl+S) writes to the current file. **Save As** (Ctrl+Shift+S) changes the current path and offers PNG, JPEG, WebP, BMP, TGA and PSD. Choose **PSD (pixel layers)** to preserve raster layers, supported editable styles and a composite preview. Multiple strokes and drop shadows retain their order. Documents with adjustment layers can be saved as a composite PSD. For native text, smart objects, arbitrary gradient stops or other unsupported data, open the compatibility composite and save to a new file. Layered PSD supports 8-bit RGB.
+
+The main Image and Tile canvases have pixel rulers. Use **Ctrl+R** to toggle the rulers. Drag from the top ruler for a horizontal guide or from the left ruler for a vertical guide. Use Move to reposition an existing guide and drag it onto a ruler to delete it. **Ctrl+;** toggles the cyan guides. Guides belong to the current editing session. The Text tool (**T**) sits before Zoom.
+
+Press **T** and click the canvas to enter text at that position, or click existing text to edit its layer. Click outside the field to confirm and place new text at the top of the layer list. Hover over the paragraph alignment, indent and spacing icons to see their labels.

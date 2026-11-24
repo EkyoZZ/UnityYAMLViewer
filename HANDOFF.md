@@ -4756,3 +4756,49 @@ Lock／Unlock统一原生矢量，图层行与锁定栏复用；灰色与选中�
 - EXE文件／产品版本1.3.7／1.3.7，34912768字节，SHA-256 756ee6ec88e91a0ec17c34324a06e83d968569f72d681a0dc44468cbd9a889c9；target/release/unity_yaml_viewer.exe.sha256已更新。
 - 包含参数框自动收缩、标题简化、统一240曲线宽度、调整层隐藏剪切菜单、父组隐藏时子对象眼睛灰显、继承锁复用BaseLayer禁用样式；子对象自身状态保留，眼睛独立。
 - 未自动启动、未发布；实际参数框宽高、菜单及组状态仍待用户验证，应用版本保持1.3.7。
+
+## 2026-11-24 停用蒙版斜线（源码）
+
+mask_enabled=false时缩略图加红色斜线，启用即移除，不改数据或合成。未重建EXE。
+
+- 2026-11-24：FX统一开关面板及样式复制／粘贴／清除菜单完成；检查通过见 target/tile-fx-context-check.log。包含此前停用蒙版红线的修改均尚未重建 EXE，待用户授权及界面验证。
+
+## 2026-11-24 绘 Tile 八种图层样式
+
+- 主程序 1.3.7 的 fx 现按效果分页编辑，补齐内阴影、内外发光、渐变叠加及斜面和浮雕，并扩展描边、投影、颜色叠加。参考 PhotoCraft 提交 `b84c777860324526e8da83690331a911e5c57931`，源码路径、Tile 适配范围与限制见当前版本记录。
+- 填充为 0% 时保留样式，图层不透明度统一控制整体。工程格式 10 写入参数及工程全局光，兼容旧格式。静态检查见 `target/tile-fx-photocraft-check.log`。尚未构建新 EXE，界面及像素回归用例待运行。
+
+## 2026-11-24 Tile 文字水印、自由变换和多项 fx
+
+- 主程序源码保持 1.3.7。矩形文字层可通过 T 添加，行末箭头展开字符／段落属性，系统字体按需读取，样张后台缓存，手动刷新识别新安装字体。移动和选区增加 Ctrl+T。fx 使用独立置顶窗口，五类效果支持多项。工程格式、适用对象和限制见当前版本记录。
+- 编译检查日志 `target/tile-text-fx-check.log`。未重建 EXE，交互、实际字体安装刷新和导出仍待实机核验。
+
+## 2026-11-24 Image / Tile 和 PSD
+
+- 普通图片与 PSD 共用“编辑图像”。Image 和 Tile 有独立工作状态，工程文件固定 Tile。Image 可原位保存或另存六种格式。支持的 8 位 RGB PSD 可保留像素层、组及蒙版。原生复杂结构保留源文件，仅允许将兼容合成图另存。
+- 核验入口和兼容范围见当前版本记录。测试目标与主程序的编译检查日志为 `target/image-tile-psd-check.log` 和 `target/image-tile-psd-app-check.log`。未生成测试程序或新 EXE，Photoshop 文件往返与窗口实机交互待验证。
+
+## 2026-11-24 单图拆分与图层拖放
+
+- 主程序 1.3.7 的 Tile 设置使用“拆分 Tile / 多 Tile”。1×1 保持单图，应用拆分可生成互相独立的矩形或菱形格子。切换预览和 Slot 不标记修改。Image/Tile 标题随当前页切换，支持外部图片拖入普通图层。
+- 逐像素核对 432 组几何组合。常规及测试目标的检查日志见 `target/tile-split-check.log` 与 `target/tile-split-check-tests.log`。新 EXE、Rust 测试程序和窗口实测均未执行。
+
+## 2026-11-24 当前格与整图导出
+
+- 当前格导入与 PNG 保存位于格子选择下方。多格额外提供逐格和合并 PNG 导出。合并图使用矩形、菱形或六边形的原始像素排列与透明度。检查日志见 `target/tile-merged-png-check-tests.log` 与 `target/tile-merged-png-check.log`。版本仍为 1.3.7，导出对话框和真实窗口操作待验证。
+- 2026-11-24 经用户授权编译。主程序进程及固定 EXE 独占访问检查通过后，`cargo build --release --locked --offline` 成功，耗时 1 分 29 秒。产物 `target/release/unity_yaml_viewer.exe` 的文件版本和产品版本均为 1.3.7，大小 35,784,704 字节，SHA-256 为 `58e14bce1984bb52a0257faae89ced4ade8649e143019944290087551b0ec3e6`。相邻校验文件已更新，构建日志为 `target/tile-image-split-export-release-build.log`。窗口和 PNG 导出待实机验证。
+
+## 2026-11-24 Image 尺寸调整和背景色输出
+
+- 主程序源码 1.3.7 增加 Image 画布裁扩和整图重采样，可切换百分比／像素并选择四种插值。Alpha 开关控制普通图片的透明或背景色输出，分层和合成 PSD 始终保留透明度。
+- 静态编译检查日志为 `target/image-size-alpha-test-check.log` 和 `target/image-size-alpha-check.log`。上次构建的 EXE 早于这项改动，窗口、实际输出和新回归用例仍待运行验证。
+- 2026-11-24 经用户授权，通过主程序进程与固定 EXE 独占检查后，`cargo build --release --locked --offline` 成功，耗时 1 分 24 秒。产物 `target/release/unity_yaml_viewer.exe` 为 35,960,832 字节，文件版本与产品版本均为 1.3.7，SHA-256 为 `d23e31067fd98d9d9b6af009c94f55c833e9221cae7a902d0a8f6b709c819c4f`。已更新相邻校验文件并核对内嵌的尺寸和 PSD 透明度提示。日志为 `target/image-size-alpha-release-build.log`，界面与实际导出待验证。
+
+## 2026-11-24 Image 相对尺寸和输入框对齐测试版
+
+- 经用户授权并确认主程序和固定 EXE 均无占用后，Release 构建完成，耗时 1 分 25 秒。产物 `target/release/unity_yaml_viewer.exe` 为 35,893,248 字节，文件及产品版本均为 1.3.7，SHA-256 为 `ba723c434cc65abf0e7b69ede631909b038a26a22cc5cee944db21e195033a54`。已核对内嵌的相对输入提示和“两次线性”名称，并更新相邻校验文件。
+- 尺寸模块 4 项回归测试全部通过。构建和测试日志分别为 `target/image-size-relative-release-build.log` 与 `target/image-size-relative-regression.log`。输入框等宽、垂直居中与鼠标交互待实机验证。
+## 2026-11-24 PSD 原生样式与画布编辑测试版
+
+- 经用户授权并确认主程序和固定 EXE 无占用后，`cargo build --release --locked --offline` 成功，耗时 1 分 11 秒。产物 `target/release/unity_yaml_viewer.exe` 为 35,988,480 字节，文件及产品版本为 1.3.7，SHA-256 为 `1fe7ac056304153d614f3ad2531b812fd1a361b86b45d17039777a50f689b824`。已更新相邻校验文件，构建日志见 `target/editor-psd-guides-release-build.log`。
+- 本地测试版包含 PSD 原生 FX、画布文字、标尺及辅助线吸附、紫罗兰色对齐线和图层键盘微移。实际窗口交互和 Photoshop 双向兼容性待验证。

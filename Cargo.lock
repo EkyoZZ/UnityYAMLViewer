@@ -5023,6 +5023,7 @@ dependencies = [
  "egui_commonmark",
  "egui_extras",
  "encoding_rs",
+ "flate2",
  "ico",
  "image",
  "libloading",

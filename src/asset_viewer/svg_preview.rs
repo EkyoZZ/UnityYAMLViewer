@@ -15,14 +15,18 @@ fn raster_size(size: egui::Vec2, scale: f32) -> [u32; 2] {
     let scale = scale.max(0.001).min(RASTER_SIDE / size.x.max(size.y));
     [(size.x * scale).round().max(1.0) as u32, (size.y * scale).round().max(1.0) as u32]
 }
+pub(super) fn load_system_fonts()->usvg::fontdb::Database {
+    let mut fonts=usvg::fontdb::Database::new();fonts.load_system_fonts();fonts.set_sans_serif_family("Arial");fonts.set_serif_family("Times New Roman");fonts.set_monospace_family("Courier New");fonts
+}
 fn tree_with_text(source:&[u8])->Result<usvg::Tree,String>{
-    static FONTS:std::sync::LazyLock<usvg::fontdb::Database>=std::sync::LazyLock::new(||{
-        let mut fonts=usvg::fontdb::Database::new();fonts.load_system_fonts();fonts.set_sans_serif_family("Arial");fonts.set_serif_family("Times New Roman");fonts.set_monospace_family("Courier New");fonts
-    });
+    static FONTS:std::sync::LazyLock<usvg::fontdb::Database>=std::sync::LazyLock::new(load_system_fonts);
+    tree_with_fonts(source,&FONTS)
+}
+pub(super) fn tree_with_fonts(source:&[u8],fonts:&usvg::fontdb::Database)->Result<usvg::Tree,String>{
     let mut options=usvg::Options::default();options.font_family="Arial".into();
     options.image_href_resolver.resolve_string=Box::new(|_,_|None);
     let mut tree=usvg::Tree::from_data(source,&options).map_err(|e|e.to_string())?;
-    tree.convert_text(&FONTS);Ok(tree)
+    tree.convert_text(fonts);Ok(tree)
 }
 pub(super) fn svg_with_text(source:&[u8])->Result<Vec<u8>,String>{
     Ok(tree_with_text(source)?.to_string(&usvg::XmlOptions::default()).into_bytes())

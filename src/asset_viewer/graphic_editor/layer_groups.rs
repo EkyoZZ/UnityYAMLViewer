@@ -92,6 +92,7 @@ impl Editor {
         if self.layers[index].material || self.layers[index].locked || self.ancestor_locked(index) {
             return;
         }
+        if clear && !self.mask_editing && selected.iter().any(|i| self.layers[*i].settings.text.is_some()) { return; }
         self.pending_layer_action = Some((
             clear,
             index,
@@ -410,7 +411,7 @@ impl Editor {
             };
             let alpha = if p.has_effects() {
                 let mut image = RgbaImage::new(source.width(), source.height());
-                p.composite(&mut image, source, tile);
+                p.composite(&mut image, source, tile, self.fx_light);
                 image.get_pixel(x, y)[3]
             } else if p.fill > 0 {
                 source.get_pixel(x, y)[3]
@@ -677,7 +678,7 @@ impl Editor {
                 if end == cursor + 1 || self.layers[base].settings.adjustment.is_some() {
                     self.composite_layer_entry(base, tile, out, depth, None);
                 } else {
-                    let properties = &self.layers[base].settings;
+                    let properties = &self.transform.as_ref().filter(|t|t.index==base).and_then(|t|t.preview.as_ref()).unwrap_or(&self.layers[base]).settings;
                     let mut settings = properties.clone();
                     settings.blend = layer_properties::Blend::Normal;
                     settings.opacity = 100;
@@ -703,7 +704,7 @@ impl Editor {
                     let mut final_settings = layer_properties::Properties::default();
                     final_settings.blend = properties.blend;
                     final_settings.opacity = properties.opacity;
-                    final_settings.composite(out, &isolated, tile);
+                    final_settings.composite(out, &isolated, tile, self.fx_light);
                 }
             }
             cursor = end;
@@ -717,7 +718,8 @@ impl Editor {
         depth: usize,
         override_settings: Option<&layer_properties::Properties>,
     ) {
-        let layer = &self.layers[index];
+        let draft=self.transform.as_ref().filter(|t|t.index==index).and_then(|t|t.preview.as_ref());
+        let layer = draft.unwrap_or(&self.layers[index]);
         let p = override_settings.unwrap_or(&layer.settings);
         if p.group_id != 0 {
             if p.pass_through && p.fill == 100 && !p.has_effects() {
@@ -746,11 +748,11 @@ impl Editor {
                 if settings.pass_through {
                     settings.blend = layer_properties::Blend::Normal;
                 }
-                settings.composite(out, &group, tile);
+                settings.composite(out, &group, tile, self.fx_light);
             }
             return;
         }
-        let source = if index == self.active_layer {
+        let source = if draft.is_some(){&layer.tiles[tile]}else if index == self.active_layer {
             if tile == self.selected {
                 &self.pixels
             } else {
@@ -767,15 +769,15 @@ impl Editor {
                     *pixel = Rgba([0; 4]);
                 }
             }
-            p.composite(out, &clipped, tile);
+            p.composite(out, &clipped, tile, self.fx_light);
         } else {
-            p.composite(out, source, tile);
+            p.composite(out, source, tile, self.fx_light);
         }
     }
     fn next_group_id(&self) -> u64 {
         (1..).find(|id| self.group_index(*id).is_none()).unwrap()
     }
-    fn can_add_layers(&self, indices: &[usize], extra: usize) -> bool {
+    pub(super) fn can_add_layers(&self, indices: &[usize], extra: usize) -> bool {
         let bytes = self
             .layers
             .iter()
@@ -790,7 +792,7 @@ impl Editor {
             .sum::<usize>()
             + extra;
         self.layers.len() + indices.len() + usize::from(extra > 0) <= 32
-            && bytes.saturating_add(added) <= LAYER_BYTES
+            && bytes.saturating_add(added) <= self.layer_budget()
     }
     fn create_group(&mut self) {
         let i = self.active_layer;
@@ -864,6 +866,7 @@ impl Editor {
         }
         self.layers.remove(index);
         self.cleanup_single_links();
+        self.ensure_layer_after_removal();
         self.active_layer = index.saturating_sub(1).min(self.layers.len() - 1);
         self.selected_layers = vec![self.active_layer];
         self.mask_editing = false;
@@ -896,9 +899,7 @@ impl Editor {
             self.layers.remove(i);
         }
         self.cleanup_single_links();
-        if self.layers.is_empty() {
-            self.ensure_layers();
-        }
+        self.ensure_layer_after_removal();
         self.active_layer = 0;
         self.selected_layers = vec![0];
         self.layer_anchor = 0;
@@ -950,6 +951,7 @@ impl Editor {
             self.layers.remove(i);
         }
         self.cleanup_single_links();
+        self.ensure_layer_after_removal();
         self.active_layer = 0;
         self.selected_layers = vec![0];
         self.mask_editing = false;
@@ -1101,7 +1103,9 @@ impl Editor {
         }
     }
 }
-fn mix_group(before: Rgba<u8>, after: Rgba<u8>, k: f32) -> Rgba<u8> {
+pub(super) fn mix_group(before: Rgba<u8>, after: Rgba<u8>, k: f32) -> Rgba<u8> {
+    if k == 1. { return after; }
+    if k == 0. { return before; }
     let wa = before[3] as f32 * (1. - k);
     let wb = after[3] as f32 * k;
     let a = wa + wb;

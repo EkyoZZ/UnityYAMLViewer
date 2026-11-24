@@ -1,5 +1,6 @@
 //! Tile-scoped non-destructive layer appearance and editing permissions.
 use super::*;
+pub(super) mod effects;
 pub(super) const DETAIL_WIDTH: f32 = 240.;
 #[derive(Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) enum Blend {
@@ -180,7 +181,7 @@ impl Blend {
         }
     }
 }
-fn over(dst: Rgba<u8>, src: Rgba<u8>, mode: Blend, weight: f32) -> Rgba<u8> {
+pub(super) fn over(dst: Rgba<u8>, src: Rgba<u8>, mode: Blend, weight: f32) -> Rgba<u8> {
     let sa = src[3] as f32 / 255. * weight;
     let da = dst[3] as f32 / 255.;
     let a = sa + da * (1. - sa);
@@ -351,6 +352,10 @@ impl Adjustment {
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(super) struct Properties {
+    #[serde(skip)]
+    pub(super) psd_layer_id:Option<u32>,
+    #[serde(skip)]
+    pub(super) psd_metadata:Vec<u8>,
     pub clipped: bool,
     pub link_id: u64,
     pub group_id: u64,
@@ -368,21 +373,15 @@ pub(super) struct Properties {
     pub mask_enabled: bool,
     pub mask_linked: bool,
     pub adjustment: Option<Adjustment>,
-    overlay: bool,
-    overlay_color: [u8; 3],
-    overlay_opacity: u8,
-    stroke: bool,
-    stroke_size: u8,
-    stroke_color: [u8; 3],
-    shadow: bool,
-    shadow_radius: u8,
-    shadow_offset: [i16; 2],
-    shadow_opacity: u8,
-    shadow_color: [u8; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) text: Option<super::text_layer::Text>,
+    #[serde(flatten)]
+    pub(super) effects: effects::Effects,
 }
 impl Default for Properties {
     fn default() -> Self {
         Self {
+            psd_layer_id:None, psd_metadata:Vec::new(),
             clipped: false,
             link_id: 0,
             group_id: 0,
@@ -400,23 +399,14 @@ impl Default for Properties {
             mask_enabled: true,
             mask_linked: true,
             adjustment: None,
-            overlay: false,
-            overlay_color: [255, 255, 255],
-            overlay_opacity: 100,
-            stroke: false,
-            stroke_size: 1,
-            stroke_color: [0, 0, 0],
-            shadow: false,
-            shadow_radius: 3,
-            shadow_offset: [3, 3],
-            shadow_opacity: 50,
-            shadow_color: [0, 0, 0],
+            text: None,
+            effects: Default::default(),
         }
     }
 }
 impl Properties {
     pub(super) fn has_effects(&self) -> bool {
-        self.overlay || self.stroke || self.shadow
+        self.effects.active()
     }
     pub fn bytes(&self) -> usize {
         self.mask
@@ -427,11 +417,8 @@ impl Properties {
         self.opacity <= 100
             && self.fill <= 100
             && self.group.chars().count() <= 64
-            && self.overlay_opacity <= 100
-            && self.stroke_size <= 8
-            && self.shadow_radius <= 16
-            && self.shadow_offset.iter().all(|v| v.unsigned_abs() <= 32)
-            && self.shadow_opacity <= 100
+            && self.effects.valid()
+            && self.text.as_ref().is_none_or(|text| self.group_id == 0 && self.adjustment.is_none() && text.valid())
             && self
                 .mask
                 .as_ref()
@@ -462,7 +449,7 @@ impl Properties {
             1.
         }
     }
-    pub fn composite(&self, out: &mut RgbaImage, source: &RgbaImage, tile: usize) {
+    pub fn composite(&self, out: &mut RgbaImage, source: &RgbaImage, tile: usize, light: effects::Light) {
         if let Some(adjust) = &self.adjustment {
             let lut = if let Adjustment::CurvesBezier { channels } = adjust {
                 Some(curve_editor::lookup(channels))
@@ -492,85 +479,31 @@ impl Properties {
             }
             return;
         }
-        if !self.shadow && !self.stroke {
+        if self.has_effects() {
+            self.effects.composite(self, out, source, tile, light);
+        } else {
             for (i, (dst, src)) in out.pixels_mut().zip(source.pixels()).enumerate() {
-                let mut p = *src;
-                if self.overlay {
-                    for c in 0..3 {
-                        p[c] = ((p[c] as u16 * (100 - self.overlay_opacity) as u16
-                            + self.overlay_color[c] as u16 * self.overlay_opacity as u16)
-                            / 100) as u8;
-                    }
-                }
-                *dst = over(
-                    *dst,
-                    p,
-                    self.blend,
-                    self.opacity as f32 / 100. * self.fill as f32 / 100. * self.mask_value(tile, i),
-                );
+                *dst = over(*dst, *src, self.blend,
+                    self.opacity as f32 / 100. * self.fill as f32 / 100. * self.mask_value(tile, i));
             }
-            return;
-        }
-        let (w, h) = source.dimensions();
-        let mut masked = source.clone();
-        for (i, p) in masked.pixels_mut().enumerate() {
-            p[3] = (p[3] as f32 * self.mask_value(tile, i)).round() as u8;
-        }
-        let mut layer = RgbaImage::new(w, h);
-        if self.shadow {
-            let alpha =
-                image::GrayImage::from_fn(w, h, |x, y| image::Luma([masked.get_pixel(x, y)[3]]));
-            let blurred = image::imageops::blur(&alpha, self.shadow_radius as f32);
-            for (x, y, p) in layer.enumerate_pixels_mut() {
-                let sx = x as i32 - self.shadow_offset[0] as i32;
-                let sy = y as i32 - self.shadow_offset[1] as i32;
-                if sx >= 0 && sy >= 0 && sx < w as i32 && sy < h as i32 {
-                    let a = blurred.get_pixel(sx as u32, sy as u32)[0] as u16
-                        * self.shadow_opacity as u16
-                        / 100;
-                    *p = Rgba([
-                        self.shadow_color[0],
-                        self.shadow_color[1],
-                        self.shadow_color[2],
-                        a as u8,
-                    ]);
-                }
-            }
-        }
-        if self.stroke {
-            let expanded = dilate(&masked, self.stroke_size as usize);
-            for y in 0..h {
-                for x in 0..w {
-                    let alpha =
-                        expanded[(y * w + x) as usize].saturating_sub(masked.get_pixel(x, y)[3]);
-                    let p = Rgba([
-                        self.stroke_color[0],
-                        self.stroke_color[1],
-                        self.stroke_color[2],
-                        alpha,
-                    ]);
-                    let old = *layer.get_pixel(x, y);
-                    layer.put_pixel(x, y, over(old, p, Blend::Normal, 1.));
-                }
-            }
-        }
-        for (dst, src) in layer.pixels_mut().zip(masked.pixels()) {
-            let mut p = *src;
-            if self.overlay {
-                for c in 0..3 {
-                    p[c] = ((p[c] as u16 * (100 - self.overlay_opacity) as u16
-                        + self.overlay_color[c] as u16 * self.overlay_opacity as u16)
-                        / 100) as u8;
-                }
-            }
-            *dst = over(*dst, p, Blend::Normal, self.fill as f32 / 100.);
-        }
-        for (dst, src) in out.pixels_mut().zip(layer.pixels()) {
-            *dst = over(*dst, *src, self.blend, self.opacity as f32 / 100.);
         }
     }
 }
 impl Editor {
+    pub(super) fn style_context_menu(&mut self, ui: &mut egui::Ui, index: usize, fx: bool) {
+        let eligible=!self.layers[index].material && self.layers[index].settings.adjustment.is_none();
+        let editable=eligible && !self.layers[index].locked && !self.ancestor_locked(index);
+        if fx && ui.button(tr("复制图层样式")).clicked() { self.style_clipboard=Some(self.layers[index].settings.effects.clone()); ui.close_menu(); }
+        if ui.add_enabled(editable && self.style_clipboard.is_some(),egui::Button::new(tr("粘贴图层样式"))).clicked() {
+            let source=self.style_clipboard.clone().unwrap();
+            if source != self.layers[index].settings.effects { self.record_layer_change(); self.layers[index].settings.effects=source; }
+            ui.close_menu();
+        }
+        if fx && ui.add_enabled(editable && self.layers[index].settings.has_effects(),egui::Button::new(tr("清除图层样式"))).clicked() {
+            self.record_layer_change(); self.layers[index].settings.effects = Default::default(); ui.close_menu();
+        }
+    }
+
     pub(super) fn move_allowed(&self, index: usize) -> bool {
         self.layers.get(index).is_some_and(|l| {
             !l.material
@@ -632,7 +565,7 @@ impl Editor {
             .map(|l| l.tiles.iter().map(|p| p.as_raw().len()).sum::<usize>() + l.settings.bytes())
             .sum();
         let added = self.tiles.iter().map(|p| p.as_raw().len()).sum::<usize>();
-        if self.layers.len() >= 32 || bytes + added > LAYER_BYTES {
+        if self.layers.len() >= 32 || bytes + added > self.layer_budget() {
             self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
             return;
         }
@@ -680,13 +613,11 @@ impl Editor {
         let index = self.active_layer;
         let original = self.layers[index].settings.clone();
         let mut p = original.clone();
-        if p.lock_pixels {
-            p.lock_alpha = false;
-        }
         let material = self.layers[index].material;
         let locked = self.layers[index].locked || self.ancestor_locked(index);
         let mut full = locked;
         let mut added_mask = false;
+        let mut open_fx = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.;
             ui.label(egui::RichText::new(tr("图层")).heading().strong());
@@ -714,11 +645,14 @@ impl Editor {
             }
             ui.add_enabled_ui(!locked && !material, |ui| {
                 ui.add_enabled_ui(p.adjustment.is_none(), |ui| {
-                    panel_menu(ui, PanelIcon::Effects, "图层样式", |ui| {
-                        ui.checkbox(&mut p.overlay, tr("颜色叠加"));
-                        ui.checkbox(&mut p.stroke, tr("描边"));
-                        ui.checkbox(&mut p.shadow, tr("投影"));
-                    });
+                    let expanded = self
+                        .layer_detail
+                        .as_ref()
+                        .is_some_and(|(i, fx, _, _)| *i == index && *fx);
+                    let response = panel_button(ui, PanelIcon::Effects, expanded, "图层样式");
+                    if response.clicked() {
+                        open_fx = Some(response.rect);
+                    }
                 });
                 if ui
                     .add_enabled_ui(p.mask.is_none(), |ui| {
@@ -740,7 +674,7 @@ impl Editor {
                                 + l.settings.bytes()
                         })
                         .sum::<usize>();
-                    if total + bytes <= LAYER_BYTES {
+                    if total + bytes <= self.layer_budget() {
                         p.mask = Some(
                             self.tiles
                                 .iter()
@@ -912,7 +846,7 @@ impl Editor {
                         *value = !*value;
                     }
                 }
-                if p.lock_pixels {
+                if !original.lock_pixels && p.lock_pixels {
                     p.lock_alpha = false;
                 }
             });
@@ -954,15 +888,13 @@ impl Editor {
         {
             self.add_adjustment(kind);
         }
+        if let Some(rect) = open_fx {
+            self.toggle_layer_detail(index, true, rect, ui.ctx().screen_rect());
+        }
         self.group_controls(ui);
     }
 }
 fn adjustment_ui(ui: &mut egui::Ui, adjust: &mut Adjustment, histogram: Option<&[f32; 256]>) {
-    if let Adjustment::Curves { values } = adjust {
-        *adjust = Adjustment::CurvesBezier {
-            channels: curve_editor::from_legacy(*values),
-        };
-    }
     match adjust {
         Adjustment::Brightness {
             brightness,
@@ -1053,7 +985,12 @@ fn adjustment_ui(ui: &mut egui::Ui, adjust: &mut Adjustment, histogram: Option<&
             }
         }
         Adjustment::CurvesBezier { channels } => curve_editor::show(ui, channels),
-        Adjustment::Curves { .. } => {}
+        Adjustment::Curves { values } => {
+            let original=curve_editor::from_legacy(*values);
+            let mut channels=original.clone();
+            curve_editor::show(ui,&mut channels);
+            if channels!=original {*adjust=Adjustment::CurvesBezier{channels};}
+        }
     }
 }
 
@@ -1108,17 +1045,17 @@ mod tests {
         let mut p = Properties::default();
         p.opacity = 50;
         let mut out = RgbaImage::new(2, 2);
-        p.composite(&mut out, &source, 0);
+        p.composite(&mut out, &source, 0, effects::Light::default());
         assert_eq!(out.get_pixel(0, 0)[3], 128);
         assert_eq!(source, original);
         p.mask = Some(vec![vec![0; 4]]);
         let mut out = RgbaImage::new(2, 2);
-        p.composite(&mut out, &source, 0);
+        p.composite(&mut out, &source, 0, effects::Light::default());
         assert!(out.pixels().all(|p| p[3] == 0));
         p.mask_enabled = false;
         p.fill = 0;
         let mut out = RgbaImage::new(2, 2);
-        p.composite(&mut out, &source, 0);
+        p.composite(&mut out, &source, 0, effects::Light::default());
         assert!(out.pixels().all(|p| p[3] == 0));
     }
     #[test]
@@ -1160,8 +1097,7 @@ mod tests {
         p.blend = Blend::Multiply;
         p.lock_position = true;
         p.mask = Some(vec![vec![128; 4]]);
-        p.shadow = true;
-        p.overlay = true;
+        p.effects = serde_json::from_value(serde_json::json!({"shadow":true,"overlay":true})).unwrap();
         let q: Properties = serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
         assert!(p == q);
         assert!(q.valid(1, 4));
@@ -1221,7 +1157,7 @@ mod tests {
     }
 }
 
-fn dilate(source: &RgbaImage, radius: usize) -> Vec<u8> {
+fn dilate(source: &image::GrayImage, radius: usize) -> image::GrayImage {
     let w = source.width() as usize;
     let h = source.height() as usize;
     let mut temp = vec![0; w * h];
@@ -1231,10 +1167,10 @@ fn dilate(source: &RgbaImage, radius: usize) -> Vec<u8> {
         let mut next = 0;
         for x in 0..w {
             while next <= (x + radius).min(w - 1) {
-                let value = source.get_pixel(next as u32, row as u32)[3];
+                let value = source.get_pixel(next as u32, row as u32)[0];
                 while queue
                     .back()
-                    .is_some_and(|i| source.get_pixel(*i as u32, row as u32)[3] <= value)
+                    .is_some_and(|i| source.get_pixel(*i as u32, row as u32)[0] <= value)
                 {
                     queue.pop_back();
                 }
@@ -1244,7 +1180,7 @@ fn dilate(source: &RgbaImage, radius: usize) -> Vec<u8> {
             while queue.front().is_some_and(|i| *i < x.saturating_sub(radius)) {
                 queue.pop_front();
             }
-            temp[row * w + x] = source.get_pixel(*queue.front().unwrap() as u32, row as u32)[3];
+            temp[row * w + x] = source.get_pixel(*queue.front().unwrap() as u32, row as u32)[0];
         }
     }
     for col in 0..w {
@@ -1265,7 +1201,7 @@ fn dilate(source: &RgbaImage, radius: usize) -> Vec<u8> {
             out[y * w + col] = temp[*queue.front().unwrap() * w + col];
         }
     }
-    out
+    image::GrayImage::from_raw(source.width(), source.height(), out).expect("matched mask dimensions")
 }
 
 pub(super) fn mask_link_button(ui: &mut egui::Ui, linked: bool) -> egui::Response {
@@ -1449,7 +1385,7 @@ impl Editor {
         }
         if action == 2
             && (self.layers[index].settings.group_id != 0
-                || self.layers[index].settings.adjustment.is_some())
+                || self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.text.is_some())
         {
             return;
         }
@@ -1674,49 +1610,6 @@ mod insertion_tests {
     }
 }
 
-fn effect_detail_ui(ui: &mut egui::Ui, p: &mut Properties) {
-    if p.overlay {
-        ui.horizontal(|ui| {
-            ui.label(tr("颜色叠加"));
-            ui.color_edit_button_srgb(&mut p.overlay_color);
-            ui.add(
-                egui::DragValue::new(&mut p.overlay_opacity)
-                    .range(0..=100)
-                    .suffix("%"),
-            );
-        });
-    }
-    if p.stroke {
-        ui.horizontal(|ui| {
-            ui.label(tr("描边"));
-            ui.color_edit_button_srgb(&mut p.stroke_color);
-            ui.add(
-                egui::DragValue::new(&mut p.stroke_size)
-                    .range(1..=8)
-                    .suffix(" px"),
-            );
-        });
-    }
-    if p.shadow {
-        ui.horizontal(|ui| {
-            ui.label(tr("投影"));
-            ui.color_edit_button_srgb(&mut p.shadow_color);
-            ui.add(
-                egui::DragValue::new(&mut p.shadow_opacity)
-                    .range(0..=100)
-                    .suffix("%"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label(tr("模糊"));
-            ui.add(egui::DragValue::new(&mut p.shadow_radius).range(0..=16));
-            for v in &mut p.shadow_offset {
-                ui.add(egui::DragValue::new(v).range(-32..=32));
-            }
-        });
-    }
-    ui.small(tr("效果按单格计算，边缘会裁切。"));
-}
 impl Editor {
     pub(super) fn toggle_layer_detail(
         &mut self,
@@ -1732,48 +1625,91 @@ impl Editor {
                 .is_some_and(|(i, kind, _, _)| *i == index && *kind == fx);
         self.select_layer(index);
 
+        self.text_dialog=None;
         if same {
             self.layer_detail = None;
         } else {
             self.detail_histogram_fresh = false;
-            let height = if fx {
-                290.
+            let position = if fx {
+                self.fx_page = effects::Page::initial(&self.layers[index].settings.effects);
+                self.fx_dragging = false;
+                Pos2::ZERO
             } else {
-                match self.layers[index].settings.adjustment {
+                let height = match self.layers[index].settings.adjustment {
                     Some(Adjustment::Brightness { .. }) => 145.,
                     Some(Adjustment::Hue { .. }) => 220.,
                     _ => 330.,
-                }
+                };
+                tool_popup_position(anchor, screen, egui::vec2(DETAIL_WIDTH + 16., height), false)
             };
-            let position = tool_popup_position(
-                anchor,
-                screen,
-                egui::vec2(DETAIL_WIDTH + 16., height),
-                false,
-            );
             self.layer_detail = Some((index, fx, self.layers[index].name.clone(), position));
+            if !fx && self.layers[index].settings.text.is_some(){self.begin_text(Some(index));}
+        }
+    }
+    pub(super) fn fx_window(&mut self, ctx: &egui::Context, path: &Path) {
+        let Some((index,true,name,_)) = self.layer_detail.clone() else { return; };
+        if index != self.active_layer || self.layers.get(index).is_none_or(|layer|
+            layer.name != name || layer.material || layer.settings.adjustment.is_some()) {
+            self.layer_detail = None;
+            return;
+        }
+        if self.confirm_close || self.pending_layer_action.is_some() || self.pending_open.is_some() || self.text_dialog.is_some() || self.transform.is_some() {
+            self.fx_dragging=false;
+            return;
+        }
+        let editable = !self.layers[index].locked && !self.ancestor_locked(index);
+        let mut effects = self.layers[index].settings.effects.clone();
+        let mut light = self.fx_light;
+        let mut pointer_down = false;
+        let mut history = None;
+        let mut open = true;
+        crate::native_window::Window::new(format!("{} · {}",name,tr("图层样式")))
+            .id(egui::Id::new(("pixel_tile_fx",path))).open(&mut open)
+            .default_width(effects::PANEL_WIDTH).default_height(520.).min_width(310.).min_height(225.)
+            .always_on_top().scrollable(false)
+            .show(ctx, |ui| {
+                effects::detail_ui(ui,&mut effects,&mut self.fx_page,&mut light,editable,self.plain_image || self.layers[index].settings.text.is_some());
+                pointer_down = ui.input(|i| i.pointer.primary_down());
+                if !ui.ctx().wants_keyboard_input() && !pointer_down {
+                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL,egui::Key::Z)) {history=Some(false);}
+                    else if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL,egui::Key::Y)) {history=Some(true);}
+                }
+            });
+        if let Some(redo)=history {
+            self.fx_dragging=false;
+            self.finish_stroke();
+            self.history(redo);
+        } else if editable && (effects != self.layers[index].settings.effects || light != self.fx_light) {
+            if self.fx_dragging {
+                self.revision=self.revision.wrapping_add(1);
+                self.changed=true;
+            } else { self.record_layer_change(); }
+            self.fx_dragging=pointer_down;
+            effects.legacy_appearance=false;
+            self.layers[index].settings.effects=effects;
+            self.fx_light=light;
+            self.invalidate_textures();
+        }
+        if !pointer_down {self.fx_dragging=false;}
+        if !open {
+            self.layer_detail=None;
+            ctx.request_repaint_of(egui::ViewportId(egui::Id::new(("pixel_tile",path))));
         }
     }
     pub(super) fn layer_detail_ui(&mut self, ui: &mut egui::Ui) {
-        let Some((index, fx, name, position)) = self.layer_detail.clone() else {
+        let Some((index, false, name, position)) = self.layer_detail.clone() else {
             return;
         };
+        if self.layers.get(index).is_some_and(|l|l.settings.text.is_some()) {return;}
         if index != self.active_layer
-            || self.layers.get(index).is_none_or(|l| {
-                l.name != name
-                    || if fx {
-                        !l.settings.has_effects()
-                    } else {
-                        l.settings.adjustment.is_none()
-                    }
-            })
+            || self.layers.get(index).is_none_or(|l| l.name != name || l.settings.adjustment.is_none())
         {
             self.layer_detail = None;
             return;
         }
-        let original = self.layers[index].settings.clone();
+        let mut adjustment = self.layers[index].settings.adjustment.clone();
         let histogram_id = ui.id().with(("tile_levels_input_histogram", index));
-        let histogram = if matches!(original.adjustment, Some(Adjustment::Levels { .. })) {
+        let histogram = if matches!(adjustment, Some(Adjustment::Levels { .. })) {
             let cached = ui
                 .ctx()
                 .data(|d| d.get_temp::<(String, [f32; 256])>(histogram_id));
@@ -1818,42 +1754,32 @@ impl Editor {
         } else {
             None
         };
-        let mut properties = original.clone();
         let mut open = true;
         let enabled = !self.layers[index].locked
             && !self.ancestor_locked(index)
             && !self.layers[index].material
             && self.pending_layer_action.is_none()
             && self.pending_open.is_none();
-        let title = if fx {
-            format!("{} · {}", name, tr("图层样式"))
-        } else {
-            name
-        };
-        egui::Window::new(title)
-            .id(ui.id().with("tile_layer_detail_window_curve_width"))
+        egui::Window::new(name)
+            .id(ui.id().with(("tile_layer_detail_window", false)))
             .open(&mut open)
             .collapsible(false)
             .auto_sized()
             .fixed_pos(position)
             .show(ui.ctx(), |ui| {
-                ui.set_width(DETAIL_WIDTH);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, true])
-                    .max_height((ui.ctx().screen_rect().height() - 80.).max(100.))
-                    .show(ui, |ui| {
-                        ui.add_enabled_ui(enabled, |ui| {
-                            if fx {
-                                effect_detail_ui(ui, &mut properties);
-                            } else if let Some(adjust) = properties.adjustment.as_mut() {
-                                adjustment_ui(ui, adjust, histogram.as_ref());
-                            }
+                ui.set_width(DETAIL_WIDTH.min((ui.ctx().screen_rect().width() - 28.).max(120.)));
+                if let Some(adjust) = adjustment.as_mut() {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, true])
+                        .max_height((ui.ctx().screen_rect().height() - 80.).max(100.))
+                        .show(ui, |ui| {
+                            ui.add_enabled_ui(enabled, |ui| adjustment_ui(ui, adjust, histogram.as_ref()));
                         });
-                    });
+                }
             });
-        if enabled && properties != original {
+        if enabled && adjustment != self.layers[index].settings.adjustment {
             self.record_layer_change();
-            self.layers[index].settings = properties;
+            self.layers[index].settings.adjustment = adjustment;
             self.invalidate_textures();
         }
         if !open {
@@ -1870,7 +1796,7 @@ mod detail_tests {
         let mut e = Editor::default();
         e.reset_document(RgbaImage::new(4, 4));
         let first = e.active_layer;
-        e.layers[first].settings.overlay = true;
+        e.layers[first].settings.effects = serde_json::from_value(serde_json::json!({"overlay":true})).unwrap();
         e.duplicate_layer(first, true);
         let second = e.active_layer;
         e.layers[second].settings.adjustment = Some(Adjustment::default());
