@@ -834,7 +834,7 @@ impl Assets {
             }
             }
             if (is_bitmap(path)||is_psd(path)) && ui.add_enabled(tab.original.is_some()||is_psd(path),egui::Button::new(crate::localization::tr("编辑图像"))).clicked() {
-                tab.graphic_editor.open=true;
+                tab.graphic_editor.open_image_tab(path);
                 crate::native_window::wake(ui.ctx(),egui::Id::new(("pixel_tile",path)));
             }
         });

@@ -1024,7 +1024,7 @@ Below the selected slot, **Import current image** replaces that cell's BaseLayer
 
 ### 像素 Tile 工具栏与背景
 
-绘制工具位于绘制区左上角的竖向悬浮栏：V移动（默认，左键拖动画布）、B画笔、I取色、E橡皮、U框画、L直线、G区域／透明底色填充。直线在按下处起笔、拖动预览、松开完成，使用当前笔宽／颜色／Alpha并支持平面边缘回绕和整笔撤销；带高度模式不启用直线、框画与填充。工具栏点击不会穿透到画布落笔。
+绘制工具位于绘制区左上角的竖向悬浮栏：V移动（默认，左键拖动画布）、B画笔、I取色、E橡皮、K框画、L直线、G区域／透明底色填充。直线在按下处起笔、拖动预览、松开完成，使用当前笔宽／颜色／Alpha并支持平面边缘回绕和整笔撤销；带高度模式不启用直线、框画与填充。工具栏点击不会穿透到画布落笔。
 
 颜色和Alpha保留在绘制区顶部，笔宽提供不同大小方框快捷选项（1／4／8／16／32）及1–32滑条和数值，仍支持[／]调节。图层下方可选择透明棋盘格或自定义背景，色块与HEX可改色，同步绘制区、循环预览及独立预览；背景仅用于显示，不写入PNG，保存在.uytile工程中。
 
@@ -1351,9 +1351,9 @@ Polygon selections preview an edge immediately after the first click. A small st
 
 The Zoom tool offers common percentage presets and shows the same value as the top zoom field. Dragging, manual entry and preset selection stay synchronized.
 
-选区工具栏可选择颜色和不透明度，再点击“填充选区”或按Alt+Enter。填充当前层／蒙版选区内的内容，保留选区并支持撤销；无有效选区或目标锁定时不执行。
+选区工具栏可设置前景色和不透明度。Alt+Delete 用前景色填充，Ctrl+Delete 用背景色填充。有选区时保留并填充选区，无选区时填充当前整层。支持撤销，锁定的目标不可填充。
 
-Choose color and opacity in the Selection toolbar, then click Fill selection or press Alt+Enter. This fills the selection on the active layer/mask, preserves the selection and supports undo. It does nothing without a valid selection or when the target is locked.
+Use Alt+Delete to fill with the foreground color or Ctrl+Delete to fill with the background color. The active selection is preserved. With no selection, the shortcut fills the whole active layer. Fill supports undo and requires an editable target.
 
 点击调整层或文字层行末的三角箭头，选中该层并展开属性。再次点击或切换图层即可收起。图层或组行末的 fx 打开置顶样式窗口。
 
@@ -1385,11 +1385,15 @@ When a parent group is hidden, children’s eye icons turn gray without highligh
 
 **透明度** 默认勾选。取消勾选后，画布按背景色预览，旁边的提示显示实际填充色。保存普通图片时，透明像素填为该色，半透明边缘按透明度混合。分层 PSD 和合成 PSD 始终保留透明度。重新勾选可恢复编辑中的透明内容。JPEG 始终输出不透明图像，勾选 透明度 时使用白底。
 
-**保存**（Ctrl+S）写回当前文件。**另存为**（Ctrl+Shift+S）可选择 PNG、JPEG、WebP、BMP、TGA 或 PSD，之后的保存会写回新文件。“PSD（像素图层）”保留像素图层、受支持的可编辑样式和合成预览，同类描边与投影按原顺序保存。含调整层时可另存为合成 PSD。遇到原生文字、智能对象、任意渐变色标或其他超出支持范围的数据时，可读取兼容合成图并另存。分层 PSD 支持 8 位 RGB。
+**保存**（Ctrl+S）写回当前文件。**另存为**（Ctrl+Shift+S）可选择 PNG、JPEG、WebP、BMP、TGA 或 PSD，之后的保存会写回新文件。“PSD（像素图层）”保留像素图层、受支持的可编辑样式和合成预览，同类描边与投影按原顺序保存。含调整层时可另存为合成 PSD。有可用像素缓存的 Photoshop 原生文字会作为独立像素图层打开，编辑后需另存。遇到智能对象、任意渐变色标或其他超出支持范围的数据时，可读取兼容合成图并另存。分层 PSD 支持 8 位 RGB。
 
 Image 和 Tile 的主绘制区支持像素标尺。按 **Ctrl+R** 开关标尺，从顶部拖出水平辅助线，从左侧拖出垂直辅助线。使用移动工具调整已有辅助线，拖回标尺可删除。按 **Ctrl+;** 开关青色辅助线的显示。辅助线随当前会话保留。文字工具 **T** 位于缩放工具之前。
 
 按 **T** 后单击画布可在点击位置开始输入文字，单击已有文字则编辑原图层。点击输入框外确认，新文字会放到图层列表最上方。段落页使用对齐、缩进和间距图标，悬停可查看名称。
+
+画布文字沿基线输入。新建点文字按 **Enter** 手动换行，多行使用段落对齐设置。文字层的整个内容外框都可以点击，包括字间空白。
+
+Image 中按 **U** 拖出矢量矩形，可调整宽高、统一圆角和填充颜色。按 **A** 选择整条路径或直接选择锚点。首次拖动参数化形状的锚点时会提示转换，确认后可编辑路径，取消会保留形状。按 **P** 点击放置钢笔锚点，点回第一个锚点或按 Enter 闭合。**K** 用于像素框画，Image 拖矩形，菱形 Tile 拖菱形。
 
 Open an ordinary bitmap or PSD and choose **Edit Image**. **Image / Tile** keeps each tab’s edits and undo history. A `.uytile` project opens only in Tile. Image uses the original canvas size and clips text at its edges. Use a rectangular Tile to make a seamless watermark.
 
@@ -1405,8 +1409,12 @@ In Tile settings, **Multi-Tile** arranges cells for repeating and painting. **Sp
 
 **Transparency** is on by default. Turn it off to preview the background color and fill transparent areas with that color when saving a flat image. Both layered and composite PSDs always retain transparency. Partially transparent edges blend with the background. Turning Transparency back on restores the transparency in the editable document. JPEG is always opaque and uses white when Transparency is on.
 
-**Save** (Ctrl+S) writes to the current file. **Save As** (Ctrl+Shift+S) changes the current path and offers PNG, JPEG, WebP, BMP, TGA and PSD. Choose **PSD (pixel layers)** to preserve raster layers, supported editable styles and a composite preview. Multiple strokes and drop shadows retain their order. Documents with adjustment layers can be saved as a composite PSD. For native text, smart objects, arbitrary gradient stops or other unsupported data, open the compatibility composite and save to a new file. Layered PSD supports 8-bit RGB.
+**Save** (Ctrl+S) writes to the current file. **Save As** (Ctrl+Shift+S) changes the current path and offers PNG, JPEG, WebP, BMP, TGA and PSD. Choose **PSD (pixel layers)** to preserve raster layers, supported editable styles and a composite preview. Multiple strokes and drop shadows retain their order. Documents with adjustment layers can be saved as a composite PSD. Native Photoshop text with usable cached pixels opens as separate pixel layers and requires Save As. For smart objects, arbitrary gradient stops or other unsupported data, open the compatibility composite and save to a new file. Layered PSD supports 8-bit RGB.
 
 The main Image and Tile canvases have pixel rulers. Use **Ctrl+R** to toggle the rulers. Drag from the top ruler for a horizontal guide or from the left ruler for a vertical guide. Use Move to reposition an existing guide and drag it onto a ruler to delete it. **Ctrl+;** toggles the cyan guides. Guides belong to the current editing session. The Text tool (**T**) sits before Zoom.
 
 Press **T** and click the canvas to enter text at that position, or click existing text to edit its layer. Click outside the field to confirm and place new text at the top of the layer list. Hover over the paragraph alignment, indent and spacing icons to see their labels.
+
+Type along the baseline on the canvas. Press **Enter** to add a line to point text. Paragraph alignment applies to multiple lines. Click anywhere inside a text layer’s content bounds, including the spaces between letters, to edit it.
+
+In Image, press **U** to draw a vector rectangle with adjustable width, height, corner radius and fill color. Press **A** to select the whole path or edit anchors directly. Dragging an anchor on a live shape asks for confirmation before converting it to a path. Press **P** to place Pen anchors and click the first anchor or press Enter to close the path. **K** draws pixel rectangles in Image and pixel diamonds in diamond Tile mode.

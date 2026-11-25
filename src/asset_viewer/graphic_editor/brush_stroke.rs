@@ -25,7 +25,9 @@ pub(super) fn accumulate(old:f32,tip:f32,flow:f32,ceiling:f32)->f32 {
 }
 impl Editor {
     pub(super) fn brush_segment(&mut self,from:Pos2,to:Pos2,layout:bool){
-        if !self.layer_editable(){return;}
+        if !self.prepare_pixel_paint(|editor| [from, to].into_iter().any(|p| {
+            editor.paint_hit((p.x.round() as i32, p.y.round() as i32), layout)
+        })) {return;}
         if self.before.is_none(){self.before=Some(self.snapshot());self.brush_sampler.reset();}
         let sample=Sample{pos:to,pressure:self.input_pressure};
         let size=self.pressure_size(sample.pressure) as f32;

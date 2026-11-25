@@ -7,6 +7,10 @@ mod psd;
 #[derive(PartialEq)]
 pub(super) struct FileVersion([u8; 32]);
 impl FileVersion {
+    pub(super) fn from_bytes(bytes: &[u8]) -> Self {
+        Self(Sha256::digest(bytes).into())
+    }
+
     fn read(path: &Path) -> Result<Self, String> {
         let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         let mut hash = Sha256::new();
@@ -35,6 +39,7 @@ struct OpenedImage {
     version: FileVersion,
     layers: Vec<Layer>,
     resources: Vec<u8>,
+    patterns: Vec<u8>,
     restriction: Option<String>,
 }
 
@@ -67,9 +72,20 @@ fn open_image(path: &Path, max_side: u32) -> Result<OpenedImage, String> {
         let height = u32::from_be_bytes(header[..4].try_into().unwrap());
         let width = u32::from_be_bytes(header[4..].try_into().unwrap());
         check_dimensions(width, height)?;
-        let (layers, resources, restriction) = match psd::decode(&bytes, (width, height)) {
-            Ok((layers, resources)) => (layers, resources, None),
+        let (layers, resources, patterns, restriction) = match psd::decode(&bytes, (width, height)) {
+            Ok((layers, resources, patterns, has_unwritten_metadata)) => {
+                let mut notices = Vec::new();
+                if layers.iter().any(|layer| layer.settings.psd_native_text && layer.settings.text.is_none()) {
+                    notices.push(tr("PSD 原生文字以独立像素图层读取，请另存为新文件。"));
+                }
+                if has_unwritten_metadata {
+                    notices.push(tr("已读取 PSD 图层。源文件含额外的 PSD 元数据，请另存为新文件。"));
+                }
+                let restriction = (!notices.is_empty()).then(|| notices.join("\n"));
+                (layers, resources, patterns, restriction)
+            }
             Err(reason) => (
+                vec![],
                 vec![],
                 vec![],
                 Some(format!(
@@ -91,6 +107,7 @@ fn open_image(path: &Path, max_side: u32) -> Result<OpenedImage, String> {
             version,
             layers,
             resources,
+            patterns,
             restriction,
         });
     }
@@ -117,11 +134,23 @@ fn open_image(path: &Path, max_side: u32) -> Result<OpenedImage, String> {
         version,
         layers,
         resources,
+        patterns: vec![],
         restriction,
     })
 }
 
 impl Workspace {
+    pub(in super::super) fn open_image_tab(&mut self, path: &Path) {
+        if !self.open
+            && self.image.image_target.as_deref().is_some_and(|target| !same_file(path, target))
+        {
+            self.image = Editor::default();
+            self.loaded_image = false;
+            self.load_failed = false;
+        }
+        self.open = true;
+    }
+
     pub(in super::super) fn active(&self) -> bool {
         self.open || self.image.changed || self.tile.changed
     }
@@ -173,6 +202,7 @@ impl Workspace {
                         self.image.image_version = Some(doc.version);
                         self.image.fx_light = psd::global_light(&doc.resources);
                         self.image.psd_resources = doc.resources;
+                        self.image.psd_patterns = doc.patterns;
                         self.image.image_readonly = doc.restriction.is_some();
                         self.image.image_source_protected = self.image.image_readonly;
                         self.image.message = doc.restriction.unwrap_or_default();
@@ -244,6 +274,7 @@ impl Workspace {
 
 impl Editor {
     pub(super) fn init_image(&mut self, im: &RgbaImage) {
+        self.psd_patterns.clear();
         self.guides.clear();
         self.inline_text = None;
         self.plain_image = true;
@@ -282,7 +313,7 @@ impl Editor {
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(
-                    !self.image_readonly && self.image_version.is_some(),
+                    self.changed && !self.image_readonly && self.image_version.is_some(),
                     egui::Button::new(tr("保存")),
                 )
                 .clicked()
@@ -295,7 +326,7 @@ impl Editor {
             ui.checkbox(&mut self.image_alpha, tr("透明度"));
         });
         if !self.image_alpha {
-            let [r, g, b] = self.background_color;
+            let [r, g, b, _] = self.drawing_background;
             ui.small(format!(
                 "{}  #{r:02X}{g:02X}{b:02X}",
                 tr("普通图片使用背景色填充透明区域，PSD 保留透明度。")
@@ -310,6 +341,9 @@ impl Editor {
     }
     pub(super) fn save_image(&mut self, source: &Path, choose_path: bool) {
         self.finish_stroke();
+        if !choose_path && !self.changed {
+            return;
+        }
         self.sync_layer();
         let current = self.image_target.as_deref().unwrap_or(source);
         let dest = if choose_path {
@@ -319,15 +353,25 @@ impl Editor {
             } else {
                 tr("PSD（像素图层）")
             };
-            let dialog = rfd::FileDialog::new()
+            let extension = super::super::extension(current);
+            let jpeg_extensions = if extension == "jpeg" { ["jpeg", "jpg"] } else { ["jpg", "jpeg"] };
+            let mut formats = [
+                ("PNG", &["png"][..]),
+                (psd_label, &["psd"][..]),
+                ("JPEG", &jpeg_extensions[..]),
+                ("WebP", &["webp"][..]),
+                ("BMP", &["bmp"][..]),
+                ("TGA", &["tga"][..]),
+            ];
+            if let Some(index) = formats.iter().position(|(_, extensions)| extensions.contains(&extension.as_str())) {
+                formats[..=index].rotate_right(1);
+            }
+            let mut dialog = rfd::FileDialog::new()
                 .set_directory(current.parent().unwrap_or(Path::new(".")))
-                .set_file_name(format!("{name}-edited"))
-                .add_filter("PNG", &["png"])
-                .add_filter(psd_label, &["psd"])
-                .add_filter("JPEG", &["jpg", "jpeg"])
-                .add_filter("WebP", &["webp"])
-                .add_filter("BMP", &["bmp"])
-                .add_filter("TGA", &["tga"]);
+                .set_file_name(format!("{name}-edited"));
+            for (label, extensions) in formats {
+                dialog = dialog.add_filter(label, extensions);
+            }
             let Some(p) = dialog.save_file() else {
                 return;
             };
@@ -375,7 +419,8 @@ impl Editor {
             return psd::write(writer, self, &out);
         }
         if !self.image_alpha {
-            fill_transparency(&mut out, self.background_color);
+            let [r, g, b, _] = self.drawing_background;
+            fill_transparency(&mut out, [r, g, b]);
         }
         write_flat(writer, ext, &out, self.image_alpha)
     }
@@ -492,7 +537,8 @@ mod tests {
         e.init_image(&pixels);
         let original = e.composite(0);
         assert!(e.image_alpha);
-        e.background_color = [16, 32, 64];
+        e.drawing_background = [16, 32, 64, 255];
+        e.background_color = [240, 240, 240];
         for alpha in [false, true] {
             e.image_alpha = alpha;
             let mut expected = original.clone();
@@ -539,7 +585,7 @@ mod tests {
                 let mut out = Cursor::new(Vec::new());
                 e.encode_image(&mut out, "psd").unwrap();
                 let bytes = out.into_inner();
-                let (layers, _) = psd::decode(&bytes, (2, 1)).unwrap();
+                let (layers, _, _, _) = psd::decode(&bytes, (2, 1)).unwrap();
                 assert_eq!(layers.len(), if composite_only { 1 } else { 2 });
                 let merged = super::super::super::psd::decode(Cursor::new(&bytes)).unwrap();
                 assert_eq!(merged.get_pixel(0, 0)[3], 0);

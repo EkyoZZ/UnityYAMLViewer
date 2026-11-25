@@ -371,6 +371,170 @@ fn read_rgb(value: Option<&Value>) -> Result<[u8; 3]> {
     }
 }
 
+pub(crate) fn read_solid_fill(bytes: &[u8]) -> Result<[u8; 3]> {
+    let mut reader = Reader(bytes);
+    if reader.u32()? != 16 {
+        return Err(UNSUPPORTED.into());
+    }
+    let fill = reader.object(0)?;
+    let color = fill.get(b"Clr ").ok_or(UNSUPPORTED)?;
+    read_rgb(Some(color))
+}
+
+pub(crate) fn write_solid_fill(color: [u8; 3]) -> Vec<u8> {
+    let mut bytes = 16_u32.to_be_bytes().to_vec();
+    Descriptor::new(b"solidColorLayer")
+        .with(b"Clr ", rgb_value(color))
+        .write(&mut bytes);
+    bytes
+}
+
+pub(in crate::asset_viewer::graphic_editor) fn solid_shape_stroke_supported(
+    bytes: &[u8],
+) -> Result<bool> {
+    let mut reader = Reader(bytes);
+    if reader.u32()? != 16 {
+        return Err(UNSUPPORTED.into());
+    }
+    let style = reader.object(0)?;
+    Ok(!style.boolean(b"strokeEnabled", false)? && style.boolean(b"fillEnabled", true)?)
+}
+
+pub(in crate::asset_viewer::graphic_editor) fn read_live_rectangle(
+    bytes: &[u8],
+) -> Option<super::super::super::vector::Geometry> {
+    let mut reader = Reader(bytes);
+    if reader.u32().ok()? != 1 || reader.u32().ok()? != 16 {
+        return None;
+    }
+    let root = reader.object(0).ok()?;
+    let Value::List(list) = root.get(b"keyDescriptorList")? else {
+        return None;
+    };
+    let [Value::Object(shape)] = list.as_slice() else {
+        return None;
+    };
+    if shape.boolean(b"keyShapeInvalidated", false).ok()? {
+        return None;
+    }
+    let Value::Object(bounds) = shape.get(b"keyOriginShapeBBox")? else {
+        return None;
+    };
+    let number = |obj: &Descriptor, key: &[u8]| {
+        obj.number(key, f64::NAN)
+            .ok()
+            .filter(|n| n.is_finite())
+            .map(|n| n as f32)
+    };
+    let radii = match shape.get(b"keyOriginType")? {
+        Value::Integer(1) => [0.; 4],
+        Value::Integer(2) => {
+            let Value::Object(corners) = shape.get(b"keyOriginRRectRadii")? else {
+                return None;
+            };
+            [
+                number(corners, b"topLeft")?,
+                number(corners, b"topRight")?,
+                number(corners, b"bottomRight")?,
+                number(corners, b"bottomLeft")?,
+            ]
+        }
+        _ => return None,
+    };
+    let mut min = [number(bounds, b"Left")?, number(bounds, b"Top ")?];
+    let mut max = [number(bounds, b"Rght")?, number(bounds, b"Btom")?];
+    let mut angle = 0.;
+    if let Some(Value::Object(transform)) = shape.get(b"Trnf") {
+        let c = transform.number(b"xx", 1.).ok()? as f32;
+        let s = transform.number(b"xy", 0.).ok()? as f32;
+        let yx = transform.number(b"yx", 0.).ok()? as f32;
+        let yy = transform.number(b"yy", 1.).ok()? as f32;
+        if (c * c + s * s - 1.).abs() > 0.0001 || (yx + s).abs() > 0.0001 || (yy - c).abs() > 0.0001
+        {
+            return None;
+        }
+        let x = (min[0] + max[0]) * 0.5;
+        let y = (min[1] + max[1]) * 0.5;
+        let dx = c * x - s * y + transform.number(b"tx", 0.).ok()? as f32 - x;
+        let dy = s * x + c * y + transform.number(b"ty", 0.).ok()? as f32 - y;
+        min = [min[0] + dx, min[1] + dy];
+        max = [max[0] + dx, max[1] + dy];
+        angle = s.atan2(c).to_degrees();
+    }
+    Some(super::super::super::vector::Geometry::Rectangle {
+        min,
+        max,
+        radii,
+        angle,
+    })
+}
+
+pub(in crate::asset_viewer::graphic_editor) fn write_live_rectangle(
+    geometry: &super::super::super::vector::Geometry,
+) -> Option<Vec<u8>> {
+    let super::super::super::vector::Geometry::Rectangle {
+        min,
+        max,
+        radii,
+        angle,
+    } = *geometry
+    else {
+        return None;
+    };
+    let px = |v: f32| Value::Unit(*b"#Pxl", f64::from(v));
+    let quad =
+        |class: &[u8]| Descriptor::new(class).with(b"unitValueQuadVersion", Value::Integer(1));
+    let bounds = quad(b"unitRect")
+        .with(b"Left", px(min[0]))
+        .with(b"Top ", px(min[1]))
+        .with(b"Rght", px(max[0]))
+        .with(b"Btom", px(max[1]));
+    let rounded = radii.iter().any(|&radius| radius > 0.);
+    let mut shape = Descriptor::new(b"null")
+        .with(b"keyOriginIndex", Value::Integer(0))
+        .with(
+            b"keyOriginType",
+            Value::Integer(if rounded { 2 } else { 1 }),
+        )
+        .with(b"keyOriginResolution", Value::Number(72.))
+        .with(b"keyOriginShapeBBox", Value::Object(bounds));
+    if angle != 0. {
+        let (sin, cos) = f64::from(angle).to_radians().sin_cos();
+        let x = f64::from(min[0] + max[0]) * 0.5;
+        let y = f64::from(min[1] + max[1]) * 0.5;
+        let transform = Descriptor::new(b"Trnf")
+            .with(b"xx", Value::Number(cos))
+            .with(b"xy", Value::Number(sin))
+            .with(b"yx", Value::Number(-sin))
+            .with(b"yy", Value::Number(cos))
+            .with(b"tx", Value::Number(x - cos * x + sin * y))
+            .with(b"ty", Value::Number(y - sin * x - cos * y));
+        shape = shape.with(b"Trnf", Value::Object(transform));
+    }
+    if rounded {
+        let mut corners = quad(b"radii");
+        for (key, radius) in [
+            b"topLeft".as_slice(),
+            b"topRight",
+            b"bottomRight",
+            b"bottomLeft",
+        ]
+        .into_iter()
+        .zip(radii)
+        {
+            corners = corners.with(key, px(radius));
+        }
+        shape = shape.with(b"keyOriginRRectRadii", Value::Object(corners));
+    }
+    let root = Descriptor::new(b"null").with(
+        b"keyDescriptorList",
+        Value::List(vec![Value::Object(shape)]),
+    );
+    let mut out = vec![0, 0, 0, 1, 0, 0, 0, 16];
+    root.write(&mut out);
+    Some(out)
+}
+
 fn parse_common(d: &Descriptor) -> Result<(bool, Blend, u8, [u8; 3])> {
     let enabled = d.boolean(b"enab", true)?;
     let key = d.enumeration(b"Md  ", b"Nrml")?;
@@ -399,16 +563,15 @@ fn write_gradient(d: Descriptor, ramp: Gradient) -> Descriptor {
         .unwrap()
         .0;
     let stops = [0, 4096];
-    let colors = stops
-        .into_iter()
-        .zip(ramp.colors)
-        .map(|(at, color)| {
+    let colors = ramp
+        .color_stops()
+        .map(|stop| {
             Value::Object(
                 Descriptor::new(b"Clrt")
-                    .with(b"Lctn", Value::Integer(at))
+                    .with(b"Lctn", Value::Integer(i32::from(stop.position)))
                     .with(b"Mdpn", Value::Integer(50))
                     .with(b"Type", enumerated(b"Clry", b"UsrS"))
-                    .with(b"Clr ", rgb_value(color)),
+                    .with(b"Clr ", rgb_value(stop.color)),
             )
         })
         .collect();
@@ -467,12 +630,31 @@ fn read_gradient(d: &Descriptor) -> Result<Gradient> {
     {
         return Err(UNSUPPORTED.into());
     }
-    let [first, last] = gradient_stops(gradient, b"Clrs")?;
-    for stop in [first, last] {
-        if stop.enumeration(b"Type", b"UsrS")? != b"UsrS" {
+    let Some(Value::List(values)) = gradient.get(b"Clrs") else {
+        return Err(UNSUPPORTED.into());
+    };
+    if !(2..=MAX_GRADIENT_STOPS).contains(&values.len()) {
+        return Err(UNSUPPORTED.into());
+    }
+    let mut stops = Vec::with_capacity(values.len());
+    for value in values {
+        let Value::Object(stop) = value else {
+            return Err(UNSUPPORTED.into());
+        };
+        let position = stop.number(b"Lctn", -1.)?;
+        if stop.enumeration(b"Type", b"UsrS")? != b"UsrS"
+            || stop.number(b"Mdpn", 50.)? != 50.
+            || !(0. ..=f64::from(GRADIENT_END)).contains(&position)
+            || position.fract() != 0.
+        {
             return Err(UNSUPPORTED.into());
         }
+        stops.push(GradientStop {
+            position: position as u16,
+            color: read_rgb(stop.get(b"Clr "))?,
+        });
     }
+    stops.sort_by_key(|stop| stop.position);
     for stop in gradient_stops(gradient, b"Trns")? {
         if stop.number(b"Opct", 100.)? != 100. {
             return Err(UNSUPPORTED.into());
@@ -485,15 +667,17 @@ fn read_gradient(d: &Descriptor) -> Result<Gradient> {
         .ok_or(UNSUPPORTED)?
         .1;
     let angle = (d.number(b"Angl", 90.)? + 180.).rem_euclid(360.) - 180.;
-    Ok(Gradient {
-        colors: [read_rgb(first.get(b"Clr "))?, read_rgb(last.get(b"Clr "))?],
+    let mut ramp = Gradient {
         style,
         angle: angle.round() as i16,
         scale: bounded(d.number(b"Scl ", 100.)?, 1, 400)? as u16,
         reverse: d.boolean(b"Rvrs", false)?,
         align_layer: d.boolean(b"Algn", true)?,
         dither: d.boolean(b"Dthr", false)?,
-    })
+        ..Gradient::default()
+    };
+    ramp.set_color_stops(&stops);
+    Ok(ramp)
 }
 
 fn write_shadow(d: Descriptor, shape: ShadowShape, offset: [i16; 2], size: u8) -> Descriptor {
@@ -564,13 +748,7 @@ fn write_glow(class: &[u8], glow: Glow) -> Value {
         d
     };
     Value::Object(if glow.gradient {
-        write_gradient(
-            d,
-            Gradient {
-                colors: [glow.ink.color, glow.end_color],
-                ..Gradient::default()
-            },
-        )
+        write_gradient(d, glow.color_ramp())
     } else {
         d
     })
@@ -584,6 +762,7 @@ fn read_glow(d: &Descriptor) -> Result<Glow> {
             if ramp
                 != (Gradient {
                     colors: ramp.colors,
+                    stops: ramp.stops,
                     ..Gradient::default()
                 })
             {
@@ -619,6 +798,7 @@ fn read_glow(d: &Descriptor) -> Result<Glow> {
         precise,
         gradient: ramp.is_some(),
         end_color,
+        stops: ramp.map_or([None; MAX_GRADIENT_STOPS], |ramp| ramp.stops),
     })
 }
 

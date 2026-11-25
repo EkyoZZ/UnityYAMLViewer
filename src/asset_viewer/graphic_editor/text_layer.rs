@@ -3,6 +3,8 @@
 use super::*;
 pub(super) mod font_samples;
 mod paragraph;
+mod character;
+pub(super) mod psd;
 use crate::asset_viewer::svg_preview::tree_with_fonts;
 use resvg::tiny_skia;
 use std::fmt::Write;
@@ -19,8 +21,14 @@ pub(super) struct Text {
     italic: bool,
     color: [u8; 3],
     pub offset: [i32; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) tile_origin: Option<[i32; 2]>,
     #[serde(default="repeat_by_default")]
     pub(super) repeat:bool,
+    #[serde(default)]
+    point_text: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    character_runs: Vec<character::Run>,
     #[serde(default = "identity")]
     linear: [f32; 4],
     #[serde(default)]
@@ -32,7 +40,7 @@ fn identity() -> [f32; 4] {
 }
 
 impl Text {
-    fn new(size: u32, color: [u8; 4]) -> Self {
+    pub(super) fn new(size: u32, color: [u8; 4]) -> Self {
         Self {
             content: String::new(),
             family: "Microsoft YaHei".into(),
@@ -43,7 +51,9 @@ impl Text {
             bold: false,
             italic: false,
             color: [color[0], color[1], color[2]],
-            offset: [0; 2],repeat:true,
+            offset: [0; 2],repeat:true,tile_origin:None,
+            point_text: false,
+            character_runs: Vec::new(),
             linear: identity(),
             paragraph: Default::default(),
         }
@@ -57,6 +67,7 @@ impl Text {
                 .chars()
                 .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
             && !self.family.is_empty()
+            && character::valid(&self.character_runs, self.content.chars().count())
             && self.family.len() <= 512
             && (1..=256).contains(&self.size)
             && (-180..=180).contains(&self.angle)
@@ -87,7 +98,7 @@ impl Text {
         let wrap = |v: f32, size: u32| {
             (v.round() as i32 + size as i32 / 2).rem_euclid(size as i32) - size as i32 / 2
         };
-        self.offset = if self.repeat{[wrap(position.x, period[0]), wrap(position.y, period[1])]}else{[position.x.round().clamp(-8192.,8192.)as i32,position.y.round().clamp(-8192.,8192.)as i32]};
+        self.offset = if self.repeat && self.tile_origin.is_none(){[wrap(position.x, period[0]), wrap(position.y, period[1])]}else{[position.x.round().clamp(-8192.,8192.)as i32,position.y.round().clamp(-8192.,8192.)as i32]};
     }
     pub(super) fn raster(
         &self,
@@ -95,28 +106,62 @@ impl Text {
         h: u32,
         fonts: &font_samples::Catalog,
     ) -> Result<RgbaImage, String> {
-        if !self.valid() {
-            return Err(tr("请输入 1 至 16 行文字，最多 512 个字符。").into());
-        }
-        if !fonts.contains(&self.family) {
-            return Err(format!("{} {}", tr("缺少字体"), self.family));
-        }
+        self.raster_with_layout(w, h, fonts).map(|(image, _)| image)
+    }
+
+    fn svg_layout(&self, w: u32, h: u32, fonts: &font_samples::Catalog) -> (String, TextLayout) {
         let family = quick_xml::escape::escape(&self.family);
+        use resvg::usvg::fontdb::{Family, Query, Style, Weight};
+        let native_italic = self.italic && fonts.db.query(&Query {
+            families: &[Family::Name(&self.family)],
+            weight: if self.bold { Weight::BOLD } else { Weight::NORMAL },
+            style: Style::Italic,
+            ..Default::default()
+        }).and_then(|id| fonts.db.face(id)).is_some_and(|face| face.style != Style::Normal);
+        let synthetic_slant = if self.italic && !native_italic { " skewX(-12)" } else { "" };
         let mut svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}"><g transform="rotate({})" font-family="{family}" font-size="{}" font-weight="{}" font-style="{}" letter-spacing="{}" text-anchor="middle" xml:space="preserve">"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}"><g transform="rotate({}){synthetic_slant}" font-family="{family}" font-size="{}" font-weight="{}" font-style="{}" letter-spacing="{}" text-anchor="middle" xml:space="preserve">"#,
             self.angle,
             self.size,
             if self.bold { "bold" } else { "normal" },
-            if self.italic { "italic" } else { "normal" },
+            if native_italic { "italic" } else { "normal" },
             self.tracking
         );
-        self.paragraph.write_lines(self, &fonts.db, &mut svg);
+        let lines = self.paragraph.write_lines(self, &fonts.db, &mut svg);
         svg.push_str("</g></svg>");
+        let [a, b, c, d] = self.linear;
+        let matrix = tiny_skia::Transform::from_row(a, b, c, d, 0., 0.);
+        let skew = if synthetic_slant.is_empty() { 0. } else { (-12_f32).to_radians().tan() };
+        let layout = TextLayout {
+            lines,
+            transform: matrix.pre_concat(tiny_skia::Transform::from_rotate(f32::from(self.angle)))
+                .pre_concat(tiny_skia::Transform::from_skew(skew, 0.)),
+            origin: egui::vec2((w / 2) as f32 + self.offset[0] as f32, (h / 2) as f32 + self.offset[1] as f32),
+        };
+        (svg, layout)
+    }
+
+    fn raster_with_layout(
+        &self,
+        w: u32,
+        h: u32,
+        fonts: &font_samples::Catalog,
+    ) -> Result<(RgbaImage, TextLayout), String> {
+        let (stamp, start, layout) = self.stamp_with_layout(w, h, fonts)?;
+        Ok((place_stamp(&stamp, start, w, h, self.repeat), layout))
+    }
+
+    fn stamp_with_layout(
+        &self, w: u32, h: u32, fonts: &font_samples::Catalog,
+    ) -> Result<(tiny_skia::Pixmap, [i32; 2], TextLayout), String> {
+        if !self.valid() {
+            return Err(tr("请输入 1 至 16 行文字，最多 512 个字符。").into());
+        }
+        let (svg, layout) = self.svg_layout(w, h, fonts);
         let tree = resvg::Tree::from_usvg(&tree_with_fonts(svg.as_bytes(), &fonts.db)?);
         let bounds = tree
             .content_area
             .ok_or_else(|| tr("所选字体无法绘制这些文字。").to_owned())?;
-        // Layout coordinates are relative to the watermark's paragraph origin.
         let [a, b, c, d] = self.linear;
         let matrix = tiny_skia::Transform::from_row(a, b, c, d, 0., 0.);
         let bounds = bounds
@@ -139,7 +184,96 @@ impl Text {
             w as i32 / 2 + left as i32 + self.offset[0],
             h as i32 / 2 + top as i32 + self.offset[1],
         ];
-        Ok(place_stamp(&stamp, start, w, h, self.color,self.repeat))
+        Ok((stamp, start, layout))
+    }
+}
+
+struct TextLayout {
+    lines: Vec<paragraph::CaretLine>,
+    transform: tiny_skia::Transform,
+    origin: Vec2,
+}
+
+impl TextLayout {
+    fn to_cell(&self, x: f32, y: f32) -> Pos2 {
+        let mut point = tiny_skia::Point::from_xy(x, y);
+        self.transform.map_point(&mut point);
+        egui::pos2(point.x, point.y) + self.origin
+    }
+
+    fn index_at(&self, cell: Pos2) -> Option<usize> {
+        let mut point = tiny_skia::Point::from_xy(cell.x - self.origin.x, cell.y - self.origin.y);
+        self.transform.invert()?.map_point(&mut point);
+        let line = self.lines.iter().min_by(|a, b| {
+            let distance = |line: &paragraph::CaretLine| {
+                (point.y - point.y.clamp(line.baseline - line.ascent, line.baseline + line.descent)).abs()
+            };
+            distance(a).total_cmp(&distance(b))
+        })?;
+        line.columns.iter().enumerate()
+            .min_by(|(_, a), (_, b)| (point.x - **a).abs().total_cmp(&(point.x - **b).abs()))
+            .map(|(column, _)| line.start + column)
+    }
+}
+
+fn selected_characters(range: egui::text::CCursorRange) -> std::ops::Range<usize> {
+    let [start, end] = range.sorted();
+    start.index..end.index
+}
+
+fn paint_text_caret(
+    ui: &egui::Ui,
+    layout: &TextLayout,
+    cursor: Option<egui::text::CCursorRange>,
+    style: egui::style::TextCursorStyle,
+    origin: Pos2,
+    scale: f32,
+) {
+    let screen = |x, y| origin + layout.to_cell(x, y).to_vec2() * scale;
+    let baseline = egui::Stroke::new(1_f32, style.stroke.color);
+    let selected = cursor.map(selected_characters);
+    for line in &layout.lines {
+        let first = line.columns[0];
+        let last = *line.columns.last().unwrap();
+        let end = line.start + line.columns.len() - 1;
+        ui.painter().line_segment(
+            [screen(first, line.baseline), screen(last.max(first + 4. / scale), line.baseline)],
+            baseline,
+        );
+        if let Some(range) = &selected {
+            let start = range.start.max(line.start);
+            let stop = range.end.min(end);
+            if start < stop {
+                let left = line.columns[start - line.start];
+                let right = line.columns[stop - line.start];
+                let top = line.baseline - line.ascent;
+                let bottom = line.baseline + line.descent;
+                ui.painter().add(egui::Shape::convex_polygon(
+                    vec![screen(left, top), screen(right, top), screen(right, bottom), screen(left, bottom)],
+                    style.stroke.color.gamma_multiply(0.3),
+                    egui::Stroke::NONE,
+                ));
+            }
+        }
+    }
+    let Some(cursor) = cursor.map(|range| range.primary.index) else { return; };
+    if style.blink {
+        let period = f64::from(style.on_duration + style.off_duration).max(0.01);
+        let phase = ui.input(|input| input.time).rem_euclid(period);
+        let visible = phase < f64::from(style.on_duration);
+        let next = if visible { f64::from(style.on_duration) - phase } else { period - phase };
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(next.max(0.01)));
+        if !visible {
+            return;
+        }
+    }
+    if let Some((line, x)) = layout.lines.iter().rev().find_map(|line| {
+        cursor.checked_sub(line.start).and_then(|index| line.columns.get(index)).map(|x| (line, *x))
+    }) {
+        ui.painter().line_segment(
+            [screen(x, line.baseline - line.ascent), screen(x, line.baseline + line.descent)],
+            style.stroke,
+        );
     }
 }
 
@@ -149,7 +283,7 @@ fn place_stamp(
     start: [i32; 2],
     w: u32,
     h: u32,
-    color: [u8; 3],repeat:bool,
+    repeat:bool,
 ) -> RgbaImage {
     let mut out = RgbaImage::new(w, h);
     for (y, row) in stamp
@@ -168,12 +302,20 @@ fn place_stamp(
             let cx=start[0]+x as i32;
             if !repeat && !(0..w as i32).contains(&cx){continue;}
             let px=cx.rem_euclid(w as i32)as u32;
-            let old = out.get_pixel_mut(px, py);
-            let alpha = a + ((255 - a) * u32::from(old[3]) + 127) / 255;
-            *old = Rgba([color[0], color[1], color[2], alpha as u8]);
+            composite_stamp_pixel(out.get_pixel_mut(px, py), *pixel);
         }
     }
     out
+}
+fn composite_stamp_pixel(old: &mut Rgba<u8>, pixel: tiny_skia::PremultipliedColorU8) {
+    let a = u32::from(pixel.alpha());
+    let background_alpha = ((255 - a) * u32::from(old[3]) + 127) / 255;
+    let alpha = a + background_alpha;
+    let source = [pixel.red(), pixel.green(), pixel.blue()];
+    let color: [u8; 3] = std::array::from_fn(|channel| {
+        ((u32::from(source[channel]) * 255 + u32::from(old[channel]) * background_alpha + alpha / 2) / alpha).min(255) as u8
+    });
+    *old = Rgba([color[0], color[1], color[2], alpha as u8]);
 }
 
 pub(super) struct Dialog {
@@ -188,15 +330,67 @@ pub(super) struct Dialog {
 }
 
 pub(super) struct Inline {
-    index: Option<usize>,
+    pub(super) index: Option<usize>,
     original: Text,
     content: String,
+    runs: Vec<character::Run>,
     bounds: Rect,
+    cell_offset: Vec2,
+    pub(super) preview: Option<Vec<RgbaImage>>,
+    preview_style: Option<(Text, u64)>,
+    layout: Option<TextLayout>,
+    mouse_anchor: Option<usize>,
     focus: bool,
     input_rect: Option<Rect>,
 }
 
+fn text_pixel_bounds(image: &RgbaImage) -> Rect {
+    let mut bounds = Rect::NOTHING;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        if pixel[3] != 0 {
+            let point = egui::pos2(x as f32, y as f32);
+            bounds.extend_with(point);
+            bounds.extend_with(point + Vec2::splat(1.));
+        }
+    }
+    bounds
+}
+
 impl Editor {
+    fn anchor_tile_text(&self, text: &mut Text, origin: Vec2) {
+        if text.tile_origin.is_none() && !self.plain_image && (self.multiple || self.diamond || self.hex != 0) {
+            text.tile_origin = Some([origin.x.round() as i32, origin.y.round() as i32]);
+        }
+    }
+
+    fn text_tile_images(
+        &self, text: &Text, fonts: &font_samples::Catalog,
+    ) -> Result<(Vec<RgbaImage>, TextLayout), String> {
+        let (w, h) = self.pixels.dimensions();
+        let (stamp, start, layout) = text.stamp_with_layout(w, h, fonts)?;
+        let Some(origin) = text.tile_origin.filter(|_| !self.plain_image) else {
+            return Ok((vec![place_stamp(&stamp, start, w, h, text.repeat); self.tiles.len()], layout));
+        };
+        let mut tiles = vec![RgbaImage::new(w, h); self.tiles.len()];
+        let layout_mode = self.multiple;
+        for (i, &pixel) in stamp.pixels().iter().enumerate() {
+            if pixel.alpha() == 0 {
+                continue;
+            }
+            let x = origin[0].clamp(-32768, 32768) + start[0] + (i % stamp.width() as usize) as i32;
+            let y = origin[1].clamp(-32768, 32768) + start[1] + (i / stamp.width() as usize) as i32;
+            let hit = self.geometry_hit(x, y, layout_mode, self.wrap && text.repeat);
+            if let Some((tile, px, py)) = hit {
+                composite_stamp_pixel(tiles[tile].get_pixel_mut(px, py), pixel);
+            }
+        }
+        Ok((tiles, layout))
+    }
+
+    pub(super) fn render_text_tiles(&self, text: &Text, fonts: &font_samples::Catalog) -> Result<Vec<RgbaImage>, String> {
+        self.text_tile_images(text, fonts).map(|(tiles, _)| tiles)
+    }
+
     pub(super) fn text_tool_click(&mut self, point: Pos2, layout: bool, infinite: bool) {
         if !self.rectangle_text_allowed() || self.inline_text_hit(point, layout, infinite) {
             return;
@@ -218,11 +412,15 @@ impl Editor {
         self.text_dialog = None;
         let mut text = Text::new(w.min(h), self.color);
         text.angle = 0;
+        text.point_text = true;
         text.repeat = !self.plain_image;
         text.offset = [x as i32 - (w / 2) as i32, y as i32 - (h / 2) as i32];
+        self.anchor_tile_text(&mut text, point.to_vec2() - egui::vec2(x as f32, y as f32));
         self.inline_text = Some(Inline {
-            index: None, original: text, content: String::new(),
-            bounds: Rect::from_min_size(point, Vec2::splat(1.)), focus: true, input_rect: None,
+            index: None, original: text, content: String::new(), runs: Vec::new(),
+            bounds: Rect::from_min_size(point, Vec2::splat(1.)),
+            cell_offset: point.to_vec2() - egui::vec2(x as f32, y as f32),
+            preview: None, preview_style: None, layout: None, mouse_anchor: None, focus: true, input_rect: None,
         });
     }
     pub(super) fn inline_text_hit(&mut self, point: Pos2, layout: bool, infinite: bool) -> bool {
@@ -237,8 +435,8 @@ impl Editor {
         let Some((tile, x, y)) = hit else { return false; };
         let index = self.layers.iter().enumerate().rev().find_map(|(i, layer)| {
             (layer.settings.text.is_some() && layer.visible && self.ancestors_visible(i)
-                && layer.settings.opacity > 0 && layer.tiles[tile].get_pixel(x, y)[3] != 0)
-                .then_some(i)
+                && layer.settings.opacity > 0 && text_pixel_bounds(&layer.tiles[tile])
+                    .contains(egui::pos2(x as f32 + 0.5, y as f32 + 0.5))).then_some(i)
         });
         let Some(index) = index else { return false; };
         let cell = (tile, point.to_vec2() - egui::vec2(x as f32, y as f32));
@@ -252,6 +450,22 @@ impl Editor {
         }
         let Some(text) = self.layers[index].settings.text.clone() else { return; };
         let (w, h) = self.pixels.dimensions();
+        if self.layers[index].settings.psd_native_text {
+            let fonts = self.font_samples.catalog.as_deref();
+            let missing = std::iter::once(text.family.as_str())
+                .chain(text.content.chars().enumerate().filter_map(|(i, _)| {
+                    character::get(&text.character_runs, i)?.family.as_deref()
+                }))
+                .find(|family| fonts.is_some_and(|fonts| !fonts.contains(family)));
+            let differs = fonts
+                .and_then(|fonts| text.raster(w, h, fonts).ok())
+                .is_none_or(|image| image != self.layers[index].tiles[self.selected]);
+            if let Some(family) = missing {
+                self.message = format!("{} {family} · {}", tr("缺少字体"), tr("编辑后文字外观可能与 PSD 原预览不同。"));
+            } else if differs {
+                self.message = tr("编辑后文字外观可能与 PSD 原预览不同。").into();
+            }
+        }
         let size = egui::vec2(w as f32, h as f32);
         let (tile, offset) = cell.unwrap_or_else(|| {
             let anchor = (0..self.rows).flat_map(|row| (0..self.columns).map(move |col| (col, row)))
@@ -259,31 +473,34 @@ impl Editor {
                 .unwrap_or((0, 0));
             (self.selected, self.mapped_center(anchor.0 as i32, anchor.1 as i32, w, h) - size * 0.5)
         });
-        let mut bounds = Rect::NOTHING;
-        for (x, y, pixel) in self.layers[index].tiles[tile].enumerate_pixels() {
-            if pixel[3] != 0 {
-                let p = (offset + egui::vec2(x as f32, y as f32)).to_pos2();
-                bounds.extend_with(p);
-                bounds.extend_with(p + Vec2::splat(1.));
-            }
-        }
+        let mut bounds = text_pixel_bounds(&self.layers[index].tiles[tile]).translate(offset);
         if !bounds.is_positive() {
             let center = offset + size * 0.5 + egui::vec2(text.offset[0] as f32, text.offset[1] as f32);
             bounds = Rect::from_center_size(center.to_pos2(), egui::vec2(48., text.size as f32));
         }
         self.select_layer(index);
-        self.layer_detail = None;
-        self.text_dialog = None;
+        if !self.text_dialog.as_ref().is_some_and(|dialog| dialog.target == Some(index)) {
+            self.layer_detail = None;
+            self.text_dialog = None;
+        }
+        let offset = text.tile_origin.map_or(offset, |origin| egui::vec2(origin[0] as f32, origin[1] as f32));
         self.inline_text = Some(Inline {
-            index: Some(index), content: text.content.clone(), original: text, bounds, focus: true, input_rect: None,
+            index: Some(index), content: text.content.clone(), runs: text.character_runs.clone(),
+            original: text, bounds, cell_offset: offset, preview: None, preview_style: None,
+            layout: None, mouse_anchor: None,
+            focus: true, input_rect: None,
         });
     }
 
     pub(super) fn confirm_inline_text_outside(&mut self, ui: &egui::Ui) {
+        if ui.memory(|memory| memory.any_popup_open()) { return; }
         let outside = self.inline_text.as_ref().and_then(|edit| edit.input_rect).is_some_and(|rect| {
             ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p)))
         });
         if outside && let Some(edit) = self.inline_text.take() {
+            if edit.preview.is_some() {
+                self.invalidate_textures();
+            }
             self.commit_inline_text(edit, ui.ctx());
         }
     }
@@ -294,46 +511,197 @@ impl Editor {
             || self.layers[index].settings.text.as_ref() != Some(&edit.original)) {
             return;
         }
-        let position = origin + edit.bounds.min.to_vec2() * scale - Vec2::splat(3.);
-        let width = (edit.bounds.width() * scale + 24.).max(100.).min((view.width() - 8.).max(1.));
+        let position = origin + edit.bounds.min.to_vec2() * scale;
+        let width = (edit.bounds.width() * scale + 12.).max(16.);
+        let font = egui::FontId::proportional((f32::from(edit.original.size) * scale).clamp(6., 192.));
+        let [r, g, b] = edit.original.color;
+        let normal = Color32::from_rgb(r, g, b);
+        let alignment = edit.original.paragraph.editor_alignment();
         let first = edit.focus;
-        let response = egui::Area::new(ui.id().with("canvas_text_edit"))
+        let id = ui.id().with("canvas_text_edit");
+        let input_id = id.with("input");
+        self.font_samples.tick(ui.ctx());
+        let popup_was_open = ui.memory(|memory| memory.any_popup_open());
+        let response = egui::Area::new(id)
             .order(egui::Order::Foreground).movable(false).fixed_pos(position)
-            .constrain_to(view)
+            .constrain(false)
             .show(ui.ctx(), |ui| {
-                egui::Frame::new().fill(ui.visuals().extreme_bg_color)
-                    .stroke(egui::Stroke::new(1_f32, ui.visuals().selection.stroke.color))
-                    .inner_margin(3).show(ui, |ui| {
-                        let input = ui.add(egui::TextEdit::multiline(&mut edit.content)
-                            .font(egui::FontId::proportional((f32::from(edit.original.size) * scale).clamp(12., 96.)))
-                            .desired_rows(1).desired_width(width).char_limit(512).frame(false));
-                        if first { input.request_focus(); }
+                ui.shrink_clip_rect(view);
+                let cursor_style = ui.visuals().text_cursor.clone();
+                if edit.layout.is_some() {
+                    ui.visuals_mut().text_cursor.stroke.color = Color32::TRANSPARENT;
+                    ui.visuals_mut().selection.bg_fill = Color32::TRANSPARENT;
+                } else {
+                    ui.visuals_mut().selection.bg_fill = normal.gamma_multiply(0.35);
+                }
+                let selection = (!first).then(|| egui::TextEdit::load_state(ui.ctx(), input_id))
+                    .flatten().and_then(|state| state.cursor.char_range())
+                    .map(|range| {
+                        let a = range.primary.index;
+                        let b = range.secondary.index;
+                        a.min(b)..a.max(b)
                     });
+                let previous = edit.content.clone();
+                let mut layouter = |ui: &egui::Ui, content: &str, _width: f32| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.wrap.max_width = f32::INFINITY;
+                    let lines: Vec<_> = content.split_inclusive('\n').collect();
+                    let widths = ui.fonts(|fonts| lines.iter().map(|line|
+                        fonts.layout_no_wrap(line.trim_end_matches('\n').to_owned(), font.clone(), normal).size().x
+                    ).collect::<Vec<_>>());
+                    let longest = widths.iter().copied().fold(0_f32, f32::max);
+                    let mut index = 0;
+                    for (line, line_width) in lines.into_iter().zip(widths) {
+                        let mut leading = match alignment {
+                            egui::Align::Min => 0.,
+                            egui::Align::Center => (longest - line_width) / 2.,
+                            egui::Align::Max => longest - line_width,
+                        };
+                        for character in line.chars() {
+                            let mut bytes = [0; 4];
+                            let style = character::get(&edit.runs, index);
+                            let size = style.and_then(|s| s.size).unwrap_or(edit.original.size);
+                            job.append(character.encode_utf8(&mut bytes), leading, egui::TextFormat::simple(
+                                egui::FontId::proportional((f32::from(size) * scale).clamp(6.,192.)), Color32::TRANSPARENT,
+                            ));
+                            leading = 0.;
+                            index += 1;
+                        }
+                    }
+                    if content.is_empty() {
+                        job.append("", 0., egui::TextFormat::simple(font.clone(), normal));
+                    }
+                    ui.fonts(|fonts| fonts.layout_job(job))
+                };
+                let mut output = egui::TextEdit::multiline(&mut edit.content)
+                    .id(input_id).font(font.clone()).desired_rows(1).desired_width(width)
+                    .char_limit(512).margin(0).frame(false).clip_text(false).layouter(&mut layouter)
+                    .show(ui);
+                if first { output.response.request_focus(); }
+                if output.response.changed() {
+                    character::edit(&mut edit.runs, &previous, &edit.content);
+                }
+                let mut cursor_range = output.state.cursor.char_range();
+                if let Some(layout) = &edit.layout {
+                    let (pointer, pressed, held, shift) = ui.input(|i| (
+                        i.pointer.interact_pos(), i.pointer.primary_pressed(), i.pointer.primary_down(), i.modifiers.shift,
+                    ));
+                    if let Some(pointer) = pointer
+                        && (pressed && output.response.hovered() || held && edit.mouse_anchor.is_some())
+                        && let Some(index) = layout.index_at(((pointer - origin) / scale - edit.cell_offset).to_pos2())
+                    {
+                        let anchor = if pressed && shift {
+                            cursor_range.map_or(index, |r| r.secondary.index)
+                        } else {
+                            edit.mouse_anchor.unwrap_or(index)
+                        };
+                        edit.mouse_anchor = Some(anchor);
+                        let range = egui::text::CCursorRange {
+                            primary: egui::text::CCursor::new(index),
+                            secondary: egui::text::CCursor::new(anchor),
+                        };
+                        output.state.cursor.set_char_range(Some(range));
+                        output.state.store(ui.ctx(), input_id);
+                        cursor_range = Some(range);
+                    }
+                    if !held {
+                        edit.mouse_anchor = None;
+                    }
+                    if !output.response.changed() {
+                        paint_text_caret(ui, layout, cursor_range, cursor_style, origin + edit.cell_offset * scale, scale);
+                    }
+                }
+                let range = cursor_range.map(selected_characters).or(selection);
+                if let Some(range) = range.filter(|r| !r.is_empty() && r.end <= edit.content.chars().count()) {
+                    character::controls(ui, &mut self.font_samples, &mut edit, range);
+                }
             }).response;
         edit.focus = false;
         edit.input_rect = Some(response.rect);
         if ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if edit.preview.is_some() {
+                self.invalidate_textures();
+            }
             return;
         }
         let confirmed = ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Enter));
-        if !confirmed && (first || !response.clicked_elsewhere()) {
+        if !confirmed && (first || popup_was_open || ui.memory(|memory| memory.any_popup_open()) || !response.clicked_elsewhere()) {
+            self.refresh_inline_preview(ui.ctx(), &mut edit);
             self.inline_text = Some(edit);
             return;
+        }
+        if edit.preview.is_some() {
+            self.invalidate_textures();
         }
         self.commit_inline_text(edit, ui.ctx());
     }
 
+    fn refresh_inline_preview(&mut self, ctx: &egui::Context, edit: &mut Inline) {
+        let mut style = edit.original.clone();
+        style.content.clone_from(&edit.content);
+        style.character_runs.clone_from(&edit.runs);
+        if style != edit.original {
+            self.anchor_tile_text(&mut style, edit.cell_offset);
+        }
+        let generation = self.font_samples.generation;
+        if edit.preview_style.as_ref().is_some_and(|(old, fonts)| *old == style && *fonts == generation) {
+            return;
+        }
+        let (w, h) = self.pixels.dimensions();
+        let fonts = self.font_samples.catalog.as_deref();
+        if style == edit.original && edit.index.is_some() {
+            edit.preview = None;
+            edit.layout = fonts.map(|fonts| style.svg_layout(w, h, fonts).1);
+            if let Some(image) = edit.index.and_then(|index| self.layers.get(index))
+                .and_then(|layer| layer.tiles.get(self.selected))
+            {
+                let bounds = text_pixel_bounds(image);
+                if bounds.is_positive() && self.plain_image {
+                    edit.bounds = bounds.translate(edit.cell_offset);
+                }
+            }
+        } else if style.content.is_empty() {
+            edit.preview = Some(vec![RgbaImage::new(w, h); self.tiles.len()]);
+            edit.layout = fonts.map(|fonts| style.svg_layout(w, h, fonts).1);
+        } else if let Some(fonts) = fonts {
+            if let Ok((image, layout)) = self.text_tile_images(&style, fonts) {
+                edit.preview = Some(image);
+                edit.layout = Some(layout);
+            } else {
+                edit.preview = None;
+                edit.layout = None;
+            }
+        }
+        if let Some(preview) = edit.preview.as_ref().and_then(|tiles| tiles.get(self.selected)) {
+            let bounds = text_pixel_bounds(preview);
+            if bounds.is_positive() && self.plain_image {
+                edit.bounds = bounds.translate(edit.cell_offset);
+            }
+        }
+        edit.preview_style = Some((style, generation));
+        self.invalidate_textures();
+        ctx.request_repaint();
+    }
+
     fn commit_inline_text(&mut self, mut edit: Inline, ctx: &egui::Context) {
-        if edit.content != edit.original.content
+        if (edit.content != edit.original.content || edit.runs != edit.original.character_runs)
             && !(edit.index.is_none() && edit.content.trim().is_empty())
             && edit.index.is_none_or(|index| self.text_unlocked(index)
                 && self.layers[index].settings.text.as_ref() == Some(&edit.original)) {
-            let (w, h) = self.pixels.dimensions();
             edit.original.content = edit.content;
+            edit.original.character_runs = edit.runs;
+            self.anchor_tile_text(&mut edit.original, edit.cell_offset);
             self.font_samples.tick(ctx);
-            let result = self.font_samples.catalog.as_ref()
-                .ok_or_else(|| tr("缺少字体").to_owned())
-                .and_then(|fonts| edit.original.raster(w, h, fonts));
+            let valid_preview = edit.preview_style.as_ref().is_some_and(|(style, generation)| {
+                *style == edit.original && *generation == self.font_samples.generation
+            }) && edit.original.valid();
+            let result = if let Some(preview) = edit.preview.take().filter(|_| valid_preview) {
+                Ok(preview)
+            } else {
+                self.font_samples.catalog.as_ref()
+                    .ok_or_else(|| tr("缺少字体").to_owned())
+                    .and_then(|fonts| self.text_tile_images(&edit.original, fonts).map(|(tiles, _)| tiles))
+            };
             match result {
                 Ok(image) => {
                     let opacity = edit.index.map_or(100, |index| self.layers[index].settings.opacity);
@@ -345,7 +713,7 @@ impl Editor {
     }
 
     pub(super) fn rectangle_text_allowed(&self) -> bool {
-        !self.diamond && !self.elevated && self.hex == 0
+        !self.elevated
     }
     pub(super) fn text_unlocked(&self, i: usize) -> bool {
         self.layers
@@ -361,7 +729,9 @@ impl Editor {
         if target.is_none() {
             self.layer_detail = None;
         }
-        self.inline_text = None;
+        if !self.inline_text.as_ref().is_some_and(|edit| edit.index == target && target.is_some()) {
+            self.inline_text = None;
+        }
         self.finish_stroke();
         let (draft, opacity, cached) = if let Some(i) = target {
             let Some(text) = self.layers[i].settings.text.clone() else {
@@ -397,9 +767,19 @@ impl Editor {
         });
     }
     fn apply_text(&mut self, target: Option<usize>, text: Text, opacity: u8, image: RgbaImage) {
-        self.apply_text_at(target, text, opacity, image, false);
+        let tiles = if text.tile_origin.is_some() && !self.plain_image {
+            match self.font_samples.catalog.as_ref().ok_or_else(|| tr("缺少字体").to_owned())
+                .and_then(|fonts| self.text_tile_images(&text, fonts))
+            {
+                Ok((tiles, _)) => tiles,
+                Err(error) => { self.message = error; return; }
+            }
+        } else {
+            vec![image; self.tiles.len()]
+        };
+        self.apply_text_at(target, text, opacity, tiles, false);
     }
-    fn apply_text_at(&mut self, target: Option<usize>, text: Text, opacity: u8, image: RgbaImage, top: bool) {
+    fn apply_text_at(&mut self, target: Option<usize>, text: Text, opacity: u8, tiles: Vec<RgbaImage>, top: bool) {
         let index = if let Some(i) = target {
             if !self.text_unlocked(i) || self.layers[i].settings.text.is_none() {
                 return;
@@ -411,11 +791,11 @@ impl Editor {
             }
             self.record_layer_change();
             if self.layers[i].settings.text.as_ref() != Some(&text) {
-                self.layers[i].tiles.fill(image);
+                self.layers[i].tiles = tiles;
             }
             i
         } else {
-            if !self.can_add_layers(&[], image.as_raw().len() * self.tiles.len()) {
+            if !self.can_add_layers(&[], tiles.iter().map(|image| image.as_raw().len()).sum()) {
                 return;
             }
             self.record_layer_change();
@@ -447,7 +827,7 @@ impl Editor {
                     visible: true,
                     locked: false,
                     name,
-                    tiles: vec![image; self.tiles.len()],
+                    tiles,
                 },
             );
             index
@@ -510,10 +890,13 @@ impl Editor {
         let mut accept = false;
         let mut cancel = false;
         let existing = dialog.target.is_some();
+        let inline_style = self.inline_text.as_ref().filter(|edit| existing && edit.index == dialog.target)
+            .map(|edit| character::layer_style(&edit.original, &edit.content, &edit.runs));
+        let mut inline_change = None;
         let editable =
             dialog.target.is_none_or(|i| self.text_unlocked(i)) && self.rectangle_text_allowed();
         let mut contents = |ui: &mut egui::Ui| {
-            let preferred_width: f32 = if existing { 300. } else { 390. };
+            let preferred_width: f32 = if existing { 252. } else { 390. };
             ui.set_width(preferred_width.min((ui.ctx().screen_rect().width() - 32.).max(150.)));
             if !editable {
                 ui.disable();
@@ -555,25 +938,35 @@ impl Editor {
                     if dialog.paragraph_tab {
                         t.paragraph.controls(ui);
                     } else {
+                        let effective = inline_style.clone()
+                            .unwrap_or_else(|| character::layer_style(t, &t.content, &t.character_runs));
+                        let mut family = effective.family.clone().unwrap_or_default();
+                        let mut size = effective.size.unwrap_or(0);
+                        let mut color = None;
                         ui.horizontal_wrapped(|ui| {
                             ui.label(tr("字体"));
-                            self.font_samples.picker(ui, &mut t.family);
+                            self.font_samples.picker(ui, &mut family);
                         });
                         ui.horizontal_wrapped(|ui| {
+                            ui.label(tr("颜色"));
+                            color = character::color_control(ui, effective.color, t.color);
+                            ui.label(tr("样式"));
                             ui.toggle_value(&mut t.bold, egui::RichText::new("B").strong())
                                 .on_hover_text(tr("粗体"));
                             ui.toggle_value(&mut t.italic, egui::RichText::new("I").italics())
                                 .on_hover_text(tr("斜体"));
-                            ui.color_edit_button_srgb(&mut t.color);
                         });
                         egui::Grid::new("tile_text_metrics")
                             .num_columns(4)
                             .show(ui, |ui| {
                                 ui.label(tr("字号"));
                                 ui.add(
-                                    egui::DragValue::new(&mut t.size)
+                                    egui::DragValue::new(&mut size)
                                         .range(1..=256)
-                                        .suffix(" px"),
+                                        .clamp_existing_to_range(false)
+                                        .custom_formatter(|value, _| {
+                                            if value == 0. { String::new() } else { format!("{value:.0} px") }
+                                        }),
                                 );
                                 ui.label(tr("旋转"));
                                 ui.add(
@@ -609,6 +1002,18 @@ impl Editor {
                                 }
                                 ui.end_row();
                             });
+                        let change = character::Style {
+                            family: (!family.is_empty() && effective.family.as_deref() != Some(&family)).then_some(family),
+                            size: (size > 0 && effective.size != Some(size)).then_some(size),
+                            color,
+                        };
+                        if change != character::Style::default() {
+                            if inline_style.is_some() {
+                                inline_change = Some(change);
+                            } else {
+                                character::apply_layer_style(t, change);
+                            }
+                        }
                         ui.horizontal(|ui| {
                             ui.label(tr("不透明度"));
                             ui.add(egui::Slider::new(&mut dialog.opacity, 0..=100).suffix("%"));
@@ -694,9 +1099,6 @@ impl Editor {
                 .fixed_pos(position)
                 .show(ui.ctx(), &mut contents);
             if editable
-                && fonts
-                    .as_ref()
-                    .is_some_and(|f| f.contains(&dialog.draft.family))
                 && dialog
                     .last_applied
                     .as_ref()
@@ -708,6 +1110,13 @@ impl Editor {
                     self.apply_text(Some(i), style.clone(), dialog.opacity, image.clone());
                     dialog.last_applied = Some((style.clone(), dialog.opacity));
                 }
+            }
+            if let Some(change) = inline_change
+                && let Some(edit) = self.inline_text.as_mut().filter(|edit| edit.index == Some(i))
+            {
+                let count = edit.content.chars().count();
+                character::apply(&mut edit.runs, count, 0..count, change);
+                ui.ctx().request_repaint();
             }
             if !open {
                 self.layer_detail = None;
@@ -735,12 +1144,12 @@ mod tests {
     #[test]
     fn stamp_wraps_both_axes_and_accumulates_overlapping_glyphs() {
         let mut stamp = tiny_skia::Pixmap::new(4, 2).unwrap();
-        stamp.fill(tiny_skia::Color::from_rgba8(255, 255, 255, 128));
-        let im = place_stamp(&stamp, [-1, -1], 3, 3, [12, 34, 56],true);
+        stamp.fill(tiny_skia::Color::from_rgba8(12, 34, 56, 128));
+        let im = place_stamp(&stamp, [-1, -1], 3, 3,true);
         assert_eq!(im.get_pixel(2, 2).0, [12, 34, 56, 192]);
         assert_eq!(im.get_pixel(1, 0).0, [12, 34, 56, 128]);
         assert_eq!(im.get_pixel(1, 1)[3], 0);
-        assert_eq!(im, place_stamp(&stamp, [5, -4], 3, 3, [12, 34, 56],true));
+        assert_eq!(im, place_stamp(&stamp, [5, -4], 3, 3,true));
     }
 
     #[test]
@@ -750,6 +1159,13 @@ mod tests {
         editor.reset_document(RgbaImage::new(8, 8));
         let mut text = Text::new(8, [255; 4]);
         text.content = "A<&字".into();
+        character::apply(&mut text.character_runs, 4, 1..3, character::Style {
+            size: Some(18), ..Default::default()
+        });
+        character::apply(&mut text.character_runs, 4, 2..4, character::Style {
+            family: Some("Segoe UI".into()), color: Some([12, 72, 154]), ..Default::default()
+        });
+        assert_eq!(character::get(&text.character_runs, 2).unwrap().size, Some(18));
         let mark = RgbaImage::from_fn(8, 8, |x, y| {
             if x == 0 && y == 0 {
                 Rgba([255; 4])

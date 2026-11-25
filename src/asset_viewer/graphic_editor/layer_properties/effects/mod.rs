@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 
 mod legacy;
 mod psd;
+pub(in crate::asset_viewer::graphic_editor) use psd::{
+    read_live_rectangle, read_solid_fill, solid_shape_stroke_supported, write_live_rectangle,
+    write_solid_fill,
+};
 mod render;
 #[cfg(test)]
 mod tests;
@@ -71,9 +75,25 @@ enum Carve {
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+struct GradientStop {
+    position: u16,
+    color: [u8; 3],
+}
+
+const MAX_GRADIENT_STOPS: usize = 16;
+const GRADIENT_END: u16 = 4096;
+type GradientStops = [Option<GradientStop>; MAX_GRADIENT_STOPS];
+
+fn no_gradient_stops(stops: &GradientStops) -> bool {
+    stops.iter().all(Option::is_none)
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 struct Gradient {
     colors: [[u8; 3]; 2],
+    #[serde(skip_serializing_if = "no_gradient_stops")]
+    stops: GradientStops,
     style: GradientStyle,
     angle: i16,
     scale: u16,
@@ -85,6 +105,7 @@ impl Default for Gradient {
     fn default() -> Self {
         Self {
             colors: [[0, 0, 0], [255; 3]],
+            stops: [None; MAX_GRADIENT_STOPS],
             style: GradientStyle::Linear,
             angle: 90,
             scale: 100,
@@ -95,8 +116,63 @@ impl Default for Gradient {
     }
 }
 impl Gradient {
+    fn color_stops(&self) -> impl Iterator<Item = GradientStop> + '_ {
+        let legacy = [0, GRADIENT_END]
+            .into_iter()
+            .zip(self.colors)
+            .map(|(position, color)| GradientStop { position, color });
+        let use_legacy = self.stops[0].is_none();
+        self.stops
+            .iter()
+            .map_while(|stop| *stop)
+            .chain(legacy.filter(move |_| use_legacy))
+    }
+
+    fn set_color_stops(&mut self, stops: &[GradientStop]) {
+        self.colors = [stops[0].color, stops[stops.len() - 1].color];
+        self.stops = [None; MAX_GRADIENT_STOPS];
+        if stops.len() != 2 || stops[0].position != 0 || stops[1].position != GRADIENT_END {
+            for (slot, stop) in self.stops.iter_mut().zip(stops) {
+                *slot = Some(*stop);
+            }
+        }
+    }
+
+    fn sample(&self, t: f32) -> [u8; 3] {
+        let position = t.clamp(0., 1.) * f32::from(GRADIENT_END);
+        let mut stops = self.color_stops();
+        let mut left = stops.next().unwrap();
+        if position < f32::from(left.position) {
+            return left.color;
+        }
+        for right in stops {
+            if position < f32::from(right.position) {
+                let k = (position - f32::from(left.position))
+                    / f32::from(right.position - left.position);
+                return std::array::from_fn(|c| {
+                    (f32::from(left.color[c]) * (1. - k) + f32::from(right.color[c]) * k).round()
+                        as u8
+                });
+            }
+            left = right;
+        }
+        left.color
+    }
+
     fn valid(self) -> bool {
-        self.angle.unsigned_abs() <= 180 && (1..=400).contains(&self.scale)
+        let count = self.stops.iter().flatten().count();
+        self.angle.unsigned_abs() <= 180
+            && (1..=400).contains(&self.scale)
+            && (count == 0 || count >= 2)
+            && self.stops[..count].iter().all(Option::is_some)
+            && self
+                .stops
+                .iter()
+                .flatten()
+                .all(|stop| stop.position <= GRADIENT_END)
+            && self.stops[..count]
+                .windows(2)
+                .all(|pair| pair[0].unwrap().position <= pair[1].unwrap().position)
     }
 }
 
@@ -201,6 +277,8 @@ struct Glow {
     precise: bool,
     gradient: bool,
     end_color: [u8; 3],
+    #[serde(skip_serializing_if = "no_gradient_stops")]
+    stops: GradientStops,
     jitter: u8,
     quality: Quality,
 }
@@ -220,12 +298,21 @@ impl Default for Glow {
             precise: false,
             gradient: false,
             end_color: [255; 3],
+            stops: [None; MAX_GRADIENT_STOPS],
             jitter: 0,
             quality: Quality::default(),
         }
     }
 }
 impl Glow {
+    fn color_ramp(&self) -> Gradient {
+        Gradient {
+            colors: [self.ink.color, self.end_color],
+            stops: self.stops,
+            ..Gradient::default()
+        }
+    }
+
     fn valid(self) -> bool {
         self.ink.opacity <= 100
             && (1..=64).contains(&self.size)
@@ -233,6 +320,7 @@ impl Glow {
             && (1..=100).contains(&self.range)
             && self.jitter <= 100
             && self.quality.noise <= 100
+            && self.color_ramp().valid()
     }
 }
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]

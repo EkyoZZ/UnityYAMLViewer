@@ -80,7 +80,7 @@ impl Editor {
     }
 
     pub(super) fn request_layer_action(&mut self, clear: bool, index: usize) {
-        if self.pending_layer_action.is_some() || index >= self.layers.len() {
+        if index >= self.layers.len() {
             return;
         }
         self.finish_stroke();
@@ -92,74 +92,31 @@ impl Editor {
         if self.layers[index].material || self.layers[index].locked || self.ancestor_locked(index) {
             return;
         }
-        if clear && !self.mask_editing && selected.iter().any(|i| self.layers[*i].settings.text.is_some()) { return; }
-        self.pending_layer_action = Some((
-            clear,
-            index,
-            selected,
-            self.mask_editing && index == self.active_layer,
-        ));
-    }
-    pub(super) fn layer_action_confirmation(&mut self, ui: &mut egui::Ui) {
-        let Some((clear, index, selected, mask)) = self.pending_layer_action.clone() else {
-            return;
-        };
-        if index >= self.layers.len() {
-            self.pending_layer_action = None;
+        if clear
+            && !self.mask_editing
+            && selected
+                .iter()
+                .any(|i| self.layers[*i].settings.text.is_some())
+        {
             return;
         }
-        let mut accept = false;
-        let mut cancel = false;
-        let response =
-            egui::Modal::new(ui.id().with("tile_layer_action_confirm")).show(ui.ctx(), |ui| {
-                ui.set_width(360.);
-                ui.heading(tr(if clear {
-                    "确认清空"
-                } else {
-                    "确认删除"
-                }));
-                ui.label(tr(if clear {
-                    "将清空当前编辑目标的内容，是否继续？"
-                } else {
-                    "将删除选中的图层或组及组内内容，是否继续？"
-                }));
-                egui::ScrollArea::vertical()
-                    .max_height(150.)
-                    .show(ui, |ui| {
-                        if clear {
-                            ui.label(&self.layers[index].name);
-                        } else {
-                            for &i in &selected {
-                                if let Some(layer) = self.layers.get(i) {
-                                    ui.label(&layer.name);
-                                }
-                            }
-                        }
-                    });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    cancel = ui.button(tr("取消")).clicked();
-                    accept = ui.button(tr(if clear { "清空" } else { "删除" })).clicked();
-                });
-            });
-        if cancel || response.should_close() {
-            self.pending_layer_action = None;
-        } else if accept {
-            self.pending_layer_action = None;
-            self.select_layer(index);
-            self.selected_layers = selected
-                .into_iter()
-                .filter(|i| *i < self.layers.len())
-                .collect();
-            self.mask_editing = mask && self.layers[index].settings.mask.is_some();
-            if clear {
-                self.clear_selected_layer();
-            } else {
-                self.delete_selected_layers(index);
+        if !clear {
+            let revision = self.revision;
+            self.delete_selected_layers(index);
+            if self.revision != revision {
+                self.layer_detail = None;
+                self.invalidate_textures();
             }
+            return;
         }
+        let mask = self.mask_editing && index == self.active_layer;
+        if index != self.active_layer {
+            self.select_layer(index);
+        }
+        self.mask_editing = mask;
+        self.clear_selected_layer();
+        self.invalidate_textures();
     }
-
     pub(super) fn layer_insert_position(&self) -> (u64, usize) {
         let layer = &self.layers[self.active_layer];
         if layer.settings.group_id != 0 {
@@ -678,7 +635,13 @@ impl Editor {
                 if end == cursor + 1 || self.layers[base].settings.adjustment.is_some() {
                     self.composite_layer_entry(base, tile, out, depth, None);
                 } else {
-                    let properties = &self.transform.as_ref().filter(|t|t.index==base).and_then(|t|t.preview.as_ref()).unwrap_or(&self.layers[base]).settings;
+                    let properties = &self
+                        .transform
+                        .as_ref()
+                        .filter(|t| t.index == base)
+                        .and_then(|t| t.preview.as_ref())
+                        .unwrap_or(&self.layers[base])
+                        .settings;
                     let mut settings = properties.clone();
                     settings.blend = layer_properties::Blend::Normal;
                     settings.opacity = 100;
@@ -718,7 +681,11 @@ impl Editor {
         depth: usize,
         override_settings: Option<&layer_properties::Properties>,
     ) {
-        let draft=self.transform.as_ref().filter(|t|t.index==index).and_then(|t|t.preview.as_ref());
+        let draft = self
+            .transform
+            .as_ref()
+            .filter(|t| t.index == index)
+            .and_then(|t| t.preview.as_ref());
         let layer = draft.unwrap_or(&self.layers[index]);
         let p = override_settings.unwrap_or(&layer.settings);
         if p.group_id != 0 {
@@ -752,7 +719,9 @@ impl Editor {
             }
             return;
         }
-        let source = if draft.is_some(){&layer.tiles[tile]}else if index == self.active_layer {
+        let source = if draft.is_some() {
+            &layer.tiles[tile]
+        } else if index == self.active_layer {
             if tile == self.selected {
                 &self.pixels
             } else {
@@ -1026,6 +995,47 @@ impl Editor {
     pub(super) fn group_contains(&self, root: usize, index: usize) -> bool {
         root == index || self.is_descendant(index, root)
     }
+    pub(super) fn insert_empty_layer(&mut self, record: bool) -> bool {
+        let bytes = self.tiles.iter().map(|t| t.as_raw().len()).sum();
+        if !self.can_add_layers(&[], bytes) {
+            self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
+            return false;
+        }
+        if record {
+            self.record_layer_change();
+        }
+        let mut settings = layer_properties::Properties::default();
+        let (parent, insertion) = self.layer_insert_position();
+        settings.parent = parent;
+        if let Some(group) = self
+            .layers
+            .iter_mut()
+            .find(|l| parent != 0 && l.settings.group_id == parent)
+        {
+            group.settings.collapsed = false;
+        }
+        let tiles = self
+            .tiles
+            .iter()
+            .map(|t| RgbaImage::new(t.width(), t.height()))
+            .collect();
+        self.layers.insert(
+            insertion,
+            Layer {
+                settings,
+                material: false,
+                name: format!("{} {}", tr("图层"), self.layers.len()),
+                visible: true,
+                locked: false,
+                tiles,
+            },
+        );
+        if insertion <= self.active_layer {
+            self.active_layer += 1;
+        }
+        self.select_layer(insertion);
+        true
+    }
     pub(super) fn group_controls(&mut self, ui: &mut egui::Ui) {
         let Some((action, target)) = ui
             .ctx()
@@ -1056,42 +1066,7 @@ impl Editor {
                 }
             }
             6 => {
-                let bytes = self.tiles.iter().map(|t| t.as_raw().len()).sum();
-                if !self.can_add_layers(&[], bytes) {
-                    self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
-                    return;
-                }
-                self.record_layer_change();
-                let mut settings = layer_properties::Properties::default();
-                let (parent, insertion) = self.layer_insert_position();
-                settings.parent = parent;
-                if let Some(group) = self
-                    .layers
-                    .iter_mut()
-                    .find(|l| parent != 0 && l.settings.group_id == parent)
-                {
-                    group.settings.collapsed = false;
-                }
-                let tiles = self
-                    .tiles
-                    .iter()
-                    .map(|t| RgbaImage::new(t.width(), t.height()))
-                    .collect();
-                self.layers.insert(
-                    insertion,
-                    Layer {
-                        settings,
-                        material: false,
-                        name: format!("{} {}", tr("图层"), self.layers.len()),
-                        visible: true,
-                        locked: false,
-                        tiles,
-                    },
-                );
-                if insertion <= self.active_layer {
-                    self.active_layer += 1;
-                }
-                self.select_layer(insertion);
+                self.insert_empty_layer(true);
             }
             7 => self.request_layer_action(false, index),
             8 => {
@@ -1104,8 +1079,12 @@ impl Editor {
     }
 }
 pub(super) fn mix_group(before: Rgba<u8>, after: Rgba<u8>, k: f32) -> Rgba<u8> {
-    if k == 1. { return after; }
-    if k == 0. { return before; }
+    if k == 1. {
+        return after;
+    }
+    if k == 0. {
+        return before;
+    }
     let wa = before[3] as f32 * (1. - k);
     let wb = after[3] as f32 * k;
     let a = wa + wb;

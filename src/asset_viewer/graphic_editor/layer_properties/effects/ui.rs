@@ -53,7 +53,15 @@ fn mode(ui: &mut Ui, label: &str, v: &mut Blend) {
 fn color(ui: &mut Ui, label: &str, rgb: &mut [u8; 3]) {
     ui.horizontal(|ui| {
         ui.label(tr(label));
-        ui.color_edit_button_srgb(rgb);
+        let [r, g, b] = rgb.map(|channel| f64::from(channel) / 255.);
+        if let Some(rgba) = crate::color_property::show_editable(ui, tr(label), [r, g, b, 1.]) {
+            let rgb_channel = |channel: f64| (channel.clamp(0., 1.) * 255.).round() as u8;
+            *rgb = [
+                rgb_channel(rgba[0]),
+                rgb_channel(rgba[1]),
+                rgb_channel(rgba[2]),
+            ];
+        }
     });
 }
 fn contour(ui: &mut Ui, v: &mut Contour, aa: &mut bool) {
@@ -76,36 +84,171 @@ fn quality(ui: &mut Ui, q: &mut Quality) {
     contour(ui, &mut q.contour, &mut q.antialias);
     percent_ui(ui, "杂色", &mut q.noise);
 }
-fn gradient(ui: &mut Ui, g: &mut Gradient) {
-    ui.horizontal_wrapped(|ui| {
-        for (color, label) in g.colors.iter_mut().zip(["起始颜色", "结束颜色"]) {
-            ui.label(tr(label));
-            ui.color_edit_button_srgb(color);
-        }
-    });
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width().min(240.), 12.),
-        egui::Sense::hover(),
+fn gradient_colors(ui: &mut Ui, g: &mut Gradient) {
+    let mut stops: Vec<_> = g.color_stops().collect();
+    let selected_id = ui.id().with("selected_gradient_stop");
+    let mut selected = ui
+        .ctx()
+        .data(|data| data.get_temp::<usize>(selected_id))
+        .unwrap_or(0)
+        .min(stops.len() - 1);
+    let (control, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width().min(260.), 28.),
+        egui::Sense::click_and_drag(),
     );
-    let left = egui::Color32::from_rgb(g.colors[0][0], g.colors[0][1], g.colors[0][2]);
-    let right = egui::Color32::from_rgb(g.colors[1][0], g.colors[1][1], g.colors[1][2]);
-    let (left, right) = if g.reverse {
-        (right, left)
+    let rect = egui::Rect::from_min_max(control.min, control.right_bottom() - egui::vec2(0., 12.));
+    let pos_x = |position: u16| {
+        egui::lerp(
+            rect.x_range(),
+            f32::from(position) / f32::from(GRADIENT_END),
+        )
+    };
+    let from_x = |x: f32| {
+        (((x - rect.left()) / rect.width().max(1.)).clamp(0., 1.) * f32::from(GRADIENT_END)).round()
+            as u16
+    };
+    let display = |position| {
+        if g.reverse {
+            GRADIENT_END - position
+        } else {
+            position
+        }
+    };
+    let mut moved = None;
+    if (response.clicked() || response.drag_started())
+        && let Some(pointer) = ui
+            .input(|i| i.pointer.press_origin())
+            .or(response.interact_pointer_pos())
+        && let Some((index, _)) = stops.iter().enumerate().min_by(|(_, a), (_, b)| {
+            (pos_x(display(a.position)) - pointer.x)
+                .abs()
+                .total_cmp(&(pos_x(display(b.position)) - pointer.x).abs())
+        })
+    {
+        selected = index;
+    }
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        moved = Some(display(from_x(pointer.x)));
+    }
+    let display_stops: Vec<_> = if g.reverse {
+        stops
+            .iter()
+            .rev()
+            .map(|s| GradientStop {
+                position: display(s.position),
+                ..*s
+            })
+            .collect()
     } else {
-        (left, right)
+        stops.clone()
     };
     let mut mesh = egui::Mesh::default();
-    for (p, c) in [
-        (rect.left_top(), left),
-        (rect.right_top(), right),
-        (rect.left_bottom(), left),
-        (rect.right_bottom(), right),
-    ] {
-        mesh.colored_vertex(p, c);
+    let first = display_stops[0];
+    let last = display_stops[display_stops.len() - 1];
+    let edges = std::iter::once(GradientStop {
+        position: 0,
+        ..first
+    })
+    .chain(display_stops)
+    .chain(std::iter::once(GradientStop {
+        position: GRADIENT_END,
+        ..last
+    }));
+    let mut previous: Option<GradientStop> = None;
+    for stop in edges {
+        if let Some(left) = previous {
+            let [x, y] = [pos_x(left.position), pos_x(stop.position)];
+            let rgb = |[r, g, b]: [u8; 3]| egui::Color32::from_rgb(r, g, b);
+            let index = mesh.vertices.len() as u32;
+            mesh.colored_vertex(egui::pos2(x, rect.top()), rgb(left.color));
+            mesh.colored_vertex(egui::pos2(y, rect.top()), rgb(stop.color));
+            mesh.colored_vertex(egui::pos2(x, rect.bottom()), rgb(left.color));
+            mesh.colored_vertex(egui::pos2(y, rect.bottom()), rgb(stop.color));
+            mesh.add_triangle(index, index + 1, index + 2);
+            mesh.add_triangle(index + 1, index + 3, index + 2);
+        }
+        previous = Some(stop);
     }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(1, 3, 2);
     ui.painter().add(mesh);
+    for (index, stop) in stops.iter().enumerate() {
+        let [r, g, b] = stop.color;
+        let marker = egui::Rect::from_center_size(
+            egui::pos2(pos_x(display(stop.position)), rect.bottom() + 6.),
+            egui::Vec2::splat(8.),
+        );
+        ui.painter()
+            .rect_filled(marker, 1., egui::Color32::from_rgb(r, g, b));
+        let border = if index == selected {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().widgets.inactive.fg_stroke.color
+        };
+        ui.painter().rect_stroke(
+            marker,
+            1.,
+            egui::Stroke::new(if index == selected { 2_f32 } else { 1_f32 }, border),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(stops.len() < MAX_GRADIENT_STOPS, egui::Button::new("+"))
+            .on_hover_text(tr("添加色标"))
+            .clicked()
+        {
+            let mut points = vec![0];
+            points.extend(stops.iter().map(|stop| stop.position));
+            points.push(GRADIENT_END);
+            let gap = points
+                .windows(2)
+                .max_by_key(|pair| pair[1] - pair[0])
+                .unwrap();
+            let position = gap[0].midpoint(gap[1]);
+            let color = g.sample(f32::from(position) / f32::from(GRADIENT_END));
+            selected = stops.partition_point(|stop| stop.position <= position);
+            stops.insert(selected, GradientStop { position, color });
+            moved = None;
+        }
+        if ui
+            .add_enabled(stops.len() > 2, egui::Button::new("−"))
+            .on_hover_text(tr("删除色标"))
+            .clicked()
+        {
+            stops.remove(selected);
+            selected = selected.min(stops.len() - 1);
+            moved = None;
+        }
+        let mut position = f32::from(stops[selected].position) * 100. / f32::from(GRADIENT_END);
+        if ui
+            .add(
+                egui::DragValue::new(&mut position)
+                    .range(0. ..=100.)
+                    .max_decimals(1)
+                    .suffix("%"),
+            )
+            .changed()
+        {
+            moved = Some((position * f32::from(GRADIENT_END) / 100.).round() as u16);
+        }
+        ui.push_id(("gradient_stop_color", selected), |ui| {
+            self::color(ui, "颜色", &mut stops[selected].color);
+        });
+    });
+    if let Some(position) = moved.filter(|position| *position != stops[selected].position) {
+        let mut stop = stops.remove(selected);
+        stop.position = position;
+        selected = stops.partition_point(|other| other.position <= position);
+        stops.insert(selected, stop);
+    }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(selected_id, selected));
+    g.set_color_stops(&stops);
+}
+
+fn gradient(ui: &mut Ui, g: &mut Gradient) {
+    gradient_colors(ui, g);
     pick(
         ui,
         "渐变样式",
@@ -188,13 +331,13 @@ fn glow(ui: &mut Ui, g: &mut Glow, inner: bool) {
         &mut g.gradient,
         &[(false, "颜色"), (true, "渐变")],
     );
-    color(
-        ui,
-        if g.gradient { "起始颜色" } else { "颜色" },
-        &mut g.ink.color,
-    );
     if g.gradient {
-        color(ui, "结束颜色", &mut g.end_color);
+        let mut ramp = g.color_ramp();
+        gradient_colors(ui, &mut ramp);
+        [g.ink.color, g.end_color] = ramp.colors;
+        g.stops = ramp.stops;
+    } else {
+        color(ui, "颜色", &mut g.ink.color);
     }
     ui.separator();
     pick(
@@ -349,13 +492,22 @@ fn instance_button(ui: &mut Ui, fx: &Effects, row: Page, editable: bool) -> bool
     } else {
         "移除此效果"
     };
-    ui.add_enabled(
-        editable && !full,
-        egui::Button::new(if add { "+" } else { "−" }).min_size(egui::vec2(22., 20.)),
-    )
-    .on_hover_text(tr(tip))
-    .on_disabled_hover_text(tr(tip))
-    .clicked()
+    let response = ui
+        .add_enabled_ui(editable && !full, |ui| {
+            ui.add_sized([22., 20.], egui::Button::new("").frame(false))
+        })
+        .inner;
+    let rect = egui::Rect::from_center_size(response.rect.center(), egui::Vec2::splat(16.));
+    let color = ui.style().interact(&response).fg_stroke.color;
+    if add {
+        crate::icons::paint(ui, crate::icons::Icon::AddLayer, rect, color);
+    } else {
+        crate::icons::paint_layer_button(ui, rect, color, false);
+    }
+    response
+        .on_hover_text(tr(tip))
+        .on_disabled_hover_text(tr(tip))
+        .clicked()
 }
 fn apply_instance_action(fx: &mut Effects, row: Page, selected: &mut Page) {
     if row.index == 0 {
@@ -368,7 +520,10 @@ fn apply_instance_action(fx: &mut Effects, row: Page, selected: &mut Page) {
 }
 fn effect_list(ui: &mut Ui, fx: &mut Effects, selected: &mut Page, editable: bool) {
     let mut enabled = !fx.master_disabled;
-    if ui.add_enabled(editable, egui::Checkbox::new(&mut enabled, tr("图层样式"))).changed() {
+    if ui
+        .add_enabled(editable, egui::Checkbox::new(&mut enabled, tr("图层样式")))
+        .changed()
+    {
         fx.master_disabled = !enabled;
     }
     let mut action = None;

@@ -3,6 +3,49 @@ use super::*;
 use std::collections::HashSet;
 type Pixel = (usize, u32, u32);
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Interpolation {
+    Nearest,
+    Bilinear,
+    #[default]
+    Bicubic,
+    Smoother,
+    Sharper,
+    Automatic,
+}
+
+impl Interpolation {
+    const CHOICES: [(Self, &'static str); 6] = [
+        (Self::Nearest, "邻近"),
+        (Self::Bilinear, "两次线性"),
+        (Self::Bicubic, "两次立方"),
+        (Self::Smoother, "两次立方（较平滑）"),
+        (Self::Sharper, "两次立方（较锐利）"),
+        (Self::Automatic, "两次立方（自动）"),
+    ];
+
+    fn cubic_parameter(self, scale: f32) -> f32 {
+        match self {
+            Self::Smoother => -0.25,
+            Self::Sharper => -0.75,
+            Self::Automatic if scale < 1. => -0.75,
+            Self::Automatic if scale > 1. => -0.25,
+            _ => -0.5,
+        }
+    }
+}
+
+fn cubic_weight(distance: f32, a: f32) -> f32 {
+    let x = distance.abs();
+    if x <= 1. {
+        ((a + 2.) * x - (a + 3.)) * x * x + 1.
+    } else if x < 2. {
+        ((a * x - 5. * a) * x + 8. * a) * x - 4. * a
+    } else {
+        0.
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct Pose {
     center: Pos2,
@@ -45,7 +88,7 @@ pub(super) struct Session {
     pose: Pose,
     drag: Option<Drag>,
     linked: bool,
-    smooth: bool,
+    interpolation: Interpolation,
     pub index: usize,
     pub preview: Option<Layer>,
     selection: Option<HashSet<Pixel>>,
@@ -64,6 +107,20 @@ const HANDLES: [Vec2; 8] = [
 ];
 fn handle_position(r: Rect, pose: Pose, handle: Vec2) -> Pos2 {
     pose.forward(r, r.center() + r.size() * handle * 0.5)
+}
+
+fn corner_controls(bounds: Rect, radii: [f32; 4], angle: f32, zoom: f32) -> Option<[Pos2; 4]> {
+    let side = bounds.width().min(bounds.height());
+    if side * zoom < 30. {
+        return None;
+    }
+    let min_inset = (12. / zoom).min(side * 0.36);
+    let max_inset = side * 0.38;
+    Some(std::array::from_fn(|index| {
+        let outward = HANDLES[index];
+        let inset = (radii[index] * 0.65).clamp(min_inset, max_inset);
+        bounds.center() + rotate((bounds.size() * 0.5 - Vec2::splat(inset)) * outward, angle)
+    }))
 }
 fn hit_test(r: Rect, pose: Pose, point: Pos2, zoom: f32, active: bool) -> Option<Handle> {
     let nearest = HANDLES
@@ -117,18 +174,20 @@ impl Editor {
         let i = self.active_layer;
         matches!(self.tool, Tool::Move | Tool::Select)
             && !self.elevated
-            && self.move_allowed(i)
+            && self.position_editable(i)
             && self.ancestors_visible(i)
             && self.layers[i].visible
             && !self.ancestor_paint_locked(i)
             && !self.layers[i].settings.lock_pixels
             && self.selection.draft.is_empty()
             && if self.mask_editing {
-                self.layers[i].settings.mask.is_some()
+                let p = &self.layers[i].settings;
+                p.mask.is_some() && p.vector.as_ref().is_none_or(|vector| vector.fill.is_some())
             } else {
                 let p = &self.layers[i].settings;
                 p.group_id == 0
                     && p.adjustment.is_none()
+                    && (p.vector.is_none() || self.selection.mask.is_none())
                     && (p.text.is_none()
                         || (self.rectangle_text_allowed() && self.selection.mask.is_none()))
             }
@@ -178,6 +237,29 @@ impl Editor {
         }
         let layer = &self.layers[self.active_layer];
         let (w, h) = self.pixels.dimensions();
+        if let Some(vector) = layer
+            .settings
+            .vector
+            .as_ref()
+            .filter(|_| !self.mask_editing)
+        {
+            let offset = self
+                .vector_origin(layer.settings.vector_origin)
+                .map_or_else(
+                    || {
+                        self.vector_cell(Pos2::ZERO, 1., self.whole_unit())
+                            .min
+                            .to_vec2()
+                    },
+                    |[x, y]| egui::vec2(x as f32, y as f32),
+                );
+            let result = vector
+                .bounds()
+                .filter(Rect::is_positive)
+                .map(|bounds| bounds.translate(offset));
+            self.transform_bounds_cache = Some((key, result));
+            return result;
+        }
         let mut bounds = Rect::NOTHING;
         for (tile, offset) in
             self.transform_cells(layer.settings.text.is_some() && !self.mask_editing)
@@ -221,7 +303,7 @@ impl Editor {
             pose: Pose::initial(bounds),
             drag: None,
             linked: self.transform_linked,
-            smooth: self.transform_smooth,
+            interpolation: self.transform_interpolation,
             index: self.active_layer,
             preview: None,
             selection: None,
@@ -230,14 +312,16 @@ impl Editor {
     }
     pub(super) fn finish_transform(&mut self, commit: bool) -> bool {
         let Some(mut t) = self.transform.take() else {
+            self.confirm_transform_exit = false;
             return true;
         };
         if commit && t.error.is_some() {
             self.transform = Some(t);
             return false;
         }
+        self.confirm_transform_exit = false;
         self.transform_linked = t.linked;
-        self.transform_smooth = t.smooth;
+        self.transform_interpolation = t.interpolation;
         if let Some(layer) = t
             .preview
             .take()
@@ -272,12 +356,57 @@ impl Editor {
         let mut draft = layer.clone();
         let (w, h) = self.pixels.dimensions();
         let text = layer.settings.text.is_some() && !self.mask_editing;
+        let vector = layer
+            .settings
+            .vector
+            .as_ref()
+            .filter(|_| !self.mask_editing);
+        if let Some(vector) = vector {
+            let origin = self.vector_origin(layer.settings.vector_origin);
+            let offset = origin.map_or_else(
+                || {
+                    self.vector_cell(Pos2::ZERO, 1., self.whole_unit())
+                        .min
+                        .to_vec2()
+                },
+                |[x, y]| egui::vec2(x as f32, y as f32),
+            );
+            let transformed = vector.transformed(
+                |point| t.pose.forward(t.bounds, point + offset) - offset,
+                t.pose.scale,
+                t.pose.angle,
+            );
+            let Some(images) = transformed
+                .valid()
+                .then(|| self.render_vector_tiles(&transformed, origin))
+                .flatten()
+            else {
+                t.error = Some(tr("当前目标没有可变换的内容。").to_owned());
+                self.invalidate_textures();
+                return;
+            };
+            if transformed.fill.is_some() {
+                draft.tiles = images;
+            } else {
+                draft.settings.mask = Some(
+                    images
+                        .iter()
+                        .map(|image| image.pixels().map(|p| p[3]).collect())
+                        .collect(),
+                );
+            }
+            draft.settings.vector = Some(transformed);
+            draft.settings.vector_origin = origin;
+        }
         if text {
             let Some((_, min)) = self.transform_cells(true).into_iter().next() else {
                 return;
             };
-            let pivot = t.bounds.center().to_vec2() - min - egui::vec2(w as f32, h as f32) * 0.5;
             let style = draft.settings.text.as_mut().unwrap();
+            let min = style
+                .tile_origin
+                .map_or(min, |[x, y]| egui::vec2(x as f32, y as f32));
+            let pivot = t.bounds.center().to_vec2() - min - egui::vec2(w as f32, h as f32) * 0.5;
             style.transform(
                 [
                     rotate(Vec2::X * t.pose.scale.x, t.pose.angle),
@@ -292,9 +421,9 @@ impl Editor {
                 .catalog
                 .as_ref()
                 .ok_or_else(|| tr("正在读取系统字体").to_owned())
-                .and_then(|fonts| style.raster(w, h, fonts))
+                .and_then(|fonts| self.render_text_tiles(style, fonts))
             {
-                Ok(im) => draft.tiles.fill(im),
+                Ok(tiles) => draft.tiles = tiles,
                 Err(e) => {
                     self.message = e.clone();
                     t.error = Some(e);
@@ -303,12 +432,14 @@ impl Editor {
                 }
             }
         }
-        let masks = if self.mask_editing || layer.settings.mask_linked {
+        let masks = if self.mask_editing
+            || (layer.settings.mask_linked && vector.is_none_or(|vector| vector.fill.is_some()))
+        {
             layer.settings.mask.as_ref()
         } else {
             None
         };
-        if !text || masks.is_some() {
+        if (!text && vector.is_none()) || masks.is_some() {
             let mut selected = HashSet::new();
             let layout = self.whole_unit();
             let text_cell = text.then(|| self.transform_cells(true)[0].1);
@@ -354,21 +485,36 @@ impl Editor {
                                 }
                             }
                         };
-                        if t.smooth {
+                        if t.interpolation != Interpolation::Nearest {
                             let p = local - Vec2::splat(0.5);
                             let sx = p.x.floor() as i32;
                             let sy = p.y.floor() as i32;
                             let fx = p.x - sx as f32;
                             let fy = p.y - sy as f32;
-                            for (dx, wx) in [(0, 1. - fx), (1, fx)] {
-                                for (dy, wy) in [(0, 1. - fy), (1, fy)] {
-                                    add(sample(sx + dx, sy + dy), wx * wy);
+                            if t.interpolation == Interpolation::Bilinear {
+                                for (dx, wx) in [(0, 1. - fx), (1, fx)] {
+                                    for (dy, wy) in [(0, 1. - fy), (1, fy)] {
+                                        add(sample(sx + dx, sy + dy), wx * wy);
+                                    }
+                                }
+                            } else {
+                                let ax = t.interpolation.cubic_parameter(t.pose.scale.x);
+                                let ay = t.interpolation.cubic_parameter(t.pose.scale.y);
+                                let x = [-1, 0, 1, 2].map(|i| (i, cubic_weight(fx - i as f32, ax)));
+                                let y = [-1, 0, 1, 2].map(|i| (i, cubic_weight(fy - i as f32, ay)));
+                                for (dx, wx) in x {
+                                    for (dy, wy) in y {
+                                        let weight = wx * wy;
+                                        if weight != 0. {
+                                            add(sample(sx + dx, sy + dy), weight);
+                                        }
+                                    }
                                 }
                             }
                         } else {
                             add(from, 1.);
                         }
-                        if !self.mask_editing && !text {
+                        if !self.mask_editing && !text && vector.is_none() {
                             let base = if clear {
                                 Rgba([0; 4])
                             } else {
@@ -422,7 +568,7 @@ impl Editor {
         let mut commit = false;
         let mut cancel = false;
         let old = t.pose;
-        let smooth = t.smooth;
+        let interpolation = t.interpolation;
         egui::ScrollArea::horizontal()
             .id_salt("transform_options")
             .show(ui, |ui| {
@@ -476,16 +622,36 @@ impl Editor {
                             .range(-180. ..=180.)
                             .suffix("°"),
                     );
-                    if self.layers[t.index].settings.text.is_none() || self.mask_editing {
-                        ui.checkbox(&mut t.smooth, tr("平滑插值"));
-                    }
+                    let settings = &self.layers[t.index].settings;
+                    let samples_pixels = (settings.text.is_none() && settings.vector.is_none())
+                        || (settings.mask.is_some()
+                            && (self.mask_editing || settings.mask_linked)
+                            && settings
+                                .vector
+                                .as_ref()
+                                .is_none_or(|vector| vector.fill.is_some()));
+                    ui.add_enabled_ui(samples_pixels, |ui| {
+                        ui.label(tr("插值方式"));
+                        let label = Interpolation::CHOICES
+                            .iter()
+                            .find(|(value, _)| *value == t.interpolation)
+                            .unwrap()
+                            .1;
+                        egui::ComboBox::from_id_salt("transform_interpolation")
+                            .selected_text(tr(label))
+                            .show_ui(ui, |ui| {
+                                for (value, label) in Interpolation::CHOICES {
+                                    ui.selectable_value(&mut t.interpolation, value, tr(label));
+                                }
+                            });
+                    });
                     commit = ui
                         .add_enabled(t.error.is_none(), egui::Button::new(tr("确定")))
                         .clicked();
                     cancel = ui.button(tr("取消")).clicked();
                 })
             });
-        if old != t.pose || smooth != t.smooth {
+        if old != t.pose || interpolation != t.interpolation {
             self.transform_update(&mut t);
         }
         self.transform = Some(t);
@@ -494,13 +660,50 @@ impl Editor {
         }
     }
     pub(super) fn transform_switch(&mut self, ui: &mut egui::Ui) {
-        ui.checkbox(&mut self.show_transform, tr("显示变换控件"));
+        ui.checkbox(&mut self.show_transform, tr("显示变换控件"))
+            .on_hover_text("Ctrl+H");
         if ui
             .small_button(tr("自由变换"))
             .on_hover_text("Ctrl+T")
             .clicked()
         {
             self.begin_transform();
+        }
+    }
+
+    pub(super) fn toggle_transform_controls(&mut self) {
+        if let Some(session) = self.transform.as_mut() {
+            session.drag = None;
+            self.confirm_transform_exit = true;
+        } else {
+            self.show_transform = !self.show_transform;
+        }
+    }
+
+    pub(super) fn transform_exit_confirmation(&mut self, ui: &egui::Ui) {
+        if !self.confirm_transform_exit {
+            return;
+        }
+        let Some(session) = &self.transform else {
+            self.confirm_transform_exit = false;
+            return;
+        };
+        let (decision, dismissed) = editor_confirmation_response(
+            ui,
+            egui::Modal::new(ui.id().with("transform_exit_confirmation")),
+            tr("退出变换"),
+            tr("是否应用当前变换？"),
+            tr("放弃变换"),
+            tr("应用变换"),
+            session.error.is_none(),
+            |_| {},
+        );
+        if dismissed {
+            self.confirm_transform_exit = false;
+        } else if let Some(commit) = decision
+            && self.finish_transform(commit)
+        {
+            self.show_transform = false;
         }
     }
     pub(super) fn transform_input(
@@ -510,7 +713,13 @@ impl Editor {
         origin: Pos2,
         zoom: f32,
     ) -> bool {
-        if !self.show_transform && self.transform.is_none() {
+        if self.confirm_transform_exit {
+            return true;
+        }
+        if (!self.show_transform || !matches!(self.tool, Tool::Move | Tool::Select))
+            && self.transform.is_none()
+        {
+            self.path_tool.corner_drag = None;
             return false;
         }
         let active = self.transform.is_some();
@@ -520,6 +729,7 @@ impl Editor {
             .map(|t| (t.bounds, t.pose))
             .or_else(|| self.transform_bounds().map(|r| (r, Pose::initial(r))));
         let Some((r, pose)) = frame else {
+            self.path_tool.corner_drag = None;
             return active;
         };
         let Some(pointer) = response
@@ -530,6 +740,12 @@ impl Editor {
         };
         let local = |p: Pos2| ((p - origin) / zoom).to_pos2();
         let start = ui.input(|i| i.pointer.press_origin()).unwrap_or(pointer);
+        if !active
+            && self.tool == Tool::Move
+            && self.corner_input(ui, response, local(start), local(pointer), zoom)
+        {
+            return true;
+        }
         let hit = hit_test(
             r,
             pose,
@@ -615,6 +831,90 @@ impl Editor {
         }
         handle.is_some()
     }
+
+    fn corner_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        start: Pos2,
+        pointer: Pos2,
+        zoom: f32,
+    ) -> bool {
+        let layer = self.active_layer;
+        let Some(mut vector) = self.layers[layer]
+            .settings
+            .vector
+            .clone()
+            .filter(|_| !self.mask_editing)
+        else {
+            self.path_tool.corner_drag = None;
+            return false;
+        };
+        let vector::Geometry::Rectangle {
+            min,
+            max,
+            radii,
+            angle,
+        } = &mut vector.geometry
+        else {
+            self.path_tool.corner_drag = None;
+            return false;
+        };
+        let bounds = self.rectangle_corner_bounds(*min, *max);
+        let hit = corner_controls(bounds, *radii, *angle, zoom).and_then(|handles| {
+            let point = if response.drag_started() {
+                start
+            } else {
+                pointer
+            };
+            handles
+                .iter()
+                .position(|handle| handle.distance(point) * zoom <= 7.)
+        });
+        if response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(corner) = hit
+        {
+            self.path_tool.corner_drag = Some(vector::CornerDrag {
+                layer,
+                corner,
+                pointer: start,
+                radius: radii[corner],
+                changed: false,
+            });
+        }
+        if let Some(mut drag) = self
+            .path_tool
+            .corner_drag
+            .take()
+            .filter(|drag| drag.layer == layer)
+        {
+            let down = ui.input(|i| i.pointer.primary_down());
+            if !down && !response.drag_stopped_by(egui::PointerButton::Primary) {
+                return true;
+            }
+            let inward = rotate(-HANDLES[drag.corner], *angle);
+            let targeted =
+                (drag.radius + (pointer - drag.pointer).dot(inward) * 0.5).clamp(0., 8192.);
+            if targeted != radii[drag.corner] {
+                if self.path_tool.corner_unlinked {
+                    radii[drag.corner] = targeted;
+                } else {
+                    radii.fill(targeted);
+                }
+                self.update_vector(layer, vector, !drag.changed);
+                drag.changed = true;
+            }
+            if down {
+                self.path_tool.corner_drag = Some(drag);
+            }
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+            return true;
+        }
+        if hit.is_some() {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+        }
+        hit.is_some()
+    }
     pub(super) fn transform_outline(&mut self, painter: &egui::Painter, origin: Pos2, zoom: f32) {
         if !self.show_transform || !matches!(self.tool, Tool::Move | Tool::Select) {
             return;
@@ -643,6 +943,44 @@ impl Editor {
                 egui::StrokeKind::Inside,
             );
         }
+        if self.tool == Tool::Move
+            && self.transform.is_none()
+            && !self.mask_editing
+            && let Some(vector::Geometry::Rectangle {
+                min,
+                max,
+                radii,
+                angle,
+            }) = self.layers[self.active_layer]
+                .settings
+                .vector
+                .as_ref()
+                .map(|vector| &vector.geometry)
+            && let Some(points) = corner_controls(
+                self.rectangle_corner_bounds(*min, *max),
+                *radii,
+                *angle,
+                zoom,
+            )
+        {
+            for point in points {
+                let center = origin + point.to_vec2() * zoom;
+                painter.circle_filled(center, 4., Color32::WHITE);
+                painter.circle_stroke(center, 4., egui::Stroke::new(1_f32, blue));
+                painter.circle_filled(center, 1.3, blue);
+            }
+        }
+    }
+
+    fn rectangle_corner_bounds(&self, min: [f32; 2], max: [f32; 2]) -> Rect {
+        let offset = self.vector_origin(self.layers[self.active_layer].settings.vector_origin).map_or_else(
+            || self.vector_cell(Pos2::ZERO, 1., self.whole_unit()).min.to_vec2(),
+            |[x, y]| egui::vec2(x as f32, y as f32),
+        );
+        Rect::from_min_max(
+            egui::pos2(min[0], min[1]) + offset,
+            egui::pos2(max[0], max[1]) + offset,
+        )
     }
 }
 

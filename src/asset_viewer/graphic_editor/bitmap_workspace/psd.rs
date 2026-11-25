@@ -63,12 +63,6 @@ fn dimensions([top, left, bottom, right]: [i32; 4]) -> Result<(usize, usize)> {
     }
     Ok((w as usize, h as usize))
 }
-#[derive(serde::Serialize, serde::Deserialize)]
-struct TextData {
-    text: text_layer::Text,
-    raster_hash: [u8; 32],
-}
-
 fn blend_key(mode: Blend) -> Result<&'static [u8; 4]> {
     BLENDS
         .iter()
@@ -89,7 +83,6 @@ fn blend_value(key: &[u8]) -> Result<Blend> {
 struct Record {
     divider: u32,
     locked: bool,
-    text_hash: Option<[u8; 32]>,
     rect: [i32; 4],
     channels: Vec<(i16, usize)>,
     name: String,
@@ -97,7 +90,7 @@ struct Record {
     settings: Properties,
     mask: Option<([i32; 4], u8)>,
 }
-fn record(data: &mut Bytes) -> Result<Record> {
+fn record(data: &mut Bytes, canvas: [u32; 2]) -> Result<Record> {
     let rect = data.rect()?;
     dimensions(rect)?;
     let count = data.word()?;
@@ -120,7 +113,6 @@ fn record(data: &mut Bytes) -> Result<Record> {
     let blend = blend_value(mode)?;
     let mut divider = 0;
     let mut locked = false;
-    let mut text_hash = None;
     let pct = |v: u8| ((u16::from(v) * 100 + 127) / 255) as u8;
     let opacity = pct(data.byte()?);
     let clipped = data.byte()? != 0;
@@ -169,6 +161,10 @@ fn record(data: &mut Bytes) -> Result<Record> {
     let mut style = None;
     let mut multi_style = None;
     let mut legacy_style = false;
+    let mut vector_mask = None;
+    let mut vector_fill = None;
+    let mut live_shape = None;
+    let mut has_shape_stroke = false;
     while extra.0.len() >= 12 {
         if extra.take(4)? != b"8BIM" {
             return Err("Unsupported PSD layer block".into());
@@ -200,17 +196,7 @@ fn record(data: &mut Bytes) -> Result<Record> {
                 settings.lock_pixels = flags & 2 != 0;
                 settings.lock_position = flags & 4 != 0;
             }
-            b"uyTx" => {
-                if len > 32768 {
-                    return Err("Invalid text metadata".into());
-                }
-                let t: TextData = serde_json::from_slice(block.0).map_err(|e| e.to_string())?;
-                if !t.text.valid() || t.text.repeat {
-                    return Err("Invalid text settings".into());
-                }
-                text_hash = Some(t.raster_hash);
-                settings.text = Some(t.text);
-            }
+            b"uyTx" => {}
             b"lsct" | b"lsdk" => {
                 divider = block.long()?;
                 if divider > 3 {
@@ -232,9 +218,33 @@ fn record(data: &mut Bytes) -> Result<Record> {
                 settings.collapsed = divider == 2;
             }
             b"lyid" => settings.psd_layer_id = Some(block.long()?),
+            b"shmd" if len <= 1024 * 1024 => tag(&mut settings.psd_metadata, b"shmd", block.0),
+            b"TySh" => {
+                settings.psd_native_text = true;
+                settings.text = text_layer::psd::read(block.0, canvas);
+                if settings.text.is_some() {
+                    settings.psd_tysh = Some(block.0.into());
+                }
+            }
             b"lfx2" | b"lfxs" => style = Some(block.0),
             b"lmfx" => multi_style = Some(block.0),
             b"lrFX" => legacy_style = true,
+            b"vmsk" | b"vsms" => vector_mask = Some(block.0),
+            b"SoCo" => {
+                vector_fill = Some(super::super::layer_properties::read_solid_fill(block.0)?)
+            }
+            b"vscg" if block.0.starts_with(b"SoCo") => {
+                vector_fill = Some(super::super::layer_properties::read_solid_fill(
+                    &block.0[4..],
+                )?);
+            }
+            b"vogk" => live_shape = Some(block.0),
+            b"vstk" => {
+                if !super::super::layer_properties::solid_shape_stroke_supported(block.0)? {
+                    return Err("Unsupported PSD vector stroke or disabled fill".into());
+                }
+                has_shape_stroke = true;
+            }
             b"lclr" | b"fxrp" | b"clbl" | b"infx" | b"knko" | b"lnsr" | b"lyvr" | b"lmgm"
             | b"vmgm" => {
                 if len > 64 {
@@ -254,13 +264,50 @@ fn record(data: &mut Bytes) -> Result<Record> {
     } else if legacy_style {
         return Err("Unsupported legacy PSD layer style".into());
     }
+    if settings.psd_native_text
+        && ([-1, 0, 1, 2].into_iter().any(|id| {
+            !channels
+                .iter()
+                .any(|&(channel, len)| channel == id && len > 2)
+        }) || rect[0] == rect[2]
+            || rect[1] == rect[3])
+    {
+        return Err("PSD native text has no usable layer pixels".into());
+    }
     if !extra.0.iter().all(|v| *v == 0) {
         return Err("Invalid trailing layer data".into());
+    }
+    if let Some(path) = vector_mask {
+        if divider != 0 || settings.psd_native_text || (mask.is_some() && vector_fill.is_none()) {
+            return Err(
+                "Unsupported PSD vector mask combined with another mask or layer type".into(),
+            );
+        }
+        let (mut vector, enabled, linked) =
+            super::super::vector::psd::decode(path, canvas, vector_fill)?;
+        if vector.fill.is_some()
+            && let Some(geometry) =
+                live_shape.and_then(super::super::layer_properties::read_live_rectangle)
+        {
+            let rectangle = super::super::vector::Vector {
+                geometry,
+                ..vector.clone()
+            };
+            if rectangle.valid() {
+                vector = rectangle;
+            }
+        }
+        if vector.fill.is_none() {
+            settings.mask_enabled = enabled;
+            settings.mask_linked = linked;
+        }
+        settings.vector = Some(vector);
+    } else if vector_fill.is_some() || live_shape.is_some() || has_shape_stroke {
+        return Err("PSD shape missing its vector path".into());
     }
     Ok(Record {
         divider,
         locked,
-        text_hash,
         rect,
         channels,
         name,
@@ -365,9 +412,10 @@ pub(super) fn global_light(resources: &[u8]) -> Light {
     light
 }
 
-fn resources_with_light(resources: &[u8], light: Light) -> Result<Vec<u8>> {
+fn resources_with_light(resources: &[u8], light: Light, merged: &RgbaImage) -> Result<Vec<u8>> {
     let mut section = Bytes(resources);
     let mut output = Vec::new();
+    let mut has_version_info = false;
     while !section.0.is_empty() {
         let start = section.0;
         section.take(4)?;
@@ -376,9 +424,29 @@ fn resources_with_light(resources: &[u8], light: Light) -> Result<Vec<u8>> {
         section.take(name_len + usize::from(name_len % 2 == 0))?;
         let data_len = section.section()?.0.len();
         section.take(data_len % 2)?;
-        if !matches!(id, 1037 | 1049) {
+        if !matches!(id, 1033 | 1036 | 1037 | 1049 | 1057) {
             output.extend(&start[..start.len() - section.0.len()]);
+        } else if id == 1057 && data_len >= 5 {
+            let record = &start[..start.len() - section.0.len()];
+            let offset = output.len() + record.len() - data_len - data_len % 2;
+            output.extend(record);
+            output[offset + 4] = 1;
+            has_version_info = true;
         }
+    }
+    if !has_version_info {
+        let mut version = vec![0, 0, 0, 1, 1]; // Version 1, real merged image present.
+        for name in ["Unity YAML Viewer", "Unity YAML Viewer"] {
+            version.extend((name.encode_utf16().count() as u32).to_be_bytes());
+            version.extend(name.encode_utf16().flat_map(u16::to_be_bytes));
+        }
+        version.extend(1u32.to_be_bytes());
+        output.extend(b"8BIM");
+        output.extend(1057u16.to_be_bytes());
+        output.extend([0, 0]);
+        output.extend((version.len() as u32).to_be_bytes());
+        output.extend(version);
+        output.push(0); // The resource payload has an odd length.
     }
     for (id, value) in [
         (1037u16, i32::from(light.angle)),
@@ -390,7 +458,53 @@ fn resources_with_light(resources: &[u8], light: Light) -> Result<Vec<u8>> {
         output.extend(4u32.to_be_bytes());
         output.extend(value.to_be_bytes());
     }
+    write_thumbnail(&mut output, merged)?;
     Ok(output)
+}
+
+fn write_thumbnail(output: &mut Vec<u8>, merged: &RgbaImage) -> Result<()> {
+    let (w, h) = merged.dimensions();
+    let longest = w.max(h);
+    if longest == 0 {
+        return Err("Invalid PSD thumbnail dimensions".into());
+    }
+    let thumbnail = if longest > 160 {
+        image::imageops::resize(
+            merged,
+            (w * 160 / longest).max(1),
+            (h * 160 / longest).max(1),
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        merged.clone()
+    };
+    let (w, h) = thumbnail.dimensions();
+    let rgb = image::RgbImage::from_fn(w, h, |x, y| {
+        let [r, g, b, alpha] = thumbnail.get_pixel(x, y).0;
+        image::Rgb([r, g, b].map(|channel| {
+            let alpha = u32::from(alpha);
+            ((u32::from(channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8
+        }))
+    });
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 88)
+        .encode_image(&rgb)
+        .map_err(|error| error.to_string())?;
+    let row_bytes = (w * 3).next_multiple_of(4);
+    output.extend(b"8BIM");
+    output.extend(1036u16.to_be_bytes());
+    output.extend([0, 0]);
+    output.extend((28 + jpeg.len() as u32).to_be_bytes());
+    for word in [1, w, h, row_bytes, row_bytes * h, jpeg.len() as u32] {
+        output.extend(word.to_be_bytes());
+    }
+    output.extend(24u16.to_be_bytes());
+    output.extend(1u16.to_be_bytes());
+    output.extend(&jpeg);
+    if jpeg.len() % 2 != 0 {
+        output.push(0);
+    }
+    Ok(())
 }
 pub(super) fn has_merged_preview(bytes: &[u8]) -> Result<bool> {
     let mut data = Bytes(bytes);
@@ -398,7 +512,25 @@ pub(super) fn has_merged_preview(bytes: &[u8]) -> Result<bool> {
     data.section()?;
     image_resources(data.section()?.0, None, None)
 }
-pub(super) fn decode(bytes: &[u8], (w, h): (u32, u32)) -> Result<(Vec<Layer>, Vec<u8>)> {
+fn retain_photoshop_metadata(key: &[u8], data: &[u8]) -> bool {
+    match key {
+        // A disabled Content Authenticity descriptor, with an empty generation GUID.
+        b"CAI " => data == b"\0\0\0\x03\0\0\0\x10\0\0\0\x01\0\0\0\0\0\0null\0\0\0\x02\0\0\0\0enabbool\0\0\0\0\x10generationalGuidTEXT\0\0\0\x01\0\0\0\0\0\0\0\0\0\0",
+        // The descriptor reports no generative technology in use.
+        b"GenI" => data == b"\0\0\0\x10\0\0\0\x01\0\0\0\0\0\x0bgenTechInfo\0\0\0\x01\0\0\0\x0eisUsingGenTechlong\0\0\0\0",
+        // Photoshop's empty filter-mask record, without an associated filter.
+        b"FMsk" => data == [0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 50],
+        // Source compositor information is a document descriptor.
+        b"cinf" => data.len() <= 4096
+            && data.starts_with(b"\0\0\0\x10\0\0\0\x01\0\0\0\0\0\0null\0\0\0\x08\0\0\0\0VrsnObjc"),
+        _ => false,
+    }
+}
+
+pub(super) fn decode(
+    bytes: &[u8],
+    (w, h): (u32, u32),
+) -> Result<(Vec<Layer>, Vec<u8>, Vec<u8>, bool)> {
     let mut data = Bytes(bytes);
     if data.take(4)? != b"8BPS" || data.word()? != 1 {
         return Err("PSD v1 required".into());
@@ -418,7 +550,7 @@ pub(super) fn decode(bytes: &[u8], (w, h): (u32, u32)) -> Result<(Vec<Layer>, Ve
     image_resources(data.section()?.0, Some(&mut resources), None)?;
     let mut layers = data.section()?;
     if layers.0.is_empty() && channels == 3 {
-        return Ok((vec![], resources));
+        return Ok((vec![], resources, vec![], false));
     }
     let mut info = layers.section()?;
     let signed = info.word()? as i16;
@@ -430,7 +562,7 @@ pub(super) fn decode(bytes: &[u8], (w, h): (u32, u32)) -> Result<(Vec<Layer>, Ve
         return Err("PSD layer memory limit".into());
     }
     let mut records = (0..count)
-        .map(|_| record(&mut info))
+        .map(|_| record(&mut info, [w, h]))
         .collect::<Result<Vec<_>>>()?;
     let mut parents = vec![0];
     for (i, r) in records.iter_mut().enumerate().rev() {
@@ -462,7 +594,12 @@ pub(super) fn decode(bytes: &[u8], (w, h): (u32, u32)) -> Result<(Vec<Layer>, Ve
         || records
             .iter()
             .filter(|r| r.divider != 3)
-            .map(|r| 4 + u64::from(r.mask.is_some()))
+            .map(|r| {
+                4 + u64::from(
+                    r.mask.is_some()
+                        || r.settings.vector.as_ref().is_some_and(|v| v.fill.is_none()),
+                )
+            })
             .sum::<u64>()
             * u64::from(w)
             * u64::from(h)
@@ -509,10 +646,15 @@ pub(super) fn decode(bytes: &[u8], (w, h): (u32, u32)) -> Result<(Vec<Layer>, Ve
                 }
             }
         }
-        if let Some(digest) = r.text_hash
-            && <[u8; 32]>::from(Sha256::digest(im.as_raw())) != digest
-        {
-            r.settings.text = None;
+        if let Some(vector) = &r.settings.vector {
+            let raster = vector
+                .raster(w, h)
+                .ok_or("Unable to render PSD vector path")?;
+            if vector.fill.is_some() {
+                im = raster;
+            } else {
+                r.settings.mask = Some(vec![raster.pixels().map(|p| p[3]).collect()]);
+            }
         }
         result.push(Layer {
             settings: r.settings,
@@ -529,10 +671,49 @@ pub(super) fn decode(bytes: &[u8], (w, h): (u32, u32)) -> Result<(Vec<Layer>, Ve
     if layers.0.len() >= 4 && !layers.section()?.0.is_empty() {
         return Err("Global PSD mask".into());
     }
+    let mut patterns = Vec::new();
+    let mut has_unwritten_metadata = false;
+    while layers.0.len() >= 12 && layers.0.starts_with(b"8BIM") {
+        let start = layers.0;
+        layers.take(4)?;
+        let key = layers.take(4)?;
+        let block = layers.section()?;
+        let pattern = matches!(key, b"Patt" | b"Pat2" | b"Pat3");
+        let retained_metadata = retain_photoshop_metadata(key, block.0);
+        let unwritten_metadata = !retained_metadata && matches!(key, b"CAI " | b"GenI" | b"cinf");
+        has_unwritten_metadata |= unwritten_metadata;
+        if !pattern
+            && !retained_metadata
+            && !unwritten_metadata
+            && (key != b"Txt2" || !result.iter().any(|l| l.settings.psd_native_text))
+        {
+            return Err(format!(
+                "Additional PSD layer data {}",
+                String::from_utf8_lossy(key)
+            ));
+        }
+        for _ in 0..(4 - block.0.len() % 4) % 4 {
+            if layers.0.first() == Some(&0) {
+                layers.take(1)?;
+            }
+        }
+        if pattern || retained_metadata || key == b"Txt2" {
+            patterns.extend_from_slice(&start[..start.len() - layers.0.len()]);
+        }
+    }
     if layers.0.iter().any(|&b| b != 0) {
         return Err("Additional global PSD layer data".into());
     }
-    Ok((result, resources))
+    let text_count = result
+        .iter()
+        .filter(|layer| layer.settings.psd_native_text)
+        .count();
+    for layer in &mut result {
+        if layer.settings.psd_tysh.is_some() {
+            layer.settings.psd_text_count = text_count;
+        }
+    }
+    Ok((result, resources, patterns, has_unwritten_metadata))
 }
 pub(super) fn needs_merged(e: &Editor) -> bool {
     e.layers
@@ -552,19 +733,63 @@ fn layer_records<'a>(layers: &'a [Layer], parent: u64, records: &mut Vec<(&'a La
     }
 }
 fn tag(extra: &mut Vec<u8>, key: &[u8; 4], bytes: &[u8]) {
+    let size = bytes.len().next_multiple_of(4);
     extra.extend(b"8BIM");
     extra.extend(key);
-    extra.extend((bytes.len() as u32).to_be_bytes());
+    extra.extend((size as u32).to_be_bytes());
     extra.extend(bytes);
-    if bytes.len() % 2 != 0 {
-        extra.push(0);
+    extra.resize(extra.len() + size - bytes.len(), 0);
+}
+
+fn write_layer_metadata(extra: &mut Vec<u8>, metadata: &[u8]) -> Result<()> {
+    let mut data = Bytes(metadata);
+    while !data.0.is_empty() {
+        if data.take(4)? != b"8BIM" {
+            return Err("Invalid PSD layer metadata signature".into());
+        }
+        let key = data.take(4)?.try_into().unwrap();
+        let block = data.section()?.0;
+        tag(extra, key, block);
+        data.take(block.len() % 2)?;
     }
+    Ok(())
 }
 fn rect(out: &mut Vec<u8>, w: u32, h: u32) {
     for n in [0, 0, h, w] {
         out.extend(n.to_be_bytes());
     }
 }
+fn global_blocks(
+    source: &[u8],
+    keep_text_engine: bool,
+    changes: &[(usize, &[u8])],
+) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut blocks = Bytes(source);
+    while !blocks.0.is_empty() {
+        let start = blocks.0;
+        blocks.take(4)?;
+        let key = blocks.take(4)?;
+        let payload = blocks.section()?.0;
+        for _ in 0..(4 - payload.len() % 4) % 4 {
+            if blocks.0.first() == Some(&0) {
+                blocks.take(1)?;
+            }
+        }
+        if key != b"Txt2" || keep_text_engine {
+            output.extend_from_slice(&start[..start.len() - blocks.0.len()]);
+        } else if !changes.is_empty()
+            && let Some(updated) = text_layer::psd::update_txt2(payload, changes)
+        {
+            output.extend(b"8BIMTxt2");
+            output.extend((updated.len() as u32).to_be_bytes());
+            output.extend(updated);
+            output.resize(output.len().next_multiple_of(4), 0);
+        }
+    }
+    Ok(output)
+}
+
 pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Result<()> {
     let (w, h) = merged.dimensions();
     let flat = Layer {
@@ -583,8 +808,63 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
     };
     let mut records = vec![];
     layer_records(layers, 0, &mut records);
+    let mut native_indices = std::collections::HashSet::new();
+    let mut text_count = 0;
+    let mut source_text_counts = Vec::new();
+    let original_type_data: Vec<_> = records
+        .iter()
+        .map(|(layer, divider)| {
+            let p = &layer.settings;
+            if *divider != 0 || p.text.as_ref().is_none_or(|text| text.repeat) {
+                return None;
+            }
+            text_count += 1;
+            let raw = p.psd_tysh.as_deref()?;
+            let index = text_layer::psd::text_index(raw)?;
+            if text_layer::psd::read(raw, [w, h]).as_ref() != p.text.as_ref()
+                || !native_indices.insert(index)
+            {
+                return None;
+            }
+            source_text_counts.push(p.psd_text_count);
+            Some(raw)
+        })
+        .collect();
+    let keep_text_engine = text_count != 0
+        && source_text_counts.len() == text_count
+        && source_text_counts.iter().all(|&count| count == text_count);
+    let mut source_indices = std::collections::HashSet::new();
+    let can_update_text_engine = text_count != 0
+        && records
+            .iter()
+            .filter(|(layer, divider)| {
+                *divider == 0
+                    && layer
+                        .settings
+                        .text
+                        .as_ref()
+                        .is_some_and(|text| !text.repeat)
+            })
+            .all(|(layer, _)| {
+                let p = &layer.settings;
+                p.psd_text_count == text_count
+                    && p.psd_tysh
+                        .as_deref()
+                        .and_then(text_layer::psd::text_index)
+                        .is_some_and(|index| source_indices.insert(index))
+            });
+    let mut text_changes = Vec::new();
     let mut table = Vec::new();
-    table.extend((-(records.len() as i16)).to_be_bytes());
+    let merged_has_alpha = merged.pixels().any(|pixel| pixel[3] != 255);
+    let layer_count = records.len() as i16;
+    table.extend(
+        if merged_has_alpha {
+            -layer_count
+        } else {
+            layer_count
+        }
+        .to_be_bytes(),
+    );
     let mut plane_bytes = 0usize;
     let reserved: std::collections::HashSet<u32> = layers
         .iter()
@@ -592,7 +872,8 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
         .collect();
     let mut used = std::collections::HashSet::new();
     let mut next_id = 1;
-    for &(l, divider) in &records {
+    let mut text_index = 0;
+    for (&(l, divider), original_tysh) in records.iter().zip(original_type_data) {
         let defaults = Properties::default();
         let p = if divider == 3 { &defaults } else { &l.settings };
         let pixels = if divider == 0 { w * h } else { 0 };
@@ -601,7 +882,7 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
         } else {
             rect(&mut table, 0, 0)
         }
-        let mask = p.mask.is_some();
+        let mask = p.mask.is_some() && p.vector.as_ref().is_none_or(|v| v.fill.is_some());
         let count = if mask { 5u16 } else { 4 };
         table.extend(count.to_be_bytes());
         for id in [0i16, 1, 2, -1, -2].into_iter().take(count as usize) {
@@ -665,7 +946,26 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
             next_id
         };
         tag(&mut extra, b"lyid", &id.to_be_bytes());
-        extra.extend_from_slice(&p.psd_metadata);
+        write_layer_metadata(&mut extra, &p.psd_metadata)?;
+        if let Some(vector) = &p.vector {
+            let shape = vector.fill.is_some();
+            let path = super::super::vector::psd::encode(
+                vector,
+                [w, h],
+                shape || p.mask_enabled,
+                shape || p.mask_linked,
+            )?;
+            tag(&mut extra, b"vmsk", &path);
+            if let Some(color) = vector.fill {
+                let fill = super::super::layer_properties::write_solid_fill(color);
+                tag(&mut extra, b"SoCo", &fill);
+                if let Some(origination) =
+                    super::super::layer_properties::write_live_rectangle(&vector.geometry)
+                {
+                    tag(&mut extra, b"vogk", &origination);
+                }
+            }
+        }
         if let Some((key, mut bytes)) = p.effects.encode_psd_styles() {
             bytes.resize(bytes.len().next_multiple_of(2), 0);
             tag(
@@ -694,30 +994,50 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
             }
             tag(&mut extra, b"lsct", &block);
         }
-        if let Some(text) = &p.text {
-            let data = TextData {
-                text: text.clone(),
-                raster_hash: Sha256::digest(l.tiles[0].as_raw()).into(),
-            };
-            tag(
-                &mut extra,
-                b"uyTx",
-                &serde_json::to_vec(&data).map_err(|err| err.to_string())?,
-            );
+        if divider == 0
+            && let Some(text) = p.text.as_ref().filter(|text| !text.repeat)
+        {
+            if let Some(raw) = original_tysh {
+                tag(&mut extra, b"TySh", raw);
+            } else {
+                let index = if can_update_text_engine {
+                    text_layer::psd::text_index(p.psd_tysh.as_deref().unwrap()).unwrap()
+                } else {
+                    while native_indices.contains(&text_index) {
+                        text_index += 1;
+                    }
+                    let index = text_index;
+                    text_index += 1;
+                    index
+                };
+                let tysh =
+                    text_layer::psd::write(text, [w, h], index, e.font_samples.catalog.as_deref());
+                tag(&mut extra, b"TySh", &tysh);
+                if can_update_text_engine {
+                    text_changes.push((index as usize, tysh));
+                }
+            }
         }
         table.extend((extra.len() as u32).to_be_bytes());
         table.extend(extra);
     }
+    let changes: Vec<_> = text_changes
+        .iter()
+        .map(|(index, tysh)| (*index, tysh.as_slice()))
+        .collect();
+    let global_data = global_blocks(&e.psd_patterns, keep_text_engine, &changes)?;
     let len = table.len() + plane_bytes;
-    let resources = resources_with_light(&e.psd_resources, e.fx_light)?;
+    let resources = resources_with_light(&e.psd_resources, e.fx_light, merged)?;
     let mut write = || -> io::Result<()> {
-        out.write_all(b"8BPS\x00\x01\x00\x00\x00\x00\x00\x00\x00\x04")?;
+        out.write_all(b"8BPS\x00\x01\x00\x00\x00\x00\x00\x00")?;
+        let merged_channels = if merged_has_alpha { 4u16 } else { 3u16 };
+        out.write_all(&merged_channels.to_be_bytes())?;
         out.write_all(&h.to_be_bytes())?;
         out.write_all(&w.to_be_bytes())?;
         out.write_all(&[0, 8, 0, 3, 0, 0, 0, 0])?;
         out.write_all(&(resources.len() as u32).to_be_bytes())?;
         out.write_all(&resources)?;
-        out.write_all(&((len.next_multiple_of(2) + 8) as u32).to_be_bytes())?;
+        out.write_all(&((len.next_multiple_of(2) + 8 + global_data.len()) as u32).to_be_bytes())?;
         out.write_all(&(len.next_multiple_of(2) as u32).to_be_bytes())?;
         out.write_all(&table)?;
         let mut bytes = Vec::with_capacity(w as usize);
@@ -744,6 +1064,7 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
                 }
             }
             if divider != 3
+                && l.settings.vector.as_ref().is_none_or(|v| v.fill.is_some())
                 && let Some(m) = &l.settings.mask
             {
                 out.write_all(&[0; 2])?;
@@ -754,8 +1075,9 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
             out.write_all(&[0])?;
         }
         out.write_all(&[0; 4])?;
+        out.write_all(&global_data)?;
         out.write_all(&[0; 2])?;
-        for c in 0..4 {
+        for c in 0..usize::from(merged_channels) {
             channel(out, merged, c, true)?;
         }
         Ok(())
@@ -767,6 +1089,59 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn photoshop_layer_tags_count_padding_inside_the_payload() {
+        let mut bytes = Vec::new();
+        tag(&mut bytes, b"SoCo", &[1, 2, 3, 4, 5]);
+        tag(&mut bytes, b"lyid", &1u32.to_be_bytes());
+        let mut reader = Bytes(&bytes);
+        assert_eq!(reader.take(8).unwrap(), b"8BIMSoCo");
+        assert_eq!(reader.section().unwrap().0, &[1, 2, 3, 4, 5, 0, 0, 0]);
+        assert_eq!(reader.take(8).unwrap(), b"8BIMlyid");
+    }
+
+    #[test]
+    fn psd_thumbnail_encodes_the_composite_in_rgb_order() {
+        let pixels = RgbaImage::from_pixel(2, 2, Rgba([230, 40, 25, 255]));
+        let mut bytes = Vec::new();
+        write_thumbnail(&mut bytes, &pixels).unwrap();
+        let mut reader = Bytes(&bytes);
+        assert_eq!(reader.take(4).unwrap(), b"8BIM");
+        assert_eq!(reader.word().unwrap(), 1036);
+        reader.take(2).unwrap();
+        let data = reader.section().unwrap();
+        let rgb = image::load_from_memory(&data.0[28..]).unwrap().to_rgb8();
+        let [r, g, b] = rgb.get_pixel(0, 0).0;
+        assert!(r > 200 && g < 60 && b < 60);
+    }
+    #[test]
+    fn editable_psd_rectangle_keeps_its_rounding_and_pixel_cache() {
+        use crate::asset_viewer::graphic_editor::vector::{Geometry, Vector};
+        let mut editor = Editor::default();
+        editor.init_image(&RgbaImage::new(24, 16));
+        let vector = Vector {
+            geometry: Geometry::Rectangle {
+                min: [2., 3.],
+                max: [18., 12.],
+                radii: [3., 1., 4., 0.],
+                angle: 0.,
+            },
+            fill: Some([11, 183, 104]),
+            inverted: false,
+        };
+        let pixels = vector.raster(24, 16).unwrap();
+        editor.layers[0].settings.vector = Some(vector.clone());
+        editor.layers[0].tiles[0] = pixels.clone();
+        editor.tiles[0] = pixels.clone();
+        editor.pixels = pixels.clone();
+        let mut bytes = Vec::new();
+        write(&mut bytes, &editor, &pixels).unwrap();
+        let (layers, _, _, _) = decode(&bytes, (24, 16)).unwrap();
+        assert!(layers[0].settings.vector.as_ref() == Some(&vector));
+        assert_eq!(layers[0].tiles[0], pixels);
+        assert!(bytes.windows(4).any(|key| key == b"vogk"));
+    }
 
     #[test]
     fn native_styles_keep_order_raw_pixels_and_rendered_composite() {
@@ -788,7 +1163,13 @@ mod tests {
             "extra_strokes": [
                 {"stroke": false, "stroke_size": 4, "stroke_color": [20, 80, 30]},
                 {"stroke": true, "stroke_size": 2, "stroke_position": "Inside",
-                 "stroke_gradient": true, "stroke_ramp": {"colors": [[5, 50, 150], [220, 130, 15]]}}
+                 "stroke_gradient": true, "stroke_ramp": {"colors": [[5, 50, 150], [220, 130, 15]],
+                    "stops": [
+                        {"position": 0, "color": [5, 50, 150]},
+                        {"position": 1433, "color": [30, 220, 70]},
+                        {"position": 4096, "color": [220, 130, 15]},
+                        null, null, null, null, null, null, null, null, null, null, null, null, null
+                    ]}}
             ],
             "shadow": true, "shadow_opacity": 40,
             "shadow_offset": [0, 0], "shadow_shape": {"direction": [90, 2], "global": true},
@@ -809,7 +1190,7 @@ mod tests {
         let mut bytes = Vec::new();
         write(&mut bytes, &editor, &composite).unwrap();
         assert!(bytes.windows(4).any(|key| key == b"lmfx"));
-        let (layers, resources) = decode(&bytes, (16, 16)).unwrap();
+        let (layers, resources, _, _) = decode(&bytes, (16, 16)).unwrap();
         assert!(global_light(&resources) == editor.fx_light);
         assert_eq!(layers[0].tiles[0], pixels);
         assert!(layers[0].settings.effects == editor.layers[0].settings.effects);
@@ -829,6 +1210,7 @@ mod tests {
         editor.init_image(&bottom);
         let mut top = editor.layers[0].clone();
         top.name = "描画 ✦".into();
+        tag(&mut top.settings.psd_metadata, b"shmd", &[0; 4]);
         top.tiles[0] = RgbaImage::from_pixel(3, 2, Rgba([77, 88, 99, 130]));
         top.settings.blend = Blend::Screen;
         top.settings.parent = 21;
@@ -844,13 +1226,29 @@ mod tests {
         group.settings.collapsed = true;
         group.tiles[0] = RgbaImage::new(3, 2);
         editor.layers.extend([top.clone(), group]);
+        tag(&mut editor.psd_patterns, b"Patt", &[5, 10, 15, 20]);
+        tag(&mut editor.psd_patterns, b"Pat3", &[1, 2, 3, 4]);
+        let mut expected_patterns = editor.psd_patterns.clone();
+        let empty_filter_mask = [0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 50];
+        tag(&mut expected_patterns, b"FMsk", &empty_filter_mask);
+        tag(&mut editor.psd_patterns, b"CAI ", &[7, 3, 9]);
+        tag(&mut editor.psd_patterns, b"GenI", &[1, 2, 3]);
+        tag(
+            &mut editor.psd_patterns,
+            b"FMsk",
+            &[0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 50],
+        );
+        tag(&mut editor.psd_patterns, b"cinf", &[1, 2]);
         let composite = editor.composite(0);
         let mut bytes = vec![];
         write(&mut bytes, &editor, &composite).unwrap();
-        let (layers, _) = decode(&bytes, (3, 2)).unwrap();
+        let (layers, _, patterns, has_unwritten_metadata) = decode(&bytes, (3, 2)).unwrap();
+        assert_eq!(patterns, expected_patterns);
+        assert!(has_unwritten_metadata);
         assert_eq!(layers.len(), 3);
         assert_eq!(layers[0].tiles[0], bottom);
         assert_eq!(layers[1].name, top.name);
+        assert_eq!(layers[1].settings.psd_metadata, top.settings.psd_metadata);
         assert_eq!(layers[1].settings.parent, layers[2].settings.group_id);
         assert_ne!(layers[2].settings.group_id, 0);
         assert!(layers[2].settings.collapsed && layers[2].settings.pass_through);
@@ -872,7 +1270,83 @@ mod tests {
     }
 
     #[test]
-    fn native_text_and_effects_in_repository_psds_use_existing_composite() {
+    #[ignore = "requires the user's original Photoshop fixture"]
+    fn photoshop_sabi_fixture_opens_as_editable_text() {
+        let path = std::env::var_os("UYV_PSD_TEXT_FIXTURE").expect("fixture path");
+        let bytes = std::fs::read(path).expect("read Photoshop fixture");
+        let (layers, resources, patterns, protected) =
+            decode(&bytes, (256, 128)).expect("parse layered Photoshop fixture");
+        assert!(!protected, "the fixture metadata should round-trip");
+        let source_metadata: Vec<_> = [b"CAI ", b"GenI", b"FMsk", b"cinf"]
+            .into_iter()
+            .map(|key| {
+                let offset = patterns
+                    .windows(8)
+                    .position(|block| block.starts_with(b"8BIM") && &block[4..] == key)
+                    .expect("source metadata must be preserved");
+                let mut record = Bytes(&patterns[offset + 8..]);
+                (key, record.section().unwrap().0.to_vec())
+            })
+            .collect();
+        let names: Vec<_> = layers.iter().map(|layer| layer.name.as_str()).collect();
+        assert_eq!(names, ["图层 1", "图像", "SABI"]);
+        let text = layers[2].settings.text.as_ref().expect("editable SABI");
+        assert_eq!(text.content, "SABI");
+        assert_eq!(text.family, "GenJyuuGothic-Heavy");
+        let mut editor = Editor::default();
+        editor.init_image(&RgbaImage::new(256, 128));
+        editor.layers = layers;
+        editor.psd_resources = resources;
+        editor.psd_patterns = patterns;
+        let original_tysh = editor.layers[2].settings.psd_tysh.clone();
+        assert!(original_tysh.is_some());
+        assert!(
+            editor
+                .psd_patterns
+                .windows(8)
+                .any(|bytes| bytes == b"8BIMTxt2")
+        );
+        editor.layers[0].tiles[0].put_pixel(0, 0, image::Rgba([12, 34, 56, 255]));
+        let mut saved = Vec::new();
+        write(&mut saved, &editor, &editor.composite(0)).expect("save non-text edit");
+        let (saved_layers, _, saved_global, _) =
+            decode(&saved, (256, 128)).expect("read non-text edit");
+        assert_eq!(saved_layers[2].settings.psd_tysh, original_tysh);
+        assert_eq!(saved_global, editor.psd_patterns);
+        if let Some(output) = std::env::var_os("UYV_PSD_UNCHANGED_TEXT_OUTPUT") {
+            std::fs::write(output, saved).expect("save unchanged text fixture");
+        }
+        let layer = &mut editor.layers[2];
+        let text = layer.settings.text.as_mut().unwrap();
+        text.content = "SABI edited".into();
+        text.family = "ArialMT".into();
+        let fonts = text_layer::font_samples::Catalog::read();
+        layer.tiles[0] = text.raster(256, 128, &fonts).expect("render edited text");
+        let mut exported = Vec::new();
+        write(&mut exported, &editor, &editor.composite(0)).expect("write native PSD text");
+        let (reopened, _, globals, _) = decode(&exported, (256, 128)).expect("reopen exported PSD");
+        assert_eq!(reopened.len(), 3);
+        assert!(globals.windows(8).any(|bytes| bytes == b"8BIMTxt2"));
+        assert_ne!(globals, editor.psd_patterns);
+        for (key, source) in source_metadata {
+            let offset = globals
+                .windows(8)
+                .position(|block| block.starts_with(b"8BIM") && &block[4..] == key)
+                .expect("edited export should retain source metadata");
+            let mut record = Bytes(&globals[offset + 8..]);
+            assert_eq!(record.section().unwrap().0, source);
+        }
+        assert_eq!(
+            reopened[2].settings.text.as_ref().unwrap().content,
+            "SABI edited"
+        );
+        if let Some(output) = std::env::var_os("UYV_PSD_TEXT_OUTPUT") {
+            std::fs::write(output, exported).expect("save fixture for Photoshop verification");
+        }
+    }
+
+    #[test]
+    fn repository_psds_with_unsupported_structures_use_existing_composite() {
         for name in ["assets/app_icon.psd", "assets/default_icons/file_icon.psd"] {
             let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
             let doc = super::super::open_image(&path, 8192).unwrap();

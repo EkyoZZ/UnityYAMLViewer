@@ -4802,3 +4802,27 @@ mask_enabled=false时缩略图加红色斜线，启用即移除，不改数据�
 
 - 经用户授权并确认主程序和固定 EXE 无占用后，`cargo build --release --locked --offline` 成功，耗时 1 分 11 秒。产物 `target/release/unity_yaml_viewer.exe` 为 35,988,480 字节，文件及产品版本为 1.3.7，SHA-256 为 `1fe7ac056304153d614f3ad2531b812fd1a361b86b45d17039777a50f689b824`。已更新相邻校验文件，构建日志见 `target/editor-psd-guides-release-build.log`。
 - 本地测试版包含 PSD 原生 FX、画布文字、标尺及辅助线吸附、紫罗兰色对齐线和图层键盘微移。实际窗口交互和 Photoshop 双向兼容性待验证。
+## 2026-11-24 矢量与文字编辑测试版
+
+- 按用户授权并确认 EXE 无占用后完成 1.3.7 Release 构建，耗时 1 分 23 秒。产物 `target/release/unity_yaml_viewer.exe` 为 36,283,392 字节，SHA-256 为 `3e68906845c333e0c4fc0317ee8c02e056998763c8e5a2467f438139f19c5194`。已核对文件及产品版本并更新相邻校验文件。日志见 `target/editor-vector-text-release-build.log`。
+- 本地测试版包含矢量图形 U、像素框画 K、PSD 矢量和图层元数据读写、文字区间样式及最近的面板调整。实际窗口及 Photoshop 往返待验证。
+## 2026-11-24 PSD 图案资源和矢量工具栏测试版
+
+- 经用户授权并确认目标程序无占用，1.3.7 Release 构建通过，耗时 1 分 12 秒。产物 `target/release/unity_yaml_viewer.exe` 为 36111872 字节，SHA-256 为 `137255736c021831aa453e31c7119c235bde850d19895203c85e4e4169bfa728`。已核对版本并更新相邻校验文件，构建日志见 `target/psd-pattern-toolbar-release-build.log`。
+- 测试版包含 PSD 图案库分层读取修复、无滚动浮动工具栏及重绘的矢量图标。用户原 PSD 和窗口显示待实机验证。
+
+- 2026-11-24 经用户授权并检查目标 EXE 无占用，PSD 兼容性调整后的 Release 构建成功。文件版本 1.3.7，大小 36572160 字节，SHA-256 131fe22954216169ab83230c91274a613caf36d62d11d8488d3b31367748fd80。日志 target/psd-compatibility-release-build.log。
+
+- 2026-11-24 经用户授权并检查程序无占用，Txt2 同步的 Release 构建成功。文件版本 1.3.7，大小 36571136 字节，SHA-256 0ad08cbea332b0793c6936ff54411c489f1d762127653a6857afa62139e89046。构建日志 target/psd-txt2-release-build.log，SABI 回归日志 target/psd-txt2-fixture.log。仅修改像素层、修改文字及字体的两个副本均通过 Photoshop 2024 无提示打开和继续编辑验证。
+
+- 2026-11-24 经授权并检查固定 EXE 无占用后构建 PSD 元数据往返版。版本 1.3.7，大小 36475392 字节，SHA-256 7a2bd85599f71b75afcd816813048e04b262a3dd089f40f4020a7b125afe5b7a。SABI 改字导出与 Photoshop 实测副本哈希一致，Photoshop 改字、重存、重开后四个块的内容与原件一致。日志 target/psd-metadata-release-build.log 和 target/psd-metadata-fixture.log。
+
+- 2026-11-24 经用户授权并检查目标 EXE 无占用，保存状态和标题星号的 1.3.7 Release 构建成功。文件大小 36473344 字节，SHA-256 c07191984cde70b9c2f8c9329842ff99e9fdebdf8351f5598daa53d921b640c6。日志 target/image-save-state-release-build.log，界面待实测。
+
+- 2026-11-24 经授权并检查 EXE 无占用后完成 Tile 工程保存相关 Release 构建。版本 1.3.7，大小 36456960 字节，SHA-256 7228db73a65d860451c44f4263569c43bd36103982a3b73ea123888245dd61e7。日志 target/tile-project-save-release-build.log，界面待实测。
+
+- 2026-11-24 经授权并检查目标 EXE 无占用后构建菱形选区修复版。版本 1.3.7，大小 36456960 字节，SHA-256 87fef8fbcd5ab9a6bd4a7c3446e7379c030b85e231720bbef84971e9aee2e91a。日志 target/diamond-selection-release-build.log，松手交互待实测。
+
+- 2026-11-24 检查固定 EXE 无占用后按授权构建 Tile 整组绕回版。版本 1.3.7，大小 36619264 字节，SHA-256 01381333b34b0f9f144d7aa4b2d8299811b317e007f178427936ec1a787895ea。日志 target/tile-geometry-wrap-release.log 和 target/tile-geometry-wrap-tests.log。2×2 回归通过，未覆盖源工程。
+
+- 2026-11-24 经授权并检查目标 EXE 无占用后重新检查 Tile 绕回版 Release 构建。版本 1.3.7，大小 36619264 字节，SHA-256 d781de55455bc8691cf8aaebb6cb00b30a6bd9808787d15c72d827e5da5935cb。日志 target/tile-wrap-verification-build.log。

@@ -896,6 +896,14 @@ Bayer 强度	Bayer 強度	Bayer scale	Bayer 強度	Bayer 강도	Bayer-Stärke	In
 像素	像素	Pixels	ピクセル	픽셀	Pixel	Pixels
 宽度	寬度	Width	幅	너비	Breite	Largeur
 高度	高度	Height	高さ	높이	Höhe	Hauteur
+圆角	圓角	Corner radius	角の半径	모서리 반경	Eckenradius	Rayon des angles
+矢量形状	向量形狀	Vector shape	ベクトルシェイプ	벡터 모양	Vektorform	Forme vectorielle
+编辑路径锚点	編輯路徑錨點	Edit path anchors	パスのアンカーを編集	패스 앵커 편집	Pfadanker bearbeiten	Modifier les ancres du tracé
+路径选择	路徑選取	Path Selection	パス選択	패스 선택	Pfadauswahl	Sélection du tracé
+直接选择	直接選取	Direct Selection	ダイレクト選択	직접 선택	Direktauswahl	Sélection directe
+钢笔	鋼筆	Pen	ペン	펜	Zeichenstift	Plume
+编辑锚点会将形状转换为路径，圆角将不能再按数值调整。	編輯錨點會將形狀轉換為路徑，圓角將無法再以數值調整。	Editing anchors converts the shape to a path and removes numeric corner radius controls.	アンカーを編集するとシェイプがパスになり、角の半径を数値で調整できなくなります。	앵커를 편집하면 모양이 패스로 변환되어 모서리 반경을 수치로 조절할 수 없습니다.	Die Ankerbearbeitung wandelt die Form in einen Pfad um. Der Eckenradius ist danach nicht mehr numerisch einstellbar.	La modification des ancres convertit la forme en tracé et retire le réglage numérique du rayon.
+当前文档含矢量图层，暂不能调整尺寸。	目前文件含向量圖層，暫時無法調整尺寸。	Resizing is unavailable for documents with vector layers.	ベクトルレイヤーを含むドキュメントではサイズを変更できません。	벡터 레이어가 있는 문서는 크기를 바꿀 수 없습니다.	Dokumente mit Vektorebenen können derzeit nicht skaliert werden.	Le redimensionnement est indisponible pour les documents contenant des calques vectoriels.
 锁定宽高比例	鎖定寬高比例	Lock aspect ratio	縦横比を固定	가로세로 비율 잠금	Seitenverhältnis sperren	Verrouiller les proportions
 锁定宽高比例；重新锁定时以宽度为准恢复比例。	鎖定寬高比例；重新鎖定時以寬度為準恢復比例。	Lock aspect ratio; relocking uses width to restore the ratio.	縦横比を固定。再度固定すると幅に合わせて比率を復元します。	가로세로 비율을 잠급니다. 다시 잠그면 너비를 기준으로 비율을 복원합니다.	Seitenverhältnis sperren; erneutes Sperren stellt das Verhältnis anhand der Breite wieder her.	Verrouiller les proportions ; au reverrouillage, la largeur détermine le rapport.
 音轨与字幕	音軌與字幕	Audio tracks and subtitles	音声トラックと字幕	오디오 트랙 및 자막	Audiospuren und Untertitel	Pistes audio et sous-titres
@@ -1527,6 +1535,7 @@ FFmpeg 不随程序附带；点击安装后下载 Shared 版，保留所需 DLL�
 编辑 RTF	編輯 RTF	Edit RTF	RTF を編集	RTF 편집	RTF bearbeiten	Modifier le RTF
 编辑区底色	編輯區底色	Editor background	編集領域の背景色	편집 영역 배경색	Editorhintergrund	Arrière-plan de l’éditeur
 粗体	粗體	Bold	太字	굵게	Fett	Gras
+样式	樣式	Style	スタイル	스타일	Stil	Style
 项目符号	項目符號	Bullets	箇条書き	글머리 기호	Aufzählungszeichen	Puces
 左对齐	靠左對齊	Align left	左揃え	왼쪽 맞춤	Linksbündig	Aligner à gauche
 居中对齐	置中對齊	Align center	中央揃え	가운데 맞춤	Zentrieren	Centrer
@@ -2289,6 +2298,7 @@ PS 插件尚未正式发布	PS 外掛尚未正式發佈	PS plugin has not been r
 编辑像素	編輯像素	Edit pixels	ピクセルを編集	픽셀 편집	Pixel bearbeiten	Modifier les pixels
 编辑蒙版	編輯遮色片	Edit mask	マスクを編集	마스크 편집	Maske bearbeiten	Modifier le masque
 图层样式	圖層樣式	Layer styles	レイヤースタイル	레이어 스타일	Ebenenstile	Styles de calque
+图层名	圖層名稱	LayerName	レイヤー名	레이어 이름	Ebenenname	Nom du calque
 模糊	模糊	Blur	ぼかし	흐림	Weichzeichnen	Flou
 效果按单格计算，边缘会裁切。	效果按單格計算，邊緣會裁切。	Effects are calculated per cell and clipped at its edges.	効果はセル単位で計算し、端で切り取ります。	효과는 셀별로 계산되며 가장자리에서 잘립니다.	Effekte werden je Zelle berechnet und an den Rändern beschnitten.	Les effets sont calculés par cellule et rognés aux bords.
 亮度	亮度	Brightness	明るさ	밝기	Helligkeit	Luminosité
@@ -2430,6 +2440,8 @@ PS 插件尚未正式发布	PS 外掛尚未正式發佈	PS plugin has not been r
 原图不符合 Tile 尺寸限制，已打开独立的空白 Tile 画布。	原圖不符合 Tile 尺寸限制，已開啟獨立的空白 Tile 畫布。	The source image does not meet the Tile size limits. A separate blank Tile canvas is open.	元画像が Tile のサイズ条件を満たさないため、独立した空の Tile キャンバスを開きました。	원본 크기가 Tile 조건에 맞지 않아 별도의 빈 Tile 캔버스를 열었습니다.	Das Quellbild erfüllt die Tile-Größenvorgaben nicht. Eine separate leere Tile-Zeichenfläche ist geöffnet.	Les dimensions de l’image ne conviennent pas au mode Tile. Un canevas Tile vierge a été ouvert.
 其他编辑页也有未保存的绘制，是否放弃并关闭整个窗口？	另一個編輯頁有未儲存的繪製，要捨棄並關閉整個視窗嗎？	The other tab has unsaved edits. Discard changes and close the entire window?	もう一方のタブに未保存の編集があります。変更を破棄してウィンドウ全体を閉じますか？	다른 탭에 저장하지 않은 편집이 있습니다. 변경 사항을 버리고 전체 창을 닫을까요?	Der andere Tab hat ungespeicherte Änderungen. Änderungen verwerfen und das ganze Fenster schließen?	L’autre onglet contient des modifications non enregistrées. Les abandonner et fermer toute la fenêtre ?
 此 PSD 以合成图打开，请另存为新文件。	此 PSD 以合成影像開啟，請另存為新檔案。	This PSD opened as a composite. Use Save As to create a new file.	この PSD は合成画像として開きました。別名で新しいファイルに保存してください。	이 PSD는 합성 이미지로 열렸습니다. 다른 이름으로 새 파일에 저장하세요.	Diese PSD wurde als zusammengesetztes Bild geöffnet. Bitte unter einem neuen Namen speichern.	Ce PSD a été ouvert en tant qu’image composite. Enregistrez-le dans un nouveau fichier.
+PSD 原生文字以独立像素图层读取，请另存为新文件。	PSD 原生文字以獨立像素圖層讀取，請另存為新檔案。	Native PSD text was opened as separate pixel layers. Use Save As to create a new file.	PSD のネイティブテキストを個別のピクセルレイヤーとして開きました。別名で保存してください。	PSD 기본 텍스트를 별도의 픽셀 레이어로 열었습니다. 다른 이름으로 저장하세요.	PSD-Text wurde als separate Pixelebenen geöffnet. Bitte unter einem neuen Namen speichern.	Le texte PSD a été ouvert sur des calques de pixels distincts. Enregistrez sous un nouveau nom.
+已读取 PSD 图层。源文件含额外的 PSD 元数据，请另存为新文件。	已讀取 PSD 圖層。來源檔含額外的 PSD 中繼資料，請另存為新檔案。	PSD layers were loaded. The source contains additional PSD metadata. Use Save As to create a new file.	PSD レイヤーを読み込みました。元のファイルに 追加の PSD メタデータがあるため、別名で保存してください。	PSD 레이어를 불러왔습니다. 원본에 추가 PSD 메타데이터가 있으므로 다른 이름으로 저장하세요.	PSD-Ebenen wurden geladen. Die Quelldatei enthält zusätzliche PSD-Metadaten. Bitte unter einem neuen Namen speichern.	Les calques PSD ont été chargés. Le fichier source contient des métadonnées PSD supplémentaires. Enregistrez sous un nouveau nom.
 此图含动画或高位深数据，当前画面可另存为新文件。	此圖含動畫或高位元深度資料，可將目前畫面另存為新檔案。	This image contains animation or high-bit-depth data. Save the current view as a new file.	アニメーションまたは高ビット深度の画像です。現在の表示を別名で保存できます。	애니메이션 또는 고비트 심도 데이터가 있습니다. 현재 화면을 새 파일로 저장할 수 있습니다.	Das Bild enthält Animationen oder Daten mit hoher Farbtiefe. Die aktuelle Ansicht kann als neue Datei gespeichert werden.	Cette image contient une animation ou des données à haute profondeur de couleur. Enregistrez la vue actuelle dans un nouveau fichier.
 PSD（合成图）	PSD（合成影像）	PSD (flattened composite)	PSD（合成画像）	PSD(병합 이미지)	PSD (zusammengeführtes Bild)	PSD (image aplatie)
 PSD（像素图层）	PSD（像素圖層）	PSD (pixel layers)	PSD（ピクセルレイヤー）	PSD(픽셀 레이어)	PSD (Pixelebenen)	PSD (calques de pixels)
@@ -2458,3 +2470,53 @@ Tile	Tile	Tile	Tile	Tile	Tile	Tile
 拆分支持矩形和菱形 Tile。	拆分支援矩形和菱形 Tile。	Splitting supports rectangular and diamond tiles.	矩形と菱形のタイルを分割できます。	사각형 및 마름모 타일을 분할할 수 있습니다.	Rechteckige und rautenförmige Kacheln lassen sich teilen.	La découpe prend en charge les tuiles rectangulaires et en losange.
 拆分后的素材超过 64 项。	拆分後的素材超過 64 項。	Splitting would exceed the limit of 64 materials.	分割後の素材数が上限の64点を超えます。	분할 후 소재가 64개를 초과합니다.	Die Teilung würde die Grenze von 64 Materialien überschreiten.	La découpe dépasserait la limite de 64 matériaux.
 已有不同内容的格子，请从单张图拆分。	已有不同內容的格子，請從單張圖拆分。	Cells already contain different content. Split a single image instead.	内容の異なるセルがあります。単一の画像から分割してください。	내용이 다른 셀이 있습니다. 단일 이미지에서 분할하세요.	Die Zellen haben unterschiedliche Inhalte. Bitte ein einzelnes Bild teilen.	Les cellules ont déjà des contenus différents. Découpez une image unique.
+
+编辑后文字外观可能与 PSD 原预览不同。	編輯後文字外觀可能與 PSD 原始預覽不同。	Edited text may look different from the original PSD preview.	編集後のテキストは元の PSD プレビューと異なる場合があります。	편집한 텍스트가 원본 PSD 미리보기와 다르게 보일 수 있습니다.	Bearbeiteter Text kann anders aussehen als in der ursprünglichen PSD-Vorschau.	Le texte modifié peut différer de l’aperçu PSD d’origine.
+矢量矩形	向量矩形	Vector Rectangle	ベクトル長方形	벡터 사각형	Vektorrechteck	Rectangle vectoriel
+椭圆	橢圓	Ellipse	楕円	타원	Ellipse	Ellipse
+三角形	三角形	Triangle	三角形	삼각형	Dreieck	Triangle
+多边形	多邊形	Polygon	多角形	다각형	Polygon	Polygone
+自定形状	自訂形狀	Custom Shape	カスタムシェイプ	사용자 정의 모양	Eigene Form	Forme personnalisée
+自由钢笔	自由鋼筆	Freeform Pen	フリーフォームペン	자유 형태 펜	Freiform-Zeichenstift	Plume libre
+弯度钢笔	彎度鋼筆	Curvature Pen	曲線ペン	곡률 펜	Kurvenzeichenstift	Plume de courbure
+添加锚点	新增錨點	Add Anchor Point	アンカーポイントの追加	앵커점 추가	Ankerpunkt hinzufügen	Ajouter un point
+删除锚点	刪除錨點	Delete Anchor Point	アンカーポイントの削除	앵커점 삭제	Ankerpunkt löschen	Supprimer un point
+转换点	轉換點	Convert Point	アンカーポイントの切り替え	앵커점 변환	Punkt umwandeln	Convertir un point
+确认转换为路径	確認轉換為路徑	Convert Shape to Path	パスへの変換を確認	패스로 변환 확인	Form in Pfad umwandeln	Convertir la forme en tracé
+形状属性	形狀屬性	Shape Properties	シェイプのプロパティ	모양 속성	Formeigenschaften	Propriétés de forme
+路径属性	路徑屬性	Path Properties	パスのプロパティ	패스 속성	Pfadeigenschaften	Propriétés du tracé
+左上	左上	Top left	左上	왼쪽 위	Oben links	Haut gauche
+右上	右上	Top right	右上	오른쪽 위	Oben rechts	Haut droite
+左下	左下	Bottom left	左下	왼쪽 아래	Unten links	Bas gauche
+右下	右下	Bottom right	右下	오른쪽 아래	Unten rechts	Bas droite
+退出变换	退出變形	Exit Transform	変形を終了	변형 종료	Transformation beenden	Quitter la transformation
+是否应用当前变换？	是否套用目前的變形？	Apply the current transform?	現在の変形を適用しますか？	현재 변형을 적용할까요?	Aktuelle Transformation anwenden?	Appliquer la transformation actuelle ?
+放弃变换	捨棄變形	Discard Transform	変形を破棄	변형 취소	Verwerfen	Abandonner
+应用变换	套用變形	Apply Transform	変形を適用	변형 적용	Anwenden	Appliquer
+填充图层	填滿圖層	Fill Layer	レイヤーを塗りつぶす	레이어 채우기	Ebene füllen	Remplir le calque
+已填充图层。	已填滿圖層。	Layer filled.	レイヤーを塗りつぶしました。	레이어를 채웠습니다.	Ebene gefüllt.	Calque rempli.
+拾色器（前景色）	拾色器（前景色）	Color Picker (Foreground)	カラーピッカー（描画色）	색상 피커(전경색)	Farbwähler (Vordergrund)	Sélecteur de couleurs (premier plan)
+拾色器（背景色）	拾色器（背景色）	Color Picker (Background)	カラーピッカー（背景色）	색상 피커(배경색)	Farbwähler (Hintergrund)	Sélecteur de couleurs (arrière-plan)
+交换前景色和背景色	交換前景色和背景色	Swap foreground and background colors	描画色と背景色を入れ替え	전경색과 배경색 교환	Vordergrund- und Hintergrundfarbe tauschen	Permuter les couleurs de premier plan et de fond
+
+恢复默认绘制颜色	恢復預設繪製顏色	Reset drawing colors	描画色を初期値に戻す	그리기 색상 초기화	Zeichenfarben zurücksetzen	Réinitialiser les couleurs de dessin
+
+前景色	前景色	Foreground	描画色	전경색	Vordergrund	Premier plan
+
+已清空选区。	已清空選取範圍。	Selection cleared.	選択範囲内を消去しました。	선택 영역을 지웠습니다.	Auswahlbereich geleert.	Contenu de la sélection effacé.
+
+添加色标	新增色標	Add color stop	カラーストップを追加	색상 정지점 추가	Farbstopp hinzufügen	Ajouter un point de couleur
+
+删除色标	刪除色標	Remove color stop	カラーストップを削除	색상 정지점 삭제	Farbstopp entfernen	Supprimer le point de couleur
+锁定比例	鎖定比例	Lock aspect ratio	縦横比を固定	비율 잠금	Seitenverhältnis sperren	Verrouiller les proportions
+联动圆角	連動圓角	Link corner radii	角の半径を連動	모서리 반경 연결	Eckenradien koppeln	Lier les rayons des angles
+左右翻转	水平翻轉	Flip horizontally	水平方向に反転	좌우 반전	Horizontal spiegeln	Retourner horizontalement
+上下翻转	垂直翻轉	Flip vertically	垂直方向に反転	상하 반전	Vertikal spiegeln	Retourner verticalement
+邻近	最鄰近	Nearest Neighbor	最近傍法	최근접	Nächster Nachbar	Plus proche voisin
+两次立方（较平滑）	雙立方（較平滑）	Bicubic Smoother	バイキュービック（滑らか）	쌍입방(부드럽게)	Bikubisch (glatter)	Bicubique (plus lisse)
+两次立方（较锐利）	雙立方（較銳利）	Bicubic Sharper	バイキュービック（シャープ）	쌍입방(선명하게)	Bikubisch (schärfer)	Bicubique (plus net)
+两次立方（自动）	雙立方（自動）	Bicubic Automatic	バイキュービック（自動）	쌍입방(자동)	Bikubisch (automatisch)	Bicubique (automatique)
+
+边数	邊數	Sides	辺の数	변 수	Seitenzahl	Nombre de côtés
+
+星形比例	星形比例	Star inset ratio	星形の内側比率	별 안쪽 비율	Stern-Einzug	Rapport intérieur de l’ étoile

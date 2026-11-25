@@ -15,14 +15,64 @@ const HEIGHT: usize = 36;
 struct Entry {
     id: fontdb::ID,
     key: String,
+    language_coverage: u8,
+}
+
+const LANGUAGE_SAMPLES: [&str; 7] = [
+    "简体汉字",
+    "繁體漢字",
+    "English",
+    "日本語かな",
+    "한글서체",
+    "ÄÖÜäöüß",
+    "Ééèêçœ",
+];
+
+fn localized_family<'a>(face: &'a fontdb::FaceInfo, fallback: &'a str, language: &str) -> &'a str {
+    use fontdb::Language::*;
+    let preferred = match language {
+        "zh-CN" => [
+            Chinese_PeoplesRepublicOfChina,
+            Chinese_Singapore,
+            Chinese_Taiwan,
+            Chinese_HongKongSAR,
+            Chinese_MacaoSAR,
+        ],
+        "zh-TW" => [
+            Chinese_Taiwan,
+            Chinese_HongKongSAR,
+            Chinese_MacaoSAR,
+            Chinese_PeoplesRepublicOfChina,
+            Chinese_Singapore,
+        ],
+        _ => return fallback,
+    };
+    preferred
+        .iter()
+        .find_map(|language| {
+            face.families
+                .iter()
+                .find(|(name, locale)| locale == language && !name.is_empty())
+                .map(|(name, _)| name.as_str())
+        })
+        .unwrap_or(fallback)
 }
 pub(in super::super) struct Catalog {
     pub(super) db: fontdb::Database,
     rows: BTreeMap<String, Entry>,
 }
 impl Catalog {
+    fn display_family<'a>(&'a self, family: &'a str, language: &str) -> &'a str {
+        self.rows
+            .get(family)
+            .and_then(|entry| self.db.face(entry.id))
+            .or_else(|| self.db.faces().find(|face| face.post_script_name == family))
+            .map_or(family, |face| localized_family(face, family, language))
+    }
+
     pub(in super::super) fn contains(&self, family: &str) -> bool {
-        self.rows.contains_key(family)
+        self.db.faces().any(|face| face.post_script_name == family)
+            || self.rows.contains_key(family)
             || self
                 .db
                 .query(&fontdb::Query {
@@ -31,7 +81,7 @@ impl Catalog {
                 })
                 .is_some()
     }
-    fn read() -> Self {
+    pub(in crate::asset_viewer::graphic_editor) fn read() -> Self {
         let db = crate::asset_viewer::svg_preview::load_system_fonts();
         let mut rows = BTreeMap::new();
         for face in db.faces() {
@@ -67,10 +117,31 @@ impl Catalog {
                 }
                 fontdb::Source::Binary(bytes) => hash.update(bytes.as_ref().as_ref()),
             }
+            let language_coverage = db
+                .with_face_data(id, |bytes, index| {
+                    let Ok(font) = FontRef::try_from_slice_and_index(bytes, index) else {
+                        return 0;
+                    };
+                    LANGUAGE_SAMPLES
+                        .iter()
+                        .enumerate()
+                        .fold(0, |coverage, (locale, sample)| {
+                            if sample
+                                .chars()
+                                .all(|character| font.glyph_id(character).0 != 0)
+                            {
+                                coverage | (1 << locale)
+                            } else {
+                                coverage
+                            }
+                        })
+                })
+                .unwrap_or(0);
             rows.insert(
                 family.clone(),
                 Entry {
                     id,
+                    language_coverage,
                     key: format!("{:x}", hash.finalize()),
                 },
             );
@@ -237,30 +308,61 @@ impl Cache {
         }
     }
     pub(super) fn picker(&mut self, ui: &mut egui::Ui, family: &mut String) {
+        let locale = crate::localization::language_index();
+        let language = crate::localization::LANGUAGES[locale].0;
+        let selected = self
+            .catalog
+            .as_deref()
+            .map_or(family.as_str(), |fonts| {
+                fonts.display_family(family, language)
+            })
+            .to_owned();
         egui::ComboBox::from_id_salt("tile_font_family")
             .width(145.)
             .height(260.)
-            .selected_text(&*family)
+            .selected_text(selected)
             .show_ui(ui, |ui| {
                 let Some(fonts) = self.catalog.clone() else {
                     ui.label(tr("正在读取系统字体"));
                     return;
                 };
-                for (name, entry) in &fonts.rows {
+                let supports_language =
+                    |entry: &Entry| entry.language_coverage & (1 << locale) != 0;
+                let rows = fonts
+                    .rows
+                    .iter()
+                    .filter(|(_, entry)| supports_language(entry))
+                    .chain(
+                        fonts
+                            .rows
+                            .iter()
+                            .filter(|(_, entry)| !supports_language(entry)),
+                    );
+                for (name, entry) in rows {
+                    let label = fonts
+                        .db
+                        .face(entry.id)
+                        .map_or(name.as_str(), |face| localized_family(face, name, language));
+                    let selected = name == family
+                        || fonts
+                            .db
+                            .face(entry.id)
+                            .is_some_and(|face| face.post_script_name == *family);
                     let response =
-                        ui.add_sized([300., 25.], egui::Button::new("").selected(name == family));
+                        ui.add_sized([300., 25.], egui::Button::new("").selected(selected));
                     if !ui.is_rect_visible(response.rect) {
                         continue;
                     }
                     let r = response.rect;
                     let color = ui.visuals().text_color();
-                    let label = Rect::from_min_max(r.min, r.right_bottom() - egui::vec2(114., 0.));
+                    let label_rect =
+                        Rect::from_min_max(r.min, r.right_bottom() - egui::vec2(114., 0.));
                     ui.painter()
-                        .with_clip_rect(label.intersect(ui.clip_rect()))
+                        .with_clip_rect(label_rect.intersect(ui.clip_rect()))
                         .text(
                             r.left_center() + egui::vec2(5., 0.),
                             egui::Align2::LEFT_CENTER,
-                            name,
+                            label,
                             egui::FontId::proportional(14.),
                             color,
                         );
@@ -289,8 +391,15 @@ impl Cache {
                     {
                         self.pending.insert(entry.key.clone());
                     }
-                    if response.on_hover_text(name).clicked() {
-                        family.clone_from(name);
+                    let tooltip = if label == name {
+                        name.clone()
+                    } else {
+                        format!("{label} ({name})")
+                    };
+                    if response.on_hover_text(tooltip).clicked() {
+                        if !selected {
+                            family.clone_from(name);
+                        }
                         ui.close_menu();
                     }
                 }

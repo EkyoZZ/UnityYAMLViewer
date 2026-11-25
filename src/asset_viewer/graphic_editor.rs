@@ -20,6 +20,7 @@ mod split;
 mod png_export;
 mod image_size;
 mod guides;
+mod vector;
 mod text_layer;
 mod transform;
 pub(super) mod bitmap_workspace;
@@ -143,6 +144,9 @@ enum Tool {
     Line,
     Fill,
     Text,
+    Shape,
+    Path,
+    Pen,
 }
 #[derive(Clone, Copy)]
 struct RectangleDrag {
@@ -152,6 +156,19 @@ struct RectangleDrag {
     preview: bool,
     line: bool,
     filled:bool,
+    ellipse: bool,
+    soft: bool,
+}
+const FRAME_MODES: [(bool, &str, crate::icons::Icon); 2] = [
+    (false, "矩形", crate::icons::Icon::RectangleTool),
+    (true, "椭圆", crate::icons::Icon::SelectionEllipse),
+];
+fn diamond_size(size: [f64; 2], footprint: [u32; 2]) -> [f64; 2] {
+    let [w, h] = footprint.map(|value| f64::from(value.max(1)));
+    let factor = (size[0] * w + size[1] * h) / (w * w + h * h);
+    let shorter = (factor * w.min(h)).round().max(1.);
+    let scale = shorter / w.min(h);
+    [(scale * w).round(), (scale * h).round()]
 }
 fn default_brush_flow()->u8 {100}
 fn default_brush_spacing()->u8 {10}
@@ -268,6 +285,39 @@ fn drag_zoom(anchor: Pos2, initial: f32, pan: Vec2, dx: f32, center: Pos2, minim
     let offset = anchor - center;
     (zoom, offset - (offset - pan) * (zoom / initial))
 }
+
+fn click_zoom(current: f32, out: bool, maximum: f32) -> f32 {
+    const BELOW_100: [f32; 7] = [2. / 3., 1. / 2., 1. / 3., 1. / 4., 1. / 6., 1. / 8., 1. / 12.];
+    const EPSILON: f32 = 0.0001;
+    if out {
+        if current > 1. + EPSILON {
+            return (current - EPSILON).ceil() - 1.;
+        }
+        return BELOW_100.into_iter()
+            .find(|step| *step < current - EPSILON)
+            .unwrap_or(current);
+    }
+    if current < 1. - EPSILON {
+        return BELOW_100.into_iter().rev()
+            .find(|step| *step > current + EPSILON)
+            .unwrap_or(1.);
+    }
+    ((current + EPSILON).floor() + 1.).min(maximum)
+}
+
+fn paint_zoom_cursor(ui: &egui::Ui, pointer: Pos2, out: bool) {
+    ui.output_mut(|output| output.cursor_icon = egui::CursorIcon::None);
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.id().with("zoom_cursor")));
+    for (width, color) in [(3_f32, Color32::BLACK), (1.4_f32, Color32::WHITE)] {
+        let stroke = egui::Stroke::new(width, color);
+        painter.circle_stroke(pointer, 6., stroke);
+        painter.line_segment([pointer + egui::vec2(4., 4.), pointer + egui::vec2(9., 9.)], stroke);
+        painter.line_segment([pointer - egui::vec2(3., 0.), pointer + egui::vec2(3., 0.)], stroke);
+        if !out {
+            painter.line_segment([pointer - egui::vec2(0., 3.), pointer + egui::vec2(0., 3.)], stroke);
+        }
+    }
+}
 // Use the same effective scale for rendering and anchored drag zoom, including
 // the minimum tile size and raised-sprite draw-budget floor.
 fn repeat_scale(zoom: f32, dpi: f32, footprint: [u32; 2], height: u32) -> f32 {
@@ -354,6 +404,63 @@ fn toolbar_offset_inside(offset:Vec2,size:Vec2,area:Rect)->Vec2 {
 }
 #[derive(serde::Serialize,serde::Deserialize)]
 struct ToolbarSettings { offset:[f32;2], #[serde(default)] horizontal:bool }
+fn editor_confirmation(
+    ui: &egui::Ui,
+    modal: egui::Modal,
+    title: &str,
+    message: &str,
+    cancel: &str,
+    confirm: &str,
+    details: impl FnOnce(&mut egui::Ui),
+) -> Option<bool> {
+    let (decision, dismissed) =
+        editor_confirmation_response(ui, modal, title, message, cancel, confirm, true, details);
+    if dismissed { Some(false) } else { decision }
+}
+
+fn editor_confirmation_response(
+    ui: &egui::Ui,
+    modal: egui::Modal,
+    title: &str,
+    message: &str,
+    cancel: &str,
+    confirm: &str,
+    confirm_enabled: bool,
+    details: impl FnOnce(&mut egui::Ui),
+) -> (Option<bool>, bool) {
+    let mut decision = None;
+    let modal = modal.show(ui.ctx(), |ui| {
+        ui.set_width(286.);
+        ui.vertical_centered(|ui| {
+            ui.heading(title);
+            ui.add(egui::Label::new(message).wrap().halign(egui::Align::Center));
+            details(ui);
+            ui.separator();
+            let width_for = |label| ui.painter().layout_no_wrap(
+                label, egui::FontId::proportional(14.), ui.visuals().text_color(),
+            ).size().x + 16.;
+            let max_button = (ui.available_width() - ui.spacing().item_spacing.x) / 2.;
+            let button_size = egui::vec2(width_for(cancel.to_owned()).max(width_for(confirm.to_owned())).max(84.).min(max_button), 30.);
+            let width = 2. * button_size.x + ui.spacing().item_spacing.x;
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, button_size.y),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    if ui.add_sized(button_size, egui::Button::new(cancel)).clicked() {
+                        decision = Some(false);
+                    }
+                    if ui.add_enabled_ui(confirm_enabled, |ui| {
+                        ui.add_sized(button_size, egui::Button::new(confirm))
+                    }).inner.clicked() {
+                        decision = Some(true);
+                    }
+                },
+            );
+        });
+    });
+    (decision, modal.should_close())
+}
+
 fn tool_mode_button(ui:&mut egui::Ui,icon:crate::icons::Icon,label:&str,selected:bool)->egui::Response {
     let font=egui::TextStyle::Button.resolve(ui.style());let galley=ui.painter().layout_no_wrap(label.to_owned(),font,ui.visuals().text_color());
     let width=(galley.size().x+36.).max(ui.available_width());
@@ -394,15 +501,18 @@ pub(super) struct Editor {
     image_source_protected:bool,
     image_saved_as_merged_psd:bool,
     psd_resources:Vec<u8>,
+    psd_patterns: Vec<u8>,
     image_saved:Option<std::path::PathBuf>,
     rectangle_fill:bool,
     text_dialog:Option<text_layer::Dialog>,
     inline_text:Option<text_layer::Inline>,
+    path_tool: vector::PathTool,
     font_samples:text_layer::font_samples::Cache,
     transform:Option<transform::Session>,
     transform_bounds_cache:Option<((usize,usize,bool,u64),Option<Rect>)>,
     show_transform:bool,
-    transform_smooth:bool,
+    confirm_transform_exit: bool,
+    transform_interpolation:transform::Interpolation,
     transform_linked:bool,
     layer_detail:Option<(usize,bool,String,Pos2)>,
     style_clipboard:Option<layer_properties::effects::Effects>,
@@ -445,6 +555,7 @@ pub(super) struct Editor {
     preview_samples:Vec<RgbaImage>,
     preview_last: Option<(i32, i32)>,
     dirty_texture: bool,
+    preview_inline_active: bool,
     dirty_all: bool,
     dirty_tiles: std::collections::BTreeSet<usize>,
     undo: Vec<Snapshot>,
@@ -453,8 +564,10 @@ pub(super) struct Editor {
     brush_coverage: std::collections::HashMap<(usize, u32, u32), f32>,
     last: Option<(i32, i32)>,
     color: [u8; 4],
+    drawing_background: [u8; 4],
     tool: Tool,
     rectangle: Option<RectangleDrag>,
+    rectangle_ellipse: bool,
     diamond: bool,
     hex: u8,
     elevated: bool,
@@ -475,7 +588,7 @@ pub(super) struct Editor {
     confirm_close: bool,
     discard_requested:bool,
     pending_open:Option<std::path::PathBuf>,
-    pending_layer_action:Option<(bool,usize,Vec<usize>,bool)>,
+    project_target: Option<(std::path::PathBuf, bitmap_workspace::FileVersion)>,
     message: String,
     wake: bool,
     wrap: bool,
@@ -507,14 +620,15 @@ impl Default for Editor {
         Self {
             split_preview: false, split_grid: [1, 1],
             image_alpha: true, image_size_draft: None,
-            plain_image:false,guides:Default::default(),image_target:None,image_version:None,image_readonly:false,image_source_protected:false,image_saved_as_merged_psd:false,image_saved:None,psd_resources:Vec::new(),
+            plain_image:false,guides:Default::default(),image_target:None,image_version:None,image_readonly:false,image_source_protected:false,image_saved_as_merged_psd:false,image_saved:None,psd_resources:Vec::new(),psd_patterns:Vec::new(),
             materials: Vec::new(),
             material_drop_status: None,
             material_thumbnails: Vec::new(),
             material_thumbnail_zoom: 0.,
             text_dialog:None,
             inline_text:None,
-            font_samples:Default::default(),transform:None,transform_bounds_cache:None,show_transform:false,transform_smooth:false,transform_linked:true,
+            path_tool: Default::default(),
+            font_samples:Default::default(),transform:None,transform_bounds_cache:None,show_transform:false,confirm_transform_exit:false,transform_interpolation:Default::default(),transform_linked:true,
             layer_detail:None,
             style_clipboard:None,
             fx_page: Default::default(), fx_light: Default::default(), fx_dragging: false,
@@ -549,6 +663,7 @@ impl Default for Editor {
             preview_samples:Vec::new(),
             preview_last: None,
             dirty_texture: true,
+            preview_inline_active: false,
             dirty_all: true,
             dirty_tiles: Default::default(),
             undo: Vec::new(),
@@ -557,6 +672,7 @@ impl Default for Editor {
             brush_coverage: Default::default(),
             last: None,
             color: [80, 180, 100, 255],
+            drawing_background: [0, 0, 0, 255],
             tool: Tool::Move,
             rectangle: None,
             diamond: true,
@@ -579,7 +695,7 @@ impl Default for Editor {
             confirm_close: false,
             discard_requested:false,
             pending_open:None,
-            pending_layer_action:None,
+            project_target: None,
             message: String::new(),
             wake: false,
             wrap: true,
@@ -587,6 +703,7 @@ impl Default for Editor {
             brush_size: 1,
             soft_brush: false,
             rectangle_fill:false,
+            rectangle_ellipse:false,
             brush_hardness: 0,
             brush_mode: BrushMode::Normal,
             pressure_size: false,
@@ -745,7 +862,38 @@ impl Editor {
     fn layer_editable(&self) -> bool {
         self.layers
             .get(self.active_layer)
-            .is_none_or(|layer| !layer.locked && !self.ancestor_locked(self.active_layer) && self.ancestors_visible(self.active_layer) && layer.visible && if self.mask_editing{layer.settings.mask.is_some()}else{layer.settings.group_id==0 && !layer.settings.lock_pixels && !self.ancestor_paint_locked(self.active_layer) && layer.settings.adjustment.is_none() && layer.settings.text.is_none()})
+            .is_none_or(|layer| !layer.locked && !self.ancestor_locked(self.active_layer) && self.ancestors_visible(self.active_layer) && layer.visible && if self.mask_editing{layer.settings.mask.is_some() && layer.settings.vector.as_ref().is_none_or(|v| v.fill.is_some())}else{layer.settings.group_id==0 && !layer.settings.lock_pixels && !self.ancestor_paint_locked(self.active_layer) && layer.settings.adjustment.is_none() && layer.settings.text.is_none() && layer.settings.vector.as_ref().is_none_or(|v| v.fill.is_none())})
+    }
+    fn prepare_pixel_paint(&mut self, hit: impl FnOnce(&Self) -> bool) -> bool {
+        if self.layer_editable() {
+            return true;
+        }
+        let index = self.active_layer;
+        let settings = &self.layers[index].settings;
+        if self.mask_editing
+            || !matches!(self.tool, Tool::Brush | Tool::Rectangle | Tool::Line | Tool::Fill)
+            || self.color[3] == 0
+            || (settings.vector.is_none() && settings.text.is_none())
+            || self.ancestor_locked(index)
+            || self.ancestor_paint_locked(index)
+            || !self.ancestors_visible(index)
+            || !hit(self)
+        {
+            return false;
+        }
+        let before = self.snapshot();
+        let pressure = self.input_pressure;
+        if !self.insert_empty_layer(false) {
+            return false;
+        }
+        self.input_pressure = pressure;
+        self.before = Some(before);
+        self.message.clear();
+        true
+    }
+    fn paint_hit(&self, point: (i32, i32), layout: bool) -> bool {
+        self.plane_hit(point.0, point.1, layout)
+            .is_some_and(|(tile, x, y)| self.selection.allows(tile, x, y))
     }
     fn sync_layer(&mut self) {
         self.tiles[self.selected] = self.pixels.clone();
@@ -787,7 +935,7 @@ impl Editor {
     fn background_controls(&mut self,ui:&mut egui::Ui){
         ui.separator();
         ui.horizontal(|ui|{
-            ui.spacing_mut().item_spacing.x=3.;ui.label(tr("背景色"));
+            ui.spacing_mut().item_spacing.x=3.;ui.label(tr("预览背景色"));
             ui.horizontal(|ui|{
                 ui.spacing_mut().item_spacing.x=0.;
                 let mut mode=if self.background_custom{1}else{0};
@@ -803,6 +951,50 @@ impl Editor {
     }
     fn pick_visible_pixel(&mut self, tile: usize, x: u32, y: u32) {
         self.color = self.composite(tile).get_pixel(x, y).0;
+    }
+    fn drawing_colors(&mut self, ui: &mut egui::Ui, height: f32) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(44., height), egui::Sense::hover());
+        let top = rect.center().y - 24.;
+        let reset = Rect::from_min_size(egui::pos2(rect.left() + 5., top), Vec2::splat(16.));
+        let response = ui.interact(reset, ui.id().with("reset_drawing_colors"), egui::Sense::click());
+        let outline = egui::Stroke::new(1_f32, ui.style().interact(&response).fg_stroke.color);
+        for (offset, fill) in [(egui::vec2(2., 2.), Color32::BLACK), (egui::vec2(-2., -2.), Color32::WHITE)] {
+            let square = Rect::from_center_size(reset.center() + offset, Vec2::splat(7.));
+            ui.painter().rect_filled(square, 0., fill);
+            ui.painter().rect_stroke(square, 0., outline, egui::StrokeKind::Inside);
+        }
+        if response.on_hover_text(tr("恢复默认绘制颜色")).clicked() {
+            self.color = [80, 180, 100, 255];
+            self.drawing_background = [0, 0, 0, 255];
+        }
+        for (label, value, x, y) in [
+            ("背景色", &mut self.drawing_background, 19., 27.),
+            ("前景色", &mut self.color, 9., 17.),
+        ] {
+            let swatch = Rect::from_min_size(egui::pos2(rect.left() + x, top + y), Vec2::splat(19.));
+            let mut slot = ui.new_child(egui::UiBuilder::new().id_salt(label).max_rect(swatch));
+            if let Some(rgba) = crate::color_property::show_editable_swatch(
+                &mut slot, tr(label), value.map(|v| f64::from(v) / 255.), swatch.size(),
+            ) {
+                *value = rgba.map(|v| (v.clamp(0., 1.) * 255.).round() as u8);
+            }
+        }
+        let swap = Rect::from_min_size(egui::pos2(rect.left() + 24., top), Vec2::splat(16.));
+        let response = ui.interact(swap, ui.id().with("swap_drawing_colors"), egui::Sense::click());
+        let color = ui.style().interact(&response).fg_stroke.color;
+        let c = swap.center();
+        let stroke = egui::Stroke::new(1.25_f32, color);
+        let p = |x, y| c + egui::vec2(x, y);
+        ui.painter().add(egui::epaint::CubicBezierShape::from_points_stroke(
+            [p(-4.5, -3.), p(1.5, -3.), p(4.5, -2.), p(4.5, 4.)],
+            false, Color32::TRANSPARENT, stroke,
+        ));
+        ui.painter().add(egui::Shape::line(vec![p(-2., -5.5), p(-4.5, -3.), p(-2., -0.5)], stroke));
+        ui.painter().add(egui::Shape::line(vec![p(2., 1.5), p(4.5, 4.), p(7., 1.5)], stroke));
+        if response.on_hover_text(tr("交换前景色和背景色")).clicked() {
+            std::mem::swap(&mut self.color, &mut self.drawing_background);
+        }
+        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], ui.visuals().widgets.noninteractive.bg_stroke);
     }
     fn composite(&self, tile: usize) -> RgbaImage {
         if self.layers.is_empty() {
@@ -1042,6 +1234,9 @@ impl Editor {
             let locked = self.layers[index].locked||self.ancestor_locked(index);
             let material_layer = self.layers[index].material;
             let group_layer=self.layers[index].settings.group_id!=0;
+            let vector_label = self.layers[index].settings.vector.as_ref().map(vector::Vector::property_label);
+            let has_detail = vector_label.is_some() || self.layers[index].settings.adjustment.is_some()
+                || (self.layers[index].settings.text.is_some() && self.rectangle_text_allowed());
             let frame = egui::Frame::new().inner_margin(3).stroke(egui::Stroke::new(
                 1_f32,
                 if row_selected {
@@ -1092,6 +1287,12 @@ impl Editor {
                     }
                     if self.layers[index].settings.group_id!=0{layer_properties::paint_group_icon(ui,rect,!self.layers[index].settings.collapsed);}
                     if let Some(adjust)=&self.layers[index].settings.adjustment{layer_properties::paint_adjustment_icon(ui,rect,adjust);}
+                    if let Some(vector) = &self.layers[index].settings.vector {
+                        let badge = Rect::from_min_size(rect.right_bottom() - Vec2::splat(14.), Vec2::splat(13.));
+                        ui.painter().rect_filled(badge, 2., ui.visuals().extreme_bg_color);
+                        crate::icons::paint(ui, vector.layer_icon(), badge.shrink(1.5), ui.visuals().text_color());
+                        response.clone().on_hover_text(tr(vector.property_label()));
+                    }
                     if active&&!self.mask_editing{ui.painter().rect_stroke(rect,1.,egui::Stroke::new(2_f32,ui.visuals().selection.stroke.color),egui::StrokeKind::Inside);}
                     if let Some(text)=&self.layers[index].settings.text {
                         self.font_samples.tick(ui.ctx());
@@ -1127,7 +1328,7 @@ impl Editor {
                             if let Some(action)=action{ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("tile_mask_context_action"),(index,action)));ui.close_menu();}
                         });
                     }
-                    let width = (ui.available_width() - if self.layers[index].settings.link_id!=0{48.}else{28.} - if self.layers[index].settings.has_effects()||self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx){24.}else{0.} - if self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.text.is_some(){20.}else{0.} - ui.spacing().item_spacing.x).max(1.);
+                    let width = (ui.available_width() - if self.layers[index].settings.link_id!=0{48.}else{28.} - if self.layers[index].settings.has_effects()||self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx){24.}else{0.} - if has_detail{20.}else{0.} - ui.spacing().item_spacing.x).max(1.);
                     let name_response = ui.push_id(owner.with(("name", index)), |ui| {
                         ui.add_sized([width, 28.], egui::Button::new(&name).selected(row_selected).truncate()
                             .corner_radius(0)
@@ -1177,14 +1378,16 @@ impl Editor {
                             ui.close_menu();
                         }
                         let mut text = name.clone();
-                        if !locked && !self.layers[index].material && ui
-                            .add(egui::TextEdit::singleline(&mut text).char_limit(64))
-                            .changed()
-                        {
-                            rename = Some((index, text));
+                        if !locked && !self.layers[index].material {
+                            ui.horizontal(|ui| {
+                                ui.label(tr("图层名"));
+                                if ui.add(egui::TextEdit::singleline(&mut text).char_limit(64)).changed() {
+                                    rename = Some((index, text));
+                                }
+                            });
                         }
                     });
-                    if self.layers[index].settings.adjustment.is_some() || (self.layers[index].settings.text.is_some() && self.rectangle_text_allowed()){let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&!*fx);let response=ui.add_sized([16.,28.],egui::Button::new("").frame(false).selected(expanded));let c=response.rect.center();let points=if expanded{vec![c+egui::vec2(-4.,-2.),c+egui::vec2(0.,2.),c+egui::vec2(4.,-2.)]}else{vec![c+egui::vec2(-2.,-4.),c+egui::vec2(2.,0.),c+egui::vec2(-2.,4.)]};ui.painter().add(egui::Shape::line(points,egui::Stroke::new(1.4_f32,ui.visuals().text_color())));let rect=response.rect;if response.on_hover_text(tr(if self.layers[index].settings.text.is_some(){"编辑文字图层"}else{"调整"})).clicked(){detail_toggle=Some((index,false,rect));}}
+                    if has_detail{let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&!*fx);let response=ui.add_sized([16.,28.],egui::Button::new("").frame(false).selected(expanded));let c=response.rect.center();let points=if expanded{vec![c+egui::vec2(-4.,-2.),c+egui::vec2(0.,2.),c+egui::vec2(4.,-2.)]}else{vec![c+egui::vec2(-2.,-4.),c+egui::vec2(2.,0.),c+egui::vec2(-2.,4.)]};ui.painter().add(egui::Shape::line(points,egui::Stroke::new(1.4_f32,ui.visuals().text_color())));let rect=response.rect;if response.on_hover_text(tr(vector_label.unwrap_or(if self.layers[index].settings.text.is_some(){"编辑文字图层"}else{"调整"}))).clicked(){detail_toggle=Some((index,false,rect));}}
                     if self.layers[index].settings.has_effects()||self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx){let expanded=self.layer_detail.as_ref().is_some_and(|(i,fx,_,_)|*i==index&&*fx);let response=ui.add_sized([20.,28.],egui::Button::new(egui::RichText::new("fx").italics().size(14.)).frame(false).selected(expanded));let rect=response.rect;response.context_menu(|ui|{self.style_context_menu(ui,index,true);});if response.on_hover_text(tr("图层样式")).clicked(){detail_toggle=Some((index,true,rect));}}
                     if self.layers[index].settings.link_id!=0 {let(rect,_)=ui.allocate_exact_size(egui::vec2(16.,16.),egui::Sense::hover());let c=ui.visuals().text_color();let center=rect.center();for dx in [-3.,3.]{ui.painter().rect_stroke(Rect::from_center_size(center+egui::vec2(dx,0.),egui::vec2(9.,6.)),3.,egui::Stroke::new(1.3_f32,c),egui::StrokeKind::Inside);}ui.painter().line_segment([center-egui::vec2(3.,0.),center+egui::vec2(3.,0.)],egui::Stroke::new(1.3_f32,c));}
                     let inherited_lock=self.ancestor_locked(index);
@@ -1246,7 +1449,6 @@ impl Editor {
         if ui.ctx().data_mut(|d|d.remove_temp::<bool>(egui::Id::new("tile_clear_layer"))).unwrap_or(false){self.request_layer_action(true,self.active_layer);}
         if let Some((index,fx,rect))=detail_toggle{self.toggle_layer_detail(index,fx,rect,ui.ctx().screen_rect());}
         self.layer_detail_ui(ui);
-        self.layer_action_confirmation(ui);
         if !self.layer_editable() && self.layers[self.active_layer].settings.text.is_none() {
             ui.small(tr("当前图层已锁定或隐藏，不能绘制。"));
         }
@@ -1321,11 +1523,17 @@ impl Editor {
             cell.y,
         ))
     }
+    fn geometry_hit(&self, x: i32, y: i32, layout: bool, wrap: bool) -> Option<(usize, u32, u32)> {
+        if !wrap {
+            return self.finite_plane_hit(x, y, layout);
+        }
+        let (w, h) = self.pixels.dimensions();
+        let cell = self.mapped_cell(x, y, w, h);
+        let slot = if layout { self.tile_at(cell.col, cell.row) } else { self.selected };
+        Some((slot, cell.x, cell.y))
+    }
     fn fill_region(&mut self, mut point: (i32, i32), layout: bool) {
         self.finish_stroke();
-        if !self.layer_editable() {
-            return;
-        }
         let (w, h) = self.pixels.dimensions();
         let (cols, rows) = if layout && self.multiple {
             (self.columns, self.rows)
@@ -1342,6 +1550,9 @@ impl Editor {
         let Some((tile, x, y)) = self.finite_plane_hit(point.0, point.1, layout) else {
             return;
         };
+        if !self.prepare_pixel_paint(|editor| editor.selection.allows(tile, x, y)) {
+            return;
+        }
         let state=self.snapshot();
         let target = self.snapshot_edit_pixel(&state,tile,x,y);
         let color = Rgba(self.color);
@@ -1401,17 +1612,43 @@ impl Editor {
                 }
             }
         }
-        self.before = Some(state);
+        self.before.get_or_insert(state);
         for (tile, x, y) in region {
             self.write_pixel(tile, x, y, color);
         }
         self.finish_stroke();
         self.message.clear();
     }
-    fn plane_filled_rectangle(&mut self,a:(i32,i32),b:(i32,i32),layout:bool){
-        if !self.layer_editable(){return;}let width=(i64::from(a.0)-i64::from(b.0)).abs()+1;let height=(i64::from(a.1)-i64::from(b.1)).abs()+1;if width.saturating_mul(height)>4*1024*1024{self.message=tr("填充区域过大，请缩小循环范围。").into();return;}
+    fn plane_filled_rectangle(&mut self,a:(i32,i32),b:(i32,i32),layout:bool, ellipse: bool, soft: bool){
+        let width=(i64::from(a.0)-i64::from(b.0)).abs()+1;let height=(i64::from(a.1)-i64::from(b.1)).abs()+1;if width.saturating_mul(height)>4*1024*1024{self.message=tr("填充区域过大，请缩小循环范围。").into();return;}
+        let diamond = self.diamond && !self.plain_image;
+        let contains = |x: f64, y: f64| {
+            let dx = (2. * x - f64::from(a.0) - f64::from(b.0)).abs() / width as f64;
+            let dy = (2. * y - f64::from(a.1) - f64::from(b.1)).abs() / height as f64;
+            if ellipse {
+                dx * dx + dy * dy <= 1.
+            } else {
+                !diamond || dx + dy <= 1.
+            }
+        };
+        let coverage = |x: i32, y: i32| {
+            let (x, y) = (f64::from(x), f64::from(y));
+            if !soft || (!diamond && !ellipse) {
+                return f32::from(u8::from(contains(x, y)));
+            }
+            let samples = [-0.375, -0.125, 0.125, 0.375];
+            samples.into_iter().flat_map(|dy| samples.map(move |dx| contains(x + dx, y + dy)))
+                .filter(|&inside| inside).count() as f32 / 16.
+        };
+        if !self.prepare_pixel_paint(|editor| (a.1.min(b.1)..=a.1.max(b.1))
+            .any(|y| (a.0.min(b.0)..=a.0.max(b.0)).any(|x| coverage(x,y) > 0. && editor.paint_hit((x, y), layout)))) {
+            return;
+        }
         if self.before.is_none(){self.before=Some(self.snapshot());}let mut touched=std::collections::HashSet::new();
-        for y in a.1.min(b.1)..=a.1.max(b.1){for x in a.0.min(b.0)..=a.0.max(b.0){if let Some((tile,px,py))=self.plane_hit(x,y,layout){if !self.selection.allows(tile,px,py){continue;}if self.subgroup_active()&&layout{self.subgroup_touches.insert((x,y));}if !touched.insert((tile,px,py)){continue;}let old=self.before_edit_pixel(tile,px,py);let color=self.blend_edit_pixel(old,Rgba(self.color),1.,false,BrushMode::Normal);self.write_pixel(tile,px,py,color);}}}
+        for y in a.1.min(b.1)..=a.1.max(b.1){for x in a.0.min(b.0)..=a.0.max(b.0){
+            let amount = coverage(x, y);
+            if amount == 0. { continue; }
+            if let Some((tile,px,py))=self.plane_hit(x,y,layout){if !self.selection.allows(tile,px,py){continue;}if self.subgroup_active()&&layout{self.subgroup_touches.insert((x,y));}if !touched.insert((tile,px,py)){continue;}let old=self.before_edit_pixel(tile,px,py);let color=self.blend_edit_pixel(old,Rgba(self.color),amount,false,BrushMode::Normal);self.write_pixel(tile,px,py,color);}}}
     }
     fn rectangle_input(
         &mut self,
@@ -1431,6 +1668,8 @@ impl Editor {
                         preview,
                         line: self.tool == Tool::Line,
                         filled:self.tool==Tool::Rectangle&&self.rectangle_fill,
+                        ellipse: self.tool == Tool::Rectangle && self.rectangle_ellipse,
+                        soft: self.soft_brush,
                     });
                 }
                 if let Some(drag) = self
@@ -1455,10 +1694,28 @@ impl Editor {
         if !down && self.rectangle.is_some_and(|drag| drag.preview == preview) {
             let drag = self.rectangle.take().unwrap();
             let a = drag.start;
-            let b = drag.end;
-            if drag.filled{self.plane_filled_rectangle(a,b,drag.layout);}
+            let b = self.frame_end(drag);
+            let brush_mode = self.soft_brush;
+            if !drag.line { self.soft_brush = drag.soft; }
+            if drag.filled{self.plane_filled_rectangle(a,b,drag.layout,drag.ellipse,drag.soft);}
             else if drag.line {
                 self.plane_stroke(a, b, drag.layout);
+            } else if drag.ellipse {
+                let points = selection::ellipse_points(Rect::from_two_pos(
+                    egui::pos2(a.0 as f32, a.1 as f32),
+                    egui::pos2(b.0 as f32, b.1 as f32),
+                ));
+                let pixel = |p: &Pos2| (p.x.round() as i32, p.y.round() as i32);
+                for (from, to) in points.iter().zip(points.iter().cycle().skip(1)) {
+                    self.plane_stroke(pixel(from), pixel(to), drag.layout);
+                }
+            } else if self.diamond && !self.plain_image {
+                let x = a.0.midpoint(b.0);
+                let y = a.1.midpoint(b.1);
+                let points = [(x, a.1), (b.0, y), (x, b.1), (a.0, y)];
+                for (from, to) in points.into_iter().zip(points.into_iter().cycle().skip(1)) {
+                    self.plane_stroke(from, to, drag.layout);
+                }
             } else {
                 self.plane_stroke(a, (b.0, a.1), drag.layout);
                 self.plane_stroke((b.0, a.1), b, drag.layout);
@@ -1466,7 +1723,24 @@ impl Editor {
                 self.plane_stroke((a.0, b.1), a, drag.layout);
             }
             self.finish_stroke();
+            self.soft_brush = brush_mode;
         }
+    }
+    fn frame_end(&self, drag: RectangleDrag) -> (i32, i32) {
+        if self.plain_image || !self.diamond || drag.line || drag.ellipse {
+            return drag.end;
+        }
+        let delta = [
+            f64::from(drag.end.0) - f64::from(drag.start.0),
+            f64::from(drag.end.1) - f64::from(drag.start.1),
+        ];
+        if delta == [0., 0.] {
+            return drag.end;
+        }
+        let [w, h] = diamond_size(delta.map(|value| value.abs() + 1.), self.footprint);
+        let x = (w - 1.).copysign(delta[0]);
+        let y = (h - 1.).copysign(delta[1]);
+        (drag.start.0.saturating_add(x as i32), drag.start.1.saturating_add(y as i32))
     }
     fn rectangle_outline(&self, painter: &egui::Painter, origin: Pos2, scale: f32, preview: bool) {
         if let Some(drag) = self.rectangle.filter(|drag| drag.preview == preview) {
@@ -1486,14 +1760,31 @@ impl Editor {
                 );
                 return;
             }
+            let end = self.frame_end(drag);
             let min = egui::vec2(
-                drag.start.0.min(drag.end.0) as f32,
-                drag.start.1.min(drag.end.1) as f32,
+                drag.start.0.min(end.0) as f32,
+                drag.start.1.min(end.1) as f32,
             );
             let max = egui::vec2(
-                (drag.start.0.max(drag.end.0) + 1) as f32,
-                (drag.start.1.max(drag.end.1) + 1) as f32,
+                drag.start.0.max(end.0) as f32 + 1.,
+                drag.start.1.max(end.1) as f32 + 1.,
             );
+            if drag.ellipse {
+                let points = selection::ellipse_points(Rect::from_min_max(origin + min * scale, origin + max * scale));
+                let fill = if drag.filled { super::preview_color(self.color).gamma_multiply(0.35) } else { Color32::TRANSPARENT };
+                painter.add(egui::Shape::convex_polygon(points, fill, egui::Stroke::new(1_f32, Color32::YELLOW)));
+                return;
+            }
+            if self.diamond && !self.plain_image {
+                let mid = (min + max) * 0.5;
+                let points = [egui::vec2(mid.x, min.y), egui::vec2(max.x, mid.y),
+                    egui::vec2(mid.x, max.y), egui::vec2(min.x, mid.y)]
+                    .map(|p| origin + p * scale).to_vec();
+                let fill = if drag.filled { super::preview_color(self.color).gamma_multiply(0.35) }
+                    else { Color32::TRANSPARENT };
+                painter.add(egui::Shape::convex_polygon(points, fill, egui::Stroke::new(1_f32, Color32::YELLOW)));
+                return;
+            }
             if drag.filled{painter.rect_filled(Rect::from_min_max(origin+min*scale,origin+max*scale),0.,super::preview_color(self.color).gamma_multiply(0.35));}
             painter.rect_stroke(
                 Rect::from_min_max(origin + min * scale, origin + max * scale),
@@ -1515,8 +1806,20 @@ impl Editor {
         self.pan_drag=false; self.merged_pan_drag=false;
     }
     fn tool_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.pending_layer_action.is_some()||self.pending_open.is_some()||self.text_dialog.as_ref().is_some_and(|d|d.target.is_none()){return;}
-        if self.inline_text.is_some() || Self::text_input_active(ctx) || ctx.input(|i| !i.focused || i.pointer.primary_down()) {
+        if self.confirm_transform_exit || self.pending_open.is_some()||self.text_dialog.as_ref().is_some_and(|d|d.target.is_none()){return;}
+        if self.inline_text.is_some() || self.path_tool.confirming_conversion()
+            || Self::text_input_active(ctx) || ctx.input(|i| !i.focused) {
+            return;
+        }
+        if ctx.input_mut(|i| {
+            i.events.iter().any(|event| matches!(event, egui::Event::Key {
+                key: egui::Key::H, pressed: true, repeat: false, ..
+            })) && i.consume_key(egui::Modifiers::CTRL, egui::Key::H)
+        }) {
+            self.toggle_transform_controls();
+            return;
+        }
+        if ctx.input(|i| i.pointer.primary_down()) {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::R)) {
@@ -1531,17 +1834,62 @@ impl Editor {
         if self.transform.is_some() {
             if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)){self.finish_transform(false);return;}
             if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter)){self.finish_transform(true);return;}
-            let switching=ctx.input(|i|i.modifiers.is_none() && [egui::Key::V,egui::Key::M,egui::Key::B,egui::Key::I,egui::Key::E,egui::Key::U,egui::Key::L,egui::Key::G,egui::Key::Z,egui::Key::T].iter().any(|k|i.key_pressed(*k)));
+            let switching=ctx.input(|i|i.modifiers.is_none() && [egui::Key::V,egui::Key::M,egui::Key::B,egui::Key::I,egui::Key::E,egui::Key::K,egui::Key::L,egui::Key::G,egui::Key::Z,egui::Key::T,egui::Key::U,egui::Key::A,egui::Key::P].iter().any(|k|i.key_pressed(*k)));
             if !switching || !self.finish_transform(true){return;}
         }
         self.nudge_layers(ctx);
+        if self.vector_available() {
+            for (key, tool) in [(egui::Key::U, Tool::Shape), (egui::Key::A, Tool::Path), (egui::Key::P, Tool::Pen)] {
+                if ctx.input_mut(|i| {
+                    i.events.iter().any(|event| matches!(event, egui::Event::Key {
+                        key: pressed, pressed: true, repeat: false, ..
+                    } if *pressed == key))
+                        && i.consume_key(egui::Modifiers::NONE, key)
+                }) {
+                    self.finish_stroke();
+                    if self.tool == tool {
+                        let count = vector::PathTool::modes(tool).len();
+                        self.path_tool.set_mode(tool, (self.path_tool.mode(tool) + 1) % count);
+                    } else {
+                        self.tool = tool;
+                    }
+                    return;
+                }
+            }
+            if self.tool == Tool::Pen && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.path_tool.clear_pen();
+                return;
+            }
+        }
         if self.rectangle_text_allowed() && ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::T)) {
             self.finish_stroke();
             self.tool = Tool::Text;
             return;
         }
-        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Delete)) {if self.mask_editing{self.request_layer_action(true,self.active_layer);}else{self.request_layer_action(false,self.active_layer);}return;}
-        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::ALT,egui::Key::Enter)){self.fill_selection_color();return;}
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Delete)) {
+            self.fill_selection_with_color(self.drawing_background);
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::Delete)) {
+            self.fill_selection_color();
+            return;
+        }
+        if ctx.input_mut(|i| {
+            i.events.iter().any(|event| matches!(event, egui::Event::Key {
+                key: egui::Key::Delete, pressed: true, repeat: false, ..
+            })) && i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+        }) {
+            if self.selection.mask.is_some() {
+                self.delete_selection_pixels();
+            } else {
+                self.request_layer_action(false, self.active_layer);
+            }
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::A)) {
+            self.select_entire_canvas();
+            return;
+        }
         if ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::D)) {self.selection.clear();return;}
         if ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)) {
             if self.selection.draft.is_empty(){self.selection.clear();}else{self.selection.draft.clear();}return;
@@ -1581,14 +1929,25 @@ impl Editor {
             (egui::Key::B, Tool::Brush),
             (egui::Key::I, Tool::Eyedropper),
             (egui::Key::E, Tool::Eraser),
-            (egui::Key::U, Tool::Rectangle),
+            (egui::Key::K, Tool::Rectangle),
             (egui::Key::L, Tool::Line),
             (egui::Key::G, Tool::Fill),
         ] {
             if self.elevated && matches!(tool, Tool::Rectangle | Tool::Line | Tool::Fill) {
                 continue;
             }
+            if matches!(tool, Tool::Brush | Tool::Rectangle) && !ctx.input(|i| i.events.iter().any(|event| matches!(event,
+                egui::Event::Key { key: pressed, pressed: true, repeat: false, .. } if *pressed == key
+            ))) {
+                continue;
+            }
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
+                if tool == Tool::Brush && self.tool == Tool::Brush {
+                    self.soft_brush = !self.soft_brush;
+                }
+                if tool == Tool::Rectangle && self.tool == Tool::Rectangle {
+                    self.rectangle_ellipse = !self.rectangle_ellipse;
+                }
                 self.finish_stroke();
                 self.selection.draft.clear();
                 self.tool = tool;
@@ -1621,20 +1980,34 @@ impl Editor {
     }
     fn plane_stroke(&mut self, from: (i32, i32), to: (i32, i32), layout: bool) {
         if self.soft_brush{self.brush_segment(Pos2::new(from.0 as f32,from.1 as f32),Pos2::new(to.0 as f32,to.1 as f32),layout);return;}
+        let mut points = Vec::new();
+        line(from, to, |x,y|points.push((x,y)));
+        if !self.prepare_pixel_paint(|editor| points.iter().any(|&point| editor.paint_hit(point, layout))) {
+            return;
+        }
         if self.before.is_none() {
             self.before = Some(self.snapshot());
         }
-        let mut points = Vec::new();
-        line(from, to, |x,y|points.push((x,y)));
         let size=self.brush_size as i32;let start=-(size/2);
-        let color=if self.tool==Tool::Eraser{Rgba([0;4])}else{Rgba(self.color)};
+        let color = Rgba(self.color);
         for (x,y) in points {for dy in start..start+size {for dx in start..start+size {
             if !pencil_tip_contains(size,dx-start,dy-start){continue;}
             if let Some((tile,px,py))=self.plane_hit(x+dx,y+dy,layout){
                 if self.subgroup_active() && layout{self.subgroup_touches.insert((x+dx,y+dy));}
-                self.write_pixel(tile,px,py,color);
+                let ink = if self.tool == Tool::Eraser {
+                    self.hard_eraser_pixel(tile, px, py)
+                } else if self.tool == Tool::Brush && !self.mask_editing {
+                    self.blend_edit_pixel(self.before_edit_pixel(tile, px, py), color, 1., false, BrushMode::Normal)
+                } else {
+                    color
+                };
+                self.write_pixel(tile,px,py,ink);
             }
         }}}
+    }
+    fn hard_eraser_pixel(&self, tile: usize, x: u32, y: u32) -> Rgba<u8> {
+        let original = self.before_edit_pixel(tile, x, y);
+        self.blend_edit_pixel(original, Rgba(self.color), 1., true, BrushMode::Normal)
     }
     pub fn active(&self) -> bool {
         self.open || self.changed
@@ -1813,6 +2186,11 @@ impl Editor {
         }
     }
     fn sync_texture(&mut self, ctx: &egui::Context) {
+        let editing = self.inline_text.is_some();
+        if self.preview_inline_active != editing {
+            self.invalidate_textures();
+            self.preview_inline_active = editing;
+        }
         if !self.dirty_texture {
             return;
         }
@@ -1824,7 +2202,23 @@ impl Editor {
             {
                 continue;
             }
+            let preview = self.inline_text.as_ref()
+                .and_then(|edit| edit.preview.as_ref()).and_then(|tiles| tiles.get(index));
+            let target = self.inline_text.as_ref().and_then(|edit| edit.index);
+            let old = preview.filter(|_| target == Some(self.active_layer)).map(|image| {
+                let source = if index == self.selected { &mut self.pixels } else { &mut self.tiles[index] };
+                std::mem::replace(source, image.clone())
+            });
             let mut display = self.composite(index);
+            if let Some(original) = old {
+                let source = if index == self.selected { &mut self.pixels } else { &mut self.tiles[index] };
+                *source = original;
+            }
+            if let Some(image) = preview.filter(|_| target.is_none()) {
+                let mut settings = layer_properties::Properties::default();
+                settings.opacity = if self.plain_image { 100 } else { 35 };
+                settings.composite(&mut display, image, index, self.fx_light);
+            }
             let (w, h) = display.dimensions();
             if self.diamond || self.hex!=0 {for (x, y, p) in display.enumerate_pixels_mut() {
                 if !self.inside_tile(x as i32, y as i32, w, h) {
@@ -2025,8 +2419,21 @@ impl Editor {
         }
         let zoom_tool = self.tool == Tool::Zoom;
         if zoom_tool && !moving && !space {
-            if response.hovered() && !over_tools {
-                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ZoomIn);
+            let out = ui.input(|i| i.modifiers.alt);
+            if (!over_tools || self.zoom_drag.is_some())
+                && let Some(pointer) = response.hover_pos().or_else(|| self.zoom_drag.and_then(|_| response.interact_pointer_pos()))
+            {
+                paint_zoom_cursor(ui, pointer, out);
+            }
+            if !over_tools && response.clicked_by(egui::PointerButton::Primary)
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let (_, initial, pan) = self.zoom_drag.unwrap_or((pointer, self.zoom, self.pan));
+                let next = click_zoom(initial, out, 64.);
+                let offset = pointer - area.center();
+                self.pan = offset - (offset - pan) * (next / initial);
+                self.zoom = next;
+                ui.ctx().request_repaint();
             }
             if response.is_pointer_button_down_on() && down {
                 if let Some(pointer) = response.interact_pointer_pos() {
@@ -2035,10 +2442,7 @@ impl Editor {
                         self.zoom_drag = Some((pointer, self.zoom, self.pan));
                     }
                     if let Some((anchor, initial, pan)) = self.zoom_drag {
-                        (self.zoom, self.pan) = drag_zoom(anchor, initial, pan, pointer.x - anchor.x, area.center(),self.minimum_zoom());
-                        ui.output_mut(|o| o.cursor_icon = if pointer.x < anchor.x {
-                            egui::CursorIcon::ZoomOut
-                        } else { egui::CursorIcon::ZoomIn });
+                        (self.zoom, self.pan) = drag_zoom(anchor, initial, pan, pointer.x - anchor.x, area.center(), self.minimum_zoom().min(initial));
                     }
                 }
             }
@@ -2067,7 +2471,15 @@ impl Editor {
                     ((p.y - origin.y) / scale).floor() as i32,
                 )
             });
-        if self.transform.is_none(){self.selection_context(ui,&response,origin,scale,whole,false);}
+        if self.transform.is_none() {
+            if self.tool == Tool::Brush && self.soft_brush {
+                if (!over_tools && !moving) || response.context_menu_opened() {
+                    response.context_menu(|ui| self.brush_style_menu(ui));
+                }
+            } else {
+                self.selection_context(ui, &response, origin, scale, whole, false);
+            }
+        }
         let special = !self.elevated
             && !ui.input(|i| i.modifiers.alt)
             && matches!(self.tool, Tool::Rectangle | Tool::Line | Tool::Fill);
@@ -2076,6 +2488,8 @@ impl Editor {
             && self.tool == Tool::Move && response.double_clicked()
             && point.is_some_and(|(x, y)| self.inline_text_hit(egui::pos2(x as f32, y as f32), whole, false));
         if panning || over_tools || transforming || editing_text {
+            self.last = None;
+        } else if matches!(self.tool, Tool::Shape | Tool::Path | Tool::Pen) {
             self.last = None;
         } else if self.tool == Tool::Text {
             if self.rectangle_text_allowed() && response.hovered() {
@@ -2138,7 +2552,7 @@ impl Editor {
                                     x as u32,
                                     y as u32,
                                     if self.tool == Tool::Eraser {
-                                        Rgba([0; 4])
+                                        self.hard_eraser_pixel(self.selected, x as u32, y as u32)
                                     } else {
                                         Rgba(self.color)
                                     },
@@ -2180,7 +2594,6 @@ impl Editor {
                 if self.grid || self.hex != 0 {
                     self.tile_outline(&painter, rect, Color32::from_white_alpha(85));
                 }
-                self.slot_label(&painter,rect,col as i32,row as i32);
             }
         }
         self.rectangle_outline(&painter, origin, scale, false);
@@ -2238,6 +2651,15 @@ impl Editor {
         }
         self.transform_outline(&painter,origin,scale);
         self.guides.paint(ui, outer, area, visible.min, scale);
+        if self.show_slots && self.has_multiple_slots() {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let center = origin + self.mapped_center(col as i32, row as i32, w, h) * scale;
+                    let rect = Rect::from_center_size(center, egui::vec2(w as f32, h as f32) * scale);
+                    self.slot_label(&painter, rect, col as i32, row as i32);
+                }
+            }
+        }
         if !over_tools {
             self.paint_move_alignment(&painter, origin, scale);
         }
@@ -2245,6 +2667,9 @@ impl Editor {
             self.brush_cursor(ui, &response, origin, scale);
         }
         self.inline_text_canvas(ui, area, origin, scale);
+        let vector_cell = if self.plain_image { visible } else { self.vector_cell(origin, scale, whole) };
+        self.vector_canvas(ui, &response, &painter, vector_cell, scale, panning || over_tools || transforming);
+        self.vector_confirmation(ui);
     }
     fn tile_at(&self, col: i32, row: i32) -> usize {
         if self.multiple {
@@ -2371,84 +2796,114 @@ impl Editor {
         self.invalidate_textures();
         self.changed = false;
         self.trim_history();
+        self.project_target = Some((path.to_owned(), bitmap_workspace::FileVersion::from_bytes(&bytes)));
         self.message = path.display().to_string();
         self.wake = true;
         self.confirm_close = false;
         Ok(())
     }
-    fn project_controls(&mut self, ui: &mut egui::Ui, source_path: &Path) {
-        ui.horizontal_wrapped(|ui| {
-            if ui.button(tr("保存 Tile 工程")).clicked() {
-                self.finish_stroke();
-                if let Some(path) = rfd::FileDialog::new()
+    fn save_tile_project(&mut self, source: &Path, choose_path: bool) {
+        self.finish_stroke();
+        let path = match &self.project_target {
+            Some((path, _)) if !choose_path => {
+                if !self.changed {
+                    return;
+                }
+                path.clone()
+            }
+            target => {
+                let mut dialog = rfd::FileDialog::new()
                     .set_file_name("tiles.uytile")
-                    .add_filter(tr("绘Tile"), &["uytile"])
-                    .save_file()
-                {
-                    let state = self.snapshot();
-                    let project = Project {
-                        version: if state.layers.iter().any(|l| l.settings.text.is_some()) {12} else if state.layers.iter().any(|l| l.settings.effects.has_extra()) {11} else {10},
-                        fx_light: self.fx_light,
-                        materials: self.materials.iter().map(|m| StoredMaterial { name:m.name.clone(),pixels:m.pixels.as_raw().clone() }).collect(),
-                        background_custom: self.background_custom,
-                        background_color: self.background_color,
-                        layers: state
-                            .layers
-                            .iter()
-                            .map(|l| StoredLayer { settings:l.settings.clone(), material: l.material,
-                                name: l.name.clone(),
-                                visible: l.visible,
-                                locked: l.locked,
-                                tiles: l.tiles.iter().map(|p| p.as_raw().clone()).collect(),
-                            })
-                            .collect(),
-                        active_layer: state.active_layer,
-                        width: self.pixels.width(),
-                        height: self.pixels.height(),
-                        tiles: state.tiles.iter().map(|p| p.as_raw().clone()).collect(),
-                        selected: self.selected,
-                        layout: self.layout.clone(),
-                        columns: self.columns,
-                        rows: self.rows,
-                        multiple: self.multiple,
-                        diamond: self.diamond,
-            hex: self.hex,
-                        elevated: self.elevated,
-                        footprint: self.footprint,
-                        wrap: self.wrap,
-                        edit_unit: self.edit_unit,
-                        brush_size: self.brush_size,
-                        soft_brush: self.soft_brush,
-                        rectangle_fill:self.rectangle_fill,
-                        brush_hardness: self.brush_hardness,
-                        brush_mode: self.brush_mode,
-                        pressure_size: self.pressure_size,
-                        pressure_opacity: self.pressure_opacity,
-                        pressure_min_size: self.pressure_min_size,
-                        subgroup_enabled: self.subgroup_enabled,
-                        subgroup_size: self.subgroup_size,
-                        brush_flow:self.brush_flow,
-                        brush_spacing:self.brush_spacing,
-                        pressure_flow:self.pressure_flow,
-                    };
-                    let result = if same_file(&path, source_path) && !super::is_tile_project(source_path) {
-                        Err(tr("请另存到其他文件，保留源图片。").into())
-                    } else {
-                        serde_json::to_vec(&project)
-                            .map_err(|e| e.to_string())
-                            .and_then(|bytes| {
-                                if bytes.len()>256*1024*1024 { return Err(tr("无效的 Tile 工程或超出尺寸限制。").into()); }
-                                std::fs::write(&path, bytes).map_err(|e| e.to_string())
-                            })
-                    };
-                    match result {
-                        Ok(()) => {
-                            self.changed = false;
-                            self.message = format!("{}: {}", tr("已保存"), path.display());
-                        }
-                        Err(e) => self.message = e,
+                    .add_filter(tr("绘Tile"), &["uytile"]);
+                if let Some((path, _)) = target {
+                    dialog = dialog.set_file_name(path.file_name().unwrap_or_default().to_string_lossy());
+                    if let Some(parent) = path.parent() {
+                        dialog = dialog.set_directory(parent);
                     }
                 }
+                let Some(path) = dialog.save_file() else { return };
+                path
+            }
+        };
+        if same_file(&path, source) && !super::is_tile_project(source) {
+            self.message = tr("请另存到其他文件，保留源图片。").into();
+            return;
+        }
+        let state = self.snapshot();
+        let project = Project {
+            version: if state.layers.iter().any(|l| l.settings.text.is_some()) {12} else if state.layers.iter().any(|l| l.settings.effects.has_extra()) {11} else {10},
+            fx_light: self.fx_light,
+            materials: self.materials.iter().map(|m| StoredMaterial { name:m.name.clone(),pixels:m.pixels.as_raw().clone() }).collect(),
+            background_custom: self.background_custom,
+            background_color: self.background_color,
+            layers: state
+                .layers
+                .iter()
+                .map(|l| StoredLayer { settings:l.settings.clone(), material: l.material,
+                    name: l.name.clone(),
+                    visible: l.visible,
+                    locked: l.locked,
+                    tiles: l.tiles.iter().map(|p| p.as_raw().clone()).collect(),
+                })
+                .collect(),
+            active_layer: state.active_layer,
+            width: self.pixels.width(),
+            height: self.pixels.height(),
+            tiles: state.tiles.iter().map(|p| p.as_raw().clone()).collect(),
+            selected: self.selected,
+            layout: self.layout.clone(),
+            columns: self.columns,
+            rows: self.rows,
+            multiple: self.multiple,
+            diamond: self.diamond,
+            hex: self.hex,
+            elevated: self.elevated,
+            footprint: self.footprint,
+            wrap: self.wrap,
+            edit_unit: self.edit_unit,
+            brush_size: self.brush_size,
+            soft_brush: self.soft_brush,
+            rectangle_fill:self.rectangle_fill,
+            brush_hardness: self.brush_hardness,
+            brush_mode: self.brush_mode,
+            pressure_size: self.pressure_size,
+            pressure_opacity: self.pressure_opacity,
+            pressure_min_size: self.pressure_min_size,
+            subgroup_enabled: self.subgroup_enabled,
+            subgroup_size: self.subgroup_size,
+            brush_flow:self.brush_flow,
+            brush_spacing:self.brush_spacing,
+            pressure_flow:self.pressure_flow,
+        };
+        let expected = self.project_target.as_ref()
+            .filter(|(current, _)| same_file(current, &path))
+            .map(|(_, version)| version);
+        let result = serde_json::to_vec(&project)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                if bytes.len() > 256 * 1024 * 1024 {
+                    return Err(tr("无效的 Tile 工程或超出尺寸限制。").into());
+                }
+                bitmap_workspace::write_image(&path, expected, |out| {
+                    std::io::Write::write_all(out, &bytes).map_err(|error| error.to_string())
+                })
+            });
+        match result {
+            Ok(version) => {
+                self.message = format!("{}: {}", tr("已保存"), path.display());
+                self.project_target = Some((path, version));
+                self.changed = false;
+            }
+            Err(error) => self.message = error,
+        }
+    }
+    fn project_controls(&mut self, ui: &mut egui::Ui, source_path: &Path) {
+        ui.horizontal_wrapped(|ui| {
+            if ui.add_enabled(self.changed || self.project_target.is_none(), egui::Button::new(tr("保存"))).clicked() {
+                self.save_tile_project(source_path, false);
+            }
+            if ui.button(tr("另存为")).clicked() {
+                self.save_tile_project(source_path, true);
             }
             if ui.button(tr("打开 Tile 工程")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
@@ -2459,12 +2914,22 @@ impl Editor {
                 }
             }
         });
-        if let Some(path)=self.pending_open.clone(){
-            let mut accept=false;let mut cancel=false;
-            let response=egui::Modal::new(ui.id().with("tile_confirm_open")).show(ui.ctx(),|ui|{
-                ui.set_width(400.);ui.heading(tr("打开 Tile 工程"));ui.label(tr("当前有未保存的修改，打开工程将替换当前编辑内容。是否继续？"));ui.label(path.display().to_string());ui.separator();ui.horizontal(|ui|{cancel=ui.button(tr("取消")).clicked();accept=ui.button(tr("放弃修改并打开")).clicked();});
-            });
-            if cancel||response.should_close(){self.pending_open=None;}else if accept{self.pending_open=None;if let Err(error)=self.load_project(&path){self.message=error;}}
+        if let Some(path) = self.pending_open.clone() {
+            let decision = editor_confirmation(
+                ui,
+                egui::Modal::new(ui.id().with("tile_confirm_open")),
+                tr("打开 Tile 工程"),
+                tr("当前有未保存的修改，打开工程将替换当前编辑内容。是否继续？"),
+                tr("取消"),
+                tr("放弃修改并打开"),
+                |ui| { ui.add(egui::Label::new(path.display().to_string()).wrap().halign(egui::Align::Center)); },
+            );
+            if let Some(accept) = decision {
+                self.pending_open = None;
+                if accept && let Err(error) = self.load_project(&path) {
+                    self.message = error;
+                }
+            }
         }
     }
     fn request_open_project(&mut self,path:std::path::PathBuf){self.finish_stroke();if self.changed{self.pending_open=Some(path);}else if let Err(error)=self.load_project(&path){self.message=error;}}
@@ -2668,7 +3133,24 @@ impl Editor {
         if !down { self.repeat_pan_drag = false; }
         let (w, h) = (width, height);
         if self.tool == Tool::Zoom && !moving && !space {
-            if response.hovered() && !over_tools { ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ZoomIn); }
+            let out = ui.input(|i| i.modifiers.alt);
+            if (!over_tools || self.repeat_zoom_drag.is_some())
+                && let Some(pointer) = response.hover_pos().or_else(|| self.repeat_zoom_drag.and_then(|_| response.interact_pointer_pos()))
+            {
+                paint_zoom_cursor(ui, pointer, out);
+            }
+            if !over_tools && response.clicked_by(egui::PointerButton::Primary)
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let (_, initial, pan, before) = self.repeat_zoom_drag.unwrap_or((
+                    pointer, self.repeat_zoom, self.repeat_pan, self.preview_display_scale(dpi, footprint, h),
+                ));
+                self.repeat_zoom = click_zoom(initial, out, maximum);
+                let ratio = self.preview_display_scale(dpi, footprint, h) / before;
+                let offset = pointer - area.center();
+                self.repeat_pan = offset - (offset - pan) * ratio;
+                ui.ctx().request_repaint();
+            }
             if response.is_pointer_button_down_on() && down && (!over_tools || self.repeat_zoom_drag.is_some()) {
                 if let Some(pointer) = response.interact_pointer_pos() {
                     if self.repeat_zoom_drag.is_none() {
@@ -2678,13 +3160,10 @@ impl Editor {
                     }
                     if let Some((anchor, initial, pan, initial_scale)) = self.repeat_zoom_drag {
                         let dx = pointer.x - anchor.x;
-                        self.repeat_zoom = (initial * (dx * 0.01).clamp(-20., 20.).exp()).clamp(0.25, maximum);
+                        self.repeat_zoom = (initial * (dx * 0.01).clamp(-20., 20.).exp()).clamp(0.25_f32.min(initial), maximum);
                         let ratio = repeat_scale(self.repeat_zoom, dpi, footprint, h) / initial_scale;
                         let offset = anchor - area.center();
                         self.repeat_pan = offset - (offset - pan) * ratio;
-                        ui.output_mut(|o| o.cursor_icon = if dx < 0. {
-                            egui::CursorIcon::ZoomOut
-                        } else { egui::CursorIcon::ZoomIn });
                         ui.ctx().request_repaint();
                     }
                 }
@@ -2770,7 +3249,15 @@ impl Editor {
                     ((v.y - origin.y) / scale).floor() as i32,
                 )
             });
-        if editable && self.transform.is_none() {self.selection_context(ui,&response,origin,scale,true,self.infinite_view);}
+        if editable && self.transform.is_none() {
+            if self.tool == Tool::Brush && self.soft_brush {
+                if (!over_tools && !moving) || response.context_menu_opened() {
+                    response.context_menu(|ui| self.brush_style_menu(ui));
+                }
+            } else {
+                self.selection_context(ui, &response, origin, scale, true, self.infinite_view);
+            }
+        }
         let special = editable
             && !self.elevated
             && !ui.input(|i| i.modifiers.alt)
@@ -2780,6 +3267,8 @@ impl Editor {
             && self.transform.is_none() && self.tool == Tool::Move && response.double_clicked()
             && point.is_some_and(|(x, y)| self.inline_text_hit(egui::pos2(x as f32, y as f32), true, self.infinite_view));
         if navigating || over_tools || transforming || editing_text {
+            self.preview_last = None;
+        } else if matches!(self.tool, Tool::Shape | Tool::Path | Tool::Pen) {
             self.preview_last = None;
         } else if self.tool == Tool::Text {
             if self.rendering_merged && self.rectangle_text_allowed() && response.hovered() {
@@ -2875,7 +3364,7 @@ impl Editor {
                                 self.pick_visible_pixel(index, px, py);
                             } else {
                                 let color = if self.tool == Tool::Eraser {
-                                    Rgba([0; 4])
+                                    self.hard_eraser_pixel(index, px, py)
                                 } else {
                                     Rgba(self.color)
                                 };
@@ -2893,16 +3382,13 @@ impl Editor {
             self.finish_stroke();
         }
         self.sync_texture(ui.ctx());
-        for (rect, ground, index) in instances {
+        for &(rect, ground, index) in &instances {
             p.image(
                 self.textures[index].id(),
                 rect,
                 Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)),
                 Color32::WHITE,
             );
-            let world=(ground.center()-origin)/scale;
-            let (col,row)=if self.hex != 0 { let cell=self.mapped_cell(world.x.floor() as i32,world.y.floor() as i32,w,h); (cell.col,cell.row) } else { cell_at(world,footprint,self.diamond) };
-            self.slot_label(&p,ground,col,row);
             if self.preview_grid {
                 if self.elevated { Self::outline(&p,ground,self.diamond,Color32::from_white_alpha(65)); }
                 else { self.tile_outline(&p, ground, Color32::from_white_alpha(65)); }
@@ -2924,19 +3410,38 @@ impl Editor {
         if self.rendering_merged {
             self.guides.paint(ui, outer, area, origin + guide_offset * scale, scale);
         }
+        if self.show_slots && self.has_multiple_slots() {
+            for &(_, ground, _) in &instances {
+                let world = (ground.center() - origin) / scale;
+                let (col, row) = if self.hex != 0 {
+                    let cell = self.mapped_cell(world.x.floor() as i32, world.y.floor() as i32, w, h);
+                    (cell.col, cell.row)
+                } else {
+                    cell_at(world, footprint, self.diamond)
+                };
+                self.slot_label(&p, ground, col, row);
+            }
+        }
         if editable && !over_tools && !navigating && !transforming && self.transform.is_none() {
             self.brush_cursor(ui, &response, origin, scale);
         }
-        if self.rendering_merged { self.inline_text_canvas(ui, area, origin, scale); }
+        if self.rendering_merged {
+            self.inline_text_canvas(ui, area, origin, scale);
+            let vector_cell = self.vector_cell(origin, scale, self.multiple);
+            self.vector_canvas(ui, &response, &p, vector_cell, scale, !editable || navigating || over_tools || transforming);
+            self.vector_confirmation(ui);
+        }
     }
     fn contextual_tool_options(&mut self,ui:&mut egui::Ui)->bool{
         let tool_icon=|ui:&mut egui::Ui,icon:crate::icons::Icon,label:&str|{let(rect,response)=ui.allocate_exact_size(egui::vec2(26.,24.),egui::Sense::hover());crate::icons::paint(ui,icon,rect.shrink(5.),ui.visuals().text_color());response.on_hover_text(tr(label));};
         match self.tool{
+            Tool::Shape | Tool::Path | Tool::Pen => { ui.horizontal(|ui| self.vector_options(ui)); true },
             Tool::Move=>{ui.horizontal(|ui|{tool_icon(ui,crate::icons::Icon::Move,"移动");ui.checkbox(&mut self.move_auto_select,tr("自动选择"));ui.add_enabled_ui(self.move_auto_select,|ui|{ui.horizontal(|ui|{ui.spacing_mut().item_spacing.x=0.;for(group,label)in[(false,"图层"),(true,"组")]{let corners=egui::CornerRadius{nw:if group{0}else{4},sw:if group{0}else{4},ne:if group{4}else{0},se:if group{4}else{0}};if ui.add(egui::Button::new(tr(label)).selected(self.layer_move_group==group).corner_radius(corners)).clicked(){self.layer_move_group=group;}}});});self.transform_switch(ui);});true},
             Tool::Select=>{ui.horizontal(|ui|{for mode in selection::Mode::ALL{let response=ui.add_sized([26.,24.],egui::Button::new("").selected(self.selection.mode==mode));crate::icons::paint(ui,mode.icon(),response.rect.shrink(5.),ui.visuals().text_color());if response.on_hover_text(tr(mode.label())).clicked(){self.finish_stroke();self.selection.draft.clear();self.selection.mode=mode;}}if ui.add_enabled(self.selection.mask.is_some(),egui::Button::new(tr("取消选区"))).clicked(){self.selection.clear();}
                 if let Some(color)=crate::color_property::show_editable(ui,tr("绘制颜色"),self.color.map(|v|v as f64/255.)){self.color=color.map(|v|(v.clamp(0.,1.)*255.).round()as u8);}
                 ui.scope(|ui|{ui.spacing_mut().slider_width=100.;ui.label(tr("不透明度"));let mut opacity=self.color[3]as f32*100./255.;if ui.add(egui::Slider::new(&mut opacity,0. ..=100.).max_decimals(0)).changed(){self.color[3]=(opacity*255./100.).round()as u8;}ui.label("%");});
-                if ui.add_enabled(self.layer_editable()&&self.selection.draft.is_empty()&&self.selection.mask.as_ref().is_some_and(|m|!m.is_empty()),egui::Button::new(tr("填充选区"))).on_hover_text("Alt+Enter").clicked(){self.fill_selection_color();}
+                let fill_label = if self.selection.mask.is_some() { "填充选区" } else { "填充图层" };
+                if ui.add_enabled(self.layer_editable() && self.selection.draft.is_empty(), egui::Button::new(tr(fill_label))).on_hover_text("Alt+Delete").clicked(){self.fill_selection_color();}
                 self.transform_switch(ui);
             });true},
             Tool::Eyedropper=>{ui.horizontal(|ui|{tool_icon(ui,crate::icons::Icon::Eyedropper,"吸管");ui.label(tr("取样所有可见图层"));let(rect,_)=ui.allocate_exact_size(egui::vec2(30.,20.),egui::Sense::hover());super::seamless::checker_background(ui.painter(),rect,rect.min,Vec2::splat(1.),&super::ImageBackground::Checkerboard,None);ui.painter().rect_filled(rect,0.,Color32::from_rgba_unmultiplied(self.color[0],self.color[1],self.color[2],self.color[3]));ui.label(format!("#{:02X}{:02X}{:02X} · {} {:.0}%",self.color[0],self.color[1],self.color[2],tr("不透明度"),self.color[3]as f32/255.*100.));});true},
@@ -2944,11 +3449,62 @@ impl Editor {
             _=>false
         }
     }
+    fn drawing_tools_height(ui: &egui::Ui) -> f32 {
+        (ui.spacing().interact_size.y.max(26.) + 4.).ceil()
+    }
     fn drawing_tools(&mut self,ui:&mut egui::Ui){
-        let height=(ui.spacing().interact_size.y.max(26.)+4.).ceil();
+        let height=Self::drawing_tools_height(ui);
         let(rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),height),egui::Sense::hover());
         let mut options=ui.new_child(egui::UiBuilder::new().id_salt("tile_tool_options_row").max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
         if self.transform.is_some(){self.transform_options(&mut options);}else{self.drawing_tool_contents(&mut options);}
+    }
+    fn brush_style_menu(&mut self, ui: &mut egui::Ui) {
+        let mut hardness = self.brush_hardness;
+        let mut pressure_size = self.pressure_size;
+        let mut pressure_opacity = self.pressure_opacity;
+        let mut pressure_min_size = self.pressure_min_size;
+        let mut flow=self.brush_flow;
+        let mut spacing=self.brush_spacing;
+        let mut pressure_flow=self.pressure_flow;
+        ui.set_min_width(270.);
+        ui.label(tr("画笔样式"));
+        if let Some(preset)=brush_presets::show(ui,hardness,pressure_size,pressure_opacity,pressure_flow){
+            hardness=preset.hardness;pressure_size=preset.size;pressure_opacity=preset.opacity;pressure_flow=preset.flow;
+        }
+        ui.separator();
+        ui.checkbox(&mut pressure_size, tr("压力控制大小"));
+        ui.checkbox(&mut pressure_opacity, tr("压力控制不透明度"));
+        ui.checkbox(&mut pressure_flow,tr("压力控制流量"));
+        for (label,value,minimum) in [("流量",&mut flow,0),("笔触间距",&mut spacing,1)] {
+            ui.label(tr(label));
+            ui.scope(|ui|{ui.spacing_mut().slider_width=150.;crate::theme::slider(ui,true,egui::Slider::new(value,minimum..=100).suffix("%"));});
+        }
+        ui.add_enabled_ui(pressure_size, |ui| {
+            ui.label(tr("最小直径"));
+            crate::theme::slider(ui, true, egui::Slider::new(&mut pressure_min_size, 0..=100).suffix("%"));
+        });
+        ui.label(match self.pen.current {
+            Some(value) => format!("{}: {:.0}%", tr("当前压力"), value * 100.),
+            None => match self.pen.last_received {
+                Some(value)=>format!("{}: {:.0}%",tr("当前无接触，上次压力"),value*100.),
+                None=>tr("尚未收到压力，请用笔按压测试").to_owned(),
+            },
+        });
+        ui.separator();
+        ui.label(tr("硬度"));
+        ui.scope(|ui| {
+            ui.spacing_mut().slider_width = 150.;
+            ui.spacing_mut().interact_size.x = 48.;
+            crate::theme::slider(ui, true, egui::Slider::new(&mut hardness, 0..=100).suffix("%"));
+        });
+        if (hardness, pressure_size, pressure_opacity, pressure_min_size,flow,spacing,pressure_flow) != (self.brush_hardness, self.pressure_size, self.pressure_opacity, self.pressure_min_size,self.brush_flow,self.brush_spacing,self.pressure_flow) {
+            self.finish_stroke();
+            self.brush_hardness = hardness;
+            self.pressure_size = pressure_size;
+            self.pressure_opacity = pressure_opacity;
+            self.pressure_min_size = pressure_min_size;
+            self.brush_flow=flow;self.brush_spacing=spacing;self.pressure_flow=pressure_flow;
+        }
     }
     fn drawing_tool_contents(&mut self, ui: &mut egui::Ui) {
         self.pen.read(ui);
@@ -2958,17 +3514,33 @@ impl Editor {
         }
         if self.contextual_tool_options(ui){return;}
         ui.horizontal(|ui| {
-            if matches!(self.tool,Tool::Brush|Tool::Eraser){ui.horizontal(|ui| {
+            if matches!(self.tool,Tool::Brush|Tool::Eraser|Tool::Rectangle){ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.;
                 for (soft, label) in [(false, "铅笔"), (true, "画笔")] {
                     if ui.add(egui::Button::new(tr(label)).selected(self.soft_brush == soft).corner_radius(egui::CornerRadius { nw: if soft { 0 } else { 4 }, sw: if soft { 0 } else { 4 }, ne: if soft { 4 } else { 0 }, se: if soft { 4 } else { 0 } })).clicked() {
                         self.finish_stroke();
                         self.rectangle = None;
                         self.soft_brush = soft;
-                        if self.tool != Tool::Eraser { self.tool = Tool::Brush; }
                     }
                 }
-            });}else{ui.label(tr(if self.tool==Tool::Line{"直线"}else if self.tool==Tool::Rectangle{"矩形"}else{"填充"}));}
+            });}
+            if self.tool == Tool::Rectangle {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.;
+                    for (ellipse, label, _) in FRAME_MODES {
+                        let label = if !ellipse && self.diamond && !self.plain_image { "菱形" } else { label };
+                        let (left, right) = if ellipse { (0, 4) } else { (4, 0) };
+                        if ui.add(egui::Button::new(tr(label)).selected(self.rectangle_ellipse == ellipse)
+                            .corner_radius(egui::CornerRadius { nw: left, sw: left, ne: right, se: right })).clicked()
+                        {
+                            self.finish_stroke();
+                            self.rectangle_ellipse = ellipse;
+                        }
+                    }
+                });
+            } else if matches!(self.tool, Tool::Line | Tool::Fill) {
+                ui.label(tr(if self.tool == Tool::Line { "直线" } else { "填充" }));
+            }
             if self.tool==Tool::Rectangle{ui.checkbox(&mut self.rectangle_fill,tr("填充"));}
             if self.tool!=Tool::Eraser{if let Some(color) = crate::color_property::show_editable(
                 ui,
@@ -2994,57 +3566,10 @@ impl Editor {
                 let (icon_rect, response) = ui.allocate_exact_size(Vec2::splat(22.), egui::Sense::hover());
                 response.on_hover_text(format!("{}: {} px", tr("笔尖尺寸"), self.brush_size));
                 if self.soft_brush {
-                    let mut hardness = self.brush_hardness;
-                    let mut pressure_size = self.pressure_size;
-                    let mut pressure_opacity = self.pressure_opacity;
-                    let mut pressure_min_size = self.pressure_min_size;
-                    let mut flow=self.brush_flow;
-                    let mut spacing=self.brush_spacing;
-                    let mut pressure_flow=self.pressure_flow;
-                    let menu = ui.menu_button("  ", |ui| {
-                        ui.set_min_width(270.);
-                        ui.label(tr("画笔样式"));
-                        if let Some(preset)=brush_presets::show(ui,hardness,pressure_size,pressure_opacity,pressure_flow){
-                            hardness=preset.hardness;pressure_size=preset.size;pressure_opacity=preset.opacity;pressure_flow=preset.flow;
-                        }
-                        ui.separator();
-                        ui.checkbox(&mut pressure_size, tr("压力控制大小"));
-                        ui.checkbox(&mut pressure_opacity, tr("压力控制不透明度"));
-                        ui.checkbox(&mut pressure_flow,tr("压力控制流量"));
-                        for (label,value,minimum) in [("流量",&mut flow,0),("笔触间距",&mut spacing,1)] {
-                            ui.label(tr(label));
-                            ui.scope(|ui|{ui.spacing_mut().slider_width=150.;crate::theme::slider(ui,true,egui::Slider::new(value,minimum..=100).suffix("%"));});
-                        }
-                        ui.add_enabled_ui(pressure_size, |ui| {
-                            ui.label(tr("最小直径"));
-                            crate::theme::slider(ui, true, egui::Slider::new(&mut pressure_min_size, 0..=100).suffix("%"));
-                        });
-                        ui.label(match self.pen.current {
-                            Some(value) => format!("{}: {:.0}%", tr("当前压力"), value * 100.),
-                            None => match self.pen.last_received {
-                                Some(value)=>format!("{}: {:.0}%",tr("当前无接触，上次压力"),value*100.),
-                                None=>tr("尚未收到压力，请用笔按压测试").to_owned(),
-                            },
-                        });
-                        ui.separator();
-                        ui.label(tr("硬度"));
-                        ui.scope(|ui| {
-                            ui.spacing_mut().slider_width = 150.;
-                            ui.spacing_mut().interact_size.x = 48.;
-                            crate::theme::slider(ui, true, egui::Slider::new(&mut hardness, 0..=100).suffix("%"));
-                        });
-                    });
+                    let menu = ui.menu_button("  ", |ui| self.brush_style_menu(ui));
                     let arrow_rect = Rect::from_center_size(menu.response.rect.center(), Vec2::splat(12.));
                     crate::icons::paint(ui, crate::icons::Icon::TriangleDown, arrow_rect, ui.visuals().text_color());
                     menu.response.on_hover_text(tr("画笔样式"));
-                    if (hardness, pressure_size, pressure_opacity, pressure_min_size,flow,spacing,pressure_flow) != (self.brush_hardness, self.pressure_size, self.pressure_opacity, self.pressure_min_size,self.brush_flow,self.brush_spacing,self.pressure_flow) {
-                        self.finish_stroke();
-                        self.brush_hardness = hardness;
-                        self.pressure_size = pressure_size;
-                        self.pressure_opacity = pressure_opacity;
-                        self.pressure_min_size = pressure_min_size;
-                        self.brush_flow=flow;self.brush_spacing=spacing;self.pressure_flow=pressure_flow;
-                    }
                 }
                 ui.spacing_mut().slider_width = 90.;
                 ui.add(egui::Slider::new(&mut self.brush_size, 1..=32))
@@ -3109,9 +3634,14 @@ impl Editor {
         self.toolbar.offset=toolbar_offset_inside(self.toolbar.offset,self.toolbar.size,area);
         let was_dragging=self.toolbar.dragging;
         let horizontal=self.toolbar.horizontal;
-        let layout=if horizontal {egui::Layout::left_to_right(egui::Align::Center)}else{egui::Layout::top_down(egui::Align::Center)};
-        let length=if self.rectangle_text_allowed(){322.}else{292.};
-        let default_size=if horizontal{egui::vec2(length,42.)}else{egui::vec2(42.,length)};
+        let layout=(if horizontal {egui::Layout::left_to_right(egui::Align::Center)}else{egui::Layout::top_down(egui::Align::Center)}).with_main_wrap(true);
+        let tool_count = 9 + usize::from(self.rectangle_text_allowed()) + 3 * usize::from(self.vector_available());
+        let length = 26. + tool_count as f32 * 29.;
+        let available_length = if horizontal { area.width() } else { area.height() };
+        let tools_per_line = ((available_length - 26.) / 29.).floor().max(1.) as usize;
+        let lines = tool_count.div_ceil(tools_per_line);
+        let breadth = 42. + (lines - 1) as f32 * 29.;
+        let default_size=if horizontal{egui::vec2(length, breadth)}else{egui::vec2(breadth, length)}.min(area.size());
         let response=egui::Area::new(ui.id().with(("tile_floating_tools", ctx.viewport_id(),horizontal)))
             .default_size(default_size)
             .order(egui::Order::Foreground)
@@ -3120,7 +3650,7 @@ impl Editor {
             .movable(false)
             .show(&ctx, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(area));
-                ui.set_min_size(Vec2::ZERO);ui.set_max_size(default_size.min(area.size()));
+                ui.set_min_size(Vec2::ZERO);ui.set_max_size(default_size);
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.with_layout(layout,|ui| {
                         ui.spacing_mut().item_spacing=egui::vec2(3.,3.);
@@ -3142,9 +3672,10 @@ impl Editor {
                             }
                         });
                         drag.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(tr("拖动工具栏"));
-                        egui::ScrollArea::new([horizontal,!horizontal]).id_salt(("tile_tools_scroll",horizontal)).min_scrolled_width(0.).auto_shrink([true,true]).max_width((area.width()-36.).max(1.)).max_height((area.height()-36.).max(1.))
-                            .min_scrolled_height(0.).show(ui,|ui| {
-                        ui.with_layout(layout,|ui| {
+                        let vector_mode = |tool| vector::PathTool::modes(tool)[self.path_tool.mode(tool)];
+                        let (path_label, path_icon) = vector_mode(Tool::Path);
+                        let (shape_label, shape_icon) = vector_mode(Tool::Shape);
+                        let (pen_label, pen_icon) = vector_mode(Tool::Pen);
                         for (tool, icon, label, key) in [
                             (Tool::Move, crate::icons::Icon::Move, "移动", "V"),
                             (Tool::Select, self.selection.mode.icon(), self.selection.mode.label(), "M"),
@@ -3158,22 +3689,21 @@ impl Editor {
                             (Tool::Eraser, crate::icons::Icon::Eraser, if self.soft_brush { "画笔橡皮擦" } else { "铅笔橡皮擦" }, "E"),
                             (
                                 Tool::Rectangle,
-                                crate::icons::Icon::RectangleTool,
+                                FRAME_MODES[usize::from(self.rectangle_ellipse)].2,
                                 "框画",
-                                "U",
+                                "K",
                             ),
                             (Tool::Line, crate::icons::Icon::LineTool, "直线", "L"),
                             (Tool::Fill, crate::icons::Icon::PaintBucket, "填充", "G"),
+                            (Tool::Pen, pen_icon, pen_label, "P"),
+                            (Tool::Shape, shape_icon, shape_label, "U"),
+                            (Tool::Path, path_icon, path_label, "A"),
+                            (Tool::Text, crate::icons::Icon::Type, "添加文字图层", "T"),
                             (Tool::Zoom, crate::icons::Icon::Search, "缩放", "Z"),
                         ] {
-                            if tool == Tool::Zoom && self.rectangle_text_allowed()
-                                && ui.add_sized([26.,26.], egui::Button::new(egui::RichText::new("T").strong())
-                                    .selected(self.transform.is_none() && self.tool == Tool::Text))
-                                    .on_hover_text(format!("{} (T)", tr("添加文字图层"))).clicked()
-                                && self.finish_transform(true)
-                            {
-                                self.finish_stroke();
-                                self.tool = Tool::Text;
+                            if (matches!(tool, Tool::Shape | Tool::Path | Tool::Pen) && !self.vector_available())
+                                || (tool == Tool::Text && !self.rectangle_text_allowed()) {
+                                continue;
                             }
                             let selected = self.transform.is_none() && self.tool == tool;
                             let visuals = ui.visuals().clone();
@@ -3223,18 +3753,35 @@ impl Editor {
                             let popup=ui.id().with(("tool_modes",tool as u8));
                             #[cfg(test)]
                             ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("tile_group_test",tool as u8)),(response.rect,popup)));
+                            let vector_modes = vector::PathTool::modes(tool);
+                            let grouped = matches!(tool, Tool::Select | Tool::Brush | Tool::Rectangle) || !vector_modes.is_empty();
                             if response.clicked() && self.finish_transform(true) {
                                 self.finish_stroke();self.selection.draft.clear();
-                                if selected && matches!(tool,Tool::Select|Tool::Brush) {ui.memory_mut(|m|m.toggle_popup(popup));}
+                                if selected && grouped {ui.memory_mut(|m|m.toggle_popup(popup));}
                                 else {self.tool=tool;}
                             }
-                            if matches!(tool,Tool::Select|Tool::Brush) {
-                                let menu_contents=|ui:&mut egui::Ui| {
+                            if grouped {
+                                let mut menu_contents=|ui:&mut egui::Ui| {
                                     if tool==Tool::Select {
                                         for mode in selection::Mode::ALL {
                                             if tool_mode_button(ui,mode.icon(),tr(mode.label()),self.selection.mode==mode).clicked(){self.selection.mode=mode;self.selection.draft.clear();ui.memory_mut(|m|m.close_popup());}
                                         }
                                         ui.separator();if ui.button(tr("取消选区")).clicked(){self.selection.clear();ui.memory_mut(|m|m.close_popup());}
+                                    }else if tool == Tool::Rectangle {
+                                        for (ellipse, label, icon) in FRAME_MODES {
+                                            let label = if !ellipse && self.diamond && !self.plain_image { "菱形" } else { label };
+                                            if tool_mode_button(ui, icon, tr(label), self.rectangle_ellipse == ellipse).clicked() {
+                                                self.rectangle_ellipse = ellipse;
+                                                ui.memory_mut(|m| m.close_popup());
+                                            }
+                                        }
+                                    }else if !vector_modes.is_empty() {
+                                        for (index, &(label, icon)) in vector_modes.iter().enumerate() {
+                                            if tool_mode_button(ui, icon, tr(label), self.path_tool.mode(tool) == index).clicked() {
+                                                self.path_tool.set_mode(tool, index);
+                                                ui.memory_mut(|m| m.close_popup());
+                                            }
+                                        }
                                     }else{
                                         for (soft,label,icon) in [(false,"铅笔",crate::icons::Icon::Pencil),(true,"画笔",crate::icons::Icon::Brush)] {
                                             if tool_mode_button(ui,icon,tr(label),self.soft_brush==soft).clicked(){self.soft_brush=soft;ui.memory_mut(|m|m.close_popup());}
@@ -3242,7 +3789,16 @@ impl Editor {
                                     }
                                 };
                                 if ui.memory(|m|m.is_popup_open(popup)) {
-                                    let menu_width=(if tool==Tool::Select{selection::Mode::ALL.iter().map(|m|ui.painter().layout_no_wrap(tr(m.label()).to_owned(),egui::FontId::proportional(14.),ui.visuals().text_color()).size().x).fold(0_f32,f32::max)}else{[tr("铅笔"),tr("画笔")].iter().map(|text|ui.painter().layout_no_wrap((*text).to_owned(),egui::FontId::proportional(14.),ui.visuals().text_color()).size().x).fold(0_f32,f32::max)}+48.).max(64.).min((area.width()-20.).max(40.));
+                                    let label_width = |label| ui.painter().layout_no_wrap(
+                                        tr(label).to_owned(), egui::FontId::proportional(14.), ui.visuals().text_color()
+                                    ).size().x;
+                                    let text_width = match tool {
+                                        Tool::Select => selection::Mode::ALL.map(|mode| label_width(mode.label())).into_iter().fold(0., f32::max),
+                                        Tool::Rectangle => label_width("矩形").max(label_width("椭圆")),
+                                        _ if !vector_modes.is_empty() => vector_modes.iter().map(|(label, _)| label_width(label)).fold(0., f32::max),
+                                        _ => label_width("铅笔").max(label_width("画笔")),
+                                    };
+                                    let menu_width = (text_width + 48.).max(64.).min((area.width() - 20.).max(40.));
                                     let size_id=popup.with("last_size");
                                     let old_size=ui.ctx().data(|d|d.get_temp::<Vec2>(size_id)).unwrap_or(egui::vec2(menu_width+16.,180.));
                                     let size=egui::vec2(menu_width+16.,old_size.y).min(area.size());
@@ -3250,7 +3806,11 @@ impl Editor {
                                     let menu=egui::Area::new(popup).kind(egui::UiKind::Popup).order(egui::Order::Foreground).fixed_pos(pos).constrain_to(area).show(ui.ctx(),|ui| {
                                         egui::Frame::popup(ui.style()).show(ui,|ui| {
                                             ui.set_width(menu_width);
-                                            egui::ScrollArea::both().auto_shrink([false,true]).max_width(menu_width).max_height((area.height()-16.).max(1.)).show(ui,menu_contents);
+                                            if vector_modes.is_empty() {
+                                                egui::ScrollArea::both().auto_shrink([false,true]).max_width(menu_width).max_height((area.height()-16.).max(1.)).show(ui,menu_contents);
+                                            } else {
+                                                menu_contents(ui);
+                                            }
                                         });
                                     });
                                     ui.ctx().data_mut(|d|d.insert_temp(size_id,menu.response.rect.size()));
@@ -3263,8 +3823,6 @@ impl Editor {
                                 }
                             }
                         }
-                        });
-                        });
                     });
                 });
             })
@@ -3393,16 +3951,23 @@ impl Editor {
         let view_state = (self.preview_detached, self.repeat_zoom, self.preview_grid, self.repeat_pan);
         let mut open = true;
         let min_zoom=self.minimum_zoom();
-        let display_path = if self.plain_image {self.image_target.as_deref().unwrap_or(path)} else {path};
-        let title = if tab.is_some(){format!("{} · {}",if self.plain_image {"Image"} else {"Tile"},display_path.file_name().unwrap_or_default().to_string_lossy())}else if path.as_os_str().is_empty() {
+        let display_path = if self.plain_image {
+            self.image_target.as_deref().unwrap_or(path)
+        } else {
+            self.project_target.as_ref().map_or(path, |(target, _)| target.as_path())
+        };
+        let mut title = if tab.is_some(){format!("{} · {}",if self.plain_image {"Image"} else {"Tile"},display_path.file_name().unwrap_or_default().to_string_lossy())}else if display_path.as_os_str().is_empty() {
             tr("绘Tile").to_owned()
         } else {
             format!(
                 "{} · {}",
                 tr("绘Tile"),
-                path.file_name().unwrap_or_default().to_string_lossy()
+                display_path.file_name().unwrap_or_default().to_string_lossy()
             )
         };
+        if self.changed {
+            title.push('*');
+        }
         crate::native_window::Window::new(title.clone())
             .id(egui::Id::new(("pixel_tile", path)))
             .retain_on_close_request()
@@ -3421,10 +3986,16 @@ impl Editor {
                 }
                 if !unavailable && !self.confirm_close {
                     self.confirm_inline_text_outside(ui);
-                    if self.plain_image && self.transform.is_none() && self.text_dialog.is_none() && self.pending_layer_action.is_none() && !Self::text_input_active(ui.ctx()) {
+                    if self.transform.is_none() && self.text_dialog.is_none() && !Self::text_input_active(ui.ctx()) {
                         let save_as=ui.input_mut(|i|i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT,egui::Key::S));
                         let save=ui.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::S));
-                        if save_as || (save && !self.image_readonly){self.save_image(path,save_as);}
+                        if self.plain_image {
+                            if save_as || (save && !self.image_readonly) {
+                                self.save_image(path, save_as);
+                            }
+                        } else if save_as || save {
+                            self.save_tile_project(path, save_as);
+                        }
                     }
                     if !self.showing_split_guides() { self.tool_shortcuts(ui.ctx()); }
                 }
@@ -3433,6 +4004,11 @@ impl Editor {
                 let left_width = 270_f32.min((area.width() - 400.).max(200.));
                 let left = Rect::from_min_size(area.min, egui::vec2(left_width, area.height()));
                 let center=Rect::from_min_max(egui::pos2(left.right()+gap,area.top()),area.max);
+                let divider_x = left.right() + gap * 0.5;
+                ui.painter().line_segment(
+                    [egui::pos2(divider_x, area.top()), egui::pos2(divider_x, area.bottom())],
+                    ui.visuals().widgets.inactive.bg_stroke,
+                );
                 let mut settings = ui.new_child(
                     egui::UiBuilder::new()
                         .id_salt("tile_settings")
@@ -3440,7 +4016,7 @@ impl Editor {
                 );
                 if let Some(mode)=tab.as_deref_mut(){
                     let mut selection=if *mode{"tile"}else{"image"}.to_owned();
-                    let changed=settings.add_enabled_ui(!self.confirm_close && self.pending_layer_action.is_none() && self.pending_open.is_none() && self.text_dialog.as_ref().is_none_or(|d|d.target.is_some()),|ui|crate::theme::compact_selector(ui,&mut selection,[("image","Image"),("tile","Tile")])).inner;
+                    let changed=settings.add_enabled_ui(!self.confirm_close && self.pending_open.is_none() && self.text_dialog.as_ref().is_none_or(|d|d.target.is_some()),|ui|crate::theme::compact_selector(ui,&mut selection,[("image","Image"),("tile","Tile")])).inner;
                     if changed && self.finish_transform(true){*mode=selection=="tile";return;}
                     settings.separator();
                 }
@@ -3454,7 +4030,7 @@ impl Editor {
                         else if self.plain_image {self.image_controls(ui,path);}
                         else {self.tile_sidebar(ui,path,source);}
                     });
-                if !unavailable && !self.confirm_close && self.pending_layer_action.is_none()
+                if !unavailable && !self.confirm_close
                     && self.pending_open.is_none() && self.transform.is_none() && self.text_dialog.as_ref().is_none_or(|d|d.target.is_some()) {
                     self.layer_file_drop(ui,area);
                 }
@@ -3468,7 +4044,11 @@ impl Editor {
                 paint.set_clip_rect(center.intersect(ui.clip_rect()));
                 if self.showing_split_guides() { self.split_canvas(&mut paint); } else {
                 let header_height=24_f32.max(paint.text_style_height(&egui::TextStyle::Heading));
-                paint.allocate_ui_with_layout(egui::vec2(paint.available_width(),header_height),
+                let color_height = header_height + paint.spacing().item_spacing.y + Self::drawing_tools_height(&paint);
+                paint.horizontal_top(|ui| {
+                self.drawing_colors(ui, color_height);
+                ui.vertical(|ui| {
+                ui.allocate_ui_with_layout(egui::vec2(ui.available_width(),header_height),
                     egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),|ui| {
                     ui.spacing_mut().interact_size.y=header_height;
                     ui.heading(tr("绘制区"));
@@ -3520,51 +4100,39 @@ impl Editor {
                         self.history(true);
                     }
                 });
-                if !unavailable {self.drawing_tools(&mut paint);self.merged_canvas(&mut paint);}
+                if !unavailable {self.drawing_tools(ui);}
+                });
+                });
+                if !unavailable {self.merged_canvas(&mut paint);}
                 }
                 if !self.confirm_close {self.text_dialog_ui(ui);}
+                if !self.confirm_close { self.transform_exit_confirmation(ui); }
                 if self.confirm_close {
                     let modal_id = egui::Id::new(("pixel_tile_close", path));
-                    let response = egui::Modal::new(modal_id)
+                    let modal = egui::Modal::new(modal_id)
                         .area(egui::Modal::default_area(modal_id).anchor(
                             egui::Align2::CENTER_CENTER,
                             area.center() - ui.ctx().screen_rect().center(),
-                        ))
-                        .show(ui.ctx(), |ui| {
-                            ui.set_width(400.);
-                            ui.vertical_centered(|ui| {
-                                ui.heading(tr(if tab.is_some() {"编辑图像"}else{"绘Tile"}));
-                            });
-                            ui.separator();
-                            ui.add_space(8.);
-                            ui.vertical_centered(|ui| {
-                                ui.add(egui::Label::new(tr(if tab.is_some() && other_dirty {"其他编辑页也有未保存的绘制，是否放弃并关闭整个窗口？"}else{"有未保存的绘制，是否关闭？"})).wrap());
-                            });
-                            ui.add_space(18.);
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 12.;
-                                let width = (ui.available_width() - 12.) / 2.;
-                                if ui
-                                    .add_sized([width, 40.], egui::Button::new(tr("继续编辑")))
-                                    .clicked()
-                                {
-                                    self.confirm_close = false;
-                                }
-                                if ui
-                                    .add_sized(
-                                        [width, 40.],
-                                        egui::Button::new(tr("放弃修改并关闭")),
-                                    )
-                                    .clicked()
-                                {
-                                    *self = Self::default();
-                                    self.discard_requested=true;
-                                }
-                            });
-                            ui.add_space(6.);
-                        });
-                    if response.should_close() {
+                        ));
+                    let decision = editor_confirmation(
+                        ui,
+                        modal,
+                        tr(if tab.is_some() { "编辑图像" } else { "绘Tile" }),
+                        tr(if tab.is_some() && other_dirty {
+                            "其他编辑页也有未保存的绘制，是否放弃并关闭整个窗口？"
+                        } else {
+                            "有未保存的绘制，是否关闭？"
+                        }),
+                        tr("继续编辑"),
+                        tr("放弃修改并关闭"),
+                        |_| {},
+                    );
+                    if let Some(discard) = decision {
                         self.confirm_close = false;
+                        if discard {
+                            *self = Self::default();
+                            self.discard_requested = true;
+                        }
                     }
                 }
             });
@@ -3625,9 +4193,25 @@ mod tests {
     #[test]
     fn rectangle_fill_respects_selection_opacity_and_one_undo(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));e.tool=Tool::Rectangle;e.rectangle_fill=true;e.color=[100,150,200,128];e.selection.mask=Some([(0,2,2)].into_iter().collect());let count=e.undo.len();e.rectangle_input(Some((-1,-1)),true,true,false,false);e.rectangle_input(Some((1,1)),false,false,false,false);assert_eq!(e.pixels.get_pixel(2,2).0,[100,150,200,128]);assert_eq!(e.pixels.pixels().filter(|p|p[3]>0).count(),1);assert_eq!(e.undo.len(),count+1);e.history(false);assert!(e.pixels.pixels().all(|p|p[3]==0));assert!(e.selection.mask.is_some());}
     #[test]
-    fn rectangle_wrap_does_not_apply_opacity_repeatedly(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));e.wrap=true;e.color=[100,150,200,128];e.plane_filled_rectangle((-6,-2),(6,2),false);assert!(e.pixels.pixels().all(|p|p[3]==128));}
+    fn rectangle_wrap_does_not_apply_opacity_repeatedly(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));e.wrap=true;e.color=[100,150,200,128];e.plane_filled_rectangle((-6,-2),(6,2),false,false,false);assert!(e.pixels.pixels().all(|p|p[3]==128));}
     #[test]
-    fn layer_destructive_request_waits_for_confirmation(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));e.write_pixel(0,1,1,Rgba([100,150,200,255]));let before=e.snapshot();e.request_layer_action(true,e.active_layer);assert!(e.pending_layer_action.is_some());assert!(e.snapshot()==before);e.pending_layer_action=None;e.request_layer_action(false,e.active_layer);assert!(e.pending_layer_action.is_some());assert!(e.snapshot()==before);}
+    fn layer_actions_apply_immediately_and_can_be_undone() {
+        let mut editor = Editor::default();
+        editor.diamond = false;
+        editor.reset_document(RgbaImage::new(4, 4));
+        editor.write_pixel(0, 1, 1, Rgba([100, 150, 200, 255]));
+        let original = editor.pixels.clone();
+        editor.request_layer_action(true, editor.active_layer);
+        assert!(editor.pixels.pixels().all(|pixel| pixel[3] == 0));
+        editor.history(false);
+        assert_eq!(editor.pixels, original);
+        assert!(editor.insert_empty_layer(true));
+        let count = editor.layers.len();
+        editor.request_layer_action(false, editor.active_layer);
+        assert_eq!(editor.layers.len(), count - 1);
+        editor.history(false);
+        assert_eq!(editor.layers.len(), count);
+    }
     #[test]
     fn opening_project_with_unsaved_changes_defers_loading(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));e.write_pixel(0,1,1,Rgba([80,100,120,255]));e.changed=true;let before=e.snapshot();let path=std::path::PathBuf::from("not-loaded-until-confirmed.uytile");e.request_open_project(path.clone());assert_eq!(e.pending_open,Some(path));assert!(e.snapshot()==before);e.pending_open=None;assert!(e.snapshot()==before);}
     #[test]
@@ -4554,7 +5138,7 @@ mod tests {
             (egui::Key::V, Tool::Move),
             (egui::Key::I, Tool::Eyedropper),
             (egui::Key::E, Tool::Eraser),
-            (egui::Key::U, Tool::Rectangle),
+            (egui::Key::K, Tool::Rectangle),
             (egui::Key::L, Tool::Line),
             (egui::Key::G, Tool::Fill),
             (egui::Key::B, Tool::Brush),

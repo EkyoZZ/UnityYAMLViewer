@@ -54,13 +54,29 @@ impl Selection {
     pub fn allows(&self,tile:usize,x:u32,y:u32)->bool {self.mask.as_ref().is_none_or(|m|m.contains(&(tile,x,y)))}
     pub fn clear(&mut self) {self.generation=self.generation.wrapping_add(1);self.mask=None;self.draft.clear();self.world.clear();self.edges.clear();self.contours.clear();self.moving=None;self.cut_layer=None;self.floating=None;}
     fn polygon_close_at(&self,pointer:Pos2,origin:Pos2,scale:f32,dpi:f32)->bool{self.draft.len()>=3&&self.draft.first().is_some_and(|first|(origin+first.to_vec2()*scale).distance(pointer)*dpi<=8.)}
-    fn draft_preview(&self,origin:Pos2,scale:f32,pointer:Option<Pos2>,dpi:f32)->(Vec<Pos2>,Option<(Pos2,bool)>){let mut points:Vec<_>=self.path().iter().map(|p|origin+p.to_vec2()*scale).collect();if self.mode==Mode::Polygon&&!self.draft.is_empty(){let first=points[0];let close=pointer.is_some_and(|p|self.polygon_close_at(p,origin,scale,dpi));if let Some(pointer)=pointer{points.push(if close{first}else{pointer});}(points,Some((first,close)))}else{if points.len()>1{points.push(points[0]);}(points,None)}}
-    fn path(&self)->Vec<Pos2> {
+    fn draft_preview(&self,origin:Pos2,scale:f32,pointer:Option<Pos2>,dpi:f32,diamond:Option<[u32;2]>)->(Vec<Pos2>,Option<(Pos2,bool)>){let mut points:Vec<_>=self.path(diamond).iter().map(|p|origin+p.to_vec2()*scale).collect();if self.mode==Mode::Polygon&&!self.draft.is_empty(){let first=points[0];let close=pointer.is_some_and(|p|self.polygon_close_at(p,origin,scale,dpi));if let Some(pointer)=pointer{points.push(if close{first}else{pointer});}(points,Some((first,close)))}else{if points.len()>1{points.push(points[0]);}(points,None)}}
+    fn path(&self, diamond: Option<[u32; 2]>)->Vec<Pos2> {
         if self.draft.len()<2 {return self.draft.clone();}
         let a=self.draft[0];let b=*self.draft.last().unwrap();
         match self.mode {
+            Mode::Rectangle if let Some(footprint) = diamond => {
+                let delta = b - a;
+                let [w, h] = super::diamond_size(
+                    [f64::from(delta.x.abs()) + 1., f64::from(delta.y.abs()) + 1.],
+                    footprint,
+                );
+                let anchor = a + egui::vec2(
+                    if delta.x < 0. { 1. } else { 0. },
+                    if delta.y < 0. { 1. } else { 0. },
+                );
+                let end = anchor + egui::vec2((w as f32).copysign(delta.x), (h as f32).copysign(delta.y));
+                let r = Rect::from_two_pos(anchor, end);
+                let center = r.center();
+                vec![Pos2::new(center.x, r.top()), Pos2::new(r.right(), center.y),
+                    Pos2::new(center.x, r.bottom()), Pos2::new(r.left(), center.y)]
+            }
             Mode::Rectangle=>{let r=Rect::from_two_pos(a,b);vec![r.left_top(),r.right_top(),r.right_bottom(),r.left_bottom()]},
-            Mode::Ellipse=>{let r=Rect::from_two_pos(a,b);(0..64).map(|i|{let angle=i as f32*std::f32::consts::TAU/64.;r.center()+egui::vec2(angle.cos()*r.width()/2.,angle.sin()*r.height()/2.)}).collect()},
+            Mode::Ellipse=>ellipse_points(Rect::from_two_pos(a,b)),
             _=>self.draft.clone(),
         }
     }
@@ -107,6 +123,13 @@ fn contains(path:&[Pos2],p:Pos2)->bool {
     let mut inside=false;let mut j=path.len()-1;
     for i in 0..path.len() {let a=path[i];let b=path[j];if (a.y>p.y)!=(b.y>p.y) && p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x {inside=!inside;}j=i;}
     inside
+}
+
+pub(super) fn ellipse_points(rect: Rect) -> Vec<Pos2> {
+    (0..64).map(|i| {
+        let angle = i as f32 * std::f32::consts::TAU / 64.;
+        rect.center() + egui::vec2(angle.cos() * rect.width() / 2., angle.sin() * rect.height() / 2.)
+    }).collect()
 }
 impl Editor {
     fn selection_hit(&self,point:Pos2,layout:bool,infinite:bool)->Option<Pixel> {
@@ -182,6 +205,11 @@ impl Editor {
                 if dragging {self.selection.draft=vec![start,point];}
                 if !self.selection.draft.is_empty() && (response.dragged_by(egui::PointerButton::Primary) || stopped) {
                     if mode==Mode::Lasso {if self.selection.draft.last()!=Some(&point){self.selection.draft.push(point);}}
+                    else if mode == Mode::Rectangle && self.diamond && !self.plain_image {
+                        // The pointer no longer reports a press origin on release.
+                        // Keep the anchor captured when the drag started.
+                        *self.selection.draft.last_mut().unwrap() = point;
+                    }
                     else {*self.selection.draft.last_mut().unwrap()=point+egui::vec2(1.,1.);}
                 }
                 commit=stopped;
@@ -218,7 +246,8 @@ impl Editor {
         self.apply_floating((delta.x as i32,delta.y as i32),layout,infinite);self.selection.cut_layer=Some(self.active_layer);self.finish_stroke();
     }
     fn commit_selection(&mut self,layout:bool,infinite:bool) {
-        let path=self.selection.path();
+        let diamond = (self.diamond && !self.plain_image).then_some(self.footprint);
+        let path=self.selection.path(diamond);
         if path.len()<3 {self.selection.draft.clear();return;}
         let bounds=Rect::from_points(&path);
         let width=bounds.width().ceil() as usize;let height=bounds.height().ceil() as usize;
@@ -247,7 +276,8 @@ impl Editor {
         for contour in &self.selection.contours {let points:Vec<_>=contour.iter().map(|p|origin+p.to_vec2()*scale).collect();ants(painter,&points);}
         let dpi=painter.ctx().pixels_per_point();
         let pointer=painter.ctx().pointer_hover_pos().filter(|p|painter.clip_rect().contains(*p));
-        let(points,marker)=self.selection.draft_preview(origin,scale,pointer,dpi);
+        let diamond = (self.diamond && !self.plain_image).then_some(self.footprint);
+        let(points,marker)=self.selection.draft_preview(origin,scale,pointer,dpi,diamond);
         if let Some((start,near))=marker{painter.circle_stroke(start,4./dpi,egui::Stroke::new(3./dpi,Color32::BLACK));painter.circle_stroke(start,4./dpi,egui::Stroke::new(1./dpi,Color32::WHITE));if near{painter.circle_filled(start,2./dpi,painter.ctx().style().visuals.selection.stroke.color);}}
         if points.len()<2{return;}
         for edge in points.windows(2){let length=(edge[1]-edge[0]).length();let count=(length*dpi/4.).ceil().max(1.) as usize;
@@ -269,7 +299,7 @@ mod tests {
     fn editor()->Editor {let mut e=Editor::default();e.diamond=false;e.wrap=false;e.reset_document(RgbaImage::new(8,4));e}
     fn select(e:&mut Editor,a:Pos2,b:Pos2,combine:Combine){e.selection.mode=Mode::Rectangle;e.selection.combine=combine;e.selection.draft=vec![a,b];e.commit_selection(false,false);}
     #[test]
-    fn polygon_first_point_previews_open_segment_and_start_marker(){let mut selection=Selection::default();selection.mode=Mode::Polygon;selection.draft=vec![Pos2::new(1.,2.)];let(pointer,marker)=selection.draft_preview(Pos2::ZERO,1.,Some(Pos2::new(30.,40.)),1.);assert_eq!(pointer,vec![Pos2::new(1.,2.),Pos2::new(30.,40.)]);assert_eq!(marker,Some((Pos2::new(1.,2.),false)));selection.draft.extend([Pos2::new(10.,2.),Pos2::new(10.,10.)]);let(points,_)=selection.draft_preview(Pos2::ZERO,1.,Some(Pos2::new(30.,40.)),1.);assert_eq!(points.len(),4);assert_ne!(points.first(),points.last());assert!(selection.polygon_close_at(Pos2::new(4.9,2.),Pos2::ZERO,1.,2.));assert!(!selection.polygon_close_at(Pos2::new(5.1,2.),Pos2::ZERO,1.,2.));}
+    fn polygon_first_point_previews_open_segment_and_start_marker(){let mut selection=Selection::default();selection.mode=Mode::Polygon;selection.draft=vec![Pos2::new(1.,2.)];let(pointer,marker)=selection.draft_preview(Pos2::ZERO,1.,Some(Pos2::new(30.,40.)),1.,None);assert_eq!(pointer,vec![Pos2::new(1.,2.),Pos2::new(30.,40.)]);assert_eq!(marker,Some((Pos2::new(1.,2.),false)));selection.draft.extend([Pos2::new(10.,2.),Pos2::new(10.,10.)]);let(points,_)=selection.draft_preview(Pos2::ZERO,1.,Some(Pos2::new(30.,40.)),1.,None);assert_eq!(points.len(),4);assert_ne!(points.first(),points.last());assert!(selection.polygon_close_at(Pos2::new(4.9,2.),Pos2::ZERO,1.,2.));assert!(!selection.polygon_close_at(Pos2::new(5.1,2.),Pos2::ZERO,1.,2.));}
     #[test]
     fn selection_add_subtract_and_copy_clips_pixels() {
         let mut e=editor();
@@ -327,12 +357,93 @@ impl Editor{
  }
 }
 
-impl Editor{
-    pub(super) fn fill_selection_color(&mut self){
-        if !self.layer_editable()||!self.selection.draft.is_empty(){return;}let Some(mask)=self.selection.mask.as_ref().filter(|m|!m.is_empty()).cloned()else{return;};
-        self.finish_stroke();self.before=Some(self.snapshot());let revision=self.revision;
-        for(tile,x,y)in mask{if tile>=self.tiles.len()||x>=self.pixels.width()||y>=self.pixels.height()||!self.inside_tile(x as i32,y as i32,self.pixels.width(),self.pixels.height()){continue;}let old=self.before_edit_pixel(tile,x,y);let color=self.blend_edit_pixel(old,Rgba(self.color),1.,false,BrushMode::Normal);self.write_pixel(tile,x,y,color);}
-        if self.revision!=revision{self.selection.floating=None;self.selection.cut_layer=None;self.message=tr("已填充选区。").into();}self.finish_stroke();
+impl Editor {
+    pub(super) fn select_entire_canvas(&mut self) {
+        let (w, h) = self.pixels.dimensions();
+        let layout = self.whole_unit();
+        let (cols, rows) = if layout { (self.columns, self.rows) } else { (1, 1) };
+        if (w as usize).saturating_mul(h as usize).saturating_mul(cols).saturating_mul(rows) > 4 * 1024 * 1024 {
+            self.message = tr("选取区域过大，请缩小范围。").into();
+            return;
+        }
+        self.finish_stroke();
+        self.selection.clear();
+        for row in 0..rows {
+            for col in 0..cols {
+                let offset = self.mapped_center(col as i32, row as i32, w, h)
+                    - egui::vec2(w as f32, h as f32) * 0.5;
+                for y in 0..h {
+                    for x in 0..w {
+                        if self.inside_tile(x as i32, y as i32, w, h) {
+                            self.selection.world.insert((offset.x.floor() as i32 + x as i32, offset.y.floor() as i32 + y as i32));
+                        }
+                    }
+                }
+            }
+        }
+        self.rebuild_selection(layout, false);
+    }
+
+    pub(super) fn delete_selection_pixels(&mut self) {
+        let revision = self.revision;
+        self.fill_selection_with_color([0; 4]);
+        if self.revision != revision {
+            self.message = tr("已清空选区。").into();
+        }
+    }
+
+    pub(super) fn fill_selection_color(&mut self) {
+        self.fill_selection_with_color(self.color);
+    }
+
+    pub(super) fn fill_selection_with_color(&mut self, ink: [u8; 4]) {
+        if !self.layer_editable() || !self.selection.draft.is_empty() {
+            return;
+        }
+        let selection = self.selection.mask.clone();
+        self.finish_stroke();
+        self.before = Some(self.snapshot());
+        let revision = self.revision;
+        let (w, h) = self.pixels.dimensions();
+        let tile_count = self.tiles.len();
+        let mut fill = |tile, x, y| {
+            if self.inside_tile(x as i32, y as i32, w, h) {
+                self.write_pixel(tile, x, y, Rgba(ink));
+            }
+        };
+        if let Some(mask) = &selection {
+            for &(tile, x, y) in mask {
+                if tile < tile_count {
+                    fill(tile, x, y);
+                }
+            }
+        } else {
+            for tile in 0..tile_count {
+                for y in 0..h {
+                    for x in 0..w {
+                        fill(tile, x, y);
+                    }
+                }
+            }
+        }
+        if self.revision != revision {
+            self.selection.floating = None;
+            self.selection.cut_layer = None;
+            self.message = tr(if selection.is_some() { "已填充选区。" } else { "已填充图层。" }).into();
+        }
+        self.finish_stroke();
     }
 }
 #[cfg(test)]mod fill_tests{use super::*;#[test]fn fill_preserves_selection_opacity_and_undo(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));let mask:std::collections::HashSet<_>=[(0,1,1),(0,2,1)].into_iter().collect();e.selection.mask=Some(mask.clone());e.color=[80,120,160,128];e.fill_selection_color();assert_eq!(e.pixels.get_pixel(1,1).0,[80,120,160,128]);assert_eq!(e.pixels.get_pixel(0,0)[3],0);assert_eq!(e.selection.mask.as_ref(),Some(&mask));e.history(false);assert!(e.pixels.pixels().all(|p|p[3]==0));assert_eq!(e.selection.mask.as_ref(),Some(&mask));e.layers[e.active_layer].settings.lock_pixels=true;e.fill_selection_color();assert!(e.pixels.pixels().all(|p|p[3]==0));}}
+
+#[cfg(test)]
+#[test]
+fn fill_without_selection_colors_the_entire_layer_and_can_undo() {
+    let mut editor = Editor::default();
+    editor.init_image(&RgbaImage::new(3, 2));
+    editor.color = [25, 80, 120, 160];
+    editor.fill_selection_color();
+    assert!(editor.pixels.pixels().all(|pixel| pixel.0 == editor.color));
+    editor.history(false);
+    assert!(editor.pixels.pixels().all(|pixel| pixel[3] == 0));
+}

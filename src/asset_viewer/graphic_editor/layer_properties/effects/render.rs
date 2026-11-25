@@ -18,11 +18,6 @@ fn paint(pixel: &mut Rgba<u8>, color: [u8; 3], mode: Blend, weight: f32) {
         );
     }
 }
-fn ramp(colors: [[u8; 3]; 2], t: f32) -> [u8; 3] {
-    std::array::from_fn(|i| {
-        (f32::from(colors[0][i]) * (1. - t) + f32::from(colors[1][i]) * t).round() as u8
-    })
-}
 fn grain(x: u32, y: u32) -> f32 {
     // Stable across previews, exports and undo.
     let n = x.wrapping_mul(0x9e3779b9) ^ y.wrapping_mul(0x85ebca6b);
@@ -75,7 +70,7 @@ impl GradientMap {
         if self.gradient.dither {
             t += (grain(x, y) - 0.5) / 255.;
         }
-        ramp(self.gradient.colors, t.clamp(0., 1.))
+        self.gradient.sample(t)
     }
 }
 impl Contour {
@@ -222,7 +217,7 @@ impl Glow {
         };
         let color = if self.gradient {
             let stop = (1. - strength + (grain(y, x) - 0.5) * percent(self.jitter)).clamp(0., 1.);
-            ramp([self.ink.color, self.end_color], stop)
+            self.color_ramp().sample(stop)
         } else {
             self.ink.color
         };
@@ -494,7 +489,7 @@ impl Effects {
         if p.opacity == 0 {
             return;
         }
-        let periodic = p.text.as_ref().is_some_and(|t|t.repeat);
+        let periodic = p.text.as_ref().is_some_and(|t| t.repeat);
         if self.legacy_appearance && !periodic {
             self.composite_legacy(p, out, source, tile);
             return;

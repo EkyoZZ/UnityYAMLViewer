@@ -217,6 +217,7 @@ impl Editor {
         };
         for &index in members {
             let source = &before.layers[index];
+            let mut rendered_text = None;
             if let Some(text) = source
                 .settings
                 .text
@@ -236,59 +237,93 @@ impl Editor {
                 .as_ref()
                 .filter(|t| !mask_only && t.repeat)
             {
-                let dx = (delta.x.round() as i32).rem_euclid(w as i32);
-                let dy = (delta.y.round() as i32).rem_euclid(h as i32);
-                let layer = &mut self.layers[index];
-                let previous = |x: u32, y: u32| {
-                    (
-                        ((x as i32 - dx).rem_euclid(w as i32)) as u32,
-                        ((y as i32 - dy).rem_euclid(h as i32)) as u32,
-                    )
-                };
-                layer.tiles = source
-                    .tiles
-                    .iter()
-                    .map(|im| {
-                        RgbaImage::from_fn(w, h, |x, y| {
-                            let (px, py) = previous(x, y);
-                            *im.get_pixel(px, py)
-                        })
-                    })
-                    .collect();
-                if source.settings.mask_linked {
-                    layer.settings.mask = source.settings.mask.as_ref().map(|masks| {
-                        masks
-                            .iter()
-                            .map(|m| {
-                                (0..w * h)
-                                    .map(|i| {
-                                        let (px, py) = previous(i % w, i / w);
-                                        m[(py * w + px) as usize]
-                                    })
-                                    .collect()
-                            })
-                            .collect()
-                    });
-                }
-                let shifted = |coord: i32, d: i32, side: u32| {
-                    if d == 0 {
-                        coord
+                if !self.plain_image
+                    && (text.tile_origin.is_some()
+                        || self.multiple
+                        || self.diamond
+                        || self.hex != 0)
+                {
+                    let origin = self.vector_cell(Pos2::ZERO, 1., layout).min;
+                    let mut next = text.clone();
+                    let [x, y] = next
+                        .tile_origin
+                        .unwrap_or([origin.x.round() as i32, origin.y.round() as i32]);
+                    next.tile_origin = Some([
+                        x.saturating_add(delta.x.round() as i32)
+                            .clamp(-32768, 32768),
+                        y.saturating_add(delta.y.round() as i32)
+                            .clamp(-32768, 32768),
+                    ]);
+                    if let Some(fonts) = &self.font_samples.catalog
+                        && let Ok(tiles) = self.render_text_tiles(&next, fonts)
+                    {
+                        rendered_text = Some(tiles);
+                        self.layers[index].settings.text = Some(next);
                     } else {
-                        let s = side as i32;
-                        (coord + d + s / 2).rem_euclid(s) - s / 2
+                        continue;
                     }
-                };
-                layer.settings.text.as_mut().unwrap().offset = [
-                    shifted(text.offset[0], dx, w),
-                    shifted(text.offset[1], dy, h),
-                ];
+                } else {
+                    let dx = (delta.x.round() as i32).rem_euclid(w as i32);
+                    let dy = (delta.y.round() as i32).rem_euclid(h as i32);
+                    let layer = &mut self.layers[index];
+                    let previous = |x: u32, y: u32| {
+                        (
+                            ((x as i32 - dx).rem_euclid(w as i32)) as u32,
+                            ((y as i32 - dy).rem_euclid(h as i32)) as u32,
+                        )
+                    };
+                    layer.tiles = source
+                        .tiles
+                        .iter()
+                        .map(|im| {
+                            RgbaImage::from_fn(w, h, |x, y| {
+                                let (px, py) = previous(x, y);
+                                *im.get_pixel(px, py)
+                            })
+                        })
+                        .collect();
+                    if source.settings.mask_linked {
+                        layer.settings.mask = source.settings.mask.as_ref().map(|masks| {
+                            masks
+                                .iter()
+                                .map(|m| {
+                                    (0..w * h)
+                                        .map(|i| {
+                                            let (px, py) = previous(i % w, i / w);
+                                            m[(py * w + px) as usize]
+                                        })
+                                        .collect()
+                                })
+                                .collect()
+                        });
+                    }
+                    let shifted = |coord: i32, d: i32, side: u32| {
+                        if d == 0 {
+                            coord
+                        } else {
+                            let s = side as i32;
+                            (coord + d + s / 2).rem_euclid(s) - s / 2
+                        }
+                    };
+                    layer.settings.text.as_mut().unwrap().offset = [
+                        shifted(text.offset[0], dx, w),
+                        shifted(text.offset[1], dy, h),
+                    ];
+                    continue;
+                }
+            }
+            let move_content = rendered_text.is_none()
+                && !mask_only
+                && source.settings.group_id == 0
+                && source.settings.adjustment.is_none();
+            let move_mask = mask_only || source.settings.mask_linked;
+            let geometry_text = rendered_text.is_some();
+            let mut tiles = rendered_text.unwrap_or_else(|| source.tiles.clone());
+            let mut mask = source.settings.mask.clone();
+            if geometry_text && mask.as_ref().filter(|_| move_mask).is_none() {
+                self.layers[index].tiles = tiles;
                 continue;
             }
-            let move_content =
-                !mask_only && source.settings.group_id == 0 && source.settings.adjustment.is_none();
-            let move_mask = mask_only || source.settings.mask_linked;
-            let mut tiles = source.tiles.clone();
-            let mut mask = source.settings.mask.clone();
             for row in 0..rows {
                 for col in 0..cols {
                     let tile = if layout {
@@ -325,8 +360,15 @@ impl Editor {
                             }
                             let world = center
                                 + egui::vec2(x as f32 - w as f32 / 2., y as f32 - h as f32 / 2.)
-                                + delta;
-                            let hit = if self.wrap || infinite {
+                                + if geometry_text { delta.round() } else { delta };
+                            let hit = if geometry_text {
+                                self.geometry_hit(
+                                    world.x.round() as i32,
+                                    world.y.round() as i32,
+                                    layout,
+                                    self.wrap,
+                                )
+                            } else if self.wrap || infinite {
                                 self.plane_hit(world.x as i32, world.y as i32, layout)
                             } else {
                                 self.finite_plane_hit(world.x as i32, world.y as i32, layout)
@@ -361,6 +403,33 @@ impl Editor {
                 && let Ok(im) = text.raster(w, h, fonts)
             {
                 tiles = vec![im];
+            }
+            if !mask_only && let Some(vector) = &source.settings.vector {
+                let moved = vector.transformed(|point| point + delta.round(), Vec2::splat(1.), 0.);
+                let origin = self.vector_origin(source.settings.vector_origin);
+                if moved.valid()
+                    && let Some(images) = self.render_vector_tiles(&moved, origin)
+                {
+                    if moved.fill.is_some() {
+                        tiles = images;
+                    } else {
+                        mask = Some(
+                            images
+                                .iter()
+                                .map(|image| image.pixels().map(|pixel| pixel[3]).collect())
+                                .collect(),
+                        );
+                    }
+                    self.layers[index].settings.vector = Some(moved);
+                    self.layers[index].settings.vector_origin = origin;
+                } else {
+                    tiles.clone_from(&source.tiles);
+                    mask.clone_from(&source.settings.mask);
+                    self.layers[index]
+                        .settings
+                        .vector
+                        .clone_from(&source.settings.vector);
+                }
             }
             self.layers[index].tiles = tiles;
             self.layers[index].settings.mask = mask;
@@ -552,5 +621,49 @@ mod tests {
                 .iter()
                 .all(|t| t.pixels().all(|p| p[3] == 0))
         );
+    }
+
+    #[test]
+    fn diamond_tile_2x2_linked_text_mask_follows_the_text() {
+        let mut editor = Editor::default();
+        editor.set_single_tile(RgbaImage::new(32, 16));
+        editor.multiple = true;
+        editor.columns = 2;
+        editor.rows = 2;
+        editor.wrap = true;
+        editor.independent_slots().unwrap();
+        let index = editor.active_layer;
+        let first = editor.tile_at(0, 0);
+        let next = editor.tile_at(1, 0);
+        let mut text = text_layer::Text::new(16, [255; 4]);
+        text.content = "A".into();
+        text.tile_origin = Some([-16, -8]);
+        editor.font_samples.catalog = Some(std::sync::Arc::new(
+            text_layer::font_samples::Catalog::read(),
+        ));
+        editor.layers[index].settings.text = Some(text);
+        let mut masks = vec![vec![255; 512]; editor.tiles.len()];
+        masks[first][8 * 32 + 16] = 0;
+        editor.layers[index].settings.mask = Some(masks.clone());
+        let before = editor.snapshot();
+        let delta = egui::vec2(-16., -8.);
+        editor.apply_layer_translation(&before, &[index], delta, true, false);
+        let moved = editor.layers[index].settings.mask.as_ref().unwrap();
+        assert_eq!(moved[next][8 * 32 + 16], 0);
+        assert_eq!(moved[first][8 * 32 + 16], 255);
+        assert_eq!(
+            editor.layers[index]
+                .settings
+                .text
+                .as_ref()
+                .unwrap()
+                .tile_origin,
+            Some([-32, -16])
+        );
+        editor.layers[index].settings.mask_linked = false;
+        editor.layers[index].settings.mask = Some(masks.clone());
+        let before = editor.snapshot();
+        editor.apply_layer_translation(&before, &[index], -delta, true, false);
+        assert_eq!(editor.layers[index].settings.mask, Some(masks));
     }
 }

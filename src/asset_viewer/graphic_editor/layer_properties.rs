@@ -1,6 +1,10 @@
 //! Tile-scoped non-destructive layer appearance and editing permissions.
 use super::*;
 pub(super) mod effects;
+pub(super) use effects::{
+    read_live_rectangle, read_solid_fill, solid_shape_stroke_supported, write_live_rectangle,
+    write_solid_fill,
+};
 pub(super) const DETAIL_WIDTH: f32 = 240.;
 #[derive(Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) enum Blend {
@@ -356,6 +360,12 @@ pub(super) struct Properties {
     pub(super) psd_layer_id:Option<u32>,
     #[serde(skip)]
     pub(super) psd_metadata:Vec<u8>,
+    #[serde(skip)]
+    pub(super) psd_native_text: bool,
+    #[serde(skip)]
+    pub(super) psd_tysh: Option<std::sync::Arc<[u8]>>,
+    #[serde(skip)]
+    pub(super) psd_text_count: usize,
     pub clipped: bool,
     pub link_id: u64,
     pub group_id: u64,
@@ -375,13 +385,18 @@ pub(super) struct Properties {
     pub adjustment: Option<Adjustment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) text: Option<super::text_layer::Text>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) vector: Option<super::vector::Vector>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) vector_origin: Option<[i32; 2]>,
     #[serde(flatten)]
     pub(super) effects: effects::Effects,
 }
 impl Default for Properties {
     fn default() -> Self {
         Self {
-            psd_layer_id:None, psd_metadata:Vec::new(),
+            psd_layer_id:None, psd_metadata:Vec::new(), psd_native_text: false,
+            psd_tysh: None, psd_text_count: 0,
             clipped: false,
             link_id: 0,
             group_id: 0,
@@ -400,6 +415,8 @@ impl Default for Properties {
             mask_linked: true,
             adjustment: None,
             text: None,
+            vector: None,
+            vector_origin: None,
             effects: Default::default(),
         }
     }
@@ -418,6 +435,7 @@ impl Properties {
             && self.fill <= 100
             && self.group.chars().count() <= 64
             && self.effects.valid()
+            && self.vector.as_ref().is_none_or(|shape| self.group_id == 0 && self.adjustment.is_none() && self.text.is_none() && shape.valid())
             && self.text.as_ref().is_none_or(|text| self.group_id == 0 && self.adjustment.is_none() && text.valid())
             && self
                 .mask
@@ -505,6 +523,10 @@ impl Editor {
     }
 
     pub(super) fn move_allowed(&self, index: usize) -> bool {
+        self.position_editable(index) && self.layers[index].settings.vector.is_none()
+    }
+
+    pub(super) fn position_editable(&self, index: usize) -> bool {
         self.layers.get(index).is_some_and(|l| {
             !l.material
                 && !l.locked
@@ -541,7 +563,11 @@ impl Editor {
         }
     }
     pub(super) fn before_edit_pixel(&self, tile: usize, x: u32, y: u32) -> Rgba<u8> {
-        self.snapshot_edit_pixel(self.before.as_ref().unwrap(), tile, x, y)
+        let before = self.before.as_ref().unwrap();
+        if before.active_layer != self.active_layer {
+            return Rgba([0; 4]);
+        }
+        self.snapshot_edit_pixel(before, tile, x, y)
     }
     pub(super) fn snapshot_edit_pixel(
         &self,
@@ -768,6 +794,15 @@ impl Editor {
                 queue_panel(ui, 6, 0);
             }
             if ui
+                .add_enabled_ui(!locked && !material, |ui| {
+                    panel_button(ui, PanelIcon::Delete, false, "删除图层")
+                })
+                .inner
+                .clicked()
+            {
+                queue_panel(ui, 7, 0);
+            }
+            if ui
                 .add_enabled_ui(
                     self.layer_editable() && !self.mask_editing && !p.lock_alpha,
                     |ui| panel_button(ui, PanelIcon::Clear, false, "清空选中图层"),
@@ -776,15 +811,6 @@ impl Editor {
                 .clicked()
             {
                 queue_panel(ui, 8, 0);
-            }
-            if ui
-                .add_enabled_ui(!locked && !material, |ui| {
-                    panel_button(ui, PanelIcon::Trash, false, "删除图层")
-                })
-                .inner
-                .clicked()
-            {
-                queue_panel(ui, 7, 0);
             }
         });
         ui.add_enabled_ui(!locked && !material, |ui| {
@@ -816,13 +842,15 @@ impl Editor {
                             }
                         }
                     });
-                ui.label(tr("不透明度"));
-                ui.add(
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_sized([42., ui.spacing().interact_size.y],
                     egui::DragValue::new(&mut p.opacity)
                         .range(0..=100)
                         .suffix("%")
                         .speed(1.),
                 );
+                ui.label(tr("不透明度"));
+                });
             });
         });
         ui.horizontal(|ui| {
@@ -859,15 +887,16 @@ impl Editor {
             {
                 full = !full;
             }
-            ui.add_space((ui.available_width() - 80.).max(0.));
             ui.add_enabled_ui(!locked && !material, |ui| {
-                ui.label(tr("填充"));
-                ui.add(
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_sized([42., ui.spacing().interact_size.y],
                     egui::DragValue::new(&mut p.fill)
                         .range(0..=100)
                         .suffix("%")
                         .speed(1.),
                 );
+                ui.label(tr("填充"));
+                });
             });
         });
         if p != original || full != locked {
@@ -1233,7 +1262,7 @@ enum PanelIcon {
     Adjust,
     Folder,
     New,
-    Trash,
+    Delete,
     Clear,
     Alpha,
     Paint,
@@ -1268,9 +1297,9 @@ fn panel_button(ui: &mut egui::Ui, icon: PanelIcon, selected: bool, label: &str)
     };
     let painter = ui.painter();
     match icon {
-        PanelIcon::Clear => crate::icons::paint(ui, crate::icons::Icon::Eraser, rect, color),
+        PanelIcon::Clear => crate::icons::paint(ui, crate::icons::Icon::Trash, rect, color),
         PanelIcon::New => crate::icons::paint(ui, crate::icons::Icon::AddLayer, rect, color),
-        PanelIcon::Trash => crate::icons::paint(ui, crate::icons::Icon::Trash, rect, color),
+        PanelIcon::Delete => crate::icons::paint_layer_button(ui, rect, color, false),
         PanelIcon::Folder => {
             painter.add(egui::Shape::closed_line(
                 vec![
@@ -1385,7 +1414,8 @@ impl Editor {
         }
         if action == 2
             && (self.layers[index].settings.group_id != 0
-                || self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.text.is_some())
+                || self.layers[index].settings.adjustment.is_some() || self.layers[index].settings.text.is_some()
+                || self.layers[index].settings.vector.as_ref().is_some_and(|v| v.fill.is_some()))
         {
             return;
         }
@@ -1397,10 +1427,14 @@ impl Editor {
             }
             1 => {
                 self.layers[index].settings.mask = None;
+                if self.layers[index].settings.vector.as_ref().is_some_and(|v| v.fill.is_none()) {
+                    self.layers[index].settings.vector = None;
+                }
                 self.mask_editing = false;
             }
             2 => {
                 if let Some(mask) = self.layers[index].settings.mask.take() {
+                    self.layers[index].settings.vector = None;
                     for (tile, values) in self.tiles.iter_mut().zip(mask) {
                         for (pixel, value) in tile.pixels_mut().zip(values) {
                             pixel[3] = (pixel[3] as u16 * value as u16 / 255) as u8;
@@ -1653,7 +1687,7 @@ impl Editor {
             self.layer_detail = None;
             return;
         }
-        if self.confirm_close || self.pending_layer_action.is_some() || self.pending_open.is_some() || self.text_dialog.is_some() || self.transform.is_some() {
+        if self.confirm_close || self.pending_open.is_some() || self.text_dialog.is_some() || self.transform.is_some() {
             self.fx_dragging=false;
             return;
         }
@@ -1701,6 +1735,14 @@ impl Editor {
             return;
         };
         if self.layers.get(index).is_some_and(|l|l.settings.text.is_some()) {return;}
+        if index == self.active_layer
+            && let Some(vector) = self.layers.get(index)
+                .filter(|layer| layer.name == name)
+                .and_then(|layer| layer.settings.vector.clone())
+        {
+            self.vector_detail_ui(ui, index, name, position, vector);
+            return;
+        }
         if index != self.active_layer
             || self.layers.get(index).is_none_or(|l| l.name != name || l.settings.adjustment.is_none())
         {
@@ -1758,7 +1800,6 @@ impl Editor {
         let enabled = !self.layers[index].locked
             && !self.ancestor_locked(index)
             && !self.layers[index].material
-            && self.pending_layer_action.is_none()
             && self.pending_open.is_none();
         egui::Window::new(name)
             .id(ui.id().with(("tile_layer_detail_window", false)))

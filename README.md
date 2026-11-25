@@ -14,7 +14,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **资源查看与编辑**：浏览 Prefab、Scene、Asset 的层级和引用，编辑已识别属性，支持校验、保存与撤销。
 - **材质与场景预览**：查看材质及 Shader 节点，预览场景、模型、动画、Spine 和部分粒子效果。
 - **目录与图片浏览**：多根目录、同目录缩略图和快捷切图，自动恢复目录并保留页签修改。
-- **图片工具**：支持平滑或像素预览、通道查看、九宫格、Sprite Border、序列拆分合成、去底色、多格式导出及 PNG 批量优化。Image / Tile 支持图层、像素标尺和辅助线，Image 可调整尺寸、原位保存及读写保留受支持样式的分层 PSD。
+- **图片工具**：支持平滑或像素预览、通道查看、九宫格、Sprite Border、序列拆分合成、去底色、多格式导出及 PNG 批量优化。Image / Tile 支持图层、像素标尺和辅助线，Image 可绘制矢量形状和编辑闭合路径、调整尺寸、原位保存及读写保留受支持样式和横排文字的分层 PSD。
 
 **附加工具**
 
@@ -40,7 +40,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - Unity 二进制序列化、未知属性编辑、节点连线编辑和 Shader 生成尚不支持；场景等预览不能完整替代 Unity 渲染。
 - PDF／Office 内置编辑、自由多轨剪辑、加密文档、宏格式和苹果办公格式尚不支持。办公文档可在 LibreOffice 中编辑，表格预览不重算公式或还原完整样式。
 - Word／演示文档预览需要 LibreOffice 和 PDFium；媒体处理、网页提取分别需要 FFmpeg、yt-dlp。组播频道需要线路提供对应信号；浏览器助手不传 Cookie，部分站点或受保护视频无法播放。
-- 分层 PSD 编辑限于 8 位 RGB 像素层、组及基本蒙版，复杂 PSD 可按合成图另存。目录和图片浏览、ICO 兼容范围有限；图片去水印未开放，连续图不自动修补接缝；高度 Tile 暂仅支持旧工程只读预览。
+- 分层 PSD 编辑限于 8 位 RGB 像素层、组、基本蒙版与受支持的横排文字，复杂 PSD 可按合成图另存。目录和图片浏览、ICO 兼容范围有限；图片去水印未开放，连续图不自动修补接缝；高度 Tile 暂仅支持旧工程只读预览。
 - 原位覆盖会修改源文件，撤销不是永久备份；九宫格替换前请预览或使用 `--dry-run`。
 
 ## English
@@ -52,7 +52,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **Asset browsing and editing**: Inspect Prefab, Scene and Asset hierarchies and references; edit recognized properties with validation, saving and undo.
 - **Materials and scenes**: View material and Shader nodes; preview scenes, models, animation, Spine and supported particle effects.
 - **Folders and images**: Browse multiple roots and same-folder thumbnails, switch images quickly, and restore folders while retaining tab edits.
-- **Image tools**: Preview images and channels, use nine-slice and Sprite Border, split or combine sequences, remove backgrounds, export formats and optimize PNGs in batches. Image and Tile support layers, pixel rulers and guides. Image also supports resizing, in-place saves and layered PSD read/write with supported styles.
+- **Image tools**: Preview images and channels, use nine-slice and Sprite Border, split or combine sequences, remove backgrounds, export formats and optimize PNGs in batches. Image and Tile support layers, pixel rulers and guides. Image also supports vector shapes, editable closed paths, resizing, in-place saves and layered PSD read/write with supported styles and horizontal type.
 
 **Additional tools**
 
@@ -78,7 +78,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - Unity binary serialization, editing unknown properties, node connections and Shader generation are unsupported. Previews do not fully reproduce Unity rendering.
 - Built-in PDF/Office editing, free multitrack editing, encrypted documents, macro formats and Apple office formats are unsupported. Office files can open in LibreOffice; spreadsheet previews do not recalculate formulas or reproduce full formatting.
 - Word/presentation previews require LibreOffice and PDFium; media processing and webpage extraction require FFmpeg and yt-dlp respectively. Multicast channels require a network carrying those streams. The browser assistant does not transfer cookies; some sites or protected videos may not play.
-- Layered PSD editing covers 8-bit RGB pixel layers, groups and basic masks. Complex PSDs can be saved from the composite preview. Folder/image browsing and ICO compatibility have limits. Image watermark removal is unavailable; repeat tools do not repair seams automatically. Existing raised Tile projects are read-only.
+- Layered PSD editing covers 8-bit RGB pixel layers, groups, basic masks and supported horizontal type. Complex PSDs can be saved from the composite preview. Folder/image browsing and ICO compatibility have limits. Image watermark removal is unavailable; repeat tools do not repair seams automatically. Existing raised Tile projects are read-only.
 - In-place replacement changes source files; undo is not a permanent backup. Preview nine-slice replacements first or use `--dry-run`.
 
 ## 源码构建 / Build from source

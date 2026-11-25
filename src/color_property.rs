@@ -23,15 +23,19 @@ pub fn paint_swatch(ui: &egui::Ui, rect: Rect, rgba: [f64; 4]) {
 }
 
 pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
-    show_impl(ui, name, rgba, false)
+    show_impl(ui, name, rgba, false, None)
 }
 
 /// Editable drawing color using the shared native palette.
 pub fn show_editable(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
-    show_impl(ui, name, rgba, true)
+    show_impl(ui, name, rgba, true, None)
 }
 
-fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool) -> Option<[f64; 4]> {
+pub(crate) fn show_editable_swatch(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], size: egui::Vec2) -> Option<[f64; 4]> {
+    show_impl(ui, name, rgba, true, Some(size))
+}
+
+fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size: Option<egui::Vec2>) -> Option<[f64; 4]> {
     let id = ui.id().with(("color_preview", name));
     let mut state = ui.ctx().data_mut(|data| data.get_temp::<Preview>(id))
         .unwrap_or(Preview { original: rgba, rgba, mode: 0, open: false });
@@ -41,7 +45,8 @@ fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool) -> Op
     } else if state.original != rgba { state.original = rgba; state.rgba = rgba; }
     let before = state.rgba;
     let available = ui.clip_rect().width() - (ui.cursor().min.x - ui.min_rect().left());
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(if drawing { 48.0 } else { available.clamp(80.0, 120.0) }, 19.0), Sense::click());
+    let size = size.unwrap_or_else(|| egui::vec2(if drawing { 48.0 } else { available.clamp(80.0, 120.0) }, 19.0));
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     paint_swatch(ui, rect, rgba);
     if response.clicked() {
         state.rgba = rgba;

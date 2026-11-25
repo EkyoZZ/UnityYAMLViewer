@@ -344,6 +344,9 @@ impl Editor {
     }
 
     fn validate_image_size(&self, size: [u32; 2], side_limit: u32) -> Result<(), &'static str> {
+        if self.layers.iter().any(|layer| layer.settings.vector.is_some()) {
+            return Err("当前文档含矢量图层，暂不能调整尺寸。");
+        }
         let pixels = u64::from(size[0]) * u64::from(size[1]);
         if size.contains(&0)
             || size.iter().any(|&n| n > side_limit.min(MAX_IMAGE_SIDE))
