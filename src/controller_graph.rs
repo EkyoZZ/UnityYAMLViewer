@@ -101,7 +101,7 @@ fn graph(documents: &[Document], machine: &Document) -> Graph {
     Graph { nodes, edges }
 }
 
-pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usize>, path: String) {
+pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usize>, path: String, fill_height: bool) {
     let Some(controller) = documents.iter().find(|doc| doc.type_name == "AnimatorController") else { return };
     let id = egui::Id::new(("controller_graph", path));
     let mut view = ui.ctx().data_mut(|data| data.get_temp::<View>(id)).unwrap_or_default();
@@ -128,9 +128,29 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
         if ui.button(crate::localization::tr("适应画布")).clicked() { view.fit = true; }
         ui.small(crate::localization::tr("拖动画布 · 滚轮缩放 · 点击连线 · 双击子状态机进入"));
     });
-    ui.collapsing(crate::localization::tr("Parameters（参数）"), |ui| {
-        egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| parameters(ui, &controller.text));
-    });
+    if fill_height {
+        let maximum = (ui.available_width() - 165.0).max(100.0);
+        egui::SidePanel::left(id.with("controller_parameters"))
+            .default_width(180.0_f32.min(maximum))
+            .width_range(100.0..=maximum)
+            .resizable(true)
+            .show_separator_line(true)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..egui::Margin::ZERO }))
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::both().id_salt("controller_parameters_scroll").show(ui, |ui| {
+                    ui.strong(crate::localization::tr("Parameters（参数）"));
+                    parameters(ui, &controller.text);
+                    if let Some(document) = selected.and_then(|index| documents.get(index)) {
+                        ui.separator();
+                        selected_details(ui, document);
+                    }
+                });
+            });
+    } else {
+        ui.collapsing(crate::localization::tr("Parameters（参数）"), |ui| {
+            egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| parameters(ui, &controller.text));
+        });
+    }
     let Some(machine) = documents.iter().find(|doc| doc.file_id == view.machine) else { ui.label(crate::localization::tr("未找到状态机")); return };
     let mut machine = machine.clone();
     if let Some(text) = crate::editing::controller_machine_text(ui, &machine.file_id) { machine.text = text.into(); }
@@ -140,7 +160,7 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
             if let Some(name) = crate::editing::document_text(ui, &node.id).and_then(|text| name_from_text(&text)) { node.label = name; }
         }
     }
-    let height = (ui.available_height() * 0.48).clamp(180.0, 360.0);
+    let height = if fill_height { ui.available_height().max(1.0) } else { (ui.available_height() * 0.48).clamp(180.0, 360.0) };
     let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click_and_drag());
     let painter = ui.painter().with_clip_rect(rect);
     painter.rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
@@ -254,15 +274,19 @@ pub fn show(ui: &mut egui::Ui, documents: &[Document], selected: &mut Option<usi
         if interaction.double_clicked() && node.kind == 4 { view.machine = node.id.clone(); view.fit = true; }
     }
     if response.dragged() && !node_dragged { view.pan += ui.input(|input| input.pointer.delta()); }
-    if let Some(document) = selected.and_then(|index| documents.get(index)) {
-        if matches!(document.type_name.as_str(), "AnimatorStateTransition" | "AnimatorTransition") { transition_details(ui, document); }
-        else if document.type_name == "AnimatorState" {
-            let text = crate::editing::document_text(ui, &document.file_id).unwrap_or_else(|| document.text.to_string());
-            ui.label(crate::lf!("状态：{0}", name_from_text(&text).unwrap_or_default()));
-            crate::script_properties::show_graph_reference(ui, "Motion", scalar(&document.text, "m_Motion").unwrap_or("{fileID: 0}"));
-        }
+    if !fill_height && let Some(document) = selected.and_then(|index| documents.get(index)) {
+        selected_details(ui, document);
     }
     ui.ctx().data_mut(|data| data.insert_temp(id, view));
+}
+
+fn selected_details(ui: &mut egui::Ui, document: &Document) {
+    if matches!(document.type_name.as_str(), "AnimatorStateTransition" | "AnimatorTransition") { transition_details(ui, document); }
+    else if document.type_name == "AnimatorState" {
+        let text = crate::editing::document_text(ui, &document.file_id).unwrap_or_else(|| document.text.to_string());
+        ui.label(crate::lf!("状态：{0}", name_from_text(&text).unwrap_or_default()));
+        crate::script_properties::show_graph_reference(ui, "Motion", scalar(&document.text, "m_Motion").unwrap_or("{fileID: 0}"));
+    }
 }
 
 fn parameters(ui: &mut egui::Ui, text: &str) {

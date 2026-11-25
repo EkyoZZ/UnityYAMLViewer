@@ -48,12 +48,18 @@ pub fn seed_screen_canvases(documents: &[Document], viewport: [f64;2], cache: &m
     }
 }
 pub fn layout(id: &str, transforms: &HashMap<&str,&Document>, objects: &HashMap<&str,&Document>, viewport: [f64;2], cache: &mut HashMap<String,Layout>, visiting: &mut HashSet<String>) -> Option<Layout> {
-    if let Some(layout)=cache.get(id) {return Some(*layout)}
-    if !visiting.insert(id.to_owned()) {return None}
-    let doc=transforms.get(id)?;
-    if doc.game_object.as_deref().and_then(|id|objects.get(id)).is_some_and(|doc|number(&doc.text,"m_IsActive",1.0)==0.0) {return None}
+    layout_checked(id, transforms, objects, viewport, cache, visiting).ok()
+}
+
+pub(crate) enum LayoutError { Inactive, Invalid }
+
+pub(crate) fn layout_checked(id: &str, transforms: &HashMap<&str,&Document>, objects: &HashMap<&str,&Document>, viewport: [f64;2], cache: &mut HashMap<String,Layout>, visiting: &mut HashSet<String>) -> Result<Layout, LayoutError> {
+    if let Some(layout)=cache.get(id) {return Ok(*layout)}
+    if !visiting.insert(id.to_owned()) {return Err(LayoutError::Invalid)}
+    let doc=transforms.get(id).ok_or(LayoutError::Invalid)?;
+    if doc.game_object.as_deref().and_then(|id|objects.get(id)).is_some_and(|doc|number(&doc.text,"m_IsActive",1.0)==0.0) {return Err(LayoutError::Inactive)}
     let parent=doc.parent_transform.as_deref().filter(|id|*id!="0");
-    let parent_layout=if let Some(parent)=parent {Some(layout(parent,transforms,objects,viewport,cache,visiting)?)} else {None};
+    let parent_layout=if let Some(parent)=parent {Some(layout_checked(parent,transforms,objects,viewport,cache,visiting)?)} else {None};
     let mut matrix=local(doc,parent.is_none());
     let mut size=viewport; let mut pivot=[0.5,0.5];
     if doc.type_name=="RectTransform" {
@@ -73,7 +79,7 @@ pub fn layout(id: &str, transforms: &HashMap<&str,&Document>, objects: &HashMap<
     }
     if let Some(parent)=parent_layout {matrix=parent.matrix.mul(matrix)}
     visiting.remove(id);
-    let result=Layout{matrix,size,pivot};cache.insert(id.to_owned(),result);Some(result)
+    let result=Layout{matrix,size,pivot};cache.insert(id.to_owned(),result);Ok(result)
 }
 pub fn nested_number(text: &str, key: &str, default: f64) -> f64 {
     text.lines().find_map(|line|line.trim().strip_prefix(key)?.strip_prefix(':')?.trim().parse::<f64>().ok()).filter(|v|v.is_finite()).unwrap_or(default)

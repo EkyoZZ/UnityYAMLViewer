@@ -1,5 +1,237 @@
 use std::collections::HashMap;
+use crate::localization::tr;
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, TextEdit};
+
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct GradientStop {
+    pub(crate) position: u16,
+    pub(crate) color: [u8; 3],
+}
+
+pub(crate) const MAX_GRADIENT_STOPS: usize = 16;
+pub(crate) const GRADIENT_END: u16 = 4096;
+/// Open the native RGB ramp editor from a compact gradient swatch.
+pub(crate) fn edit_rgb_stops(
+    ui: &mut egui::Ui,
+    stops: &mut Vec<GradientStop>,
+    reverse: bool,
+    sample: impl Fn(f32) -> [u8; 3],
+) {
+    let title = tr("渐变");
+    let id = ui.id().with("rgb_gradient_editor");
+    let mut open = ui.ctx().data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    let original_id = id.with("opening_stops");
+    let gradient = rgb_gradient(stops, reverse);
+    ui.horizontal(|ui| {
+        ui.label(title);
+        let width = ui.available_width().clamp(32., 112.);
+        if swatch(ui, &gradient, width, 20.).on_hover_text(title).clicked() {
+            if !open { ui.ctx().data_mut(|data| data.insert_temp(original_id, stops.clone())); }
+            open_gradient(ui, id, &mut open);
+        }
+    });
+    let original = ui.ctx().data(|data| data.get_temp::<Vec<GradientStop>>(original_id));
+    let was_open = open;
+    let confirmed = gradient_window(ui, id, title, &mut open, 280., true, false, |ui| {
+        rgb_stop_controls(ui, stops, &gradient, reverse, sample);
+        if let Some(original) = &original {
+            let preview = rgb_gradient(original, reverse);
+            if restore_gradient_row(ui, &preview, stops != original) { stops.clone_from(original); }
+        }
+    });
+    if was_open && !open && !confirmed && let Some(original) = original { *stops = original; }
+    ui.ctx().data_mut(|data| {
+        if !open { data.remove::<Vec<GradientStop>>(original_id); }
+        data.insert_temp(id, open);
+    });
+}
+
+fn rgb_gradient(stops: &[GradientStop], reverse: bool) -> Gradient {
+    let colors = stops.iter().map(|stop| {
+        let time = f64::from(stop.position) / f64::from(GRADIENT_END);
+        let [r, g, b] = stop.color.map(|channel| f64::from(channel) / 255.);
+        (if reverse { 1. - time } else { time }, [r, g, b, 1.])
+    });
+    let mut colors: Vec<_> = colors.collect();
+    if reverse {
+        colors.reverse();
+    }
+    Gradient { colors, alphas: vec![(0., 1.)], mode: 0, color_indices: vec![], alpha_indices: vec![] }
+}
+
+fn restore_gradient_row(ui: &mut egui::Ui, original: &Gradient, changed: bool) -> bool {
+    ui.horizontal(|ui| {
+        swatch(ui, original, 85., 16.).on_hover_text(tr("恢复原始渐变"));
+        ui.add_enabled(changed, egui::Button::new(tr("恢复原始渐变"))).clicked()
+    }).inner
+}
+
+fn open_gradient(ui: &egui::Ui, id: egui::Id, open: &mut bool) {
+    *open = true;
+    crate::native_window::wake(ui.ctx(), id.with("window"));
+}
+
+fn gradient_window(
+    ui: &egui::Ui, id: egui::Id, title: &str, open: &mut bool, width: f32, topmost: bool, read_only: bool,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    if !*open {
+        return false;
+    }
+    let mut confirmed = false;
+    let mut cancelled = false;
+    let window = crate::native_window::Window::new(title).id(id.with("window")).open(open)
+        .resizable(false).default_width(width).min_width(width).max_width(width);
+    let window = if topmost { window.always_on_top() } else { window };
+    window.show(ui.ctx(), |ui| {
+        ui.set_width(width);
+        if read_only {
+            ui.small(tr("只读渐变，不修改资源文件。"));
+        }
+        contents(ui);
+        if !read_only {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let gap = 8.0;
+                let button_width = ((ui.available_width() - gap) * 0.5).clamp(0.0, 84.0);
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let inset = (ui.available_width() - 2.0 * button_width - gap).max(0.0) * 0.5;
+                ui.add_space(inset);
+                cancelled = ui.add_sized([button_width, 30.0], egui::Button::new(tr("取消"))).clicked();
+                ui.add_space(gap);
+                confirmed = ui.add_sized([button_width, 30.0], egui::Button::new(tr("确定"))).clicked();
+            });
+        }
+    });
+    *open &= !confirmed && !cancelled;
+    confirmed
+}
+fn rgb_stop_controls(
+    ui: &mut egui::Ui, stops: &mut Vec<GradientStop>, gradient: &Gradient, reverse: bool, sample: impl Fn(f32) -> [u8; 3],
+) {
+    let selected_id = ui.id().with("selected_gradient_stop");
+    let mut selected = ui
+        .ctx()
+        .data(|data| data.get_temp::<usize>(selected_id))
+        .unwrap_or(0)
+        .min(stops.len() - 1);
+    let (control, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width().min(260.), 28.),
+        egui::Sense::click_and_drag(),
+    );
+    let rect = egui::Rect::from_min_max(control.min, control.right_bottom() - egui::vec2(0., 12.));
+    let pos_x = |position: u16| {
+        egui::lerp(
+            rect.x_range(),
+            f32::from(position) / f32::from(GRADIENT_END),
+        )
+    };
+    let from_x = |x: f32| {
+        (((x - rect.left()) / rect.width().max(1.)).clamp(0., 1.) * f32::from(GRADIENT_END)).round()
+            as u16
+    };
+    let display = |position| {
+        if reverse {
+            GRADIENT_END - position
+        } else {
+            position
+        }
+    };
+    let mut moved = None;
+    if (response.clicked() || response.drag_started())
+        && let Some(pointer) = ui
+            .input(|i| i.pointer.press_origin())
+            .or(response.interact_pointer_pos())
+        && let Some((index, _)) = stops.iter().enumerate().min_by(|(_, a), (_, b)| {
+            (pos_x(display(a.position)) - pointer.x)
+                .abs()
+                .total_cmp(&(pos_x(display(b.position)) - pointer.x).abs())
+        })
+    {
+        selected = index;
+    }
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        moved = Some(display(from_x(pointer.x)));
+    }
+    paint_swatch(ui, gradient, rect);
+    for (index, stop) in stops.iter().enumerate() {
+        let [r, g, b] = stop.color;
+        let marker = egui::Rect::from_center_size(
+            egui::pos2(pos_x(display(stop.position)), rect.bottom() + 6.),
+            egui::Vec2::splat(8.),
+        );
+        ui.painter()
+            .rect_filled(marker, 1., egui::Color32::from_rgb(r, g, b));
+        let border = if index == selected {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().widgets.inactive.fg_stroke.color
+        };
+        ui.painter().rect_stroke(
+            marker,
+            1.,
+            egui::Stroke::new(if index == selected { 2_f32 } else { 1_f32 }, border),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(stops.len() < MAX_GRADIENT_STOPS, egui::Button::new("+"))
+            .on_hover_text(tr("添加色标"))
+            .clicked()
+        {
+            let mut points = vec![0];
+            points.extend(stops.iter().map(|stop| stop.position));
+            points.push(GRADIENT_END);
+            let gap = points
+                .windows(2)
+                .max_by_key(|pair| pair[1] - pair[0])
+                .unwrap();
+            let position = gap[0].midpoint(gap[1]);
+            let color = sample(f32::from(position) / f32::from(GRADIENT_END));
+            selected = stops.partition_point(|stop| stop.position <= position);
+            stops.insert(selected, GradientStop { position, color });
+            moved = None;
+        }
+        if ui
+            .add_enabled(stops.len() > 2, egui::Button::new("−"))
+            .on_hover_text(tr("删除色标"))
+            .clicked()
+        {
+            stops.remove(selected);
+            selected = selected.min(stops.len() - 1);
+            moved = None;
+        }
+        let mut position = f32::from(stops[selected].position) * 100. / f32::from(GRADIENT_END);
+        if ui
+            .add(
+                egui::DragValue::new(&mut position)
+                    .range(0. ..=100.)
+                    .max_decimals(1)
+                    .suffix("%"),
+            )
+            .changed()
+        {
+            moved = Some((position * f32::from(GRADIENT_END) / 100.).round() as u16);
+        }
+        ui.push_id(("gradient_stop_color", selected), |ui| {
+            ui.label(tr("颜色"));
+            if let Some(color) = crate::color_property::show_editable_rgb(ui, tr("颜色"), stops[selected].color, false) {
+                stops[selected].color = color;
+            }
+        });
+    });
+    if let Some(position) = moved.filter(|position| *position != stops[selected].position) {
+        let mut stop = stops.remove(selected);
+        stop.position = position;
+        selected = stops.partition_point(|other| other.position <= position);
+        stops.insert(selected, stop);
+    }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(selected_id, selected));
+}
 
 struct Gradient {
     colors: Vec<(f64, [f64; 4])>,
@@ -75,17 +307,21 @@ impl Gradient {
 
 fn swatch(ui: &mut egui::Ui, gradient: &Gradient, width: f32, height: f32) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
+    paint_swatch(ui, gradient, rect);
+    response
+}
+
+fn paint_swatch(ui: &egui::Ui, gradient: &Gradient, rect: Rect) {
     let painter = ui.painter();
     let tile = 6.0;
-    for row in 0..(height / tile).ceil() as usize {
-        for column in 0..(width / tile).ceil() as usize {
+    for row in 0..(rect.height() / tile).ceil() as usize {
+        for column in 0..(rect.width() / tile).ceil() as usize {
             let cell = Rect::from_min_size(rect.min + egui::vec2(column as f32 * tile, row as f32 * tile), egui::vec2(tile, tile)).intersect(rect);
             painter.rect_filled(cell, 0.0, Color32::from_gray(if (row + column) % 2 == 0 { 195 } else { 115 }));
         }
     }
     painter.add(egui::Shape::mesh(gradient_mesh(gradient, rect)));
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, ui.visuals().text_color()), egui::StrokeKind::Inside);
-    response
 }
 
 fn gradient_mesh(gradient: &Gradient, rect: Rect) -> egui::Mesh {
@@ -137,10 +373,12 @@ fn key_column(ui: &mut egui::Ui, text: &str) {
 }
 
 pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
+    let read_only = !crate::editing::active(ui);
     let edited = crate::editing::scope_value(ui);
     let value = edited.as_deref().unwrap_or(value);
     let Some(gradient) = parse(value) else { return false; };
     let id = ui.id().with(("gradient", name));
+    let original_id = id.with("opening_gradient");
     let mut open = ui.ctx().data_mut(|data| data.get_temp::<bool>(id)).unwrap_or(false);
     let mut selected = ui.ctx().data_mut(|data| data.get_temp::<SelectedKey>(id.with("selected")))
         .unwrap_or(SelectedKey::Color(0));
@@ -152,17 +390,26 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
         ui.allocate_ui_with_layout(egui::vec2(210.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.set_min_width(210.0); ui.add(egui::Label::new(name).truncate());
         });
-        ui.allocate_ui_with_layout(egui::vec2(100.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.set_min_width(100.0); ui.weak("Gradient");
-        });
-        if swatch(ui, &gradient, 180.0, 22.0).on_hover_text(crate::localization::tr("点击查看渐变关键点（只读）")).clicked() { open = true; }
+        if swatch(ui, &gradient, 180.0, 22.0).on_hover_text(if read_only { tr("点击查看渐变关键点（只读）") } else { tr("渐变") }).clicked() {
+            if !open && !read_only {
+                if let Some(snapshot) = crate::editing::snapshot_scope(ui) {
+                    ui.ctx().data_mut(|data| data.insert_temp(original_id, (value.to_owned(), snapshot)));
+                }
+            }
+            open_gradient(ui, id, &mut open);
+        }
         if crate::editing::dirty_scope(ui) && ui.small_button(crate::localization::tr("还原")).clicked() { crate::editing::restore_scope(ui); }
     });
-    if open {
-        crate::native_window::Window::new(name).id(id.with("window")).open(&mut open).resizable(false)
-            .default_width(300.0).min_width(300.0).max_width(300.0).show(ui.ctx(), |ui| {
-            ui.set_width(300.0);
-            ui.small(if crate::editing::active(ui) { crate::localization::tr("编辑渐变关键点，保存编辑后写入文件。") } else { crate::localization::tr("只读渐变，不修改资源文件。") });
+    let original = ui.ctx().data(|data| data.get_temp::<(String, crate::editing::ScopeSnapshot)>(original_id));
+    let was_open = open;
+    let confirmed = gradient_window(ui, id, name, &mut open, 300., false, read_only, |ui| {
+            if !read_only && let Some((text, snapshot)) = &original && let Some(parsed) = parse(text) {
+                if restore_gradient_row(ui, &parsed, text != value) {
+                    crate::editing::restore_scope_snapshot(ui, snapshot);
+                    return;
+                }
+            }
+            if !read_only { ui.small(tr("编辑渐变关键点，保存编辑后写入文件。")); }
             ui.label(if gradient.mode == 0 { "Mode: Blend (Classic)" } else { "Mode: Fixed" });
             let content_width = ui.available_width();
             ui.add_space(12.0);
@@ -174,7 +421,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
                 preview
             }).inner;
             for (index, (time, alpha)) in gradient.alphas.iter().enumerate() {
-                let x = preview.rect.left() + preview.rect.width() * *time as f32;
+                let x = egui::lerp(preview.rect.x_range(), *time as f32);
                 let hit = Rect::from_center_size(egui::pos2(x, preview.rect.top() - 4.0), egui::vec2(14.0, 12.0));
                 if ui.interact(hit, id.with(("alpha_marker", index)), Sense::click())
                     .on_hover_text(format!("Alpha {index} · {:.2}% · {alpha}", time * 100.0)).clicked() {
@@ -186,7 +433,7 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
                     Color32::from_gray(gray), Stroke::new(2.0_f32, if selected == SelectedKey::Alpha(index) { Color32::from_rgb(30, 150, 255) } else { ui.visuals().text_color() })));
             }
             for (index, (time, color)) in gradient.colors.iter().enumerate() {
-                let x = preview.rect.left() + preview.rect.width() * *time as f32;
+                let x = egui::lerp(preview.rect.x_range(), *time as f32);
                 let hit = Rect::from_center_size(egui::pos2(x, preview.rect.bottom() + 4.0), egui::vec2(14.0, 12.0));
                 if ui.interact(hit, id.with(("color_marker", index)), Sense::click())
                     .on_hover_text(format!("Color {index} · {:.2}%", time * 100.0)).clicked() {
@@ -253,9 +500,14 @@ pub fn show(ui: &mut egui::Ui, name: &str, value: &str) -> bool {
             }
             });
         });
+    if was_open && !open && !confirmed && !read_only && let Some((_, snapshot)) = &original {
+        crate::editing::restore_scope_snapshot(ui, snapshot);
     }
-    ui.ctx().data_mut(|data| data.insert_temp(id, open));
-    ui.ctx().data_mut(|data| data.insert_temp(id.with("selected"), selected));
+    ui.ctx().data_mut(|data| {
+        if !open || read_only { data.remove::<(String, crate::editing::ScopeSnapshot)>(original_id); }
+        data.insert_temp(id, open);
+        data.insert_temp(id.with("selected"), selected);
+    });
     true
 }
 

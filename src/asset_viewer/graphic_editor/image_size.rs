@@ -319,6 +319,9 @@ impl Editor {
         let inset = ((ui.available_width() - row_width) / 2.).max(0.);
         ui.horizontal(|ui| {
             ui.add_space(inset);
+            if ui.add(egui::Button::new(tr("取消")).min_size(button_size)).clicked() {
+                finished = true;
+            }
             if ui
                 .add_enabled(
                     valid.is_ok() && size != original,
@@ -330,12 +333,6 @@ impl Editor {
                     Ok(()) => finished = true,
                     Err(reason) => self.message = tr(reason).into(),
                 }
-            }
-            if ui
-                .add(egui::Button::new(tr("取消")).min_size(button_size))
-                .clicked()
-            {
-                finished = true;
             }
         });
         if !finished {

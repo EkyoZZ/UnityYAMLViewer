@@ -865,7 +865,7 @@ impl Editor {
             }
             if let Some(fill) = &mut vector.fill {
                 ui.label(tr("填充"));
-                changed |= ui.color_edit_button_srgb(fill).changed();
+                changed |= crate::color_property::edit_rgb(ui, tr("填充"), fill);
             }
             if changed {
                 self.apply_vector(index, vector);
@@ -1055,7 +1055,7 @@ impl Editor {
                         ui.separator();
                         ui.horizontal(|ui| {
                             ui.label(tr("填充"));
-                            changed |= ui.color_edit_button_srgb(fill).changed();
+                            changed |= crate::color_property::edit_rgb(ui, tr("填充"), fill);
                         });
                     }
                 });

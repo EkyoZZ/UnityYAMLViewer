@@ -88,7 +88,7 @@ impl World {
         self.fps=PreviewFps::default();
     }
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn show(&mut self, ui:&mut egui::Ui, documents:&[Document], flags:&HashMap<String,crate::hierarchy_controls::Flags>, catalog:Option<Arc<HashMap<String,PathBuf>>>, axis:usize, paused:Arc<AtomicBool>, selected:&HashSet<String>, focus:&mut Option<(HashSet<String>,Instant)>, background:&str, rgb:[u8;3],show_guides:bool,expanding:bool,open:&mut bool) -> Option<String> {
+    pub(super) fn show(&mut self, ui:&mut egui::Ui, documents:&[Document], flags:&HashMap<String,crate::hierarchy_controls::Flags>, catalog:Option<Arc<HashMap<String,PathBuf>>>, axis:usize, paused:Arc<AtomicBool>, selected:&HashSet<String>, focus:&mut Option<(HashSet<String>,Instant)>, background:&str, rgb:[u8;3],show_guides:bool,expanding:bool,continuous:bool,open:&mut bool) -> Option<String> {
         use std::hash::{Hash,Hasher};
         let mut hash=std::collections::hash_map::DefaultHasher::new();
         for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
@@ -186,10 +186,23 @@ impl World {
             }
         }
         let painter=ui.painter_at(rect);
-        let preview_active=response.hovered() && ui.input(|input|input.focused) && !shared.paused.load(Ordering::Relaxed);
+        let preview_active=continuous && !shared.paused.load(Ordering::Relaxed);
         let particle_now=Instant::now();let particle_dt=self.particle_last.replace(particle_now).map_or(0.0,|last|particle_now.duration_since(last).as_secs_f64().min(0.25));
         let particle_running=has_particles && self.particle_playing && preview_active && self.status_stage==3;
-        if particle_running {self.particle_elapsed+=particle_dt as f32;for emitter in shared.particles.lock().unwrap().iter_mut(){emitter.advance(particle_dt);}}
+        let particle_step = if has_particles && self.particle_elapsed == 0.0 && self.status_stage == 3 {
+            1.0 / 60.0
+        } else if particle_running {
+            particle_dt
+        } else {
+            0.0
+        };
+        if particle_step > 0.0 {
+            self.particle_elapsed += particle_step as f32;
+            for emitter in shared.particles.lock().unwrap().iter_mut() {
+                emitter.advance(particle_step);
+            }
+            particle_controls_changed = true;
+        }
         let mut live_frame=preview_active;
         super::paint_background(&painter,rect,background,rgb);
         let mut picked=None;
@@ -379,7 +392,7 @@ fn include(area:&mut [f64;4],points:[[f64;2];4]) {
 }
 fn run(docs:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:Option<&Arc<HashMap<String,PathBuf>>>,axis:usize,shared:&Shared,ctx:&egui::Context,cache:Arc<Mutex<TextureCache>>) {
     if !shared.checkpoint() {return;}
-    let mut prepared=super::prepare(docs,flags,catalog,&shared.cancelled,axis,Some(&shared.paused));
+    let mut prepared=super::prepare(docs,flags,catalog,&shared.cancelled,axis,Some(&shared.paused),false);
     if prepared.particles.len()*crate::particle_preview::MAX_PARTICLES>65536 {prepared.issues.push("Particle preview limits total visible particles to 65,536 per frame".into());}
     *shared.particles.lock().unwrap()=std::mem::take(&mut prepared.particles);
     if !shared.checkpoint() {return;}
@@ -468,6 +481,22 @@ fn over(source:Color32,tint:Color32,dest:Color32) -> Color32 {
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn canvas_particle_materials(
+    sprites: &[Sprite], docs: &[Document], catalog: Option<&Arc<HashMap<String, PathBuf>>>,
+) -> (Option<Arc<crate::render_system::scene::Scene>>, Vec<String>) {
+    let shared = Shared {
+        particles: Mutex::default(), gpu_scene: Mutex::default(), cancelled: AtomicBool::new(false),
+        paused: Arc::default(), revision: AtomicU64::new(1), view: Mutex::default(),
+        status: Mutex::default(), frame: Mutex::default(),
+    };
+    let particles: Vec<_> = sprites.iter().filter(|sprite| sprite.id == "particle").cloned().collect();
+    if particles.is_empty() { return (None, Vec::new()); }
+    let result = gpu_scene(&particles, &[], &[], &[], &[], docs, catalog, &shared);
+    let mut errors = shared.status.into_inner().unwrap().errors;
+    let scene = result.unwrap_or_else(|error| { errors.push(error); None });
+    (scene, errors)
+}
+
 fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTexture>>],paths:&[PathBuf],components:&[String],docs:&[Document],catalog:Option<&Arc<HashMap<String,PathBuf>>>,shared:&Shared)->Result<Option<Arc<crate::render_system::scene::Scene>>,String> {
     use crate::render_system::scene::{self as rs, BlendFactor as B, Uniform as U};
     use std::collections::BTreeMap;
@@ -592,6 +621,20 @@ fn gpu_scene(sprites:&[Sprite],instances:&[Instance],textures:&[Option<Arc<CpuTe
         if slots.iter().any(Option::is_some) {custom.insert(sprite.component.clone(),slots);}
     }
     if custom.is_empty() {return Ok(None);}
+    if instances.is_empty() {
+        let draws: Vec<_> = sprites.iter().filter_map(|sprite| {
+            let material = custom.get(&sprite.component)?.first()?.clone()?;
+            let main_texture = material.textures.get("_MainTex").cloned().unwrap_or_else(|| Arc::new(rs::Texture {
+                size: [1, 1], rgba: Arc::from([255; 4]), revision: 1, repeat: [false; 2],
+            }));
+            Some(rs::Draw {
+                strict_shader: true, component: Arc::from(sprite.component.as_str()),
+                vertices: Arc::from([]), indices: Arc::from([]),
+                object_to_world: identity, material, main_texture,
+            })
+        }).collect();
+        return Ok(Some(Arc::new(rs::Scene { draws: Arc::from(draws), revision: 1 })));
+    }
     let mut gpu_textures=HashMap::new();let mut bytes=0usize;
     for instance in instances {
         if gpu_textures.contains_key(&instance.texture) {continue;}

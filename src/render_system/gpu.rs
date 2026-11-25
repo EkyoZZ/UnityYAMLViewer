@@ -92,6 +92,10 @@ impl Gpu {
     /// egui_glow PaintCallback; egui restores its own drawing state afterwards.
     /// The callback must supply a viewport/scissor and background first.
     pub unsafe fn draw(&mut self, frame: &Frame<'_>) -> Result<(), String> {
+        unsafe { self.draw_scene(frame, None) }
+    }
+
+    pub unsafe fn draw_scene(&mut self, frame: &Frame<'_>, depth_groups: Option<&[usize]>) -> Result<(), String> {
         let gl = self.gl.clone();
         unsafe {
             let result = (|| {
@@ -100,7 +104,17 @@ impl Gpu {
                 gl.disable(glow::FRAMEBUFFER_SRGB);
                 gl.enable(glow::BLEND); gl.blend_equation(glow::FUNC_ADD);
                 gl.active_texture(glow::TEXTURE0);
-                for draw in frame.scene.draws.iter() {
+                let mut groups = depth_groups.unwrap_or_default().iter().copied().peekable();
+                if depth_groups.is_some() {
+                    gl.enable(glow::DEPTH_TEST);
+                    gl.depth_func(glow::LESS);
+                }
+                for (index, draw) in frame.scene.draws.iter().enumerate() {
+                    if groups.next_if_eq(&index).is_some() {
+                        gl.depth_mask(true);
+                        gl.clear_depth_f32(1.0);
+                        gl.clear(glow::DEPTH_BUFFER_BIT);
+                    }
                     if draw.indices.len()>i32::MAX as usize || draw.indices.iter().any(|i|*i as usize>=draw.vertices.len()) {
                         return Err(format!("Invalid mesh indices: {}",draw.component));
                     }
@@ -162,6 +176,7 @@ impl Gpu {
                 Ok(())
             })();
             gl.color_mask(true,true,true,true);gl.depth_mask(true);
+            gl.disable(glow::DEPTH_TEST);
             gl.front_face(glow::CCW);
             gl.bind_vertex_array(None);
             // Multiple callbacks may render live output and node snapshots in one frame.

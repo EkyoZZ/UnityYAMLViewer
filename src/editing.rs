@@ -31,6 +31,8 @@ impl Session {
     pub fn new(path: PathBuf, original: String, disk: Vec<u8>) -> Self {
         Self { path, saved_original: original.clone(), original, disk, patches: BTreeMap::new(), saved_patches: BTreeMap::new(), undo: VecDeque::new(), drafts: BTreeMap::new(), component_drafts: BTreeMap::new(), revision: 0, undo_limit: DEFAULT_UNDO_LIMIT, active_drag: None, warning: None }
     }
+    pub(crate) fn revision_for_preview(&self) -> usize { self.revision }
+
     pub fn rendered(&self) -> String {
         let mut text = self.original.clone();
         for (start, (end, value)) in self.patches.iter().rev() { text.replace_range(*start..*end, value); }
@@ -549,6 +551,42 @@ pub fn highlight(ui: &egui::Ui, shape: egui::layers::ShapeIdx, rect: egui::Rect,
     if dirty { ui.painter().set(shape, egui::Shape::rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(240, 170, 30, 55))); }
 }
 pub fn placeholder(ui: &egui::Ui) -> egui::layers::ShapeIdx { ui.painter().add(egui::Shape::Noop) }
+#[derive(Clone)]
+pub(crate) struct ScopeSnapshot {
+    source: Source,
+    original: String,
+    patches: BTreeMap<usize, (usize, String)>,
+}
+
+pub(crate) fn snapshot_scope(ui: &egui::Ui) -> Option<ScopeSnapshot> {
+    let source = source(ui)?;
+    let session = source.session.lock().unwrap();
+    Some(ScopeSnapshot {
+        source: source.clone(),
+        original: session.original.get(source.range.clone())?.to_owned(),
+        patches: session.patches.range(source.range.clone())
+            .filter(|(_, (end, _))| *end <= source.range.end)
+            .map(|(start, value)| (*start, value.clone())).collect(),
+    })
+}
+
+pub(crate) fn restore_scope_snapshot(ui: &egui::Ui, snapshot: &ScopeSnapshot) {
+    let Some(source) = source(ui) else { return; };
+    if source.range != snapshot.source.range || !Arc::ptr_eq(&source.session, &snapshot.source.session) { return; }
+    let mut session = source.session.lock().unwrap();
+    if session.original.get(source.range.clone()) != Some(snapshot.original.as_str()) { return; }
+    let previous = session.patches.clone();
+    session.patches.retain(|start, (end, _)| !source.range.contains(start) || *end > source.range.end);
+    session.patches.extend(snapshot.patches.clone());
+    if session.patches != previous {
+        session.record_undo(previous);
+        session.revision += 1;
+    }
+    session.active_drag = None;
+    session.drafts.retain(|start, _| !source.range.contains(start));
+    session.component_drafts.retain(|(start, _), _| !source.range.contains(start));
+}
+
 pub fn restore_scope(ui: &egui::Ui) {
     if let Some(source) = source(ui) {
         let mut session = source.session.lock().unwrap();

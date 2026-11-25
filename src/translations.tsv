@@ -2520,3 +2520,21 @@ Tile	Tile	Tile	Tile	Tile	Tile	Tile
 边数	邊數	Sides	辺の数	변 수	Seitenzahl	Nombre de côtés
 
 星形比例	星形比例	Star inset ratio	星形の内側比率	별 안쪽 비율	Stern-Einzug	Rapport intérieur de l’ étoile
+
+持续刷新	持續更新	Continuous refresh	連続更新	연속 새로 고침	Fortlaufend aktualisieren	Actualisation continue
+
+恢复原始渐变	還原原始漸層	Restore original gradient	元のグラデーションに戻す	원래 그라데이션 복원	Ursprünglichen Verlauf wiederherstellen	Restaurer le dégradé initial
+调整前	調整前	Before	変更前	변경 전	Vorher	Avant
+调整后	調整後	After	変更後	변경 후	Nachher	Après
+当前	目前	Current	現在	현재	Aktuell	Actuel
+之前	之前	Before	変更前	이전	Vorher	Avant
+仅在预览中激活	僅在預覽中啟用	Activate in preview only	プレビューでのみ有効化	미리보기에서만 활성화	Nur in der Vorschau aktivieren	Activer uniquement dans la prévisualisation
+实例覆盖	實例覆寫	Instance override	インスタンスのオーバーライド	인스턴스 오버라이드	Instanzüberschreibung	Remplacement sur cette instance
+动画预览	動畫預覽	Animation Preview	アニメーションプレビュー	애니메이션 미리보기	Animationsvorschau	Aperçu de la animation
+未找到可预览的动画资源	未找到可預覽的動畫資源	No previewable animation assets found	プレビュー可能なアニメーションが見つかりません	미리 볼 애니메이션 에셋이 없습니다	Keine Animation für die Vorschau gefunden	Aucune animation prévisualisable
+预览选中动画	預覽選取的動畫	Preview selected animation	選択したアニメーションをプレビュー	선택한 애니메이션 미리보기	Ausgewählte Animation anzeigen	Prévisualiser la sélection
+UI 布局层级无效	UI 版面層級無效	Invalid UI layout hierarchy	UI レイアウト階層が無効です	UI 레이아웃 계층이 잘못되었습니다	Ungültige UI-Layouthierarchie	Hiérarchie de mise en page UI invalide
+仅显示选中属性的关键帧	僅顯示選取屬性的關鍵影格	Show keyframes for the selected property only	選択したプロパティのキーフレームのみ表示	선택한 속성의 키프레임만 표시	Nur Keyframes der ausgewählten Eigenschaft anzeigen	Afficher uniquement les images clés de la propriété sélectionnée
+显示所有属性的关键帧	顯示所有屬性的關鍵影格	Show keyframes for all properties	すべてのプロパティのキーフレームを表示	모든 속성의 키프레임 표시	Keyframes aller Eigenschaften anzeigen	Afficher les images clés de toutes les propriétés
+上一关键帧	上一個關鍵影格	Previous keyframe	前のキーフレーム	이전 키프레임	Vorheriges Keyframe	Image clé précédente
+下一关键帧	下一個關鍵影格	Next keyframe	次のキーフレーム	다음 키프레임	Nächstes Keyframe	Image clé suivante

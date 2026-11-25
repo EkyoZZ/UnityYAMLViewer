@@ -460,6 +460,7 @@ impl Editor {
                     ui.strong(tr("确认后直接覆盖此图片，不创建备份。"));ui.label(path.display().to_string());ui.label(format!("{w} × {h} → {nw} × {nh}"));
                     if self.metadata.is_some() {ui.label(tr("同时写入已读取的同名 .meta。"));}
                     ui.horizontal(|ui| {
+                        if ui.button(tr("取消")).clicked() {self.confirm=false;}
                         if ui.add(replace_button(tr("确认原位替换"))).clicked() {
                             if let (Some(result),Some(root))=(&preview,crate::app_cache::root()) {
                                 let source=source.clone();let result=result.clone();let metadata=self.metadata.clone();let path=path.to_owned();let repaint=ctx.clone();let (send,receive)=mpsc::channel();self.operation=Some(receive);self.confirm=false;
@@ -470,7 +471,6 @@ impl Editor {
                                 });
                             }else {self.status=tr("无法定位软件记录目录，未替换图片。").into();}
                         }
-                        if ui.button(tr("取消")).clicked() {self.confirm=false;}
                     });
                 });
             }

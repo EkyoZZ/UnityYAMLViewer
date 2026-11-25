@@ -677,7 +677,7 @@ impl Editor {
                     ui.separator();
                     ui.checkbox(&mut self.color_key.enabled,tr("去底色"));
                     ui.add_enabled_ui(self.color_key.enabled,|ui|{
-                        ui.horizontal_wrapped(|ui|{ui.color_edit_button_srgb(&mut self.color_key.color).on_hover_text(tr("点击色块打开调色板，或点击吸取底色后到左侧格子预览取色。"));let label=if self.picking_key{"取消吸色"}else{"吸取底色"};ui.toggle_value(&mut self.picking_key,tr(label));});
+                        ui.horizontal_wrapped(|ui|{crate::color_property::edit_rgb(ui, tr("底色"), &mut self.color_key.color);let label=if self.picking_key{"取消吸色"}else{"吸取底色"};ui.toggle_value(&mut self.picking_key,tr(label));});
                         if self.picking_key {ui.colored_label(egui::Color32::from_rgb(80,180,255),tr("吸色中：移到左侧格子预览，单击底色；Esc 或再次点击按钮取消。"));}
                         ui.horizontal_wrapped(|ui|{ui.label(tr("容差"));ui.add(egui::DragValue::new(&mut self.color_key.tolerance).range(0..=255));ui.label(tr("边缘柔化"));ui.add(egui::DragValue::new(&mut self.color_key.softness).range(0..=255));});
                         ui.checkbox(&mut self.color_key.unmix,tr("去除边缘底色混合"));

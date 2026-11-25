@@ -43,9 +43,16 @@ fn evaluate(a: &Block,b: &Block,time: f64,c: Option<&str>) -> Option<(f64,f64)> 
     let target=((time-a.time)/dt).clamp(0.0,1.0);
     let bezier=|u:f64,p:f64,q:f64,r:f64,s:f64| {let t=1.0-u;t*t*t*p+3.0*t*t*u*q+3.0*t*u*u*r+u*u*u*s};
     let derivative=|u:f64,p:f64,q:f64,r:f64,s:f64| 3.0*((1.0-u).powi(2)*(q-p)+2.0*(1.0-u)*u*(r-q)+u*u*(s-r));
-    let (mut lo,mut hi)=(0.0,1.0);
-    for _ in 0..48 { let mid=(lo+hi)*0.5;if bezier(mid,0.0,w0,1.0-w1,1.0)<target {lo=mid}else{hi=mid} }
-    let u=(lo+hi)*0.5; let p1=v0+m0*dt*w0;let p2=v1-m1*dt*w1;
+    let u = if w0 == 1.0 / 3.0 && w1 == 1.0 / 3.0 {
+        target
+    } else {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..48 {
+            let mid = (lo + hi) * 0.5;
+            if bezier(mid, 0.0, w0, 1.0-w1, 1.0) < target { lo = mid; } else { hi = mid; }
+        }
+        (lo + hi) * 0.5
+    }; let p1=v0+m0*dt*w0;let p2=v1-m1*dt*w1;
     let dx=derivative(u,0.0,w0,1.0-w1,1.0)*dt;
     Some((bezier(u,v0,p1,p2,v1), if dx.abs()>1e-12 {derivative(u,v0,p1,p2,v1)/dx} else {0.0}))
 }
@@ -53,7 +60,9 @@ fn sample(keys: &[&Block],time:f64,c:Option<&str>) -> Option<(f64,f64)> {
     let first=*keys.first()?;let last=*keys.last()?;
     if time<=first.time {return Some((number(first,"value",c)?,0.0))}
     if time>=last.time {return Some((number(last,"value",c)?,0.0))}
-    let a=*keys.iter().rev().find(|k|k.time<=time)?;let b=*keys.iter().find(|k|k.time>=time)?;
+    let right = keys.partition_point(|key| key.time < time);
+    let b = *keys.get(right)?;
+    let a = if b.time == time { b } else { *keys.get(right.checked_sub(1)?)? };
     evaluate(a,b,time,c)
 }
 fn replace_fields(lines:&[&str],block:&Block,changes:&[(String,String)]) -> String {
@@ -72,6 +81,142 @@ pub fn value_at(text:&str,binding:&AnimationBinding,time:f32)->Option<String> {
     let all=blocks(text);let keys:Vec<_>=binding.keyframes.iter().filter_map(|k|all.iter().find(|b|b.time_line==k.yaml_line)).collect();
     sample(&keys,time as f64,None).filter(|(v,_)|v.is_finite()).map(|(v,_)|(v as f32).to_string())
 }
+pub(crate) fn is_boolean_track(binding: &AnimationBinding) -> bool {
+    (binding.class_name == "GameObject" && binding.attribute == "m_IsActive")
+        || (binding.attribute == "m_Enabled" && matches!(binding.class_name.as_str(),
+            "MonoBehaviour" | "Animator" | "Animation" | "Camera" | "MeshRenderer" | "SkinnedMeshRenderer" | "SpriteRenderer"))
+}
+
+type PlotPoints = std::sync::Arc<[(f64, f64)]>;
+
+struct PlotSeries {
+    duration: f32,
+    tracks: std::collections::HashMap<usize, (PlotPoints, f64, f64)>,
+}
+
+pub(crate) struct CurveData {
+    blocks: Vec<Block>,
+    by_line: std::collections::HashMap<usize, usize>,
+    plot: std::sync::Mutex<Option<PlotSeries>>,
+}
+impl CurveData {
+    pub(crate) fn parse(text: &str) -> Self {
+        let blocks = blocks(text);
+        let by_line = blocks.iter().enumerate().map(|(index, block)| (block.time_line, index)).collect();
+        Self { blocks, by_line, plot: Default::default() }
+    }
+
+    fn plot_series(&self, bindings: &[&AnimationBinding], duration: f32) -> (Vec<PlotPoints>, f64, f64) {
+        let mut plot = self.plot.lock().unwrap();
+        if plot.as_ref().is_none_or(|plot| plot.duration != duration) {
+            *plot = Some(PlotSeries { duration, tracks: Default::default() });
+        }
+        let plot = plot.as_mut().unwrap();
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        let series = bindings.iter().map(|binding| {
+            let Some(first) = binding.keyframes.first() else { return std::sync::Arc::from([]); };
+            let (points, min, max) = plot.tracks.entry(first.yaml_line).or_insert_with(|| {
+                let keys: Vec<_> = binding.keyframes.iter().filter_map(|key| self.by_line.get(&key.yaml_line)
+                    .map(|&index| &self.blocks[index])).collect();
+                let mut points: Vec<(f64, f64)> = Vec::new();
+                let mut min = f64::INFINITY;
+                let mut max = f64::NEG_INFINITY;
+                for i in 0..=400 {
+                    let t = i as f64 / 400.0 * duration as f64;
+                    let Some((v, _)) = sample(&keys, t, None).filter(|(v, _)| v.is_finite()) else { continue; };
+                    min = min.min(v);
+                    max = max.max(v);
+                    if let [.., (t0, v0), (t1, v1)] = points.as_slice()
+                        && (v0 + (v - v0) * ((t1 - t0) / (t - t0)) - v1).abs() <= 1e-10 * (1.0 + v.abs()) {
+                        points.pop();
+                    }
+                    points.push((t, v));
+                }
+                (points.into(), min, max)
+            });
+            low = low.min(*min);
+            high = high.max(*max);
+            points.clone()
+        }).collect();
+        (series, low, high)
+    }
+
+    pub(crate) fn track_value(&self, binding: &AnimationBinding, time: f32) -> Option<String> {
+        let holding = || binding.keyframes.iter().rev().find(|key| key.time <= time)
+            .or_else(|| binding.keyframes.first()).map(|key| key.value.clone());
+        if is_boolean_track(binding) { return holding(); }
+        let keys: Vec<_> = binding.keyframes.iter().filter_map(|key| self.by_line.get(&key.yaml_line)
+            .map(|&index| &self.blocks[index])).collect();
+        sample(&keys, f64::from(time), None).filter(|(value, _)| value.is_finite())
+            .map(|(value, _)| {
+                let value = format!("{value:.5}");
+                let rounded = value.trim_end_matches('0').trim_end_matches('.');
+                if rounded == "-0" { "0".to_owned() } else { rounded.to_owned() }
+            }).or_else(holding)
+    }
+}
+
+pub(crate) fn transform_values_at(text: &str, bindings: &[&AnimationBinding], time: f32) -> Vec<(String, String, String)> {
+    transform_values_from(&CurveData::parse(text), text, bindings, time)
+}
+
+pub(crate) fn transform_values_from(curves: &CurveData, text: &str, bindings: &[&AnimationBinding], time: f32) -> Vec<(String, String, String)> {
+    let mut result = Vec::new();
+    let all = &curves.blocks;
+    let mut section = "";
+    let mut start = None;
+    for (line_number, line) in text.lines().enumerate() {
+        if line.starts_with("  m_") && let Some((key, _)) = line.trim().split_once(':') {
+            section = key;
+            start = None;
+        }
+        let (field_name, axes) = match section {
+            "m_PositionCurves" => ("m_LocalPosition", &["x", "y", "z"][..]),
+            "m_ScaleCurves" => ("m_LocalScale", &["x", "y", "z"][..]),
+            "m_RotationCurves" => ("m_LocalRotation", &["x", "y", "z", "w"][..]),
+            _ => continue,
+        };
+        if line.trim() == "- curve:" { start = Some(line_number); }
+        if let Some(path) = line.trim().strip_prefix("path:") && let Some(start) = start.take() {
+            let keys: Vec<_> = all.iter().filter(|key| (start..line_number).contains(&key.time_line)).collect();
+            let values: Option<Vec<_>> = axes.iter().map(|axis| {
+                let (value, _) = sample(&keys, time as f64, Some(axis))?;
+                value.is_finite().then(|| format!("{axis}: {value}"))
+            }).collect();
+            if let Some(values) = values {
+                result.push((path.trim().to_owned(), field_name.to_owned(), format!("{{{}}}", values.join(", "))));
+            }
+        }
+    }
+    for binding in bindings {
+        if binding.class_name == "GameObject" && binding.attribute == "m_IsActive" {
+            if let Some(key) = binding.keyframes.iter().rev().find(|key| key.time <= time)
+                .or_else(|| binding.keyframes.first())
+                && let Ok(value) = key.value.parse::<f32>()
+                && value.is_finite()
+            {
+                result.push((binding.path.clone(), binding.attribute.clone(), if value >= 0.5 { "1" } else { "0" }.into()));
+            }
+            continue;
+        }
+        let supported = match binding.class_name.as_str() {
+            "Transform" | "RectTransform" => matches!(binding.attribute.split('.').next(),
+                Some("m_LocalPosition" | "m_LocalScale" | "m_LocalRotation" | "m_AnchoredPosition" | "m_SizeDelta")),
+            "MonoBehaviour" => matches!(binding.attribute.as_str(),
+                "m_Color.r" | "m_Color.g" | "m_Color.b" | "m_Color.a"
+                | "m_fontColor.r" | "m_fontColor.g" | "m_fontColor.b" | "m_fontColor.a"),
+            _ => false,
+        };
+        if !supported { continue; }
+        let keys: Vec<_> = binding.keyframes.iter().filter_map(|key| curves.by_line.get(&key.yaml_line).map(|&index| &all[index])).collect();
+        if let Some((value, _)) = sample(&keys, time as f64, None).filter(|(v, _)| v.is_finite()) {
+            result.push((binding.path.clone(), binding.attribute.clone(), value.to_string()));
+        }
+    }
+    result
+}
+
 fn deletion_lines(bindings:&[&AnimationBinding],selected:&BTreeSet<usize>)->BTreeSet<usize> {
     let aliases:BTreeSet<_>=bindings.iter().flat_map(|b|b.keyframes.iter()).filter(|k|selected.contains(&k.yaml_line)).flat_map(|k|k.time_lines.iter().copied()).collect();
     bindings.iter().flat_map(|b|b.keyframes.iter()).filter(|k|k.time_lines.iter().any(|line|aliases.contains(line))).flat_map(|k|k.time_lines.iter().copied()).collect()
@@ -216,27 +361,60 @@ fn menu_label(mode:&str)->&str {tr(match mode {"Clamped Auto"=>"自动钳制","A
 pub fn color(attribute:&str) -> Color32 {
     match attribute.rsplit('.').next().unwrap_or("") {"x"|"r"=>Color32::from_rgb(235,85,85),"y"|"g"=>Color32::from_rgb(90,190,105),"z"|"b"=>Color32::from_rgb(85,145,245),"w"|"a"=>Color32::from_rgb(210,160,65),_=>Color32::from_rgb(180,120,220)}
 }
-pub fn show(ui:&mut egui::Ui,text:&str,bindings:&[&AnimationBinding],duration:f32,primary:&mut Option<SelectedKeyframe>) {
-    let all=blocks(text);
+#[derive(Clone, Copy)]
+pub(crate) struct CurveViewport {
+    pub zoom: f32,
+    pub vertical: f32,
+    pub height: f32,
+    pub scroll_id: egui::Id,
+    pub vertical_scroll_id: egui::Id,
+    pub playhead: f32,
+}
+
+pub fn show(ui:&mut egui::Ui,text:&str,bindings:&[&AnimationBinding],duration:f32,primary:&mut Option<SelectedKeyframe>, viewport: Option<CurveViewport>) {
+    show_parsed(ui, text, &CurveData::parse(text), bindings, duration, primary, viewport);
+}
+
+pub(crate) fn show_parsed(ui: &mut egui::Ui, text: &str, data: &CurveData, bindings: &[&AnimationBinding],
+    duration: f32, primary: &mut Option<SelectedKeyframe>, viewport: Option<CurveViewport>) {
+    let all = &data.blocks;
     let mut selected=crate::timeline_edit::selected_lines(ui);
     if let Some(key)=primary.as_ref(){selected.insert(key.yaml_line);}
-    ui.horizontal(|ui|{for binding in bindings{ui.colored_label(color(&binding.attribute),&binding.attribute);}});
-    let zoom=ui.ctx().data_mut(|d|d.get_temp::<f32>(ui.id().with("timeline_zoom"))).unwrap_or(1.0);
-    let vertical_id=ui.id().with("curve_vertical_zoom");
-    let mut vertical=ui.ctx().data_mut(|d|d.get_temp::<f32>(vertical_id)).unwrap_or(1.0);
-    ui.horizontal(|ui|{ui.label(tr("纵向缩放"));crate::theme::zoom_slider(ui, &mut vertical, 10.0);});
-    ui.ctx().data_mut(|d|d.insert_temp(vertical_id,vertical));
+    let embedded = viewport.is_some();
+    let (zoom, vertical, height, scroll_id) = if let Some(viewport) = viewport {
+        (viewport.zoom, viewport.vertical, viewport.height, viewport.scroll_id)
+    } else {
+        ui.horizontal(|ui|{for binding in bindings{ui.colored_label(color(&binding.attribute),&binding.attribute);}});
+        let zoom=ui.ctx().data_mut(|d|d.get_temp::<f32>(ui.id().with("timeline_zoom"))).unwrap_or(1.0);
+        let vertical_id=ui.id().with("curve_vertical_zoom");
+        let mut vertical=ui.ctx().data_mut(|d|d.get_temp::<f32>(vertical_id)).unwrap_or(1.0);
+        ui.horizontal(|ui|{ui.label(tr("纵向缩放"));crate::theme::zoom_slider(ui, &mut vertical, 10.0);});
+        ui.ctx().data_mut(|d|d.insert_temp(vertical_id,vertical));
+        (zoom, vertical, 260.0, ui.id().with("timeline_scroll_x"))
+    };
     let width=ui.available_width();let mut changed=false;
-    let scroll_id=ui.id().with("timeline_scroll_x");let scroll_x=ui.ctx().data_mut(|d|d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
+    let scroll_x=ui.ctx().data_mut(|d|d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
     let range_id=ui.id().with("curve_drag_range");
-    let output=egui::ScrollArea::both().id_salt("animation_curve_view").horizontal_scroll_offset(scroll_x).max_height(260.0).show(ui,|ui|{
-        let (rect,response)=ui.allocate_exact_size(egui::vec2(width*zoom,220.0*vertical),egui::Sense::click_and_drag());
-        let mut series=Vec::new();let mut low=f64::INFINITY;let mut high=f64::NEG_INFINITY;
-        for binding in bindings {
-            let keys:Vec<_>=binding.keyframes.iter().filter_map(|k|all.iter().find(|b|b.time_line==k.yaml_line)).collect();
-            let values:Vec<_>=(0..=400).filter_map(|i|{let t=i as f64/400.0*duration as f64;sample(&keys,t,None).filter(|(v,_)|v.is_finite()).map(|(v,_)|(t,v))}).collect();
-            for (_,v) in &values{low=low.min(*v);high=high.max(*v)}series.push(values);
-        }
+    let mut area = egui::ScrollArea::new([!embedded, true]).id_salt("animation_curve_view")
+        .horizontal_scroll_offset(if embedded { 0.0 } else { scroll_x })
+        .max_width(width).max_height(height).auto_shrink([!embedded; 2]);
+    if let Some(viewport) = viewport {
+        let scroll = ui.ctx().data(|data| data.get_temp::<f32>(viewport.vertical_scroll_id)).unwrap_or(0.0);
+        area = area.vertical_scroll_offset(scroll).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    }
+    let output = area.show(ui, |ui| {
+        let plot_height = (if embedded { height } else { 220.0 }) * vertical;
+        let mut shifted;
+        let ui = if embedded {
+            let (visible, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), plot_height), egui::Sense::hover());
+            let full = egui::Rect::from_min_size(visible.min - egui::vec2(scroll_x, 0.0), egui::vec2(width * zoom, plot_height));
+            shifted = ui.new_child(egui::UiBuilder::new().id_salt("curve_horizontal_view").max_rect(full)
+                .layout(egui::Layout::top_down(egui::Align::Min)));
+            shifted.set_clip_rect(visible.intersect(ui.clip_rect()));
+            &mut shifted
+        } else { ui };
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width * zoom, plot_height), egui::Sense::click_and_drag());
+        let (series, mut low, mut high) = data.plot_series(bindings, duration);
         if !low.is_finite(){low=0.0;high=1.0}let pad=((high-low)*0.12).max(0.1);low-=pad;high+=pad;
         if ui.input(|i|i.pointer.primary_down()) {
             if let Some((saved_low,saved_high))=ui.ctx().data_mut(|d|d.get_temp::<(f64,f64)>(range_id)){low=saved_low;high=saved_high}else{ui.ctx().data_mut(|d|d.insert_temp(range_id,(low,high)));}
@@ -244,11 +422,22 @@ pub fn show(ui:&mut egui::Ui,text:&str,bindings:&[&AnimationBinding],duration:f3
         let plot=rect.shrink2(egui::vec2(0.0,16.0));
         let point=|t:f64,v:f64|egui::pos2(crate::animation_time_x(plot,t,duration as f64),egui::lerp(plot.bottom()..=plot.top(),((v-low)/(high-low)) as f32));
         ui.painter().rect_filled(rect,2.0,ui.visuals().extreme_bg_color);
+        if let Some(viewport) = viewport {
+            let x = crate::animation_time_x(plot, viewport.playhead as f64, duration as f64);
+            ui.painter().vline(x, rect.y_range(), Stroke::new(1.0_f32, ui.visuals().selection.stroke.color));
+        }
         for i in 0..=4 {let v=low+(high-low)*i as f64/4.0;let y=point(0.0,v).y;ui.painter().line_segment([egui::pos2(plot.left(),y),egui::pos2(plot.right(),y)],Stroke::new(0.5_f32,ui.visuals().widgets.noninteractive.bg_stroke.color));ui.painter().text(egui::pos2(plot.left()+3.0,y),egui::Align2::LEFT_BOTTOM,format!("{v:.2}"),egui::FontId::proportional(10.0),ui.visuals().weak_text_color());}
         for (binding,values) in bindings.iter().zip(series){
-            ui.painter().add(egui::Shape::line(values.iter().map(|(t,v)|point(*t,*v)).collect(),Stroke::new(1.5_f32,color(&binding.attribute))));
+            let clip = ui.clip_rect();
+            let first = values.partition_point(|(t, _)| point(*t, low).x < clip.left()).saturating_sub(1);
+            let end = (values.partition_point(|(t, _)| point(*t, low).x <= clip.right()) + 1).min(values.len());
+            if end.saturating_sub(first) >= 2 {
+                ui.painter().add(egui::Shape::line(values[first..end].iter().map(|(t,v)|point(*t,*v)).collect(),
+                    Stroke::new(1.5_f32,color(&binding.attribute))));
+            }
             for key in &binding.keyframes {if let Ok(value)=key.value.parse::<f64>() {
                 let p=point(key.time as f64,value);let hit=egui::Rect::from_center_size(p,egui::vec2(14.0,14.0));
+                if !ui.is_rect_visible(hit) { continue; }
                 ui.painter().circle_filled(p,if selected.contains(&key.yaml_line){4.5}else{3.0},if selected.contains(&key.yaml_line){Color32::YELLOW}else{color(&binding.attribute)});
                 if (response.clicked()||response.secondary_clicked()) && response.interact_pointer_pos().is_some_and(|pos|hit.contains(pos)) {
                     if !ui.input(|i|i.modifiers.ctrl||i.modifiers.shift){selected.clear()}selected.insert(key.yaml_line);
@@ -284,7 +473,11 @@ pub fn show(ui:&mut egui::Ui,text:&str,bindings:&[&AnimationBinding],duration:f3
             });
         });
     });
-    ui.ctx().data_mut(|d|d.insert_temp(scroll_id,output.state.offset.x));
+    if let Some(viewport) = viewport {
+        ui.ctx().data_mut(|data| data.insert_temp(viewport.vertical_scroll_id, output.state.offset.y));
+    } else {
+        ui.ctx().data_mut(|data| data.insert_temp(scroll_id, output.state.offset.x));
+    }
     if changed {return}
     if let Some(key)=primary.as_ref() && let Some(block)=all.iter().find(|b|b.time_line==key.yaml_line) {
         ui.horizontal(|ui|{for (label,name,side) in [("Left Tangent","inSlope",0),("Right Tangent","outSlope",1)] {

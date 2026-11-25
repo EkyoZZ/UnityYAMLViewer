@@ -1,3 +1,4 @@
+mod canvas_particles;
 use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, mpsc}, time::SystemTime};
 use eframe::egui::{self, Color32, Pos2, Vec2};
 use crate::{Document, localization::tr};
@@ -27,6 +28,7 @@ fn selection_components(documents:&[Document],selected:Option<&str>,expanded:Opt
 pub struct Preview {
     pub open: bool,
     three_dimensional: bool,
+    continuous_refresh: Option<bool>,
     scene3d: Option<(u64, crate::model_preview::Preview)>,
     textures: HashMap<PathBuf, Texture>,
     identity: String,
@@ -50,10 +52,14 @@ pub struct Preview {
     paused: Arc<std::sync::atomic::AtomicBool>,
     world: world::World,
     ui_presence: Option<(usize,usize,usize,bool)>,
+    canvas_particles: canvas_particles::Playback,
+    animation: Option<crate::animation_workspace::Workspace>,
+    preview_active_overrides: HashMap<String, bool>,
+    activation_documents: Option<(u64, Arc<Vec<Document>>)>,
 }
 
 #[derive(Default)]
-struct Prepared { sprites: Vec<Sprite>, missing: usize, issues: Vec<String>,particles:Vec<crate::particle_preview::Emitter> }
+struct Prepared { sprites: Vec<Sprite>, missing: usize, issues: Vec<String>,particles:Vec<crate::particle_preview::Emitter>, particle_materials:Option<Arc<crate::render_system::scene::Scene>> }
 struct Preparation {
     key: u64, receiver: Option<mpsc::Receiver<Prepared>>, cancelled: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -66,12 +72,15 @@ fn coordinate_key(value:f64) -> i64 {
     let bits=value.to_bits() as i64;
     if bits<0 {bits ^ i64::MAX} else {bits}
 }
-fn renderer_order(doc:&Document, matrix:Matrix, axis:usize) -> (i64,i64,i64) {
-    (number(&doc.text,"m_SortingLayer",0.0) as i64 as i16 as i64,
-     number(&doc.text,"m_SortingOrder",0.0) as i64 as i16 as i64,
-     coordinate_key(matrix.0[axis.min(2)][3]))
+pub(crate) fn renderer_sorting(doc: &Document) -> (i64, i64) {
+    (number(&doc.text, "m_SortingLayer", 0.0) as i64 as i16 as i64,
+     number(&doc.text, "m_SortingOrder", 0.0) as i64 as i16 as i64)
 }
-fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_controls::Flags>, catalog: Option<&Arc<HashMap<String,PathBuf>>>, cancelled: &std::sync::atomic::AtomicBool, axis:usize, paused:Option<&std::sync::atomic::AtomicBool>) -> Prepared {
+fn renderer_order(doc:&Document, matrix:Matrix, axis:usize) -> (i64,i64,i64) {
+    let (layer, order) = renderer_sorting(doc);
+    (layer, order, coordinate_key(matrix.0[axis.min(2)][3]))
+}
+fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_controls::Flags>, catalog: Option<&Arc<HashMap<String,PathBuf>>>, cancelled: &std::sync::atomic::AtomicBool, axis:usize, paused:Option<&std::sync::atomic::AtomicBool>, canvas_particles:bool) -> Prepared {
     let objects:HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
     let transforms:HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
     let by_object:HashMap<_,_>=transforms.values().filter_map(|d|Some((d.game_object.as_deref()?,d.file_id.as_str()))).collect();
@@ -218,7 +227,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
         let Some(object)=doc.game_object.as_deref() else {continue;};
         if flags.get(object).is_some_and(|f|!f.visible){continue;}
         let Some(renderer)=documents.iter().find(|d|d.type_name=="ParticleSystemRenderer" && d.game_object==doc.game_object && number(&d.text,"m_Enabled",1.0)!=0.0) else {continue;};
-        let Some(matrix)=by_object.get(object).and_then(|id|world(id,&transforms,&objects,&mut HashSet::new())) else {continue;};
+        let Some(matrix)=by_object.get(object).and_then(|id| if canvas_particles {Some(Matrix::identity())} else {world(id,&transforms,&objects,&mut HashSet::new())}) else {continue;};
         if particles.len()>=128{issues.push("Particle preview exceeds 128 systems; remaining systems skipped".into());break;}
         match crate::particle_preview::Emitter::parse(renderer.file_id.clone(),&doc.text,&renderer.text,matrix) {
             Ok(emitter)=>{
@@ -230,7 +239,7 @@ fn prepare(documents: &[Document], flags: &HashMap<String,crate::hierarchy_contr
         }
     }
     sprites.sort_by_key(|s|s.order);
-    Prepared {sprites,missing,issues,particles}
+    Prepared {sprites,missing,issues,particles,particle_materials:None}
 }
 
 struct Texture {
@@ -290,6 +299,7 @@ impl Projection {
     fn point(self,x:f64,y:f64) -> [f64;2] {self.0.map(|r|r[0]*x+r[1]*y+r[2])}
     fn full(self) -> Matrix {let mut m=Matrix::identity();for i in 0..2 {m.0[i][0]=self.0[i][0];m.0[i][1]=self.0[i][1];m.0[i][3]=self.0[i][2];}m}
 }
+#[derive(Clone)]
 struct Sprite { spatial: Matrix, baked: Option<Arc<crate::spine_preview::Baked>>, ui: Option<UiImage>, component: String, selectable: bool, name: String, path: PathBuf, id: String, matrix: Projection, tint: Color32, flip: [bool;2], order: (i64,i64,i64), }
 #[derive(Clone, Copy)]
 pub(crate) struct Region { pub(crate) rect: [f64;4], pub(crate) pivot: [f64;2], pub(crate) ppu: f64, pub(crate) border: [f64;4] }
@@ -535,9 +545,61 @@ impl Preview {
         path.is_some_and(|p|p.extension().is_some_and(|e|e.eq_ignore_ascii_case("prefab") || e.eq_ignore_ascii_case("unity"))) && documents.iter().any(|d|
             d.type_name=="PrefabInstance" || d.type_name=="Tilemap" || d.type_name=="ParticleSystem" || matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer") || (d.type_name=="MonoBehaviour" && field(&d.text,"skeletonDataAsset").is_some()) || crate::ui_preview::graphic(d).is_some() || (d.type_name=="SpriteRenderer" && field(&d.text,"m_Sprite").and_then(|v|reference(v,"fileID")).is_some_and(|id|id!="0")))
     }
+    pub(crate) fn object_active(&self, object: &Document) -> bool {
+        self.preview_active_overrides.get(&object.file_id).copied()
+            .unwrap_or_else(|| number(&object.text, "m_IsActive", 1.0) != 0.0)
+    }
+
+    pub(crate) fn activation_control(&mut self, ui: &mut egui::Ui, object: &str, saved_active: bool) {
+        if !self.open { return; }
+        let mut active = self.preview_active_overrides.get(object).copied().unwrap_or(saved_active);
+        if crate::theme::compact_toggle_switch_size(ui, tr("仅在预览中激活"), &mut active, crate::theme::ToggleSwitchSize::Small).changed() {
+            if active == saved_active { self.preview_active_overrides.remove(object); }
+            else { self.preview_active_overrides.insert(object.to_owned(), active); }
+            self.activation_documents = None;
+            ui.ctx().request_repaint();
+        }
+    }
+
+    fn preview_activation_documents(&mut self, documents: &[Document]) -> Option<Arc<Vec<Document>>> {
+        use std::hash::{Hash, Hasher};
+        if self.preview_active_overrides.is_empty() { return None; }
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        for doc in documents {
+            doc.text.as_ptr().hash(&mut hash);
+            doc.text.len().hash(&mut hash);
+        }
+        let key = hash.finish();
+        if self.activation_documents.as_ref().is_none_or(|(old, _)| *old != key) {
+            let mut overlay = documents.to_vec();
+            for doc in &mut overlay {
+                if doc.type_name == "GameObject" && let Some(active) = self.preview_active_overrides.get(&doc.file_id) {
+                    prefab::patch(doc, "m_IsActive", if *active { "1" } else { "0" });
+                }
+            }
+            self.activation_documents = Some((key, Arc::new(overlay)));
+        }
+        self.activation_documents.as_ref().map(|(_, docs)| docs.clone())
+    }
+
+    pub(crate) fn clear_activation_overrides(&mut self) {
+        self.preview_active_overrides.clear();
+        self.activation_documents = None;
+    }
+
+    pub(crate) fn open_animation(&mut self, ctx: &egui::Context, root: String, caption: String, component: &Document) {
+        self.open = true;
+        if self.animation.as_ref().is_none_or(|workspace| !workspace.has_unsaved_edits()) {
+            self.animation = Some(crate::animation_workspace::Workspace::open(ctx, root, caption, component));
+        }
+        crate::native_window::wake(ctx, egui::Id::new("prefab_animation_workspace"));
+    }
+
     pub fn release(&mut self) {
+        self.animation = None;
+        self.clear_activation_overrides();
         self.scene3d=None;
-        self.preparation=None;self.preparation_pending=false;self.world.release();
+        self.preparation=None;self.preparation_pending=false;self.world.release();self.canvas_particles=Default::default();
         if self.sdf.has_state() {let sdf=std::mem::take(&mut self.sdf);std::thread::spawn(move || drop(sdf));}
         let prepared=std::mem::take(&mut self.prepared);let textures=std::mem::take(&mut self.textures);
         if !prepared.sprites.is_empty() || !textures.is_empty() {std::thread::spawn(move || {drop(prepared);drop(textures);});}
@@ -556,7 +618,7 @@ impl Preview {
             self.preparation=None;self.prepared=Arc::default();self.preparation_pending=true;
             let (sender,receiver)=mpsc::channel();let cancelled=Arc::new(std::sync::atomic::AtomicBool::new(false));
             let stop=cancelled.clone();let paused=self.paused.clone();let docs=documents.to_vec();let flags=flags.clone();let repaint=ctx.clone();
-            std::thread::spawn(move||{let result=prepare(&docs,&flags,catalog.as_ref(),&stop,axis,Some(&paused));if !stop.load(std::sync::atomic::Ordering::Relaxed) {let _=sender.send(result);repaint.request_repaint();}});
+            std::thread::spawn(move||{let mut result=prepare(&docs,&flags,catalog.as_ref(),&stop,axis,Some(&paused),true); if !stop.load(std::sync::atomic::Ordering::Relaxed) {let (materials,errors)=world::canvas_particle_materials(&result.sprites,&docs,catalog.as_ref());result.particle_materials=materials;result.issues.extend(errors);}if !stop.load(std::sync::atomic::Ordering::Relaxed) {let _=sender.send(result);repaint.request_repaint();}});
             self.preparation=Some(Preparation{key,receiver:Some(receiver),cancelled});
         }
         if let Some(job)=&self.preparation {
@@ -600,6 +662,9 @@ impl Preview {
     }
     pub fn show(&mut self, ui: &mut egui::Ui, documents: &[Document], identity: &str, flags: &HashMap<String, crate::hierarchy_controls::Flags>, selected: Option<&str>) -> Option<String> {
         let prefab_count=self.initialize_document(documents,identity);
+        if self.animation.as_mut().is_some_and(|workspace| !workspace.show(ui.ctx())) {
+            self.animation = None;
+        }
         if ui.ctx().data_mut(|data|data.get_temp::<bool>(egui::Id::new("asset_catalog_loading"))).unwrap_or(false) {
             // Indexing runs independently of preview workers. Offering their pause
             // control here can leave future preparation paused before it starts.
@@ -610,7 +675,10 @@ impl Preview {
             return None;
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label(tr("静态预览"));
+            ui.label(tr("预览"));
+            crate::theme::compact_toggle_switch(
+                ui, tr("持续刷新"), self.continuous_refresh.get_or_insert(true),
+            );
             crate::theme::preview_space_selector(ui,&mut self.three_dimensional);
             if ui.button(tr("适应窗口")).clicked(){self.zoom=1.0;self.pan=Vec2::ZERO;self.world.fit();if let Some((_,preview))=&mut self.scene3d {preview.fit();}}
             if self.three_dimensional && ui.button(tr("重置视角")).clicked(){if let Some((_,preview))=&mut self.scene3d {preview.reset();}}
@@ -625,6 +693,9 @@ impl Preview {
             crate::theme::compact_toggle_switch(ui,tr("辅助线"),&mut self.show_guides);
             }
         });
+        let refresh_enabled = self.continuous_refresh.unwrap_or(true)
+            && !self.paused.load(std::sync::atomic::Ordering::Relaxed);
+        let continuous = refresh_enabled && ui.input(|input| input.focused);
         let catalog=ui.ctx().data_mut(|data|data.get_temp::<Arc<HashMap<String,PathBuf>>>(egui::Id::new("asset_catalog")));
         let (expanded,expanding)=if self.expand_prefabs {
             self.prefabs.resolve(ui.ctx(),documents,catalog.clone(),self.paused.clone())
@@ -642,25 +713,12 @@ impl Preview {
         let resolved_flags=expanded.as_ref().map(|data|data.flags(flags));
         let flags=resolved_flags.as_deref().unwrap_or(flags);
         let documents=expanded.as_ref().map_or(documents,|data|data.documents.as_slice());
+        let activation = self.preview_activation_documents(documents);
+        let documents = activation.as_deref().map_or(documents, Vec::as_slice);
         // Hierarchy selects objects, while preview geometry is keyed by component.
         let selected_components=selection_components(documents,selected,expanded.as_deref());
         if let Some(data)=&expanded {
             crate::theme::preview_warning_details(ui,"prefab_expansion_warnings",tr("Prefab 展开存在限制"),&data.issues);
-        }
-        if self.three_dimensional {
-            if documents.iter().any(|d|d.type_name=="ParticleSystem"){ui.colored_label(ui.visuals().warn_fg_color,tr("粒子播放目前仅支持二维场景与 Prefab 预览"));}
-            use std::hash::{Hash,Hasher};
-            let mut hash=std::collections::hash_map::DefaultHasher::new();
-            for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
-            let mut keys:Vec<_>=flags.iter().collect();keys.sort_by_key(|(id,_)|*id);
-            for (id,value) in keys {id.hash(&mut hash);value.visible.hash(&mut hash);}
-            if let Some(catalog)=&catalog {catalog.len().hash(&mut hash);Arc::as_ptr(catalog).hash(&mut hash);}
-            let key=hash.finish();
-            if self.scene3d.as_ref().is_none_or(|(previous,_)|*previous!=key) {
-                self.scene3d=Some((key,crate::model_preview::Preview::new_scene(ui.ctx(),documents.to_vec(),flags.clone(),catalog.unwrap_or_default())));
-            }
-            self.scene3d.as_mut().unwrap().1.show_scene(ui,&self.background,self.background_rgb.unwrap_or([0;3]));
-            return None;
         }
         let first=documents.first().map_or(0,|d|d.text.as_ptr() as usize);
         let last=documents.last().map_or(0,|d|d.text.as_ptr() as usize);
@@ -668,12 +726,52 @@ impl Preview {
             Some((a,b,n,value)) if a==first && b==last && n==documents.len()=>value,
             _=>{let value=documents.iter().any(|doc|crate::ui_preview::graphic(doc).is_some() || (doc.type_name=="MonoBehaviour" && field(&doc.text,"skeletonDataAsset").is_some() && documents.iter().any(|t|t.type_name=="RectTransform" && t.game_object==doc.game_object)));self.ui_presence=Some((first,last,documents.len(),value));value},
         };
+        let has_mesh = documents.iter().any(|doc| matches!(doc.type_name.as_str(), "MeshFilter" | "SkinnedMeshRenderer")
+            && field(&doc.text, "m_Mesh").and_then(|value| reference(value, "fileID")).is_some_and(|id| id != "0"));
+        if self.three_dimensional || (!has_ui && has_mesh) {
+            use std::hash::{Hash,Hasher};
+            let mut hash=std::collections::hash_map::DefaultHasher::new();
+            for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
+            let mut keys:Vec<_>=flags.iter().collect();keys.sort_by_key(|(id,_)|*id);
+            for (id,value) in keys {id.hash(&mut hash);value.visible.hash(&mut hash);}
+            if let Some(catalog)=&catalog {catalog.len().hash(&mut hash);Arc::as_ptr(catalog).hash(&mut hash);}
+            let mut key=hash.finish();
+            if !self.scene3d.as_ref().is_some_and(|(_, preview)| preview.scene_pending()) {
+                let animated = self.animation.as_ref().and_then(|workspace| workspace.sample(documents));
+                if let Some(pose) = &animated {
+                    let mut pose_hash = std::collections::hash_map::DefaultHasher::new();
+                    key.hash(&mut pose_hash);
+                    for doc in pose {
+                        doc.text.hash(&mut pose_hash);
+                    }
+                    key = pose_hash.finish();
+                }
+                let catalog = catalog.unwrap_or_default();
+                if let Some((previous, preview)) = &mut self.scene3d {
+                    if *previous != key && preview.update_scene(ui.ctx(),
+                        animated.unwrap_or_else(|| documents.to_vec()), flags.clone(), catalog) {
+                        *previous = key;
+                    }
+                } else {
+                    self.scene3d = Some((key, crate::model_preview::Preview::new_scene(ui.ctx(),
+                        animated.unwrap_or_else(|| documents.to_vec()), flags.clone(), catalog)));
+                }
+            } else if self.animation.is_some() {
+                // The finished worker wakes the preview. Keep sampling the latest
+                // time once it is ready instead of queuing obsolete poses.
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+            }
+            self.scene3d.as_mut().unwrap().1.show_scene(ui,&self.background,self.background_rgb.unwrap_or([0;3]),continuous,refresh_enabled,!self.three_dimensional);
+            return None;
+        }
         if !has_ui {
-            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),&selected_components,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([0;3]),self.show_guides,expanding,&mut self.open);
+            let picked=self.world.show(ui,documents,flags,catalog,self.sort_axis.unwrap_or(1),self.paused.clone(),&selected_components,&mut self.focus_request,&self.background,self.background_rgb.unwrap_or([0;3]),self.show_guides,expanding,continuous,&mut self.open);
             if !self.open {self.release();ui.ctx().request_repaint();}
             return picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())));
         }
-        if has_ui && documents.iter().any(|d|d.type_name=="ParticleSystem"){ui.colored_label(ui.visuals().warn_fg_color,tr("UI Canvas 粒子播放尚未接入"));}
+        if continuous {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        }
         let objects: HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
         let transforms: HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
         let by_object: HashMap<_,_>=transforms.values().filter_map(|d|Some((d.game_object.as_deref()?,d.file_id.as_str()))).collect();
@@ -694,25 +792,42 @@ impl Preview {
         }
         let viewport=*viewport;
         let ui_order=crate::ui_preview::hierarchy_order(documents);
+        let animated = self.animation.as_ref().and_then(|workspace| workspace.sample(documents));
+        let ui_documents = animated.as_deref().unwrap_or(documents);
+        let objects: HashMap<_,_> = ui_documents.iter().filter(|d| d.type_name == "GameObject")
+            .map(|d| (d.file_id.as_str(), d)).collect();
+        let particle_refresh = continuous || (refresh_enabled && animated.is_some());
+        let transforms: HashMap<_,_> = ui_documents.iter().filter(|d| matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d| (d.file_id.as_str(),d)).collect();
         let mut layout_cache=HashMap::new();
-        crate::ui_preview::seed_screen_canvases(documents, viewport, &mut layout_cache);
+        crate::ui_preview::seed_screen_canvases(ui_documents, viewport, &mut layout_cache);
 
         let prepared=self.prepare_background(ui.ctx(),documents,flags,catalog.clone());
         missing+=prepared.missing;issues.extend(prepared.issues.iter().cloned());
+        let particles = self.canvas_particles.frame(&prepared, ui_documents, catalog.as_deref(),
+            &transforms, &objects, &by_object, &ui_order, &mut layout_cache, viewport, particle_refresh, selected, &selected_components);
+        if let Some(message) = self.canvas_particles.error.lock().unwrap().as_ref() {
+            issues.push(message.clone());
+        }
         let mut outlines_by_object:HashMap<&str,Vec<TextOutline>>=HashMap::new();
         for component in documents {
             if let Some(object)=component.game_object.as_deref() {
                 if let Some(outline)=text_outline(component,catalog.as_ref()) {outlines_by_object.entry(object).or_default().push(outline);}
             }
         }
-        for doc in documents {
+        for doc in ui_documents {
             use crate::ui_preview::Graphic;
             let Some(kind)=crate::ui_preview::graphic(doc) else {continue};
             let Some(object)=doc.game_object.as_deref() else {continue};
             if flags.get(object).is_some_and(|flags|!flags.visible) || number(&doc.text,"m_Enabled",1.0)==0.0 {continue}
             let Some(transform)=by_object.get(object) else {continue};
-            let Some(layout)=crate::ui_preview::layout(transform,&transforms,&objects,viewport,&mut layout_cache,&mut HashSet::new()) else {
-                missing+=1; issues.push(format!("{} · {}", doc.file_id, tr("节点或父节点未激活，或布局层级无效"))); continue;
+            let layout = match crate::ui_preview::layout_checked(transform, &transforms, &objects, viewport, &mut layout_cache, &mut HashSet::new()) {
+                Ok(layout) => layout,
+                Err(crate::ui_preview::LayoutError::Inactive) => continue,
+                Err(crate::ui_preview::LayoutError::Invalid) => {
+                    missing += 1;
+                    issues.push(format!("{} · {}", doc.file_id, tr("UI 布局层级无效")));
+                    continue;
+                }
             };
             if layout.size.iter().any(|v|*v<=0.0||!v.is_finite()) {
                 missing+=1; issues.push(format!("{} · {}", doc.file_id, tr("UI 尺寸为零或无效"))); continue;
@@ -726,12 +841,10 @@ impl Preview {
             let selectable=flags.get(object).is_none_or(|flags|flags.selectable);
             let order=(1_000_000_000,*ui_order.get(object).unwrap_or(&0),0);
             let color=tint(&doc.text,if kind==Graphic::Tmp {"m_fontColor"} else {"m_Color"});
-            let alpha=crate::ui_preview::opacity(transform,documents,&transforms);
+            let alpha=crate::ui_preview::opacity(transform,ui_documents,&transforms);
             // Asset colors are already premultiplied in gamma space; preserve that space.
             let color=color.gamma_multiply(alpha as f32);
-            if color.a()==0 {
-                missing+=1; issues.push(format!("{} · {}", doc.file_id, tr("UI 颜色或 CanvasGroup 透明度为零"))); continue;
-            }
+            if color.a() == 0 { continue; }
             if matches!(kind,Graphic::Text|Graphic::Tmp) {
                 let content: String=crate::ui_preview::text_content(doc,kind).chars().take(65536).collect();
                 if content.is_empty(){continue}
@@ -786,7 +899,7 @@ impl Preview {
         let mut checked_paths=HashSet::new();
         let mut reported_errors=HashSet::new();
         let resource_budget=std::time::Instant::now();let mut uploaded=false;
-        for sprite in sprites.iter().chain(prepared.sprites.iter()) {
+        for sprite in sprites.iter().chain(prepared.sprites.iter()).filter(|sprite|sprite.id!="particle") {
             if let Some(baked)=&sprite.baked {
                 if !self.textures.contains_key(&sprite.path) {
                     if self.paused.load(std::sync::atomic::Ordering::Relaxed) || uploaded || resource_budget.elapsed().as_millis()>=4 {loading=true;continue;}
@@ -803,7 +916,7 @@ impl Preview {
                         if let Some(transform)=by_object.get(object).filter(|id|transforms.get(**id).is_some_and(|t|t.type_name=="RectTransform")) {
                             let Some(layout)=crate::ui_preview::layout(transform,&transforms,&objects,viewport,&mut layout_cache,&mut HashSet::new()) else {continue};
                             matrix=layout.matrix.into();order=(1_000_000_000,*ui_order.get(object).unwrap_or(&0),0);
-                            color=tint(&doc.text,"m_Color").gamma_multiply(crate::ui_preview::opacity(transform,documents,&transforms) as f32);
+                            color=tint(&doc.text,"m_Color").gamma_multiply(crate::ui_preview::opacity(transform,ui_documents,&transforms) as f32);
                         }
                     }
                 }
@@ -967,15 +1080,16 @@ impl Preview {
             painter.line_segment([Pos2::new(corner.x,rect.top()),Pos2::new(corner.x,rect.bottom())],axis);
         }
         }
-        enum DrawItem { Quad(usize), Text(usize) }
+        enum DrawItem { Quad(usize), Text(usize), Particle(usize) }
         let mut drawing:Vec<_>=quads.iter().enumerate().map(|(index,quad)|(quad.order,DrawItem::Quad(index)))
-            .chain(texts.iter().enumerate().map(|(index,text)|(text.order,DrawItem::Text(index)))).collect();
+            .chain(texts.iter().enumerate().map(|(index,text)|(text.order,DrawItem::Text(index)))).chain(particles.iter().enumerate().map(|(index,item)|(item.order,DrawItem::Particle(index)))).collect();
         drawing.sort_by_key(|(order,_)|*order);
         let mut picked=None;
         if response.clicked_by(egui::PointerButton::Primary) {
             if let Some(pointer)=response.interact_pointer_pos() {
                 for (_,item) in drawing.iter().rev() {
                     match item {
+                        DrawItem::Particle(index)=>{if let Some(id)=particles[*index].hit(pointer,screen) {picked=Some(id);break;}},
                         DrawItem::Text(index)=>{
                             let text=&texts[*index];
                             if text.selectable && text.color.a()>0 && quad_coordinates(ui_rect_points(text.layout).map(screen),pointer).is_some() {picked=Some(text.component.clone());break;}
@@ -1002,6 +1116,10 @@ impl Preview {
         let mut batch: Option<egui::Mesh> = None;
         for (_,item) in drawing {
             match item {
+                DrawItem::Particle(index) => {
+                    if let Some(mesh)=batch.take() {painter.add(egui::Shape::mesh(mesh));}
+                    particles[index].paint(&painter, rect, scale, screen, self.canvas_particles.error.clone());
+                }
                 DrawItem::Quad(index)=>{
                     let quad=&quads[index];
                     let points=quad.points.map(screen);
@@ -1044,6 +1162,10 @@ impl Preview {
             }
         }
         if let Some(mesh)=batch {painter.add(egui::Shape::mesh(mesh));}
+        self.canvas_particles.controls(ui, rect, particle_refresh);
+        if particle_refresh && !continuous && self.canvas_particles.is_advancing() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        }
         let mut outlined=HashSet::new();
         let highlighted_quads: Vec<_>=quads.iter().filter(|quad|highlighted(&quad.component)).collect();
         if highlighted_quads.len()>64 {
@@ -1065,6 +1187,26 @@ impl Preview {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preview_activation_keeps_original_and_child_flags() {
+        let raw = "--- !u!1 &1\nGameObject:\n  m_IsActive: 0\n--- !u!1 &2\nGameObject:\n  m_IsActive: 1\n--- !u!1 &3\nGameObject:\n  m_IsActive: 0\n--- !u!4 &11\nTransform:\n  m_GameObject: {fileID: 1}\n  m_Father: {fileID: 0}\n--- !u!4 &12\nTransform:\n  m_GameObject: {fileID: 2}\n  m_Father: {fileID: 11}\n--- !u!4 &13\nTransform:\n  m_GameObject: {fileID: 3}\n  m_Father: {fileID: 11}\n";
+        let docs = crate::parse_unity_yaml(raw);
+        let mut preview = super::Preview::default();
+        preview.preview_active_overrides.insert("1".into(), true);
+        let overlay = preview.preview_activation_documents(&docs).unwrap();
+        let objects = overlay.iter().filter(|doc| doc.type_name == "GameObject").map(|doc| (doc.file_id.as_str(), doc)).collect();
+        let transforms = overlay.iter().filter(|doc| doc.type_name == "Transform").map(|doc| (doc.file_id.as_str(), doc)).collect();
+        assert!(super::world("12", &transforms, &objects, &mut Default::default()).is_some());
+        assert!(super::world("13", &transforms, &objects, &mut Default::default()).is_none());
+        assert_eq!(super::field(&docs[0].text, "m_IsActive"), Some("0"));
+        preview.preview_active_overrides.insert("2".into(), false);
+        preview.activation_documents = None;
+        let disabled = preview.preview_activation_documents(&docs).unwrap();
+        assert_eq!(super::field(&disabled[1].text, "m_IsActive"), Some("0"));
+        assert_eq!(super::field(&docs[1].text, "m_IsActive"), Some("1"));
+        preview.release();
+        assert!(preview.preview_activation_documents(&docs).is_none());
+    }
     use super::*;
     #[test]
     fn preview_actions_wait_five_seconds_and_reset_when_complete() {
@@ -1257,32 +1399,103 @@ mod tests {
 }
 
 /// Preserve complete world transforms for textured planes in the orbit preview.
-pub(crate) fn scene_planes(documents:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:&Arc<HashMap<String,PathBuf>>)->Result<(Vec<crate::model_preview::ScenePlane>,Vec<String>),String> {
-    let docs:Vec<_>=documents.iter().filter(|d|!matches!(d.type_name.as_str(),"MeshFilter"|"SkinnedMeshRenderer")).cloned().collect();
-    let prepared=prepare(&docs,flags,Some(catalog),&std::sync::atomic::AtomicBool::new(false),1,None);
-    let mut warnings=prepared.issues;let mut planes=Vec::new();let mut bytes=0usize;
+#[derive(Default)]
+pub(crate) struct ScenePlaneCache {
+    textures: HashMap<PathBuf, (Arc<crate::render_system::scene::Texture>, Arc<str>)>,
+    bytes: usize,
+}
+
+impl ScenePlaneCache {
+    fn load(&mut self, path: &std::path::Path) -> Result<(Arc<crate::render_system::scene::Texture>, Arc<str>), String> {
+        if let Some(cached) = self.textures.get(path) { return Ok(cached.clone()); }
+        if std::fs::metadata(path).map_err(|e| e.to_string())?.len() > 64 * 1024 * 1024 {
+            return Err("贴图超过64 MiB".into());
+        }
+        let mut reader = image::ImageReader::open(path).map_err(|e| e.to_string())?
+            .with_guessed_format().map_err(|e| e.to_string())?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(8192);
+        limits.max_image_height = Some(8192);
+        limits.max_alloc = Some(128 * 1024 * 1024);
+        reader.limits(limits);
+        let image = reader.decode().map_err(|e| e.to_string())?.into_rgba8();
+        let texture = Arc::new(crate::render_system::scene::Texture {
+            size: [image.width(), image.height()], rgba: image.into_raw().into(), revision: 1, repeat: [true; 2],
+        });
+        let meta: Arc<str> = std::fs::read_to_string(format!("{}.meta", path.display())).unwrap_or_default().into();
+        if self.textures.len() < 256 && self.bytes + texture.rgba.len() <= 128 * 1024 * 1024 {
+            self.bytes += texture.rgba.len();
+            self.textures.insert(path.to_owned(), (texture.clone(), meta.clone()));
+        }
+        Ok((texture, meta))
+    }
+}
+
+pub(crate) fn scene_planes(documents:&[Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:&Arc<HashMap<String,PathBuf>>,cache:&mut ScenePlaneCache)->Result<(Vec<crate::model_preview::ScenePlane>,Vec<crate::model_preview::SceneParticle>,Vec<String>),String> {
+    let parents: HashMap<_, _> = documents.iter()
+        .filter(|doc| matches!(doc.type_name.as_str(), "Transform" | "RectTransform"))
+        .map(|doc| (doc.file_id.as_str(), doc)).collect();
+    let transforms: HashMap<_, _> = parents.values().filter_map(|doc| Some((doc.game_object.as_deref()?, *doc))).collect();
+    let canvas_owners: HashSet<_> = documents.iter().filter(|doc| doc.type_name == "MonoBehaviour"
+        && number(&doc.text, "m_Enabled", 1.0) != 0.0)
+        .filter_map(|doc| {
+            let guid = reference(field(&doc.text, "m_Script")?, "guid")?;
+            let name = catalog.get(&guid.to_ascii_lowercase())?.file_stem()?.to_str()?;
+            matches!(name, "UIParticle" | "UIParticleSystem" | "UIParticleOrder")
+                .then_some(doc.game_object.as_deref()).flatten()
+        }).collect();
+    let docs: Vec<_> = documents.iter().filter(|doc| {
+        if matches!(doc.type_name.as_str(), "MeshFilter" | "SkinnedMeshRenderer") { return false; }
+        if doc.type_name != "ParticleSystem" { return true; }
+        let mut transform = doc.game_object.as_deref().and_then(|id| transforms.get(id).copied());
+        let mut visited = HashSet::new();
+        while let Some(node) = transform.filter(|node| visited.insert(node.file_id.as_str())) {
+            if node.game_object.as_deref().is_some_and(|id| canvas_owners.contains(id)) { return false; }
+            transform = node.parent_transform.as_deref().and_then(|id| parents.get(id).copied());
+        }
+        true
+    }).cloned().collect();
+    let prepared=prepare(&docs,flags,Some(catalog),&std::sync::atomic::AtomicBool::new(false),1,None,false);
+    let (templates, particle_warnings) = world::canvas_particle_materials(&prepared.sprites, documents, Some(catalog));
+    let mut emitters: HashMap<_, _> = prepared.particles.into_iter()
+        .map(|emitter| (emitter.id.clone(), emitter)).collect();
+    let mut particles = Vec::new();
+    for sprite in prepared.sprites.iter().filter(|sprite| sprite.id == "particle") {
+        if let Some(template) = templates.as_ref().and_then(|scene| scene.draws.iter().find(|draw| draw.component.as_ref() == sprite.component))
+            && let Some(emitter) = emitters.remove(&sprite.component) {
+            particles.push(crate::model_preview::SceneParticle {
+                emitter, template: template.clone(), sorting: (sprite.order.0, sprite.order.1),
+                origin: std::array::from_fn(|axis| sprite.spatial.0[axis][3] as f32),
+            });
+        }
+    }
+    let mut warnings=prepared.issues;warnings.extend(particle_warnings);let mut planes=Vec::new();let mut bytes=0usize;
     if documents.iter().any(|d|crate::ui_preview::graphic(d).is_some()) {warnings.push("3D模式暂不显示UI Canvas图形，请切换2D查看UI布局。".into());}
-    for sprite in prepared.sprites {
+    for sprite in prepared.sprites.into_iter().filter(|sprite| sprite.id != "particle") {
         let loaded=(|| -> Result<_,String> {
-            if let Some(baked)=&sprite.baked {return Ok((baked.image.clone(),baked.region));}
-            if std::fs::metadata(&sprite.path).map_err(|e|e.to_string())?.len()>64*1024*1024 {return Err("贴图超过64 MiB".into());}
-            let mut reader=image::ImageReader::open(&sprite.path).map_err(|e|e.to_string())?.with_guessed_format().map_err(|e|e.to_string())?;
-            let mut limits=image::Limits::default();limits.max_image_width=Some(8192);limits.max_image_height=Some(8192);limits.max_alloc=Some(128*1024*1024);reader.limits(limits);
-            let image=reader.decode().map_err(|e|e.to_string())?.into_rgba8();let size=[image.width() as usize,image.height() as usize];
-            let meta=std::fs::read_to_string(format!("{}.meta",sprite.path.display())).unwrap_or_default();
-            let region=region(&meta,&sprite.id,size).ok_or("Sprite区域未找到")?;
-            Ok((egui::ColorImage::from_rgba_unmultiplied(size,image.as_raw()),region))
+            if let Some(baked)=&sprite.baked {
+                let texture = crate::render_system::scene::Texture {
+                    size: baked.image.size.map(|size| size as u32),
+                    rgba: baked.image.pixels.iter().flat_map(|pixel| pixel.to_srgba_unmultiplied()).collect::<Vec<_>>().into(),
+                    revision: 1, repeat: [true; 2],
+                };
+                return Ok((Arc::new(texture),baked.region));
+            }
+            let (texture, meta) = cache.load(&sprite.path)?;
+            let region=region(&meta,&sprite.id,texture.size.map(|size| size as usize)).ok_or("Sprite区域未找到")?;
+            Ok((texture,region))
         })();
-        let (image,region)=match loaded {Ok(value)=>value,Err(error)=>{warnings.push(format!("{}: {error}",sprite.path.display()));continue;}};
-        bytes+=image.pixels.len()*4;if bytes>128*1024*1024 {return Err("3D精灵贴图超过128 MiB".into());}
+        let (texture,region)=match loaded {Ok(value)=>value,Err(error)=>{warnings.push(format!("{}: {error}",sprite.path.display()));continue;}};
+        bytes += texture.rgba.len();
+        if bytes > 128 * 1024 * 1024 {return Err("3D精灵贴图超过128 MiB".into());}
         let corners=[[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]];
         let points=corners.map(|corner|{
             let x=(corner[0]-region.pivot[0])*region.rect[2]/region.ppu*if sprite.flip[0]{-1.0}else{1.0};
             let y=(corner[1]-region.pivot[1])*region.rect[3]/region.ppu*if sprite.flip[1]{-1.0}else{1.0};
             std::array::from_fn(|axis|(sprite.spatial.0[axis][0]*x+sprite.spatial.0[axis][1]*y+sprite.spatial.0[axis][3]) as f32)
         });
-        let uv=corners.map(|c|[((region.rect[0]+c[0]*region.rect[2])/image.size[0] as f64) as f32,((region.rect[1]+c[1]*region.rect[3])/image.size[1] as f64) as f32]);
-        planes.push(crate::model_preview::ScenePlane{image,points,uv,tint:sprite.tint});
+        let uv=corners.map(|c|[((region.rect[0]+c[0]*region.rect[2])/texture.size[0] as f64) as f32,((region.rect[1]+c[1]*region.rect[3])/texture.size[1] as f64) as f32]);
+        planes.push(crate::model_preview::ScenePlane{texture,points,uv,tint:sprite.tint,sorting:(sprite.order.0,sprite.order.1)});
     }
-    Ok((planes,warnings))
+    Ok((planes,particles,warnings))
 }

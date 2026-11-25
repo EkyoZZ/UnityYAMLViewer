@@ -106,6 +106,43 @@ pub fn compact_selector<const N:usize>(ui:&mut egui::Ui,value:&mut String,labels
     let previous=value.clone();selector_inner(ui,value,true,labels);*value!=previous
 }
 
+pub fn small_selector<const N: usize>(ui: &mut egui::Ui, value: &mut String, labels: [(&str, &str); N]) -> bool {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let widths = labels.map(|(_, label)| {
+        ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 10.0
+    });
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(widths.iter().sum(), 20.0), egui::Sense::hover());
+    let mut left = rect.left();
+    let mut changed = false;
+    let mut segments = Vec::with_capacity(N);
+    for (index, ((key, label), width)) in labels.into_iter().zip(widths).enumerate() {
+        let segment = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(left + width, rect.bottom()));
+        let segment_response = ui.interact(segment, response.id.with(index), egui::Sense::click());
+        if segment_response.clicked() && value != key { *value = key.into(); changed = true; }
+        segment_response.widget_info(|| egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel, ui.is_enabled(), value == key, crate::localization::tr(label),
+        ));
+        segments.push((segment, key, label));
+        left += width;
+    }
+    let painter = ui.painter();
+    painter.rect_filled(rect, 3.0, ui.visuals().window_fill);
+    for (index, (segment, key, label)) in segments.into_iter().enumerate() {
+        let selected = value == key;
+        if selected {
+            painter.rect_filled(segment, egui::CornerRadius {
+                nw: if index == 0 { 3 } else { 0 }, sw: if index == 0 { 3 } else { 0 },
+                ne: if index + 1 == N { 3 } else { 0 }, se: if index + 1 == N { 3 } else { 0 },
+            }, BLUE);
+        }
+        if index != 0 { painter.vline(segment.left(), rect.y_range(), Stroke::new(1.0_f32, BLUE)); }
+        painter.text(segment.center(), egui::Align2::CENTER_CENTER, crate::localization::tr(label),
+            font.clone(), if selected { Color32::WHITE } else { BLUE });
+    }
+    painter.rect_stroke(rect, 3.0, Stroke::new(1.0_f32, BLUE), egui::StrokeKind::Inside);
+    changed
+}
+
 pub(crate) fn size_link(ui: &mut egui::Ui, linked: &mut bool) -> bool {
     use crate::localization::tr;
     let width = ui.spacing().icon_width + ui.spacing().icon_spacing;
@@ -387,7 +424,7 @@ pub fn shared_preview_background(ui:&mut egui::Ui,mode:&mut String,rgb:&mut [u8;
     let old=state.0.clone();
     let mut current=old.clone();
     background_selector(ui,&mut current.mode);
-    if current.mode=="custom" {ui.color_edit_button_srgb(&mut current.rgb);}
+    if current.mode=="custom" {crate::color_property::edit_rgb(ui, crate::localization::tr("背景色"), &mut current.rgb);}
     if current!=old {
         let saved=(||->Result<(),String>{
             let path=path.as_ref().ok_or_else(||"Cannot locate preview settings directory".to_owned())?;

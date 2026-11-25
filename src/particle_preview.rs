@@ -15,26 +15,43 @@ fn value<'a>(text:&'a str,key:&str)->Option<&'a str>{section(text,key)?.lines().
 fn num(text:&str,key:&str,default:f64)->Result<f64,String>{let v=value(text,key).map_or(Ok(default),|v|v.parse::<f64>().map_err(|_|format!("Invalid particle {key}")))?;if !v.is_finite(){return Err(format!("Non-finite particle {key}"));}Ok(v)}
 fn enabled(text:&str)->bool{value(text,"enabled")==Some("1")}
 fn list_items(text:&str)->Vec<&str>{let mut entries=Vec::new();let mut offset=0;for line in text.split_inclusive('\n'){if line.trim_start().starts_with("- serializedVersion:"){entries.push((offset,line.len()-line.trim_start().len()));}offset+=line.len();}let Some(indent)=entries.iter().map(|e|e.1).min() else{return Vec::new();};let starts=entries.iter().filter(|e|e.1==indent).map(|e|e.0).collect::<Vec<_>>();starts.iter().enumerate().map(|(i,start)|&text[*start..starts.get(i+1).copied().unwrap_or(text.len())]).collect()}
-struct Scalar {mode:u8,max:f64,min:f64,upper:Option<ScalarSampler>,lower:Option<ScalarSampler>}
+#[derive(Clone)]
+struct Scalar {mode:u8,max:f64,min:f64,upper:Option<Arc<ScalarSampler>>,lower:Option<Arc<ScalarSampler>>}
 impl Scalar {
-    fn parse(text:Option<&str>,default:f64)->Result<Self,String>{let text=text.unwrap_or("");let mode=num(text,"minMaxState",0.0)? as u8;if mode>3{return Err("Unsupported particle MinMaxCurve mode".into());}let curve=|key|section(text,key).and_then(ScalarSampler::parse);let result=Self{mode,max:num(text,"scalar",default)?,min:num(text,"minScalar",default)?,upper:curve("maxCurve"),lower:curve("minCurve")};if (mode==1 || mode==2) && (result.upper.is_none() || (mode==2 && result.lower.is_none())){return Err("Particle curve data unavailable".into());}Ok(result)}
+    fn parse(text:Option<&str>,default:f64)->Result<Self,String>{let text=text.unwrap_or("");let mode=num(text,"minMaxState",0.0)? as u8;if mode>3{return Err("Unsupported particle MinMaxCurve mode".into());}let curve=|key|section(text,key).and_then(ScalarSampler::parse).map(Arc::new);let result=Self{mode,max:num(text,"scalar",default)?,min:num(text,"minScalar",default)?,upper:curve("maxCurve"),lower:curve("minCurve")};if (mode==1 || mode==2) && (result.upper.is_none() || (mode==2 && result.lower.is_none())){return Err("Particle curve data unavailable".into());}Ok(result)}
     fn at(&self,t:f64,r:f64)->f64{match self.mode{1=>self.max*self.upper.as_ref().unwrap().at(t),2=>{let a=self.lower.as_ref().unwrap().at(t)*self.max;let b=self.upper.as_ref().unwrap().at(t)*self.max;a+(b-a)*r},3=>self.min+(self.max-self.min)*r,_=>self.max}}
 }
-struct Color {mode:u8,max:[f64;4],min:[f64;4],upper:Option<GradientSampler>,lower:Option<GradientSampler>}
+#[derive(Clone)]
+struct Color {mode:u8,max:[f64;4],min:[f64;4],upper:Option<Arc<GradientSampler>>,lower:Option<Arc<GradientSampler>>}
 impl Color {
-    fn parse(text:Option<&str>)->Result<Self,String>{let text=text.unwrap_or("");let mode=num(text,"minMaxState",0.0)? as u8;if mode>3{return Err("Particle random-color gradient is not implemented".into());}let rgba=|key|value(text,key).and_then(|v|crate::inline_vector(v,&["r","g","b","a"])).map(|v|std::array::from_fn(|i|v[i])).unwrap_or([1.0;4]);let result=Self{mode,max:rgba("maxColor"),min:rgba("minColor"),upper:section(text,"maxGradient").and_then(GradientSampler::parse),lower:section(text,"minGradient").and_then(GradientSampler::parse)};if (mode==1||mode==3)&&(result.upper.is_none()||(mode==3&&result.lower.is_none())){return Err("Particle color gradient unavailable".into());}Ok(result)}
+    fn parse(text:Option<&str>)->Result<Self,String>{let text=text.unwrap_or("");let mode=num(text,"minMaxState",0.0)? as u8;if mode>3{return Err("Particle random-color gradient is not implemented".into());}let rgba=|key|value(text,key).and_then(|v|crate::inline_vector(v,&["r","g","b","a"])).map(|v|std::array::from_fn(|i|v[i])).unwrap_or([1.0;4]);let result=Self{mode,max:rgba("maxColor"),min:rgba("minColor"),upper:section(text,"maxGradient").and_then(GradientSampler::parse).map(Arc::new),lower:section(text,"minGradient").and_then(GradientSampler::parse).map(Arc::new)};if (mode==1||mode==3)&&(result.upper.is_none()||(mode==3&&result.lower.is_none())){return Err("Particle color gradient unavailable".into());}Ok(result)}
     fn at(&self,t:f64,r:f64)->[f64;4]{match self.mode{1=>self.upper.as_ref().unwrap().at(t),2=>std::array::from_fn(|i|self.min[i]+(self.max[i]-self.min[i])*r),3=>{let a=self.lower.as_ref().unwrap().at(t);let b=self.upper.as_ref().unwrap().at(t);std::array::from_fn(|i|a[i]+(b[i]-a[i])*r)},_=>self.max}}
 }
+#[derive(Clone)]
 struct Burst {time:f64,count:Scalar,cycles:usize,interval:f64,probability:f64}
 #[derive(Clone)] struct Particle {birth:f64,life:f64,position:[f64;3],velocity:[f64;3],size:[f64;2],rotation:f64,color:[f64;4],random:f64}
+#[derive(Clone)]
 struct Shape {kind:i32,radius:f64,length:f64,angle:f64,position:[f64;3],rotation:[f64;3],scale:[f64;3],thickness:f64}
+#[derive(Clone)]
 struct WarmState {time:f64,remaining:f64,fraction:f64,seed:u64,started:bool,particles:Vec<Particle>}
+#[derive(Clone)]
 pub(crate) struct Emitter {
     pub id:String,pub warnings:Vec<String>,matrix:Matrix,duration:f64,delay:f64,speed:f64,looping:bool,max:usize,seed:u64,initial_seed:u64,
     lifetime:Scalar,start_speed:Scalar,size:Scalar,size_y:Option<Scalar>,rotation:Scalar,color:Color,gravity:f64,rate:Scalar,bursts:Vec<Burst>,shape:Option<Shape>,size_life:Option<Scalar>,color_life:Option<Color>,rotation_life:Option<Scalar>,
     time:f64,remaining:f64,emission_fraction:f64,particles:Vec<Particle>,started:bool,scale_size:bool,pivot:[f64;3],active:bool,warm:Option<WarmState>,
 }
 impl Emitter {
+    pub(crate) fn canvas_transform(&mut self, matrix: Matrix) {
+        self.matrix = matrix;
+        self.scale_size = true;
+    }
+
+    pub(crate) fn stop(&mut self) { self.active = false; self.particles.clear(); }
+
+    pub(crate) fn elapsed(&self) -> f32 { self.time as f32 }
+    pub(crate) fn is_playing(&self) -> bool { self.active }
+    pub(crate) fn particle_count(&self) -> usize { self.particles.len() }
+
     pub fn bounds_radius(&self)->f64{let maximum=|s:&Scalar|(0..=8).flat_map(|i|[s.at(i as f64/8.0,0.0).abs(),s.at(i as f64/8.0,1.0).abs()]).fold(0.0,f64::max);let shape=self.shape.as_ref().map_or(0.0,|s|s.radius+s.position.iter().map(|v|v.abs()).sum::<f64>()+s.scale.iter().map(|v|v.abs()).fold(0.0,f64::max));(maximum(&self.size)+maximum(&self.start_speed)*maximum(&self.lifetime).min(120.0)+shape).clamp(1.0,10000.0)}
     pub fn parse(id:String,text:&str,renderer:&str,matrix:Matrix)->Result<Self,String>{
         if num(renderer,"m_RenderMode",0.0)?!=0.0 || num(renderer,"m_RenderAlignment",0.0)?!=0.0{return Err("Particle preview currently requires View Billboard rendering".into());}
@@ -83,10 +100,18 @@ impl Emitter {
             for (burst_index,burst) in self.bursts.iter().enumerate(){for repeat in 0..burst.cycles{let birth=base+burst.time+repeat as f64*burst.interval;if birth>=base+self.duration{break;}if birth<=self.time && (birth>previous || (!self.started&&birth==0.0)){events.push((birth,0,burst.probability,Some((burst_index,(birth-base)/self.duration))));}}}}
             self.started=true;for (birth,count,probability,burst) in events{let chance=self.random();if probability>0.0 && chance<probability{let random=self.random();let count=burst.map_or(count,|(index,time)|self.bursts[index].count.at(time,random).clamp(0.0,MAX_PARTICLES as f64).round() as usize);for _ in 0..count{self.spawn(birth);}}}
         }}
+    pub(crate) fn update_transform(&mut self, source: &Self) {
+        self.matrix = source.matrix;
+    }
+
     pub fn draw(&self,template:&Draw)->Draw{
+        self.draw_billboard(template, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    }
+
+    pub(crate) fn draw_billboard(&self, template: &Draw, axes: [[f32; 3]; 2]) -> Draw {
         let mut vertices=Vec::with_capacity(self.particles.len()*4);let mut indices=Vec::with_capacity(self.particles.len()*6);
         for p in &self.particles{let age=(self.time-p.birth).max(0.0);let t=(age/p.life).clamp(0.0,1.0);let local=std::array::from_fn::<_,3,_>(|i|p.position[i]+p.velocity[i]*age);let center: [f64;3]=std::array::from_fn(|i|(0..3).map(|j|self.matrix.0[i][j]*local[j]).sum::<f64>()+self.matrix.0[i][3]+if i==1{0.5*self.gravity*age*age}else{0.0});let size=p.size.map(|v|v*self.size_life.as_ref().map_or(1.0,|c|c.at(t,p.random)).max(0.0));let color_life=self.color_life.as_ref().map_or([1.0;4],|c|c.at(t,p.random));let color=std::array::from_fn::<_,4,_>(|i|(p.color[i]*color_life[i]).clamp(0.0,1.0) as f32);
-            let rotation=p.rotation+self.rotation_life.as_ref().map_or(0.0,|c|{let step=t/16.0;(0..16).map(|i|c.at((i as f64+0.5)*step,p.random)*step*p.life).sum::<f64>()});let (sin,cos)=(-rotation).sin_cos();let scale=if self.scale_size{[0,1].map(|a|(0..3).map(|i|self.matrix.0[i][a].powi(2)).sum::<f64>().sqrt())}else{[1.0;2]};let start=vertices.len() as u32;for (corner,uv) in [[-0.5,-0.5],[0.5,-0.5],[0.5,0.5],[-0.5,0.5]].into_iter().zip([[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]]){let x=(corner[0]-self.pivot[0])*size[0]*scale[0];let y=(corner[1]-self.pivot[1])*size[1]*scale[1];vertices.push(Vertex{position:[(center[0]+x*cos-y*sin) as f32,(center[1]+x*sin+y*cos) as f32,center[2] as f32],uv,color,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]});}indices.extend([start,start+1,start+2,start,start+2,start+3]);}
+            let rotation=p.rotation+self.rotation_life.as_ref().map_or(0.0,|c|{let step=t/16.0;(0..16).map(|i|c.at((i as f64+0.5)*step,p.random)*step*p.life).sum::<f64>()});let (sin,cos)=(-rotation).sin_cos();let scale=if self.scale_size{[0,1].map(|a|(0..3).map(|i|self.matrix.0[i][a].powi(2)).sum::<f64>().sqrt())}else{[1.0;2]};let start=vertices.len() as u32;for (corner,uv) in [[-0.5,-0.5],[0.5,-0.5],[0.5,0.5],[-0.5,0.5]].into_iter().zip([[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]]){let x=(corner[0]-self.pivot[0])*size[0]*scale[0];let y=(corner[1]-self.pivot[1])*size[1]*scale[1];vertices.push(Vertex{position:std::array::from_fn(|a|center[a] as f32 + axes[0][a]*(x*cos-y*sin) as f32 + axes[1][a]*(x*sin+y*cos) as f32),uv,color,normal:[0.0,0.0,-1.0],tangent:[1.0,0.0,0.0,1.0]});}indices.extend([start,start+1,start+2,start,start+2,start+3]);}
         Draw{strict_shader:template.strict_shader,component:template.component.clone(),vertices:Arc::from(vertices),indices:Arc::from(indices),object_to_world:[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]],material:template.material.clone(),main_texture:template.main_texture.clone()}
     }
 }

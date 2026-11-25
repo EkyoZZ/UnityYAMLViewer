@@ -780,7 +780,7 @@ fn edit_input(
                         // Alpha is a separate shader input: zero alpha must not erase RGB.
                         // The RGBA widget premultiplies and writes back even when untouched.
                         let mut rgb = [v[0], v[1], v[2]];
-                        if ui.color_edit_button_rgb(&mut rgb).changed() {
+                        if crate::color_property::edit_rgb_float(ui, "RGB", &mut rgb) {
                             v[..3].copy_from_slice(&rgb);
                             changed = true;
                         }

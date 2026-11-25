@@ -40,6 +40,12 @@ fn identity() -> [f32; 4] {
 }
 
 impl Text {
+    fn without_color(&self) -> Self {
+        let mut text = self.clone();
+        character::apply_layer_style(&mut text, character::Style { color: Some([255; 3]), ..Default::default() });
+        text
+    }
+
     pub(super) fn new(size: u32, color: [u8; 4]) -> Self {
         Self {
             content: String::new(),
@@ -322,6 +328,9 @@ pub(super) struct Dialog {
     pub(super) target: Option<usize>,
     paragraph_tab: bool,
     last_applied: Option<(Text, u8)>,
+    last_preview_update: Option<std::time::Instant>,
+    opacity_drag_recorded: bool,
+    color_preview_recorded: bool,
     draft: Text,
     opacity: u8,
     cached: Option<(Text, Result<RgbaImage, String>)>,
@@ -342,6 +351,39 @@ pub(super) struct Inline {
     mouse_anchor: Option<usize>,
     focus: bool,
     input_rect: Option<Rect>,
+}
+
+#[derive(PartialEq, Eq)]
+struct GradientGrid {
+    diamond: bool,
+    hex: u8,
+    rows: usize,
+    columns: usize,
+    layout: Vec<usize>,
+}
+
+pub(super) struct GradientStamp {
+    text: Text,
+    fonts: std::sync::Arc<font_samples::Catalog>,
+    cell: [u32; 2],
+    stamp: tiny_skia::Pixmap,
+    start: [i32; 2],
+    bounds: [u32; 4],
+    grid: GradientGrid,
+    coordinates: std::collections::HashMap<usize, std::sync::Arc<[u32]>>,
+}
+
+pub(super) struct TextGradient {
+    pub bounds: [u32; 4],
+    width: u32,
+    coordinates: std::sync::Arc<[u32]>,
+}
+
+impl TextGradient {
+    pub fn point(&self, index: usize) -> Option<[u32; 2]> {
+        let offset = self.coordinates[index];
+        (offset != u32::MAX).then(|| [offset % self.width, offset / self.width])
+    }
 }
 
 fn text_pixel_bounds(image: &RgbaImage) -> Rect {
@@ -385,6 +427,63 @@ impl Editor {
             }
         }
         Ok((tiles, layout))
+    }
+
+    pub(super) fn wrapped_text_gradient(&self, text: &Text, tile: usize) -> Option<TextGradient> {
+        if self.plain_image || !self.wrap || !text.repeat || !self.multiple {
+            return None;
+        }
+        let origin = text.tile_origin?;
+        let fonts = self.font_samples.catalog.as_ref()?;
+        let (w, h) = self.pixels.dimensions();
+        let count = w as usize * h as usize;
+        if count > 4 * 1024 * 1024 { return None; }
+        let geometry = text.without_color();
+        let mut cache = self.text_gradient_stamp.borrow_mut();
+        if cache.as_ref().is_none_or(|cached| {
+            cached.cell != [w, h] || cached.text != geometry || !std::sync::Arc::ptr_eq(fonts, &cached.fonts)
+        }) {
+            let (stamp, start, _) = geometry.stamp_with_layout(w, h, fonts).ok()?;
+            let sw = stamp.width();
+            let mut bounds = [sw, stamp.height(), 0, 0];
+            for (i, _) in stamp.pixels().iter().enumerate().filter(|(_, pixel)| pixel.alpha() != 0) {
+                let x = i as u32 % sw;
+                let y = i as u32 / sw;
+                bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+            }
+            *cache = Some(GradientStamp { text: geometry, fonts: fonts.clone(), cell: [w, h], stamp, start, bounds,
+                grid: GradientGrid { diamond: self.diamond, hex: self.hex, rows: self.rows, columns: self.columns, layout: self.layout.clone() },
+                coordinates: Default::default(),
+            });
+        }
+        let cached = cache.as_mut()?;
+        let sw = cached.stamp.width();
+        if cached.bounds[0] == sw { return None; }
+        if cached.grid.diamond != self.diamond || cached.grid.hex != self.hex
+            || cached.grid.rows != self.rows || cached.grid.columns != self.columns || cached.grid.layout != self.layout {
+            cached.grid = GradientGrid { diamond: self.diamond, hex: self.hex, rows: self.rows,
+                columns: self.columns, layout: self.layout.clone() };
+            cached.coordinates.clear();
+        }
+        if let Some(coordinates) = cached.coordinates.get(&tile) {
+            return Some(TextGradient { bounds: cached.bounds, width: sw, coordinates: coordinates.clone() });
+        }
+        let mut coordinates = vec![u32::MAX; count];
+        let base = [origin[0].clamp(-32768, 32768) + cached.start[0],
+            origin[1].clamp(-32768, 32768) + cached.start[1]];
+        for (i, pixel) in cached.stamp.pixels().iter().enumerate() {
+            if pixel.alpha() == 0 { continue; }
+            let x = base[0] + (i as u32 % sw) as i32;
+            let y = base[1] + (i as u32 / sw) as i32;
+            if let Some((at, px, py)) = self.geometry_hit(x, y, true, true) && at == tile {
+                coordinates[(py * w + px) as usize] = i as u32;
+            }
+        }
+        let coordinates: std::sync::Arc<[u32]> = coordinates.into();
+        if (cached.coordinates.len() + 1) * count <= 8 * 1024 * 1024 {
+            cached.coordinates.insert(tile, coordinates.clone());
+        }
+        Some(TextGradient { bounds: cached.bounds, width: sw, coordinates })
     }
 
     pub(super) fn render_text_tiles(&self, text: &Text, fonts: &font_samples::Catalog) -> Result<Vec<RgbaImage>, String> {
@@ -764,6 +863,9 @@ impl Editor {
             font_generation: 0,
             paragraph_tab: false,
             last_applied,
+            last_preview_update: None,
+            opacity_drag_recorded: false,
+            color_preview_recorded: false,
         });
     }
     fn apply_text(&mut self, target: Option<usize>, text: Text, opacity: u8, image: RgbaImage) {
@@ -889,6 +991,9 @@ impl Editor {
         let fonts = self.font_samples.catalog.clone();
         let mut accept = false;
         let mut cancel = false;
+        let mut color_picker_open = false;
+        let mut opacity_dragging = false;
+        let mut opacity_released = false;
         let existing = dialog.target.is_some();
         let inline_style = self.inline_text.as_ref().filter(|edit| existing && edit.index == dialog.target)
             .map(|edit| character::layer_style(&edit.original, &edit.content, &edit.runs));
@@ -950,6 +1055,7 @@ impl Editor {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(tr("颜色"));
                             color = character::color_control(ui, effective.color, t.color);
+                            color_picker_open = crate::color_property::rgb_picker_open(ui, tr("颜色"));
                             ui.label(tr("样式"));
                             ui.toggle_value(&mut t.bold, egui::RichText::new("B").strong())
                                 .on_hover_text(tr("粗体"));
@@ -1016,10 +1122,12 @@ impl Editor {
                         }
                         ui.horizontal(|ui| {
                             ui.label(tr("不透明度"));
-                            ui.add(egui::Slider::new(&mut dialog.opacity, 0..=100).suffix("%"));
+                            let response = crate::theme::slider(ui, true, egui::Slider::new(&mut dialog.opacity, 0..=100).suffix("%"));
+                            opacity_dragging = response.dragged();
+                            opacity_released = response.drag_stopped();
                         });
                     }
-                    if let Some(fonts) = &fonts {
+                    if !existing && let Some(fonts) = &fonts {
                         if dialog
                             .cached
                             .as_ref()
@@ -1069,13 +1177,14 @@ impl Editor {
                             }
                         }
                     } else if !t.content.is_empty() {
-                        if let Some((_, Err(message))) = &dialog.cached {
+                        if !existing && let Some((_, Err(message))) = &dialog.cached {
                             ui.label(message);
                         }
                     }
                 });
             if !existing {
                 ui.horizontal(|ui| {
+                    cancel = ui.button(tr("取消")).clicked();
                     accept = ui
                         .add_enabled(
                             fonts
@@ -1085,7 +1194,6 @@ impl Editor {
                             egui::Button::new(tr("确定")),
                         )
                         .clicked();
-                    cancel = ui.button(tr("取消")).clicked();
                 });
             }
         };
@@ -1106,10 +1214,77 @@ impl Editor {
                         style != &dialog.draft || *opacity != dialog.opacity
                     })
             {
-                if let Some((style, Ok(image))) = &dialog.cached {
-                    self.apply_text(Some(i), style.clone(), dialog.opacity, image.clone());
-                    dialog.last_applied = Some((style.clone(), dialog.opacity));
+                let interval = std::time::Duration::from_millis(33);
+                let now = std::time::Instant::now();
+                let remaining = dialog.last_preview_update
+                    .map_or(std::time::Duration::ZERO, |last| interval.saturating_sub(now - last));
+                if open && !opacity_released && !remaining.is_zero() {
+                    ui.ctx().request_repaint_after(remaining);
+                } else {
+                    dialog.last_preview_update = Some(now);
+                    let style = &dialog.draft;
+                    if self.layers[i].settings.text.as_ref() == Some(style) {
+                        if self.text_unlocked(i) {
+                            if !dialog.opacity_drag_recorded {
+                                self.record_layer_change();
+                                dialog.opacity_drag_recorded = opacity_dragging;
+                            }
+                            self.layers[i].settings.opacity = dialog.opacity;
+                            self.dirty_texture = true;
+                            self.dirty_all = true;
+                            dialog.last_applied = Some((style.clone(), dialog.opacity));
+                        }
+                    } else if let Some(rgb) = self.layers[i].settings.text.as_ref().and_then(|previous| {
+                        let rgb = character::layer_style(style, &style.content, &style.character_runs).color?;
+                        (previous.without_color() == style.without_color()).then_some(rgb)
+                    }) {
+                        if self.text_unlocked(i) {
+                            if !dialog.color_preview_recorded {
+                                self.record_layer_change();
+                                dialog.color_preview_recorded = color_picker_open;
+                            }
+                            let recolor = |image: &mut RgbaImage| {
+                                for pixel in image.pixels_mut().filter(|pixel| pixel[3] != 0) {
+                                    pixel.0[..3].copy_from_slice(&rgb);
+                                }
+                            };
+                            for image in &mut self.layers[i].tiles { recolor(image); }
+                            if i == self.active_layer {
+                                for image in &mut self.tiles { recolor(image); }
+                                recolor(&mut self.pixels);
+                            }
+                            self.layers[i].settings.text = Some(style.clone());
+                            self.layers[i].settings.opacity = dialog.opacity;
+                            self.dirty_texture = true;
+                            self.dirty_all = true;
+                            if let Some(thumbnail) = self.layer_thumbnails.get_mut(i) { *thumbnail = None; }
+                            dialog.last_applied = Some((style.clone(), dialog.opacity));
+                        }
+                    } else {
+                        let result = if let Some(fonts) = &fonts {
+                            if style.tile_origin.is_some() && !self.plain_image {
+                                self.render_text_tiles(style, fonts)
+                            } else {
+                                style.raster(w, h, fonts).map(|image| vec![image; self.tiles.len()])
+                            }
+                        } else {
+                            Err(tr("缺少字体").to_owned())
+                        };
+                        match result {
+                            Ok(tiles) => {
+                                self.apply_text_at(Some(i), style.clone(), dialog.opacity, tiles, false);
+                                dialog.last_applied = Some((style.clone(), dialog.opacity));
+                            }
+                            Err(error) => self.message = error,
+                        }
+                    }
                 }
+            }
+            if !opacity_dragging {
+                dialog.opacity_drag_recorded = false;
+            }
+            if !color_picker_open && dialog.last_applied.as_ref().is_some_and(|(style, _)| style == &dialog.draft) {
+                dialog.color_preview_recorded = false;
             }
             if let Some(change) = inline_change
                 && let Some(edit) = self.inline_text.as_mut().filter(|edit| edit.index == Some(i))

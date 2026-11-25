@@ -645,10 +645,10 @@ impl Editor {
                                 }
                             });
                     });
+                    cancel = ui.button(tr("取消")).clicked();
                     commit = ui
                         .add_enabled(t.error.is_none(), egui::Button::new(tr("确定")))
                         .clicked();
-                    cancel = ui.button(tr("取消")).clicked();
                 })
             });
         if old != t.pose || interpolation != t.interpolation {

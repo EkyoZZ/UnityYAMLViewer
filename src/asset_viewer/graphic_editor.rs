@@ -508,6 +508,7 @@ pub(super) struct Editor {
     inline_text:Option<text_layer::Inline>,
     path_tool: vector::PathTool,
     font_samples:text_layer::font_samples::Cache,
+    text_gradient_stamp: std::cell::RefCell<Option<text_layer::GradientStamp>>,
     transform:Option<transform::Session>,
     transform_bounds_cache:Option<((usize,usize,bool,u64),Option<Rect>)>,
     show_transform:bool,
@@ -628,7 +629,7 @@ impl Default for Editor {
             text_dialog:None,
             inline_text:None,
             path_tool: Default::default(),
-            font_samples:Default::default(),transform:None,transform_bounds_cache:None,show_transform:false,confirm_transform_exit:false,transform_interpolation:Default::default(),transform_linked:true,
+            font_samples:Default::default(),text_gradient_stamp:Default::default(),transform:None,transform_bounds_cache:None,show_transform:false,confirm_transform_exit:false,transform_interpolation:Default::default(),transform_linked:true,
             layer_detail:None,
             style_clipboard:None,
             fx_page: Default::default(), fx_light: Default::default(), fx_dragging: false,
@@ -942,9 +943,7 @@ impl Editor {
                 for(value,label)in [(0,"棋盘格"),(1,"自定义")]{let rounding=egui::CornerRadius{nw:if value==0{4}else{0},sw:if value==0{4}else{0},ne:if value==1{4}else{0},se:if value==1{4}else{0}};if ui.add(egui::Button::new(tr(label)).selected(mode==value).corner_radius(rounding)).clicked(){mode=value;}}
                 self.background_custom=mode==1;
             });
-            let [r,g,b]=self.background_color;
-            if let Some(color)=crate::color_property::show_editable(ui,tr("预览背景色"),[r as f64/255.,g as f64/255.,b as f64/255.,1.]){
-                self.background_color=[color[0],color[1],color[2]].map(|c|(c.clamp(0.,1.)*255.).round()as u8);
+            if crate::color_property::edit_rgb(ui, tr("预览背景色"), &mut self.background_color) {
                 self.background_custom=true;
             }
         });

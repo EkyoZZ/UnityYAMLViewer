@@ -270,10 +270,10 @@ impl Browser {
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.spacing_mut().item_spacing.x = gap;
+                            let cancel = ui.add(egui::Button::new(tr("取消")).min_size(button_size)).clicked();
                             let confirm = ui.add_enabled(
                                 can_start, egui::Button::new(tr("确认")).min_size(button_size),
                             ).clicked();
-                            let cancel = ui.add(egui::Button::new(tr("取消")).min_size(button_size)).clicked();
                             (confirm, cancel)
                         },
                     ).inner

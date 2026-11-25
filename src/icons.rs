@@ -27,6 +27,31 @@ pub fn paint(ui: &egui::Ui, icon: Icon, rect: egui::Rect, color: egui::Color32) 
         paint_layer_button(ui, rect, color, true);
         return;
     }
+    if matches!(icon, Icon::Eye | Icon::EyeOff) {
+        let dpi = ui.ctx().pixels_per_point();
+        let side = rect.width().min(rect.height());
+        let center = rect.center().round_to_pixels(dpi);
+        let point = |x: f32, y: f32| center + egui::vec2(x, y) * (side / 24.0);
+        let painter = ui.painter();
+        let stroke = egui::Stroke::new((1.35 * dpi).round().max(1.0) / dpi, color);
+        let curve = |points: [(f32, f32); 4]| {
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                points.map(|(x, y)| point(x, y)), false, egui::Color32::TRANSPARENT, stroke,
+            ));
+        };
+        if matches!(icon, Icon::Eye) {
+            curve([(-10.0, 0.0), (-5.0, -8.0), (5.0, -8.0), (10.0, 0.0)]);
+            curve([(10.0, 0.0), (5.0, 8.0), (-5.0, 8.0), (-10.0, 0.0)]);
+            painter.circle_stroke(center, side * 3.0 / 24.0, stroke);
+        } else {
+            curve([(-2.0, -5.7), (3.0, -7.0), (7.2, -4.5), (10.0, 0.0)]);
+            curve([(10.0, 0.0), (9.0, 1.6), (7.8, 2.7), (6.6, 3.7)]);
+            curve([(-5.6, -5.0), (-7.5, -4.0), (-9.0, -1.6), (-10.0, 0.0)]);
+            curve([(-10.0, 0.0), (-6.6, 5.8), (0.0, 7.5), (5.5, 4.6)]);
+            painter.line_segment([point(-9.0, -9.0), point(9.0, 9.0)], stroke);
+        }
+        return;
+    }
     if matches!(icon,Icon::Move|Icon::Pencil|Icon::Brush|Icon::Eraser|Icon::Search|Icon::Trash|Icon::Lock|Icon::Unlock|Icon::Eyedropper|Icon::RectangleTool|Icon::LineTool|Icon::PaintBucket|Icon::VectorShape|Icon::VectorPath|Icon::PathSelection|Icon::PathSelectionFilled|Icon::VectorTriangle|Icon::PenNib|Icon::PenFree|Icon::PenCurve|Icon::PenAdd|Icon::PenDelete|Icon::PenConvert|Icon::Type){
         let dpi=ui.ctx().pixels_per_point();let side=rect.width().min(rect.height());let rect=egui::Rect::from_center_size(rect.center(),egui::Vec2::splat(side));
         let pixels=(1.25*dpi).round().max(1.);let width=pixels/dpi;let phase=if pixels as i32%2==0{0.}else{0.5};

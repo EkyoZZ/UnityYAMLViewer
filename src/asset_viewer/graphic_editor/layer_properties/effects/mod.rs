@@ -74,14 +74,7 @@ enum Carve {
     Soft,
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-struct GradientStop {
-    position: u16,
-    color: [u8; 3],
-}
-
-const MAX_GRADIENT_STOPS: usize = 16;
-const GRADIENT_END: u16 = 4096;
+use crate::gradient_property::{GRADIENT_END, GradientStop, MAX_GRADIENT_STOPS};
 type GradientStops = [Option<GradientStop>; MAX_GRADIENT_STOPS];
 
 fn no_gradient_stops(stops: &GradientStops) -> bool {

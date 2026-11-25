@@ -142,50 +142,7 @@ pub(super) fn apply_layer_style(text: &mut Text, change: Style) {
 }
 
 pub(super) fn color_control(ui: &mut egui::Ui, color: Option<[u8; 3]>, fallback: [u8; 3]) -> Option<[u8; 3]> {
-    let mut ink = color.unwrap_or(fallback);
-    let changed = if color.is_some() {
-        ui.color_edit_button_srgb(&mut ink).changed()
-    } else {
-        let label = egui::RichText::new("   ?   ")
-            .strong().color(egui::Color32::RED).background_color(egui::Color32::WHITE);
-        let draft_id = ui.id().with("mixed_text_color");
-        let menu = ui.menu_button(label, |ui| {
-            let width = (ui.ctx().screen_rect().width() - 24.).clamp(160., 220.);
-            ui.set_width(width);
-            ui.spacing_mut().slider_width = width;
-            let mut draft = ui.ctx().data(|data| data.get_temp::<egui::Color32>(draft_id))
-                .unwrap_or_else(|| egui::Color32::from_rgb(fallback[0], fallback[1], fallback[2]));
-            egui::color_picker::color_picker_color32(ui, &mut draft, egui::color_picker::Alpha::Opaque);
-            let mut apply = false;
-            ui.add_space(4.);
-            ui.vertical_centered(|ui| {
-                let button = egui::vec2(76., 30.);
-                let group_width = 2. * button.x + ui.spacing().item_spacing.x;
-                ui.allocate_ui_with_layout(
-                    egui::vec2(group_width, button.y),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        if ui.add_sized(button, egui::Button::new(tr("取消"))).clicked() {
-                            ui.close_menu();
-                        }
-                        if ui.add_sized(button, egui::Button::new(tr("确定"))).clicked() {
-                            let [r, g, b, _] = draft.to_array();
-                            ink = [r, g, b];
-                            apply = true;
-                            ui.close_menu();
-                        }
-                    },
-                );
-            });
-            ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
-            apply
-        });
-        if menu.inner.is_none() || menu.inner == Some(true) {
-            ui.ctx().data_mut(|data| data.remove::<egui::Color32>(draft_id));
-        }
-        menu.inner.unwrap_or(false)
-    };
-    changed.then_some(ink)
+    crate::color_property::show_editable_rgb(ui, tr("颜色"), color.unwrap_or(fallback), color.is_none())
 }
 
 pub(super) fn controls(

@@ -21,6 +21,7 @@ mod preview_layout;
 mod gradient_property;
 mod yaml_strings;
 mod editing;
+mod animation_workspace;
 mod localization;
 mod localized_format;
 mod theme;
@@ -171,6 +172,7 @@ struct AnimationBinding {
     keyframes: Vec<AnimationKeyframe>,
 }
 
+#[derive(Clone)]
 struct AnimationKeyframe {
     time: f32,
     value: String,
@@ -481,18 +483,18 @@ impl ViewerApp {
                             ui.label(localization::tr("正在下载并校验更新文件…"));
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width()-240.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
-                                ui.add_enabled_ui(false, |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("更新"))));
                                 if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.cancel_download(); }
+                                ui.add_enabled_ui(false, |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("更新"))));
                             });
                         } else {
                             if release.asset().is_none() { ui.label(localization::tr("此版本没有兼容的 Windows 更新附件。")); }
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width()-240.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
+                                if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.show = false; }
                                 if ui.add_enabled_ui(release.asset().is_some(), |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("更新")))).inner.clicked() {
                                     if self.updater.staged.is_some() { self.updater.confirm = true; }
                                     else { self.updater.download(ctx); }
                                 }
-                                if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.show = false; }
                             });
                         }
                     }
@@ -517,6 +519,7 @@ impl ViewerApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.add_space(((ui.available_width()-240.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
+                        if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.confirm = false; }
                         if ui.add_enabled_ui(dirty.is_empty(), |ui| ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("确认")))).inner.clicked() {
                             if let Some(path) = self.updater.staged.as_ref() {
                                 match updater::install(path) {
@@ -525,7 +528,6 @@ impl ViewerApp {
                                 }
                             }
                         }
-                        if ui.add_sized([120.0,36.0],egui::Button::new(localization::tr("取消"))).clicked() { self.updater.confirm = false; }
                     });
                     ui.add_space(8.0);
                 });
@@ -1106,9 +1108,11 @@ impl ViewerApp {
         children: &HashMap<String, Vec<usize>>,
         components: &HashMap<String, Vec<usize>>,
         depth: usize,
+        parent_active: bool,
     ) {
         let id = self.documents[game_object].file_id.clone();
         let title = self.display_name(&self.documents[game_object]);
+        let active = parent_active && self.preview.object_active(&self.documents[game_object]);
         if !self.game_object_has_match(game_object, children, components) {
             return;
         }
@@ -1139,7 +1143,7 @@ impl ViewerApp {
             let local = self.path.as_ref().and_then(|path| self.node_controls.get(path)).map(|controls| controls.local(&id)).unwrap_or_default();
             let flags = self.document_flags(game_object);
             let label = self.node_label(ui, game_object, title).strong();
-            let label = if !flags.visible { label.weak() } else { label };
+            let label = if !active || !flags.visible { label.weak() } else { label };
             let selected = self.selected.is_some_and(|index| index == game_object || self.documents[index].game_object.as_deref() == Some(&id));
             let response = ui.add(egui::SelectableLabel::new(selected, label));
             let mut toggle = None;
@@ -1171,7 +1175,7 @@ impl ViewerApp {
         if has_visible_children {
             state.show_body_indented(&response.response, ui, |ui| {
                 if let Some(ids) = children.get(&id).cloned() {
-                    for child in ids { self.show_game_object(ui, child, children, components, depth+1); }
+                    for child in ids { self.show_game_object(ui, child, children, components, depth+1, active); }
                 }
             });
         }
@@ -1182,9 +1186,10 @@ impl ViewerApp {
         }
     }
 
-    fn show_linked_node(&mut self,ui:&mut egui::Ui,index:usize,docs:&[Document],children:&HashMap<String,Vec<usize>>,flags:&HashMap<String,hierarchy_controls::Flags>,depth:usize) {
+    fn show_linked_node(&mut self,ui:&mut egui::Ui,index:usize,docs:&[Document],children:&HashMap<String,Vec<usize>>,flags:&HashMap<String,hierarchy_controls::Flags>,depth:usize,parent_active:bool) {
         if depth>128 {return;}
         let doc=&docs[index];let id=&doc.file_id;
+        let active = parent_active && self.preview.object_active(doc);
         let title=name_from_text(&doc.text).unwrap_or_else(||id.clone());
         if !self.query.trim().is_empty() {
             let query=self.query.to_lowercase();let mut pending=vec![index];let mut visited=std::collections::HashSet::new();let mut matched=false;
@@ -1206,7 +1211,7 @@ impl ViewerApp {
         let row=ui.horizontal(|ui| {
             if children.get(id).is_some_and(|items|!items.is_empty()) {state.show_toggle_button(ui,egui::collapsing_header::paint_default_icon);}
             else {ui.allocate_exact_size(egui::vec2(ui.spacing().indent,20.0),egui::Sense::hover());}
-            let label=if own.visible {RichText::new(title).strong()} else {RichText::new(title).weak()};
+            let label=if active && own.visible {RichText::new(title).strong()} else {RichText::new(title).weak()};
             let response=ui.add(egui::SelectableLabel::new(selected,label));
             if locate.as_deref()==Some(id.as_str()) {
                 response.scroll_to_me(Some(egui::Align::Center));
@@ -1231,11 +1236,11 @@ impl ViewerApp {
             if response.double_clicked() {self.preview.focus(docs.iter().filter(|component|component.game_object.as_deref()==Some(id.as_str())).map(|component|component.file_id.clone()).collect());}
         });
         state.show_body_indented(&row.response,ui,|ui| {
-            if let Some(items)=children.get(id) {for child in items {self.show_linked_node(ui,*child,docs,children,flags,depth+1);}}
+            if let Some(items)=children.get(id) {for child in items {self.show_linked_node(ui,*child,docs,children,flags,depth+1,active);}}
         });
     }
 
-    fn show_game_object_inspector(&mut self, ui: &mut egui::Ui, object: usize) {
+    fn show_game_object_inspector(&mut self, ui: &mut egui::Ui, object: usize, preview_only: bool, active_override: Option<&editing::Binding>) {
         let ctx = ui.ctx().clone();
         let object_id = self.documents[object].file_id.clone();
         let inspector_path = self.path.clone();
@@ -1288,7 +1293,13 @@ impl ViewerApp {
                     ui.selectable_value(&mut self.show_game_object_yaml,true,localization::tr("显示 YAML"));
                 });
                 if self.show_game_object_yaml {ui.add(egui::Label::new(RichText::new(object_doc.text.as_ref()).monospace()).wrap());}
-                else {show_game_object_properties(ui,&object_doc.text);}
+                else {
+                    show_game_object_properties(ui, &object_doc.text, active_override, |ui, active| {
+                        if preview_only {
+                            self.preview.activation_control(ui, &object_id, active);
+                        }
+                    });
+                }
             });
             for (index, range) in sections {
                 let doc = self.documents[index].clone();
@@ -1309,6 +1320,13 @@ impl ViewerApp {
                         title_clicked=title.clicked();
                         title_rect=title.rect;
                         ui.add_space(4.0);
+                        if matches!(doc.type_name.as_str(), "Animator" | "Animation")
+                            && ui.add(egui::Button::new(RichText::new(localization::tr("动画预览")).color(Color32::WHITE))
+                                    .fill(Color32::from_rgb(28, 125, 75))).clicked()
+                        {
+                            let caption = format!("{} · {}", self.display_name(&object_doc), doc.type_name);
+                            self.preview.open_animation(&ctx, object_id.clone(), caption, &doc);
+                        }
                         model_preview::component_button(ui,&doc.text);
                         spine_preview::component_button(ui,&doc.text,&self.documents);
                     });
@@ -2116,13 +2134,25 @@ impl eframe::App for ViewerApp {
         self.script_properties.update(self.path.as_deref(), ctx);
         let delimited_tab = self.path.as_ref().is_some_and(|path| !self.assets.has_network_source(path) && !remote_file::is_hls(path) && path.extension().and_then(|ext|ext.to_str()).is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),"csv"|"tsv"|"psv")));
         let reference_tab = spine_preview::is_data_asset(&self.raw) || self.path.as_ref().is_some_and(|path| self.assets.has_network_source(path) || media_preview::is_project(path) || playlist::is_playlist(path) || media_preview::is_media(path) || asset_viewer::is_tile_project(path) || asset_viewer::is_image(path) || asset_viewer::is_office_document(path) || asset_viewer::is_text(path) || (spine_preview::is_spine(path) || model_preview::is_model(path)));
+        let uses_preview_documents = !reference_tab && self.preview.open && !material_graph::available(self.path.as_deref());
+        if uses_preview_documents {
+            let preview_edit = self.path.as_ref().and_then(|path| self.edits.get(path));
+            if preview_edit.is_some() { self.preview.clear_activation_overrides(); }
+            let rendered: Arc<str> = preview_edit
+                .map(|session| Arc::from(session.lock().unwrap().rendered())).unwrap_or_else(|| self.raw.clone());
+            if !Arc::ptr_eq(&self.preview_text, &rendered) && self.preview_text != rendered {
+                self.preview_documents = if preview_edit.is_none() {self.documents.clone()} else {parse_unity_yaml(&rendered)};
+                self.preview_text = rendered;
+            }
+        }
         if !reference_tab {
         egui::SidePanel::left("hierarchy")
             .resizable(false)
             .exact_width(hierarchy_width)
             .show(ctx, |ui| {
                 let identity=self.path.as_ref().map(|path|path.display().to_string()).unwrap_or_default();
-                self.preview.hierarchy_header(ui,&self.documents,&identity);
+                let hierarchy_input = if uses_preview_documents { &self.preview_documents } else { &self.documents };
+                self.preview.hierarchy_header(ui, hierarchy_input, &identity);
                 ui.small(crate::localization::tr("按 GameObject / Transform 层级重建"));
                 // A vertical-only scroll area expands its reported width for long
                 // indented rows. SidePanel clips to its configured width, leaving
@@ -2200,8 +2230,8 @@ impl eframe::App for ViewerApp {
                                     ui.spacing_mut().indent = 14.0;
                                     for root in roots {
                                         if let Some(data)=&expanded {
-                                            self.show_linked_node(ui,root,&data.documents,&children,linked_flags.as_ref().unwrap(),0);
-                                        } else {self.show_game_object(ui, root, &children, &components,0);}
+                                            self.show_linked_node(ui,root,&data.documents,&children,linked_flags.as_ref().unwrap(),0,true);
+                                        } else {self.show_game_object(ui, root, &children, &components,0,true);}
                                     }
                                 });
                             });
@@ -2257,13 +2287,6 @@ impl eframe::App for ViewerApp {
             }
         }
         if self.preview.open && !material_preview {
-            let preview_edit = self.path.as_ref().and_then(|path| self.edits.get(path));
-            let rendered: Arc<str> = preview_edit
-                .map(|session| Arc::from(session.lock().unwrap().rendered())).unwrap_or_else(|| self.raw.clone());
-            if !Arc::ptr_eq(&self.preview_text, &rendered) && self.preview_text != rendered {
-                self.preview_documents = if preview_edit.is_none() {self.documents.clone()} else {parse_unity_yaml(&rendered)};
-                self.preview_text = rendered;
-            }
             preview_layout::panel(ctx, "static_prefab_preview").show(ctx, |ui| {
                 // Keep overflowing toolbar content from expanding the panel's reported width.
                 let preview_rect=ui.available_rect_before_wrap();
@@ -2402,7 +2425,7 @@ impl eframe::App for ViewerApp {
             });
 			if self.documents.iter().any(|doc| doc.type_name == "AnimatorController") {
 				controller_graph::show(ui, &self.documents, &mut self.selected,
-					self.path.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default());
+					self.path.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default(), false);
 				ui.separator();
 			}
             if delimited_tab {
@@ -2419,20 +2442,27 @@ impl eframe::App for ViewerApp {
             let nested=self.nested_selected.as_ref().filter(|(path,_)|Some(path)==self.path.as_ref()).and_then(|(_,id)|expanded.as_ref()?.documents.iter().position(|doc|doc.file_id==*id));
             if let (Some(index),Some(data))=(nested,expanded) {
                 ctx.data_mut(|d|d.insert_temp(egui::Id::new("inspector_prefab_roots"),data.prefab_roots.clone()));
-                ui.small(format!("Prefab · {}",crate::localization::tr("只读 Inspector")));
+                let binding = if let Some(session) = &current_edit {
+                    editing::publish(ctx, Some(session.clone()), 0..0);
+                    data.active_override_range(&data.documents[index].file_id, &self.documents,
+                        self.raw.find("--- !u!").unwrap_or(0))
+                        .and_then(|range| editing::cell_binding(ui, range))
+                } else { None };
+                let mode = if binding.is_some() { "实例覆盖" } else { "只读 Inspector" };
+                ui.small(format!("Prefab · {}", localization::tr(mode)));
                 let documents=std::mem::replace(&mut self.documents,data.documents.clone());
                 let path=self.path.take();
                 editing::publish(ctx,None,0..0);
                 let selected=self.selected;
                 let issue_component=ctx.data_mut(|data|data.remove_temp::<String>(egui::Id::new("preview_issue_component")));
                 if let Some(id)=issue_component {self.selected=self.documents.iter().position(|doc|doc.file_id==id);}
-                self.show_game_object_inspector(ui,index);
+                self.show_game_object_inspector(ui, index, current_edit.is_none(), binding.as_ref());
                 self.selected=selected;
                 self.path=path;self.documents=documents;
                 ctx.data_mut(|d|d.remove::<std::collections::HashMap<String,String>>(egui::Id::new("inspector_prefab_roots")));
                 editing::publish(ctx,None,0..0);
             } else if let Some(object) = selected_object {
-                self.show_game_object_inspector(ui, object);
+                self.show_game_object_inspector(ui, object, current_edit.is_none(), None);
             } else if let Some(index) = self.selected {
 				let doc = &self.documents[index];
                 let offset = self.documents[..index].iter().map(|doc| doc.text.len()).sum::<usize>();
@@ -2558,7 +2588,7 @@ impl eframe::App for ViewerApp {
 				script_properties::show_prefab_reference(ui, &doc.text, &self.documents);
 				if is_animation_clip {
                     ui.push_id((self.path.as_ref(), &doc.file_id), |ui| {
-                        show_animation_timeline(ui, &doc.text, &self.selected_animation_track, &mut self.selected_keyframe);
+                        show_animation_timeline(ui, &doc.text, &self.selected_animation_track, &mut self.selected_keyframe, None, None, false);
                     });
 					ui.separator();
 					ui.small(crate::localization::tr("原始 YAML（点击关键帧后自动定位并高亮对应的 time / value）"));
@@ -3002,6 +3032,7 @@ fn parse_unity_yaml_with_progress(text: &str, cancelled: Option<&AtomicBool>, pr
             "74" => "AnimationClip",
             "91" => "AnimatorController",
             "95" => "Animator",
+        "111" => "Animation",
             "221" => "AnimatorOverrideController",
             "1101" => "AnimatorStateTransition",
             "1102" => "AnimatorState",
@@ -3208,11 +3239,13 @@ fn attach_animation_runtime_times(tree: &mut AnimationPathNode, text: &str) {
 
 fn animation_class_name(class_id: &str) -> String {
     match class_id {
+        "1" => "GameObject",
         "4" => "Transform",
         "224" => "RectTransform",
         "20" => "Camera",
         "23" => "MeshRenderer",
         "95" => "Animator",
+        "111" => "Animation",
         "114" => "MonoBehaviour",
         "137" => "SkinnedMeshRenderer",
         "212" => "SpriteRenderer",
@@ -3371,10 +3404,10 @@ fn collect_animation_bindings<'a>(
     node: &'a AnimationPathNode,
     bindings: &mut Vec<&'a AnimationBinding>,
 ) {
+    bindings.extend(&node.bindings);
     for child in node.children.values() {
         collect_animation_bindings(child, bindings);
     }
-    bindings.extend(&node.bindings);
 }
 
 fn animation_stop_time(text: &str, bindings: &[&AnimationBinding]) -> f32 {
@@ -3498,10 +3531,10 @@ fn animation_time_x(rect: egui::Rect, time: f64, duration: f64) -> f32 {
     egui::lerp(rect.left()..=rect.right(), fraction as f32)
 }
 
-fn show_animation_frame_ruler(ui: &mut egui::Ui, duration: f32, sample_rate: Option<f32>, clip_duration: f32, can_insert: bool) -> Option<f64> {
-    let Some(rate) = sample_rate.filter(|rate| rate.is_finite() && *rate > 0.0) else { return None };
+fn show_animation_frame_ruler(ui: &mut egui::Ui, duration: f32, sample_rate: Option<f32>, clip_duration: f32, can_insert: bool, playhead: Option<&mut f32>) -> Option<f64> {
+    let Some(rate) = sample_rate.filter(|rate| rate.is_finite() && *rate > 0.0).or(playhead.is_some().then_some(60.0)) else { return None };
     if !duration.is_finite() || duration <= 0.0 { return None; }
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), if playhead.is_some() { egui::Sense::click_and_drag() } else { egui::Sense::click() });
     let frames = duration as f64 * rate as f64;
     let last_frame = frames.floor().min(u32::MAX as f64) as u32;
     let time_rect = animation_time_rect(rect);
@@ -3540,6 +3573,14 @@ fn show_animation_frame_ruler(ui: &mut egui::Ui, duration: f32, sample_rate: Opt
     ui.painter().rect_filled(badge,3.0,end_color);
     let text_position = badge.center() - end_galley.size() * 0.5;
     ui.painter().galley(text_position,end_galley,Color32::WHITE);
+    if let Some(playhead) = playhead {
+        if (response.clicked_by(egui::PointerButton::Primary) || response.dragged_by(egui::PointerButton::Primary))
+            && let Some(pointer) = response.interact_pointer_pos() {
+            *playhead = ((pointer.x - time_rect.left()) / time_rect.width() * duration).clamp(0.0, clip_duration);
+        }
+        let x = animation_time_x(rect, *playhead as f64, duration as f64);
+        ui.painter().vline(x, rect.y_range(), egui::Stroke::new(2.0, ui.visuals().selection.stroke.color));
+    }
     let position_id = response.id.with("insert_frame");
     if response.secondary_clicked() && let Some(position) = response.interact_pointer_pos() {
         let frame = (((position.x-time_rect.left())/time_rect.width()) as f64 * frames).round().clamp(0.0,last_frame as f64);
@@ -3585,11 +3626,26 @@ fn show_animation_overview(
     rect
 }
 
+fn animation_timeline_zoom(ui: &mut egui::Ui) -> f32 {
+    let zoom_id=ui.id().with("timeline_zoom");
+    let mut zoom=ui.ctx().data_mut(|data|data.get_temp::<f32>(zoom_id)).unwrap_or(1.0);
+    ui.horizontal(|ui| {
+        ui.label(localization::tr("缩放"));
+        theme::zoom_slider(ui, &mut zoom, 20.0);
+        if ui.small_button(localization::tr("适应窗口")).clicked(){zoom=1.0;}
+    });
+    ui.ctx().data_mut(|data|data.insert_temp(zoom_id,zoom));
+    zoom
+}
+
 fn show_animation_timeline(
     ui: &mut egui::Ui,
     text: &str,
     selected_track: &Option<AnimationTrackSelection>,
     selected_keyframe: &mut Option<SelectedKeyframe>,
+    playhead: Option<&mut f32>,
+    toolbar_zoom: Option<f32>,
+    filter_keys: bool,
 ) {
     timeline_edit::publish_owner(ui);
     let edited_text = editing::scope_value(ui);
@@ -3601,9 +3657,18 @@ fn show_animation_timeline(
     let preview_duration = animation_sample_rate(text).filter(|rate|rate.is_finite() && *rate>0.0)
         .map_or(clip_duration, |rate| clip_duration + 10.0 / rate);
     let stop_time = timeline_edit::display_duration(ui, preview_duration);
+    let zoom = toolbar_zoom.unwrap_or_else(|| animation_timeline_zoom(ui));
+    let width = ui.available_width();
+    let scroll_id = ui.id().with("timeline_scroll_x");
+    let scroll_x = ui.ctx().data(|data| data.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
     let Some(track) = selected_track else {
-        show_animation_frame_ruler(ui, stop_time, animation_sample_rate(text),clip_duration,false);
-        show_animation_overview(ui, &bindings, stop_time);
+        let output = egui::ScrollArea::horizontal().id_salt("animation_timeline_zoom")
+            .horizontal_scroll_offset(scroll_x).show(ui, |ui| {
+                ui.set_min_width(width * zoom);
+                show_animation_frame_ruler(ui, stop_time, animation_sample_rate(text), clip_duration, false, playhead);
+                show_animation_overview(ui, if filter_keys { &[] } else { &bindings }, stop_time);
+            });
+        ui.ctx().data_mut(|data| data.insert_temp(scroll_id, output.state.offset.x));
         ui.small(crate::localization::tr("从左侧路径树选择一个动画属性，可查看其独立时间轴。"));
         return;
     };
@@ -3625,24 +3690,15 @@ fn show_animation_timeline(
         group_root.unwrap_or(&track.attribute)));
     let original_item_spacing_y = ui.spacing().item_spacing.y;
     ui.spacing_mut().item_spacing.y = 0.0;
-    let zoom_id=ui.id().with("timeline_zoom");
-    let mut zoom=ui.ctx().data_mut(|data|data.get_temp::<f32>(zoom_id)).unwrap_or(1.0);
-    ui.horizontal(|ui| {
-        ui.label(localization::tr("缩放"));
-        theme::zoom_slider(ui, &mut zoom, 20.0);
-        if ui.small_button(localization::tr("适应窗口")).clicked(){zoom=1.0;}
-    });
-    ui.ctx().data_mut(|data|data.insert_temp(zoom_id,zoom));
-    let width=ui.available_width(); let mut inserted=false;
-    let scroll_id=ui.id().with("timeline_scroll_x");
-    let scroll_x=ui.ctx().data_mut(|d|d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
+    let mut inserted = false;
     let timeline_output=egui::ScrollArea::horizontal().id_salt("animation_timeline_zoom").horizontal_scroll_offset(scroll_x).show(ui,|ui| {
         ui.set_min_width(width*zoom);
-        if let Some(time)=show_animation_frame_ruler(ui,stop_time,animation_sample_rate(text),clip_duration,!matching.is_empty()) {
+        if let Some(time)=show_animation_frame_ruler(ui,stop_time,animation_sample_rate(text),clip_duration,!matching.is_empty(),playhead) {
             inserted=animation_curves::insert(ui,&matching,time);
         }
-        let overview_rect=show_animation_overview(ui,&bindings,stop_time);
-        let result=if inserted {(None,None)} else {timeline_edit::show(ui,&matching,stop_time,animation_sample_rate(text),group_root.is_some(),selected_keyframe)};
+        let overview = if filter_keys { &matching } else { &bindings };
+        let overview_rect = show_animation_overview(ui, overview, stop_time);
+        let result=if inserted {(None,None)} else {timeline_edit::show(ui,&matching,stop_time,animation_sample_rate(text),group_root.is_some(),selected_keyframe,&[])};
         (result,overview_rect)
     });
     ui.ctx().data_mut(|d|d.insert_temp(scroll_id,timeline_output.state.offset.x));
@@ -3676,17 +3732,27 @@ fn show_animation_timeline(
         ));
     }
     ui.spacing_mut().item_spacing.y = original_item_spacing_y;
+    show_animation_property_editor(ui, text, &bindings, track, &matching, stop_time, selected_keyframe, true);
+}
+
+fn show_animation_property_editor(
+    ui: &mut egui::Ui, text: &str, bindings: &[&AnimationBinding], track: &AnimationTrackSelection,
+    matching: &[&AnimationBinding], stop_time: f32, selected_keyframe: &mut Option<SelectedKeyframe>, show_tabs: bool,
+) {
+    let group_root = curve_group_root(&track.attribute);
     if editing::active(ui) {
         ui.small(localization::tr("点击选择 · Ctrl / Shift 多选 · 空白处拖动框选 · 拖动选中关键帧按帧移动"));
     }
-    let tab_id=ui.id().with("animation_editor_tab");
-    let mut curves=ui.ctx().data_mut(|data|data.get_temp::<bool>(tab_id)).unwrap_or(false);
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut curves,false,localization::tr("属性编辑"));
-        ui.selectable_value(&mut curves,true,localization::tr("曲线编辑"));
-    });
-    ui.ctx().data_mut(|data|data.insert_temp(tab_id,curves));
-    if curves {animation_curves::show(ui,text,&matching,stop_time,selected_keyframe);return;}
+    if show_tabs {
+        let tab_id=ui.id().with("animation_editor_tab");
+        let mut curves=ui.ctx().data_mut(|data|data.get_temp::<bool>(tab_id)).unwrap_or(false);
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut curves,false,localization::tr("属性编辑"));
+            ui.selectable_value(&mut curves,true,localization::tr("曲线编辑"));
+        });
+        ui.ctx().data_mut(|data|data.insert_temp(tab_id,curves));
+        if curves {animation_curves::show(ui,text,&matching,stop_time,selected_keyframe,None);return;}
+    }
     if let Some(keyframe) = selected_keyframe {
         ui.separator();
         ui.label(crate::lf!("关键帧：{0}　·　时间：{1:.3}s",
@@ -3737,7 +3803,17 @@ fn show_animation_timeline(
                 let value = bindings.iter().flat_map(|binding| &binding.keyframes)
                     .find(|key| key.yaml_line == keyframe.yaml_line)
                     .map_or(keyframe.value.as_str(), |key| key.value.as_str());
-                show_animation_value(ui, value, Some(keyframe.yaml_line + 1));
+                let boolean_key = matching.iter().filter(|binding| animation_curves::is_boolean_track(binding))
+                    .flat_map(|binding| &binding.keyframes).find(|key| key.yaml_line == keyframe.yaml_line);
+                if let Some(key) = boolean_key {
+                    let mut checked = value == "true" || value.parse::<f32>().is_ok_and(|value| value >= 0.5);
+                    if ui.add_enabled(editing::active(ui), egui::Checkbox::without_text(&mut checked)).changed() {
+                        let values: Vec<_> = key.time_lines.iter().map(|line| (line + 1, if checked { 1.0 } else { 0.0 })).collect();
+                        editing::set_animation_values(ui, &values);
+                    }
+                } else {
+                    show_animation_value(ui, value, Some(keyframe.yaml_line + 1));
+                }
             });
         }
     }
@@ -4662,14 +4738,24 @@ fn unified_tab(ui: &mut egui::Ui, title: &str, is_active: bool,path:&std::path::
     )
 }
 
-fn show_game_object_properties(ui:&mut egui::Ui,text:&str) {
+fn show_game_object_properties(ui:&mut egui::Ui,text:&str, active_override: Option<&editing::Binding>, mut preview_control: impl FnMut(&mut egui::Ui, bool)) {
     egui::Grid::new("game_object_fields").num_columns(2).show(ui,|ui|{
         for (key,label,kind) in [("m_Name","名称","string"),("m_IsActive","激活（Active）","bool"),("m_Layer","Layer","int"),("m_TagString","Tag","string")] {
             let Some(raw)=static_preview::field(text,key) else {continue;};
             ui.label(localization::tr(label));
             if key=="m_IsActive" {
-                if !editing::control(ui,key,raw,kind,None) {
-                    let mut active=raw=="1" || raw=="true";ui.add_enabled(false,egui::Checkbox::without_text(&mut active));
+                if let Some(binding) = active_override {
+                    let mut active = binding.value() == "1";
+                    if ui.checkbox(&mut active, "").changed() {
+                        binding.replace_text(if active { "1" } else { "0" }.into());
+                        ui.ctx().request_repaint();
+                    }
+                } else if !editing::control(ui,key,raw,kind,None) {
+                    let mut active = raw == "1" || raw == "true";
+                    ui.horizontal(|ui| {
+                        ui.add_enabled(false, egui::Checkbox::without_text(&mut active));
+                        preview_control(ui, active);
+                    });
                 }
             } else {ui.label(raw);}
             ui.end_row();
@@ -4696,6 +4782,7 @@ fn main() -> eframe::Result {
         "Unity YAML Viewer",
         eframe::NativeOptions {
             renderer: eframe::Renderer::Glow,
+            depth_buffer: 24,
             viewport: egui::ViewportBuilder::default().with_icon(application_icon()),
             ..Default::default()
         },

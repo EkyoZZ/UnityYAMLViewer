@@ -1,3 +1,7 @@
+# 1.3.7 本地发布候选
+
+- 用户确认文字改色验证通过。发布候选 target/releases/v1.3.7/UnityYAMLViewer-v1.3.7-windows-x64.exe 与已验证 EXE 一致，36,965,376 字节，SHA-256 `ab7c79514b6807f2fa13d56e2527b87ee36bf7bffcb2cb2e068b978d324be629`，PE AMD64。发布说明位于 docs/releases/1.3.7.md。标签、推送及 GitHub Release 待正式发布。
+
 # 最新PS安装器本地构建：0.1.0
 
 ## 2026-11-19 安装器版本比较本地构建完成（未更新公开附件）
@@ -4826,3 +4830,33 @@ mask_enabled=false时缩略图加红色斜线，启用即移除，不改数据�
 - 2026-11-24 检查固定 EXE 无占用后按授权构建 Tile 整组绕回版。版本 1.3.7，大小 36619264 字节，SHA-256 01381333b34b0f9f144d7aa4b2d8299811b317e007f178427936ec1a787895ea。日志 target/tile-geometry-wrap-release.log 和 target/tile-geometry-wrap-tests.log。2×2 回归通过，未覆盖源工程。
 
 - 2026-11-24 经授权并检查目标 EXE 无占用后重新检查 Tile 绕回版 Release 构建。版本 1.3.7，大小 36619264 字节，SHA-256 d781de55455bc8691cf8aaebb6cb00b30a6bd9808787d15c72d827e5da5935cb。日志 target/tile-wrap-verification-build.log。
+
+
+- Canvas 粒子和右下角父子播放控制，真实样例 ui_double_production_drop.prefab 自动验证通过。Release 构建完成，窗口视觉核验待完成。产物 target/release/unity_yaml_viewer.exe · 36734464 bytes · SHA-256 15297A297EB540777AF61ED6BBAA9B651111940E364AF424014A013FC2C93EBA。
+
+
+- 多格 Tile 文字绕回渐变测试版已构建。产物 target/release/unity_yaml_viewer.exe · 36716032 bytes · SHA-256 C8409E6827DAC336B3EEEFFF7C76B92588082A55648A258D231728FD08CED603。用户已在 2×2 菱形工程中验证文字绕回渐变连续。
+
+
+- Prefab 动画预览窗口测试版已编译。产物 target/release/unity_yaml_viewer.exe · 36653568 bytes · SHA-256 51D14728013E5E3A9D2088121E579690B8DCD7A9F79B4E32213CBDD0A3CAC7CA。跨屏窗口、播放和写回待界面验证。
+
+
+- Animator／Animation Inspector 动画预览入口已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36728832 bytes · SHA-256 BF4A5CBAE90489D1131B34034A1E14B2CDBA77F5990E050EF50D25EB6B141173。入口与窗口交互待实测。
+
+
+- 动画窗口布局和关键帧过滤锁已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36835840 bytes · SHA-256 7CCD8DD93A72ADFF89CCDA408FAE817569A1EC8AF8FE03DE5C8632B3375BB150。界面待实测。
+
+
+- Controller 参数分栏、逐行 Clip 时间轴、准星过滤和图标播放控件已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36878336 bytes · SHA-256 0E8F54DE0B1C3E90000FFE1C54F5C9673A13D8DB191A6093FF3015543C3BE85E。界面待实测。
+
+
+- AnimationClip 总时间轴和关键帧编辑合并已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36782592 bytes · SHA-256 1438BC57FC370B07E4ECD555E720E25F5739587EABEA9967EE50ACE7489C7473。界面待实测。
+
+
+- AnimationClip 关键帧／曲线页签、固定标尺及精简轨道名已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36720128 bytes · SHA-256 D802BE2534D2D0A61D9CF60B8D0B6D68120E888BD24FF4F8158AFA7FBB38D3C5。界面待实测。
+
+
+- AnimationClip 曲线右栏铺满、轨道色点、分量缩进、连体 Tab 和分割线已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36833792 bytes · SHA-256 D5E8AC64E2E23872AAA9C6CD882163BB8569CEA2F6CB4565114F1E97FE2A9AE7。界面待实测。
+
+
+- AnimationClip 的 IsActive 粒子启停、Image Alpha 曲线及布尔复选框已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36995072 bytes · SHA-256 E29BB4C4385930F860B6989813831BF109B349D996A8A5D8905267328A46D653。实际 Prefab 与界面待验证。

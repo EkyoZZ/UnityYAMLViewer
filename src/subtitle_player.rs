@@ -847,9 +847,9 @@ fn uniform_style_controls(ui:&mut egui::Ui,s:&mut Style,font_search:&mut String)
                     }
                     if fonts.is_empty() {ui.label(tr("未能获取系统字体列表"));}
                 });
-            ui.horizontal(|ui|{ui.label(tr("字号"));ui.add(egui::DragValue::new(&mut s.size).range(8.0..=120.0));ui.color_edit_button_srgba(&mut s.color);});
-            ui.horizontal(|ui|{ui.checkbox(&mut s.outline,tr("描边"));ui.add_enabled_ui(s.outline,|ui|{ui.add(egui::DragValue::new(&mut s.outline_size).range(0.0..=12.0));ui.color_edit_button_srgba(&mut s.outline_color);});});
-            ui.horizontal(|ui|{ui.checkbox(&mut s.shadow,tr("投影"));ui.add_enabled_ui(s.shadow,|ui|{ui.label("X");ui.add(egui::DragValue::new(&mut s.shadow_x).range(-12.0..=12.0)).on_hover_text(tr("水平投影偏移"));ui.label("Y");ui.add(egui::DragValue::new(&mut s.shadow_y).range(-12.0..=12.0)).on_hover_text(tr("垂直投影偏移"));ui.color_edit_button_srgba(&mut s.shadow_color);});});
+            ui.horizontal(|ui|{ui.label(tr("字号"));ui.add(egui::DragValue::new(&mut s.size).range(8.0..=120.0));crate::color_property::edit_color32(ui,tr("颜色"),&mut s.color);});
+            ui.horizontal(|ui|{ui.checkbox(&mut s.outline,tr("描边"));ui.add_enabled_ui(s.outline,|ui|{ui.add(egui::DragValue::new(&mut s.outline_size).range(0.0..=12.0));crate::color_property::edit_color32(ui,tr("描边"),&mut s.outline_color);});});
+            ui.horizontal(|ui|{ui.checkbox(&mut s.shadow,tr("投影"));ui.add_enabled_ui(s.shadow,|ui|{ui.label("X");ui.add(egui::DragValue::new(&mut s.shadow_x).range(-12.0..=12.0)).on_hover_text(tr("水平投影偏移"));ui.label("Y");ui.add(egui::DragValue::new(&mut s.shadow_y).range(-12.0..=12.0)).on_hover_text(tr("垂直投影偏移"));crate::color_property::edit_color32(ui,tr("投影"),&mut s.shadow_color);});});
             ui.horizontal(|ui|{ui.label(tr("水平边距（脚本单位）"));ui.add(egui::DragValue::new(&mut s.margin_x).range(0..=300));});
             ui.small(tr("边距不是百分比或屏幕像素，会随视频缩放；20 表示 20 个字幕脚本单位。"));
             ui.horizontal(|ui|{ui.label(tr("字幕位置"));ui.selectable_value(&mut s.top,false,tr("底部"));ui.selectable_value(&mut s.top,true,tr("顶部"));});

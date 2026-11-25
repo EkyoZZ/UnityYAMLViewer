@@ -377,7 +377,7 @@ impl Trim {
         let gain_value_width=(measure("-60.0 dB",egui::TextStyle::Monospace.resolve(&style))+style.spacing.button_padding.x*2.0).max(style.spacing.interact_size.x);
         let gain_controls_width=["−","+",tr("重置")].iter().map(|text|(measure(text,font.clone())+style.spacing.button_padding.x*2.0).max(style.spacing.interact_size.x)).sum::<f32>()
             +gain_value_width+style.spacing.item_spacing.x*3.0;
-        let action_width=["应用","取消"].iter().map(|label|(measure(tr(label),egui::FontId::proportional(16.0))+24.0).max(80.0)).sum::<f32>()+style.spacing.item_spacing.x;
+        let action_width=["取消","应用"].iter().map(|label|(measure(tr(label),egui::FontId::proportional(16.0))+24.0).max(80.0)).sum::<f32>()+style.spacing.item_spacing.x;
         // NativeWindow adds the window content margins to this logical width.
         let width=if incoming.is_some(){240.0_f32.max(curve_width).max(action_width)}
             else{240.0_f32.max(measure(&scope,egui::TextStyle::Body.resolve(&style))).max(gain_controls_width).max(action_width)};
@@ -405,15 +405,15 @@ impl Trim {
             }
             ui.add(egui::Label::new(egui::RichText::new(tr("确认后刷新音频与波形，可撤销；取消恢复预览前状态。")).small()).wrap());
             let font=egui::FontId::proportional(16.0);
-            let widths=["应用","取消"].map(|label|(ui.painter().layout_no_wrap(tr(label).to_owned(),font.clone(),ui.visuals().text_color()).size().x+24.0).max(80.0));
+            let widths=["取消","应用"].map(|label|(ui.painter().layout_no_wrap(tr(label).to_owned(),font.clone(),ui.visuals().text_color()).size().x+24.0).max(80.0));
             ui.add_space(4.0);
             ui.horizontal(|ui|{
                 ui.add_space(((ui.available_width()-widths.iter().sum::<f32>()-ui.spacing().item_spacing.x)*0.5).max(0.0));
-                for (index,label) in ["应用","取消"].into_iter().enumerate(){
+                for (index,label) in ["取消","应用"].into_iter().enumerate(){
                     let response=ui.add_sized([widths[index],32.0],egui::Button::new(""));
                     response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,response.enabled(),tr(label)));
                     ui.painter().text(response.rect.center(),egui::Align2::CENTER_CENTER,tr(label),font.clone(),ui.visuals().text_color());
-                    if index==0{apply=response.clicked();}else{cancel=response.clicked();}
+                    if index==0{cancel=response.clicked();}else{apply=response.clicked();}
                 }
             });
         });
@@ -814,13 +814,13 @@ impl Trim {
                         let button_width=labels.iter().map(|label|ui.painter().layout_no_wrap((*label).to_owned(),egui::FontId::proportional(16.0),ui.visuals().text_color()).size().x+32.0).fold(96.0_f32,f32::max);
                         ui.horizontal(|ui| {
                             ui.add_space(((ui.available_width()-button_width*2.0-ui.spacing().item_spacing.x)*0.5).max(0.0));
-                            if ui.add_sized([button_width,34.0],egui::Button::new(egui::RichText::new(labels[0]).size(16.0).color(egui::Color32::WHITE))
-                                .fill(egui::Color32::from_rgb(190,45,55))).clicked() {
-                                queue.discard_confirmed=true;queue.confirm_discard=false;
-                            }
                             if ui.add_sized([button_width,34.0],egui::Button::new(egui::RichText::new(labels[1]).size(16.0).color(egui::Color32::WHITE))
                                 .fill(egui::Color32::from_rgb(30,140,65))).clicked() {
                                 queue.confirm_discard=false;
+                            }
+                            if ui.add_sized([button_width,34.0],egui::Button::new(egui::RichText::new(labels[0]).size(16.0).color(egui::Color32::WHITE))
+                                .fill(egui::Color32::from_rgb(190,45,55))).clicked() {
+                                queue.discard_confirmed=true;queue.confirm_discard=false;
                             }
                         });
                         if ui.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape)) {queue.confirm_discard=false;}
@@ -851,7 +851,7 @@ fn parse_fill_hex(text:&str)->Option<[u8;3]> {
     }
 }
 fn fill_color_input(ui:&mut egui::Ui,color:&mut [u8;3]) {
-    let picked=ui.color_edit_button_srgb(color).changed();
+    let picked=crate::color_property::edit_rgb(ui, tr("填充颜色"), color);
     let id=ui.id().with("fill_hex");
     let format=|c:[u8;3]|format!("#{:02X}{:02X}{:02X}",c[0],c[1],c[2]);
     let focused=ui.memory(|memory|memory.has_focus(id));

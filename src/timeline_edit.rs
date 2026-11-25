@@ -3,10 +3,13 @@ use eframe::egui::{self, Color32, Stroke};
 use crate::{AnimationBinding, SelectedKeyframe, animation_time_x, editing, localization};
 
 #[derive(Clone)]
-struct Key { line: usize, time_lines: Vec<usize>, lane: usize, time: f64, value: String, name: String, rect: egui::Rect }
+struct Key<'a> { line: usize, time_lines: std::borrow::Cow<'a, [usize]>, lane: usize, time: f64, value: &'a str, rect: egui::Rect }
+#[derive(Clone)]
+struct DragKey { time_lines: Vec<usize>, time: f64 }
+
 #[derive(Clone)]
 enum Drag {
-    Keys { keys: Vec<Key>, origin: egui::Pos2, anchor: f64, duration: f64, width: f64, minimum: f64, maximum: f64 },
+    Keys { keys: Vec<DragKey>, origin: egui::Pos2, anchor: f64, duration: f64, width: f64, minimum: f64, maximum: f64 },
     Box { origin: egui::Pos2, previous: BTreeSet<usize> },
 }
 #[derive(Clone, Default)]
@@ -61,8 +64,12 @@ pub fn display_duration(ui: &egui::Ui, fallback: f32) -> f32 {
     }
 }
 
+pub(crate) fn summary_color(ui: &egui::Ui) -> Color32 {
+    Color32::from_gray(if ui.visuals().dark_mode { 155 } else { 105 })
+}
+
 pub fn show(ui: &mut egui::Ui, bindings: &[&AnimationBinding], duration: f32, rate: Option<f32>, grouped: bool,
-    primary: &mut Option<SelectedKeyframe>) -> (Option<f32>, Option<egui::Rect>) {
+    primary: &mut Option<SelectedKeyframe>, summaries: &[bool]) -> (Option<f32>, Option<egui::Rect>) {
     let id = selection_id(ui);
     let mut state = ui.ctx().data_mut(|data| data.get_temp::<State>(id)).unwrap_or_default();
     let revision = editing::edit_revision(ui);
@@ -76,8 +83,7 @@ pub fn show(ui: &mut egui::Ui, bindings: &[&AnimationBinding], duration: f32, ra
         rows.push(rect);
         for key in &binding.keyframes {
             let x = animation_time_x(rect, key.time as f64, duration as f64);
-            items.push(Key { line: key.yaml_line, time_lines: key.time_lines.clone(), lane, time: key.time as f64, value: key.value.clone(),
-                name: format!("{} · {} · {}", if binding.path.is_empty() { localization::tr("根对象（本对象）") } else { &binding.path }, binding.class_name, binding.attribute),
+            items.push(Key { line: key.yaml_line, time_lines: (&key.time_lines[..]).into(), lane, time: key.time as f64, value: &key.value,
                 rect: egui::Rect::from_center_size(egui::pos2(x, rect.center().y), egui::vec2(16.0, 16.0)) });
         }
     }
@@ -112,7 +118,8 @@ pub fn show(ui: &mut egui::Ui, bindings: &[&AnimationBinding], duration: f32, ra
             state.primary = Some(key.line);
             if editable && rate.is_some() && duration.is_finite() && duration > 0.0 {
                 let (minimum, maximum) = movement_limits(&items, &state.selected, duration as f64);
-                state.drag = Some(Drag::Keys { keys: items.iter().filter(|key| state.selected.contains(&key.line)).cloned().collect(),
+                state.drag = Some(Drag::Keys { keys: items.iter().filter(|key| state.selected.contains(&key.line))
+                    .map(|key| DragKey { time_lines: key.time_lines.to_vec(), time: key.time }).collect(),
                     origin, anchor: key.time, duration: duration as f64, width: crate::animation_time_rect(canvas).width() as f64, minimum, maximum });
             }
         } else {
@@ -153,18 +160,22 @@ pub fn show(ui: &mut egui::Ui, bindings: &[&AnimationBinding], duration: f32, ra
         }
     }
     if response.drag_stopped() || !ui.input(|input| input.pointer.primary_down()) { state.drag = None; }
-    for row in &rows {
+    for row in rows.iter().filter(|row| ui.is_rect_visible(**row)) {
         ui.painter().line_segment([egui::pos2(row.left(), row.center().y), egui::pos2(row.right(), row.center().y)], Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color));
     }
-    for key in &items {
+    for key in items.iter().filter(|key| ui.is_rect_visible(key.rect)) {
         let center = key.rect.center();
         let color = if state.selected.contains(&key.line) { if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::from_rgb(190,95,0) } }
+            else if summaries.get(key.lane) == Some(&true) { summary_color(ui) }
             else { crate::animation_curves::color(&bindings[key.lane].attribute) };
         ui.painter().add(egui::Shape::convex_polygon(vec![center+egui::vec2(0.0,-6.0), center+egui::vec2(6.0,0.0), center+egui::vec2(0.0,6.0), center+egui::vec2(-6.0,0.0)], color, Stroke::NONE));
     }
     let active = items.iter().find(|key| Some(key.line) == state.primary && state.selected.contains(&key.line));
     let result = active.map_or((None, rows.last().copied()), |key| {
-        *primary = Some(SelectedKeyframe { track_name: key.name.clone(), time: key.time as f32, value: key.value.clone(), yaml_line: key.line });
+        let binding = bindings[key.lane];
+        let path = if binding.path.is_empty() { localization::tr("根对象（本对象）") } else { &binding.path };
+        *primary = Some(SelectedKeyframe { track_name: format!("{path} · {} · {}", binding.class_name, binding.attribute),
+            time: key.time as f32, value: key.value.to_owned(), yaml_line: key.line });
         (Some(key.rect.center().x), Some(rows[key.lane]))
     });
     if state.selected.is_empty() { *primary = None; }
@@ -190,7 +201,7 @@ mod tests {
     }
     #[test]
     fn simultaneous_independent_components_are_selected_separately() {
-        let key = |line,lane| Key {line,time_lines:vec![line],lane,time:0.5,value:"1".into(),name:"component".into(),rect:egui::Rect::ZERO};
+        let key = |line,lane| Key {line,time_lines:vec![line].into(),lane,time:0.5,value:"1",rect:egui::Rect::ZERO};
         let items=vec![key(10,0),key(20,1)];let mut state=State::default();
         select(&mut state,&items[1],&items,true,false,false);
         assert_eq!(state.selected,BTreeSet::from([20]));
@@ -205,7 +216,7 @@ mod tests {
     }
     #[test]
     fn group_movement_keeps_order_and_avoids_unselected_keys() {
-        let key = |line, time| Key { line, time_lines: vec![line], lane: 0, time, value: "1".into(), name: "x".into(), rect: egui::Rect::ZERO };
+        let key = |line, time| Key { line, time_lines: vec![line].into(), lane: 0, time, value: "1", rect: egui::Rect::ZERO };
         let items = vec![key(0,0.0), key(1,0.2), key(2,0.4), key(3,0.6)];
         let (minimum, maximum) = movement_limits(&items, &BTreeSet::from([1,2]), 1.0);
         assert!(minimum > -0.2 && maximum < 0.2);

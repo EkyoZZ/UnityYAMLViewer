@@ -738,10 +738,61 @@ impl Editor {
                     *pixel = Rgba([0; 4]);
                 }
             }
-            p.composite(out, &clipped, tile, self.fx_light);
+            let frames = self.layer_gradient_frames(layer, p, index == self.active_layer && draft.is_none(), tile);
+            let text_gradient = if p.has_aligned_gradient_overlay() {
+                p.text.as_ref().and_then(|text| self.wrapped_text_gradient(text, tile))
+            } else { None };
+            p.composite_with_gradient_frames(out, &clipped, tile, self.fx_light, frames, text_gradient.as_ref());
         } else {
             p.composite(out, source, tile, self.fx_light);
         }
+    }
+    fn layer_gradient_frames(
+        &self, layer: &Layer, settings: &layer_properties::Properties, active: bool,
+        tile: usize,
+    ) -> Option<[[f32; 4]; 2]> {
+        if self.plain_image || !self.multiple || self.elevated || !settings.has_gradient_overlay() {
+            return None;
+        }
+        let (w, h) = self.pixels.dimensions();
+        let size = egui::vec2(w as f32, h as f32);
+        let mut slots = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut origin = None;
+        let mut canvas = Rect::NOTHING;
+        let mut content = Rect::NOTHING;
+        for row in 0..self.rows {
+            for col in 0..self.columns {
+                let at = self.tile_at(col as i32, row as i32);
+                if !seen.insert(at) {
+                    // A shared Slot has multiple canvas positions but is composited only once.
+                    return None;
+                }
+                let min = self.mapped_center(col as i32, row as i32, w, h) - size * 0.5;
+                if at == tile { origin = Some(min); }
+                canvas = canvas.union(Rect::from_min_size(min.to_pos2(), size));
+                slots.push((at, min));
+            }
+        }
+        for (at, min) in slots {
+            let image = if active {
+                if at == self.selected { &self.pixels } else { self.tiles.get(at)? }
+            } else { layer.tiles.get(at)? };
+            for (x, y, pixel) in image.enumerate_pixels() {
+                if pixel[3] != 0 && self.inside_tile(x as i32, y as i32, w, h)
+                    && settings.mask_value(at, (y * w + x) as usize) > 0.
+                {
+                    let corner = (min + egui::vec2(x as f32, y as f32)).to_pos2();
+                    content = content.union(Rect::from_min_size(corner, Vec2::splat(1.)));
+                }
+            }
+        }
+        let origin = origin?;
+        if !content.is_positive() { return None; }
+        Some([content, canvas].map(|rect| {
+            [rect.left() - origin.x, rect.top() - origin.y,
+                rect.right() - origin.x - 1., rect.bottom() - origin.y - 1.]
+        }))
     }
     fn next_group_id(&self) -> u64 {
         (1..).find(|id| self.group_index(*id).is_none()).unwrap()

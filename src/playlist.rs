@@ -188,7 +188,7 @@ fn natural_key(value: &str) -> Vec<(bool,String)> {
     }
     parts
 }
-fn natural_cmp(a:&str,b:&str)->std::cmp::Ordering {
+pub(crate) fn natural_cmp(a:&str,b:&str)->std::cmp::Ordering {
     let a=natural_key(a);let b=natural_key(b);
     for (a,b) in a.iter().zip(&b) {
         let order=if a.0 && b.0 {let x=a.1.trim_start_matches('0');let y=b.1.trim_start_matches('0');x.len().cmp(&y.len()).then_with(||x.cmp(y))}else{a.1.cmp(&b.1)};
@@ -462,7 +462,7 @@ impl Session {
         });});
         if let Some((destination,_))=self.save_as.clone(){
             ui.small(destination.display().to_string());ui.colored_label(ui.visuals().warn_fg_color,tr("同名文件已存在，覆盖将替换原列表内容"));
-            ui.horizontal(|ui|{if ui.button(tr("覆盖")).clicked(){self.finish_save_as(path);}if ui.button(tr("取消")).clicked(){self.save_as=None;}});
+            ui.horizontal(|ui|{if ui.button(tr("取消")).clicked(){self.save_as=None;}if ui.button(tr("覆盖")).clicked(){self.finish_save_as(path);}});
         }
         if let Some(destination)=&self.saved_copy{
             ui.small(tr("已另存为：{0}").replace("{0}",&destination.display().to_string()));

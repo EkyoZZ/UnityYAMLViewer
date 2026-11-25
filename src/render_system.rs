@@ -48,6 +48,44 @@ pub(crate) fn callback_timed(rect: eframe::egui::Rect, scene: std::sync::Arc<sce
     })) }
 }
 
+pub(crate) fn model_callback(
+    rect: eframe::egui::Rect, scene: std::sync::Arc<scene::Scene>, depth_groups: std::sync::Arc<[usize]>,
+    projection: [[f32; 4]; 4], mode: f32, error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+) -> eframe::egui::PaintCallback {
+    eframe::egui::PaintCallback { rect, callback: std::sync::Arc::new(eframe::egui_glow::CallbackFn::new(move |info, _| {
+        let viewport = info.viewport_in_pixels();
+        let globals = std::collections::BTreeMap::from([("preview_mode".into(), scene::Uniform::Float(mode))]);
+        let frame = scene::Frame {
+            scene: &scene, viewport: [viewport.width_px as u32, viewport.height_px as u32],
+            view_projection: projection, clear_color: [0.0; 4], elapsed_seconds: 0.0, globals: &globals,
+        };
+        if let Some(gpu) = GPU.lock().unwrap().as_mut() {
+            *error.lock().unwrap() = unsafe { gpu.draw_scene(&frame, Some(&depth_groups)) }.err();
+        }
+    })) }
+}
+
+/// Draw a Canvas item into egui's current framebuffer so Unity blend factors
+/// see the UI content already drawn beneath this item.
+pub(crate) fn canvas_callback(
+    rect: eframe::egui::Rect, scene: scene::Scene, projection: [[f32; 4]; 4], time: f32,
+    error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+) -> eframe::egui::PaintCallback {
+    eframe::egui::PaintCallback { rect, callback: std::sync::Arc::new(eframe::egui_glow::CallbackFn::new(move |info, _| {
+        let viewport = info.viewport_in_pixels();
+        let frame = scene::Frame {
+            scene: &scene, viewport: [viewport.width_px as u32, viewport.height_px as u32],
+            view_projection: projection, clear_color: [0.0; 4], elapsed_seconds: time,
+            globals: &std::collections::BTreeMap::new(),
+        };
+        if let Some(gpu) = GPU.lock().unwrap().as_mut() {
+            if let Err(message) = unsafe { gpu.draw(&frame) } {
+                *error.lock().unwrap() = Some(message);
+            }
+        }
+    })) }
+}
+
 /// Texture and vertex colors are both premultiplied. Tinting therefore
 /// multiplies RGB as well as alpha, without premultiplying a second time.
 #[inline]

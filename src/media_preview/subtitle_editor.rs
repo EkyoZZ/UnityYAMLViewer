@@ -517,8 +517,8 @@ impl Editor {
                 egui::Modal::new(self.id.with("conversion")).show(ui.ctx(),|ui|{
                     ui.set_max_width(440.0);ui.label(tr("转换格式可能丢失样式、定位、动画、图层、注释，以及 WebVTT 的标识、CSS、区域和时间设置。原文件保持不变；仅另存目标使用转换结果。"));
                     ui.horizontal(|ui|{
-                        if ui.button(tr("继续转换")).clicked(){self.conversion=None;self.start_save(path);}
                         if ui.button(tr("取消")).clicked(){self.conversion=None;self.pending=None;}
+                        if ui.button(tr("继续转换")).clicked(){self.conversion=None;self.start_save(path);}
                     });
                 });
             }
@@ -1376,9 +1376,7 @@ impl Editor {
             }
             ui.horizontal(|ui| {
                 ui.label(tr(label));
-                if ui
-                    .color_edit_button_srgba_unmultiplied(&mut color)
-                    .changed()
+                if crate::color_property::edit_rgba(ui, tr(label), &mut color)
                 {
                     if let Line::Style(style) = &mut self.doc.lines[i] {
                         if self.doc.format == Format::Ssa {

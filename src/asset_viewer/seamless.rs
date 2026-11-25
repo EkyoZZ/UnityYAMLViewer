@@ -1201,7 +1201,7 @@ impl Editor {
                     });
                     ui.horizontal_wrapped(|ui| {
                         changed|=ui.checkbox(&mut self.settings.transparent,tr("透明背景")).changed();
-                        if !self.settings.transparent {changed|=ui.color_edit_button_srgb(&mut self.settings.background).changed();}
+                        if !self.settings.transparent {changed|=crate::color_property::edit_rgb(ui, tr("背景色"), &mut self.settings.background);}
                         if ui.add_enabled(self.paths.len()<15,egui::Button::new(tr("添加图案"))).clicked() {
                             if let Some(paths)=rfd::FileDialog::new().add_filter(tr("图片"),&["png","jpg","jpeg","webp","bmp","tga"]).pick_files() {
                                 self.add_patterns(path,paths);

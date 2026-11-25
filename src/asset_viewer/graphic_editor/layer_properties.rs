@@ -468,6 +468,22 @@ impl Properties {
         }
     }
     pub fn composite(&self, out: &mut RgbaImage, source: &RgbaImage, tile: usize, light: effects::Light) {
+        self.composite_with_gradient_frames(out, source, tile, light, None, None);
+    }
+
+    pub(super) fn has_gradient_overlay(&self) -> bool {
+        self.has_effects() && self.effects.has_gradient_overlay()
+    }
+
+    pub(super) fn has_aligned_gradient_overlay(&self) -> bool {
+        self.has_effects() && self.effects.has_aligned_gradient_overlay()
+    }
+
+    pub(super) fn composite_with_gradient_frames(
+        &self, out: &mut RgbaImage, source: &RgbaImage, tile: usize, light: effects::Light,
+        gradient_frames: Option<[[f32; 4]; 2]>,
+        text_gradient: Option<&super::text_layer::TextGradient>,
+    ) {
         if let Some(adjust) = &self.adjustment {
             let lut = if let Adjustment::CurvesBezier { channels } = adjust {
                 Some(curve_editor::lookup(channels))
@@ -498,7 +514,7 @@ impl Properties {
             return;
         }
         if self.has_effects() {
-            self.effects.composite(self, out, source, tile, light);
+            self.effects.composite(self, out, source, tile, light, gradient_frames, text_gradient);
         } else {
             for (i, (dst, src)) in out.pixels_mut().zip(source.pixels()).enumerate() {
                 *dst = over(*dst, *src, self.blend,

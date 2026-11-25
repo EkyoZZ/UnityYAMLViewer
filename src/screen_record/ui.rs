@@ -407,11 +407,11 @@ impl Recorder {
                     ui.label(format!("• {tool}"));
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(tr("确定")).clicked() {
-                        install = true;
-                    }
                     if ui.button(tr("取消")).clicked() {
                         cancel = true;
+                    }
+                    if ui.button(tr("确定")).clicked() {
+                        install = true;
                     }
                 });
             });

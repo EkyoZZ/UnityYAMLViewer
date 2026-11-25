@@ -33,7 +33,10 @@ struct GradientMap {
 }
 impl GradientMap {
     fn new(gradient: Gradient, bounds: [u32; 4]) -> Self {
-        let [left, top, right, bottom] = bounds.map(|n| n as f32);
+        Self::from_frame(gradient, bounds.map(|n| n as f32))
+    }
+    fn from_frame(gradient: Gradient, bounds: [f32; 4]) -> Self {
+        let [left, top, right, bottom] = bounds;
         let (sin, cos) = f32::from(gradient.angle).to_radians().sin_cos();
         let w = (right - left + 1.).max(1.);
         let h = (bottom - top + 1.).max(1.);
@@ -478,6 +481,12 @@ impl StrokeMap {
 }
 
 impl Effects {
+    pub(in super::super) fn has_gradient_overlay(&self) -> bool {
+        rows(&self.gradient, &self.extra_gradients).any(|effect| effect.enabled)
+    }
+    pub(in super::super) fn has_aligned_gradient_overlay(&self) -> bool {
+        rows(&self.gradient, &self.extra_gradients).any(|effect| effect.enabled && effect.ramp.align_layer)
+    }
     pub(in super::super) fn composite(
         &self,
         p: &Properties,
@@ -485,12 +494,14 @@ impl Effects {
         source: &RgbaImage,
         tile: usize,
         light: Light,
+        gradient_frames: Option<[[f32; 4]; 2]>,
+        text_gradient: Option<&crate::asset_viewer::graphic_editor::text_layer::TextGradient>,
     ) {
         if p.opacity == 0 {
             return;
         }
         let periodic = p.text.as_ref().is_some_and(|t| t.repeat);
-        if self.legacy_appearance && !periodic {
+        if self.legacy_appearance && !periodic && gradient_frames.is_none() {
             self.composite_legacy(p, out, source, tile);
             return;
         }
@@ -519,7 +530,10 @@ impl Effects {
             .filter(|s| s.enabled)
             .map(|s| {
                 let frame = if s.ramp.align_layer { bounds } else { cell };
-                (s, GradientMap::new(s.ramp, frame))
+                let map = GradientMap::from_frame(s.ramp, gradient_frames.map_or(frame.map(|n| n as f32), |frames| frames[usize::from(!s.ramp.align_layer)]));
+                let text_map = text_gradient.filter(|_| s.ramp.align_layer)
+                    .map(|text| GradientMap::new(s.ramp, text.bounds));
+                (s, map, text_map)
             })
             .collect();
         let overlays: Vec<_> = rows(&self.overlay, &self.extra_overlays)
@@ -624,8 +638,10 @@ impl Effects {
                 let mut src = *source.get_pixel(x, y);
                 src[3] = 255;
                 src = over(inside_backdrop, src, p.blend, percent(p.fill));
-                for (s, gradient) in &gradients {
-                    paint(&mut src, gradient.color(x, y), s.mode, percent(s.opacity));
+                for (s, gradient, text_map) in &gradients {
+                    let color = text_map.as_ref().zip(text_gradient.and_then(|text| text.point(i)))
+                        .map_or_else(|| gradient.color(x, y), |(map, [x, y])| map.color(x, y));
+                    paint(&mut src, color, s.mode, percent(s.opacity));
                 }
                 for s in &overlays {
                     paint(&mut src, s.color, s.mode, percent(s.opacity));

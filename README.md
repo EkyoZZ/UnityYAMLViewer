@@ -12,7 +12,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 **Unity 相关**
 
 - **资源查看与编辑**：浏览 Prefab、Scene、Asset 的层级和引用，编辑已识别属性，支持校验、保存与撤销。
-- **材质与场景预览**：查看材质及 Shader 节点，预览场景、模型、动画、Spine 和部分粒子效果。
+- **材质与场景预览**：查看材质及 Shader 节点，预览场景、模型、动画、Spine 和部分场景及 Canvas 粒子效果。Prefab 可通过独立时间轴预览支持的 UI 变换动画。
 - **目录与图片浏览**：多根目录、同目录缩略图和快捷切图，自动恢复目录并保留页签修改。
 - **图片工具**：支持平滑或像素预览、通道查看、九宫格、Sprite Border、序列拆分合成、去底色、多格式导出及 PNG 批量优化。Image / Tile 支持图层、像素标尺和辅助线，Image 可绘制矢量形状和编辑闭合路径、调整尺寸、原位保存及读写保留受支持样式和横排文字的分层 PSD。
 
@@ -50,7 +50,7 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 **Unity features**
 
 - **Asset browsing and editing**: Inspect Prefab, Scene and Asset hierarchies and references; edit recognized properties with validation, saving and undo.
-- **Materials and scenes**: View material and Shader nodes; preview scenes, models, animation, Spine and supported particle effects.
+- **Materials and scenes**: View material and Shader nodes; preview scenes, models, animation, Spine and supported scene and Canvas particle effects. A separate timeline previews supported UI transform animation in Prefabs.
 - **Folders and images**: Browse multiple roots and same-folder thumbnails, switch images quickly, and restore folders while retaining tab edits.
 - **Image tools**: Preview images and channels, use nine-slice and Sprite Border, split or combine sequences, remove backgrounds, export formats and optimize PNGs in batches. Image and Tile support layers, pixel rulers and guides. Image also supports vector shapes, editable closed paths, resizing, in-place saves and layered PSD read/write with supported styles and horizontal type.
 

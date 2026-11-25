@@ -499,8 +499,8 @@ fn themed_confirmation(
         child
     };
     let body = child("STATIC", message, 0x50000000, 0, 16, 16, 380, 50);
-    let accept = child("BUTTON", action, 0x5001000b, 1, 128, 76, 162, 29);
-    let cancel = child("BUTTON", tr("取消"), 0x5001000b, 2, 300, 76, 104, 29);
+    let accept = child("BUTTON", action, 0x5001000b, 1, 242, 76, 162, 29);
+    let cancel = child("BUTTON", tr("取消"), 0x5001000b, 2, 128, 76, 104, 29);
     if body.is_null() || accept.is_null() || cancel.is_null() {
         unsafe {
             DestroyWindow(window);

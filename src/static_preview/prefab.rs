@@ -7,8 +7,24 @@ const SOURCE_BUDGET:usize=512*1024*1024;
 const EXPANSION_BUDGET:usize=512*1024*1024;
 const EXPANSION_DOCUMENT_LIMIT:usize=500_000;
 #[derive(Default)]
-pub(crate) struct Expanded {pub documents:Vec<Document>,pub picks:HashMap<String,String>,pub prefab_roots:HashMap<String,String>,pub issues:Vec<String>,flags_cache:std::sync::Mutex<Option<(u64,Arc<HashMap<String,crate::hierarchy_controls::Flags>>)>>,deps:Vec<(PathBuf,Option<SystemTime>,u64)>}
+pub(crate) struct Expanded {pub documents:Vec<Document>,pub picks:HashMap<String,String>,pub prefab_roots:HashMap<String,String>,pub issues:Vec<String>, active_overrides:HashMap<String,(String,Source)>,flags_cache:std::sync::Mutex<Option<(u64,Arc<HashMap<String,crate::hierarchy_controls::Flags>>)>>,deps:Vec<(PathBuf,Option<SystemTime>,u64)>}
 impl Expanded {
+    pub(crate) fn active_override_range(&self, object: &str, docs: &[Document], prefix: usize) -> Option<std::ops::Range<usize>> {
+        let (instance, target) = self.active_overrides.get(object)?;
+        let mut offset = prefix;
+        for doc in docs {
+            if doc.file_id == *instance && doc.type_name == "PrefabInstance" {
+                let mut matches = modifications(&doc.text).into_iter().filter(|entry| {
+                    entry.target == *target && entry.path == "m_IsActive" && matches!(entry.value.as_str(), "0" | "1")
+                });
+                let range = matches.next()?.value_range?;
+                if matches.next().is_some() { return None; }
+                return Some(offset + range.start..offset + range.end);
+            }
+            offset += doc.text.len();
+        }
+        None
+    }
     pub(super) fn selection(&self,id:String) -> String {self.picks.get(&id).unwrap_or(&id).clone()}
     pub(crate) fn hierarchy_object(&self,picked:&str)->Option<String> {
         if let Some(doc)=self.documents.iter().find(|doc|doc.file_id==picked) {
@@ -52,7 +68,42 @@ impl Expanded {
         let result=Arc::new(result);*self.flags_cache.lock().unwrap()=Some((key,result.clone()));result
     }
 }
-struct Task {key:u64,cancelled:Arc<AtomicBool>,receiver:Option<mpsc::Receiver<Expanded>>}
+fn transform_replacements(old: &[Document], new: &[Document], expanded: &Expanded) -> Option<Vec<(usize, Document)>> {
+    if old.len() != new.len() { return None; }
+    let mut replacements = Vec::new();
+    const FIELDS: [&str; 7] = ["m_LocalPosition", "m_LocalRotation", "m_LocalScale",
+        "m_LocalEulerAnglesHint", "m_AnchoredPosition", "m_SizeDelta", "m_Pivot"];
+    for (before, after) in old.iter().zip(new) {
+        if before.text == after.text { continue; }
+        if before.file_id != after.file_id || before.type_name != after.type_name
+            || !matches!(before.type_name.as_str(), "Transform" | "RectTransform") {
+            return None;
+        }
+        let mut old_lines = before.text.lines();
+        let mut new_lines = after.text.lines();
+        let (index, current) = expanded.documents.iter().enumerate().find(|(_, doc)|
+            doc.file_id == before.file_id && doc.type_name == before.type_name)?;
+        let mut replacement = current.clone();
+        loop {
+            match (old_lines.next(), new_lines.next()) {
+                (Some(old), Some(new)) if old == new => {}
+                (Some(old), Some(new)) => {
+                    let (old_key, _) = old.strip_prefix("  ")?.split_once(':')?;
+                    let (key, value) = new.strip_prefix("  ")?.split_once(':')?;
+                    if key != old_key || !FIELDS.contains(&key) || !patch(&mut replacement, key, value.trim()) {
+                        return None;
+                    }
+                }
+                (None, None) => break,
+                _ => return None,
+            }
+        }
+        replacements.push((index, replacement));
+    }
+    Some(replacements)
+}
+
+struct Task {key:u64,catalog_key:Option<usize>,source:Arc<Vec<Document>>,cancelled:Arc<AtomicBool>,receiver:Option<mpsc::Receiver<Expanded>>}
 impl Drop for Task {fn drop(&mut self) {self.cancelled.store(true,std::sync::atomic::Ordering::Relaxed);}}
 #[derive(Default)]
 pub(super) struct Cache {task:Option<Task>,result:Option<Arc<Expanded>>,next_check:Option<Instant>}
@@ -65,24 +116,50 @@ impl Cache {
         if !docs.iter().any(|doc|doc.type_name=="PrefabInstance") {return (None,false);}
         let mut hash=std::collections::hash_map::DefaultHasher::new();
         for doc in docs {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
-        catalog.as_ref().map(|c|Arc::as_ptr(c) as usize).hash(&mut hash);let key=hash.finish();
+        let catalog_key = catalog.as_ref().map(|catalog| Arc::as_ptr(catalog) as usize);
+        catalog_key.hash(&mut hash);
+        let key = hash.finish();
         let busy=self.task.as_ref().is_some_and(|task|task.receiver.is_some());
         let mut changed=false;
         if self.next_check.is_none_or(|time|Instant::now()>=time) {
             self.next_check=Some(Instant::now()+Duration::from_secs(1));
             if !busy {if let Some(result)=&self.result {changed=result.deps.iter().any(|(path,time,len)|std::fs::metadata(path).map_or(time.is_some()||*len!=0,|m|m.modified().ok()!=*time||m.len()!=*len));}}
         }
+        if !changed
+            && let (Some(task), Some(result)) = (&mut self.task, &mut self.result)
+            && task.receiver.is_none() && task.key != key && task.catalog_key == catalog_key
+            && let Some(replacements) = transform_replacements(&task.source, docs, result)
+        {
+            let expanded = Arc::get_mut(result);
+            if let Some(expanded) = expanded {
+                for (index, doc) in replacements { expanded.documents[index] = doc; }
+                task.key = key;
+                task.source = Arc::new(docs.to_vec());
+            } else {
+                let previous = result.as_ref();
+                let mut updated = Expanded {
+                    documents: previous.documents.clone(), picks: previous.picks.clone(),
+                    prefab_roots: previous.prefab_roots.clone(), issues: previous.issues.clone(),
+                    active_overrides: previous.active_overrides.clone(), deps: previous.deps.clone(),
+                    flags_cache: std::sync::Mutex::new(previous.flags_cache.lock().unwrap().clone()),
+                };
+                for (index, doc) in replacements { updated.documents[index] = doc; }
+                *result = Arc::new(updated);
+                task.key = key;
+                task.source = Arc::new(docs.to_vec());
+            }
+        }
         if changed || self.task.as_ref().is_none_or(|job|job.key!=key) {
             self.task=None;
             if !changed {self.result=None;}
-            let cancelled=Arc::new(AtomicBool::new(false));let stop=cancelled.clone();let docs=docs.to_vec();let repaint=ctx.clone();let (sender,receiver)=mpsc::channel();
+            let cancelled=Arc::new(AtomicBool::new(false));let stop=cancelled.clone();let source=Arc::new(docs.to_vec());let docs=source.clone();let repaint=ctx.clone();let (sender,receiver)=mpsc::channel();
             std::thread::spawn(move|| {
                 let mut resolver=Resolver::new(catalog.as_deref(),&stop,&paused,&docs);
                 let level=resolver.level(&docs,None,None,0);
-                let result=Expanded{documents:level.docs,picks:level.picks,prefab_roots:level.prefab_roots,issues:resolver.issues,flags_cache:Default::default(),deps:resolver.deps};
+                let result=Expanded{documents:level.docs,picks:level.picks,prefab_roots:level.prefab_roots,active_overrides:level.active_overrides,issues:resolver.issues,flags_cache:Default::default(),deps:resolver.deps};
                 if !stop.load(std::sync::atomic::Ordering::Relaxed) {let _=sender.send(result);repaint.request_repaint();}
             });
-            self.task=Some(Task{key,cancelled,receiver:Some(receiver)});
+            self.task=Some(Task{key,catalog_key,source,cancelled,receiver:Some(receiver)});
         }
         let incoming=self.task.as_ref().and_then(|task|task.receiver.as_ref()?.try_recv().ok());
         if let Some(result)=incoming {self.result=Some(Arc::new(result));self.task.as_mut().unwrap().receiver=None;}
@@ -92,7 +169,7 @@ impl Cache {
     }
 }
 #[derive(Default)]
-struct Level {docs:Vec<Document>,sources:HashMap<Source,String>,ambiguous:HashSet<Source>,picks:HashMap<String,String>,prefab_roots:HashMap<String,String>}
+struct Level {docs:Vec<Document>,sources:HashMap<Source,String>,ambiguous:HashSet<Source>,picks:HashMap<String,String>,prefab_roots:HashMap<String,String>,active_overrides:HashMap<String,(String,Source)>}
 struct Resolver<'a> {
     catalog:Option<&'a HashMap<String,PathBuf>>,stop:&'a AtomicBool,paused:&'a AtomicBool,
     templates:HashMap<String,Arc<Vec<Document>>>,stack:HashSet<String>,used:HashSet<String>,next:i64,
@@ -113,7 +190,7 @@ impl<'a> Resolver<'a> {
             let meta=PathBuf::from(format!("{}.meta",path.display()));
             if let Ok(m)=std::fs::metadata(&meta){self.deps.push((meta,m.modified().ok(),m.len()));}
             match model_template(&path,guid,instance,level_docs) {
-                Ok(docs)=>{let docs=Arc::new(docs);self.templates.insert(guid.into(),docs.clone());return Some(docs);}
+                Ok(docs)=>return Some(Arc::new(docs)),
                 Err(error)=>{self.issues.push(format!("Model Prefab {}: {error}",path.display()));return None;}
             }
         }
@@ -169,6 +246,9 @@ impl<'a> Resolver<'a> {
                 let Some(index)=lookup.get(target) else {continue;};
                 let resolved_object=source_ref(&modification.object).and_then(|source|child.sources.get(&source)).map(|id|format!("{{fileID: {id}}}"));
                 let value=if let Some(reference)=resolved_object {reference} else if modification.object.starts_with('{') && (reference(&modification.object,"fileID").is_some_and(|id|id!="0") || field(&child.docs[*index].text,&modification.path).is_some_and(|value|value.starts_with("{fileID:"))) {rewrite_refs(&modification.object,&ids)} else {modification.value};
+                if depth == 0 && modification.path == "m_IsActive" && child.docs[*index].type_name == "GameObject" {
+                    result.active_overrides.insert(target.clone(), (doc.file_id.clone(), modification.target.clone()));
+                }
                 if !patch(&mut child.docs[*index],&modification.path,&value) {self.issues.push(format!("PrefabInstance {}: unsupported override {}",doc.file_id,modification.path));}
             }
             let removed:HashSet<_>=removed_references(&doc.text).iter().filter_map(|reference|child.sources.get(reference).cloned()).collect();
@@ -267,12 +347,31 @@ fn model_template(path:&std::path::Path,guid:&str,instance:&Document,docs:&[Docu
 fn static_skin_template(path:&std::path::Path,guid:&str,instance:&Document,docs:&[Document],scene:&ufbx::Scene)->Result<Vec<Document>,String> {
     let meshes:Vec<_>=scene.nodes.iter().filter(|n|n.mesh.is_some()).collect();
     if meshes.len()!=1 || meshes[0].mesh.as_ref().unwrap().skin_deformers.is_empty(){return Err("Static Model Prefab requires one skinned mesh".into());}
-    let source_id=|kind:&str|->Result<String,String>{
-        let ids:HashSet<_>=docs.iter().filter(|d|d.type_name==kind && reference_field(&d.text,"m_PrefabInstance").and_then(|v|reference(&v,"fileID")).as_deref()==Some(instance.file_id.as_str())).filter_map(|d|reference_field(&d.text,"m_CorrespondingSourceObject").and_then(|v|source_ref(&v))).filter(|(g,_)|g==guid).map(|(_,id)|id).collect();
-        if ids.len()!=1{return Err(format!("Ambiguous or missing static skinned {kind} source ID"));}Ok(ids.into_iter().next().unwrap())
+    let source_ids = |kind: &str| -> HashSet<String> {
+        docs.iter().filter(|d| d.type_name == kind
+            && reference_field(&d.text, "m_PrefabInstance").and_then(|v| reference(&v, "fileID")).as_deref() == Some(instance.file_id.as_str()))
+            .filter_map(|d| reference_field(&d.text, "m_CorrespondingSourceObject").and_then(|v| source_ref(&v)))
+            .filter(|(g, _)| g == guid).map(|(_, id)| id).collect()
     };
-    let transform=source_id("Transform")?;let renderer=source_id("SkinnedMeshRenderer")?;
-    let go="-1";if transform==go || renderer==go || renderer==transform{return Err("Static skinned source ID conflict".into());}
+    let overrides = modifications(&instance.text);
+    let targets = |paths: &[&str]| -> HashSet<String> {
+        overrides.iter().filter(|m| m.target.0 == guid && paths.contains(&m.path.as_str()))
+            .map(|m| m.target.1.clone()).collect()
+    };
+    let unique = |ids: &HashSet<String>| (ids.len() == 1).then(|| ids.iter().next().unwrap().clone());
+    let transforms = source_ids("Transform");
+    let root_order = targets(&["m_RootOrder"]);
+    let root_candidates = root_order.intersection(&transforms).cloned().collect();
+    let transform = unique(&root_candidates).or_else(|| unique(&transforms))
+        .ok_or("Ambiguous or missing static skinned Transform source ID")?;
+    let renderer = unique(&source_ids("SkinnedMeshRenderer"))
+        .ok_or("Ambiguous or missing static skinned SkinnedMeshRenderer source ID")?;
+    let go = unique(&targets(&["m_Name"])).unwrap_or_else(|| "-1".to_owned());
+    let animator = unique(&source_ids("Animator")).or_else(|| unique(&targets(&["m_Controller"])));
+    let mut ids = HashSet::new();
+    if [&go, &transform, &renderer].into_iter().chain(animator.iter()).any(|id| !ids.insert(id)) {
+        return Err("Static skinned source ID conflict".into());
+    }
     let meta=std::fs::read_to_string(format!("{}.meta",path.display())).unwrap_or_default();
     let materials=static_material_refs(&meta,meshes[0].materials.iter().map(|m|m.element.name.as_ref()));
     let material=materials.first().copied().unwrap_or("{fileID: 0}");
@@ -284,15 +383,84 @@ fn static_skin_template(path:&std::path::Path,guid:&str,instance:&Document,docs:
     }
     let candidates:Vec<_>=scales.values().filter_map(|v|Some([v[0]?,v[1]?,v[2]?])).collect();
     let bones:Vec<_>=scene.nodes.iter().filter(|n|n.bone.is_some() && (n.local_transform.scale.x-1.0).abs()>0.001 && (n.local_transform.scale.x-n.local_transform.scale.y).abs()<0.001 && (n.local_transform.scale.x-n.local_transform.scale.z).abs()<0.001).collect();
-    let mut text=text;
+    let mut text = text;
     if materials.len()>1 {text=text.replace(&format!("  m_Materials:\n  - {material}\n"),&format!("  m_Materials:\n{}",materials.iter().map(|m|format!("  - {m}\n")).collect::<String>()));}
     if candidates.len()==1 && bones.len()==1 && candidates[0].iter().all(|v|v.is_finite() && (*v-candidates[0][0]).abs()<0.0001) {
         let root=bones[0];let skin=meshes[0].mesh.as_ref().unwrap().skin_deformers.first().unwrap();
         let all_descend=skin.clusters.iter().all(|c|{let mut node=c.bone_node.as_ref();while let Some(n)=node {if n.element.element_id==root.element.element_id{return true;}node=n.parent.as_ref();}false});
         if all_descend {text.push_str(&format!("  preview_FbxBoneScaleRatio: {}\n",candidates[0][0]/root.local_transform.scale.x));}
     }
+    if let Some(animator) = &animator {
+        text.push_str(&format!("--- !u!95 &{animator}\nAnimator:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n  m_Controller: {{fileID: 0}}\n  preview_FbxAnimator: 1\n"));
+    }
+    let (hierarchy, bone_ids) = model_hierarchy(scene, &meta, &transform, ids, docs, instance, &transforms)?;
+    let bones = bone_ids.iter().map(|id| format!("  - {{fileID: {id}}}\n")).collect::<String>();
+    text = text.replace("  m_Bones: []\n", &format!("  m_Bones:\n{bones}"));
+    text.push_str(&hierarchy);
     Ok(crate::parse_unity_yaml(&text))
 }
+
+#[allow(clippy::too_many_arguments)]
+fn model_hierarchy(
+    scene: &ufbx::Scene, meta: &str, root: &str,
+    reserved: HashSet<&String>, docs: &[Document], instance: &Document, source_transforms: &HashSet<String>,
+) -> Result<(String, Vec<String>), String> {
+    use std::fmt::Write as _;
+    let nodes: Vec<_> = scene.nodes.iter().filter(|node| !node.is_root).collect();
+    if nodes.len() > EXPANSION_DOCUMENT_LIMIT / 2 { return Err("FBX hierarchy exceeds preview budget".into()); }
+    let scale = crate::model_preview::importer_scale(meta, scene.settings.unit_meters)?;
+    let mut ids: HashSet<_> = reserved.into_iter().cloned().chain(source_transforms.iter().cloned()).collect();
+    let mut free = (1_i64..).map(|id| -id);
+    let mut next_id = || loop {
+        let id = free.next().unwrap().to_string();
+        if ids.insert(id.clone()) { break id; }
+    };
+
+    // Recognize the legacy head attachment when exactly one FBX head and one
+    // stripped Transform referenced by a head anchor are present.
+    let heads: Vec<_> = nodes.iter().filter(|node| node.bone.is_some()
+        && node.element.name.as_ref().split_whitespace().last().is_some_and(|name| name.eq_ignore_ascii_case("head"))).collect();
+    let mut head_source = None;
+    if let [head] = heads.as_slice() {
+        let anchors: Vec<_> = docs.iter().filter(|doc| doc.type_name == "GameObject"
+            && crate::name_from_text(&doc.text).as_deref() == Some("head_anchor_pos")).collect();
+        let candidates: HashSet<_> = docs.iter().filter(|proxy| proxy.type_name == "Transform"
+            && field(&proxy.text, "m_PrefabInstance").and_then(|v| reference(v, "fileID")).as_deref() == Some(instance.file_id.as_str())
+            && docs.iter().any(|child| child.parent_transform.as_deref() == Some(proxy.file_id.as_str())
+                && anchors.iter().any(|anchor| child.game_object.as_deref() == Some(anchor.file_id.as_str()))))
+            .filter_map(|proxy| reference_field(&proxy.text, "m_CorrespondingSourceObject").and_then(|v| source_ref(&v)))
+            .map(|(_, id)| id).filter(|id| id != root && source_transforms.contains(id)).collect();
+        if candidates.len() == 1 {
+            head_source = candidates.into_iter().next().map(|id| (head.element.element_id, id));
+        }
+    }
+    let transforms: HashMap<_, _> = nodes.iter().map(|node| {
+        let id = node.element.element_id;
+        let transform = head_source.as_ref().filter(|(head, _)| *head == id)
+            .map(|(_, source)| source.clone()).unwrap_or_else(&mut next_id);
+        (id, transform)
+    }).collect();
+    let mut text = String::new();
+    let skin_bones: HashSet<_> = scene.meshes.iter().flat_map(|mesh| mesh.skin_deformers.iter())
+        .flat_map(|skin| skin.clusters.iter())
+        .filter_map(|cluster| cluster.bone_node.as_ref().map(|node| node.element.element_id)).collect();
+    let mut bone_ids = Vec::new();
+    for node in nodes {
+        let object = next_id();
+        let transform = &transforms[&node.element.element_id];
+        if skin_bones.contains(&node.element.element_id) { bone_ids.push(transform.clone()); }
+        let parent = node.parent.as_ref().and_then(|parent| transforms.get(&parent.element.element_id))
+            .map_or(root, String::as_str);
+        let local = node.local_transform;
+        let name = node.element.name.as_ref().replace(['\r', '\n'], " ");
+        writeln!(text, "--- !u!1 &{object}\nGameObject:\n  m_Name: {name}\n  m_IsActive: 1\n--- !u!4 &{transform}\nTransform:\n  m_GameObject: {{fileID: {object}}}\n  m_Father: {{fileID: {parent}}}\n  m_LocalPosition: {{x: {}, y: {}, z: {}}}\n  m_LocalRotation: {{x: {}, y: {}, z: {}, w: {}}}\n  m_LocalScale: {{x: {}, y: {}, z: {}}}",
+            -local.translation.x * scale, local.translation.y * scale, local.translation.z * scale,
+            local.rotation.x, -local.rotation.y, -local.rotation.z, local.rotation.w,
+            local.scale.x, local.scale.y, local.scale.z).unwrap();
+    }
+    Ok((text, bone_ids))
+}
+
 fn static_material_refs<'a>(meta:&'a str,names:impl Iterator<Item=&'a str>)->Vec<&'a str> {
     let mut mapped=HashMap::new();let mut name=None;
     if let Some((_,tail))=meta.split_once("  externalObjects:") {
@@ -318,7 +486,7 @@ fn remap(doc:&mut Document,ids:&HashMap<String,String>) {
     doc.parent_transform=doc.parent_transform.as_ref().map(|id|ids.get(id).unwrap_or(id).clone());
     doc.text=rewrite_refs(&doc.text,ids).into();
 }
-struct Modification {target:Source,path:String,value:String,object:String}
+struct Modification {target:Source,path:String,value:String,object:String,value_range:Option<std::ops::Range<usize>>}
 fn modifications(text:&str) -> Vec<Modification> {
     let mut result=Vec::new();let mut current:Option<Modification>=None;
     let mut lines=text.lines().peekable();
@@ -327,10 +495,15 @@ fn modifications(text:&str) -> Vec<Modification> {
         if let Some(value)=line.strip_prefix("- target:") {
             if let Some(item)=current.take() {result.push(item);}
             let mut value=value.trim().to_owned();while !value.contains('}') {let Some(next)=lines.next() else {break;};value.push(' ');value.push_str(next.trim());}
-            current=source_ref(&value).map(|target|Modification{target,path:String::new(),value:String::new(),object:String::new()});
+            current=source_ref(&value).map(|target|Modification{target,path:String::new(),value:String::new(),object:String::new(),value_range:None});
         } else if let Some(item)=&mut current {
             if let Some(value)=line.strip_prefix("propertyPath:") {item.path=value.trim().into();}
-            if let Some(value)=line.strip_prefix("value:") {item.value=value.trim().into();}
+            if let Some(value)=line.strip_prefix("value:") {
+                let value = value.trim();
+                item.value = value.into();
+                let start = value.as_ptr() as usize - text.as_ptr() as usize;
+                item.value_range = Some(start..start + value.len());
+            }
             if let Some(value)=line.strip_prefix("objectReference:") {let mut value=value.trim().to_owned();while value.starts_with('{') && !value.contains('}') {let Some(next)=lines.next() else {break;};value.push(' ');value.push_str(next.trim());}item.object=value;}
         }
     }
@@ -348,7 +521,7 @@ fn removed_references(text:&str) -> Vec<Source> {
     }
     result
 }
-fn patch(doc:&mut Document,path:&str,value:&str) -> bool {
+pub(crate) fn patch(doc:&mut Document,path:&str,value:&str) -> bool {
     if let Some(index)=path.strip_prefix("m_Materials.Array.data[").and_then(|p|p.strip_suffix(']')).and_then(|p|p.parse::<usize>().ok()) {
         if index>=64{return false;}
         let mut lines:Vec<String>=doc.text.lines().map(str::to_owned).collect();
@@ -382,6 +555,20 @@ fn patch(doc:&mut Document,path:&str,value:&str) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn transform_edit_preserves_expanded_parent_alias() {
+        let old = crate::parse_unity_yaml("--- !u!4 &11\nTransform:\n  m_GameObject: {fileID: 1}\n  m_Father: {fileID: 20}\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n");
+        let mut expanded = Expanded { documents: old.clone(), ..Default::default() };
+        assert!(patch(&mut expanded.documents[0], "m_Father", "{fileID: 99}"));
+        let mut edited = old.clone();
+        assert!(patch(&mut edited[0], "m_LocalPosition", "{x: 1, y: 0, z: 0}"));
+        let updates = transform_replacements(&old, &edited, &expanded).unwrap();
+        assert_eq!(updates[0].1.parent_transform.as_deref(), Some("99"));
+        assert_eq!(field(&updates[0].1.text, "m_LocalPosition"), Some("{x: 1, y: 0, z: 0}"));
+        assert!(patch(&mut edited[0], "m_Father", "{fileID: 30}"));
+        assert!(transform_replacements(&old, &edited, &expanded).is_none());
+    }
+
+    #[test]
     fn static_material_slots_follow_fbx_names_instead_of_meta_order() {
         let meta="  externalObjects:\n  - first:\n      name: wings\n    second: {fileID: 2}\n  - first:\n      name: body\n    second: {fileID: 1}\n  materials:\n    name: ignored\n    second: {fileID: 3}";
         assert_eq!(static_material_refs(meta,["body","wings","missing"].into_iter()),vec!["{fileID: 1}","{fileID: 2}","{fileID: 0}"]);
@@ -402,6 +589,64 @@ mod tests {
             println!("{name} raw extent {:?}, evaluated extent {:?}",extent(&raw.vertex_position),extent(&posed.skinned_position));
             for n in &scene.nodes {if n.local_transform.scale.x!=1.0 || n.local_transform.scale.y!=1.0 || n.local_transform.scale.z!=1.0 {println!("scaled {} {:?}",n.element.name.as_ref(),n.local_transform.scale);}}
         }
+    }
+    #[test]
+    #[ignore = "Requires the local g001 project"]
+    fn amy_fbx_hierarchy_resolves_head_attachment() {
+        let assets = PathBuf::from("C:/Git/g001_client_new/Assets");
+        let source = std::fs::read_to_string(assets.join("Res/Prefabs/MapDesign/TDModelOri/amy.prefab")).unwrap();
+        let docs = crate::parse_unity_yaml(&source);
+        let guid = "b0bd039f7f1d1dc43aeb39ebdc6b0ddb";
+        let catalog = HashMap::from([(guid.to_owned(), assets.join("Res/Role/Models/Amy/amy_skin.FBX"))]);
+        let stop = AtomicBool::new(false);
+        let mut resolver = Resolver::new(Some(&catalog), &stop, &stop, &docs);
+        let result = resolver.level(&docs, None, None, 0);
+        let find_object = |name| result.docs.iter().find(|doc| doc.type_name == "GameObject"
+            && crate::name_from_text(&doc.text).as_deref() == Some(name)).unwrap();
+        let find_transform = |name| {
+            let object = find_object(name);
+            result.docs.iter().find(|doc| doc.type_name == "Transform"
+                && doc.game_object.as_deref() == Some(object.file_id.as_str())).unwrap()
+        };
+        assert_eq!(find_transform("head_anchor_pos").parent_transform.as_deref(),
+            Some(find_transform("Bip001 Head").file_id.as_str()));
+        assert_eq!(find_transform("Bip001").parent_transform.as_deref(),
+            Some(find_transform("amy_skin").file_id.as_str()));
+        find_transform("Bip001 R Finger0Nub");
+        let model = find_object("amy_skin");
+        assert!(result.docs.iter().any(|doc| doc.type_name == "Animator"
+            && doc.game_object.as_deref() == Some(model.file_id.as_str())
+            && doc.text.contains("3e1934cf05b43bd4cbb96df4ee24eaff")));
+        let clip = crate::animation_workspace::imported_clip_yaml(
+            &assets.join("Res/Role/AllNewAnim/AnimChildren/children@conjure_over.FBX"), "1827226128182048838").unwrap();
+        let anchor = &find_transform("head_anchor_pos").file_id;
+        let frame = |time| {
+            let pose = crate::animation_workspace::Workspace::sample_pose(&result.docs, &model.file_id, &clip, time).unwrap();
+            let objects: HashMap<_, _> = pose.iter().filter(|d| d.type_name == "GameObject")
+                .map(|d| (d.file_id.as_str(), d)).collect();
+            let transforms: HashMap<_, _> = pose.iter().filter(|d| d.type_name == "Transform")
+                .map(|d| (d.file_id.as_str(), d)).collect();
+            let matrix = |id: &str| crate::static_preview::world(id, &transforms, &objects, &mut HashSet::new()).unwrap();
+            let anchor_matrix = matrix(anchor);
+            let render = pose.iter().find(|doc| doc.type_name == "SkinnedMeshRenderer"
+                && doc.game_object.as_deref() == Some(model.file_id.as_str())).unwrap();
+            let bones: HashMap<_, _> = render.text.split_once("  m_Bones:").unwrap().1.lines().skip(1)
+                .take_while(|line| line.trim_start().starts_with("- "))
+                .filter_map(|line| reference(line.trim().strip_prefix("- ")?, "fileID"))
+                .map(|id| {
+                    let object = transforms[id.as_str()].game_object.as_deref().unwrap();
+                    (crate::name_from_text(&objects[object].text).unwrap(), matrix(&id))
+                }).collect();
+            let mesh = field(&render.text, "m_Mesh").unwrap();
+            let (baked, _) = crate::model_preview::bake(mesh, &render.text, &catalog,
+                matrix(&find_transform("amy_skin").file_id), &bones, None).unwrap();
+            assert!(baked.image.pixels.iter().any(|pixel| pixel.a() > 0));
+            (anchor_matrix.0, baked.image)
+        };
+        let (anchor_start, mesh_start) = frame(0.0);
+        let (anchor_middle, mesh_middle) = frame(0.5);
+        assert_ne!(anchor_start, anchor_middle);
+        assert_ne!(mesh_start, mesh_middle);
     }
     #[test]
     #[ignore = "Requires the user's g003 project"]
@@ -497,6 +742,43 @@ mod tests {
         }
         assert_eq!(level.docs.iter().filter(|d|d.type_name=="SpriteRenderer").count(),3);
     }
+    #[test]
+    #[ignore = "Requires the user’s Unity project"]
+    fn real_ui_particle_canvas_prefab() {
+        use std::sync::Arc;
+        let root = PathBuf::from("C:/Git/g001_client_new/Assets");
+        let docs = crate::parse_unity_yaml(&std::fs::read_to_string(
+            root.join("Res/Prefabs/UI/Buff/ui_double_production_drop.prefab")).unwrap());
+        let mut pending = vec![root];
+        let mut catalog = HashMap::new();
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(directory).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() { pending.push(path); continue; }
+                if path.extension().is_some_and(|ext| ext == "meta") {
+                    if let Ok(text) = std::fs::read_to_string(&path) {
+                        if let Some(guid) = text.lines().find_map(|line| line.strip_prefix("guid: ")) {
+                            catalog.insert(guid.trim().to_owned(), path.with_extension(""));
+                        }
+                    }
+                }
+            }
+        }
+        let catalog = Arc::new(catalog);
+        let stop = AtomicBool::new(false);
+        let paused = AtomicBool::new(false);
+        let mut resolver = Resolver::new(Some(&catalog), &stop, &paused, &docs);
+        let result = resolver.level(&docs, None, None, 0);
+        let docs = &result.docs;
+        assert_eq!(docs.iter().filter(|doc| doc.type_name == "ParticleSystem").count(), 4, "{:?}", resolver.issues);
+        let mut prepared = super::super::prepare(docs, &HashMap::new(), Some(&catalog), &stop, 1, None, true);
+        let (materials, errors) = super::super::world::canvas_particle_materials(&prepared.sprites, docs, Some(&catalog));
+        assert_eq!(prepared.particles.len(), 3, "{:?}", prepared.issues);
+        prepared.particle_materials = materials;
+        assert_eq!(prepared.particle_materials.as_ref().map(|scene| scene.draws.len()), Some(3), "{errors:?}");
+        super::super::canvas_particles::verify_fixture(docs, &catalog, Arc::new(prepared));
+    }
+
     #[test]
     #[ignore="Requires UNITY_SHADER_TEST_PROJECT"]
     fn real_beach_model_prefab_hierarchy() {
