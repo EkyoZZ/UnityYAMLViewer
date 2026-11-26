@@ -1,6 +1,8 @@
-# 1.3.8 本地测试构建
+# 1.3.8 正式发布
 
-- 1.3.8 待发布。复用姜饼人单面渲染实测通过的构建，发布候选与本地校验文件已放入 `target/releases/v1.3.8/` 并核对 SHA-256。发布说明位于 `docs/releases/1.3.8.md`。待用户提交并推送后核对提交与发布候选。
+- GitHub Release 459136897 已于北京时间 2026-11-26 16:33:35 正式发布。标题和标签均为 v1.3.8，标签指向 `0bdf18a04f2d0b8b142aced27f8599f175862f8e`，已核对 Latest。仅上传已实测的 Windows x64 EXE，远端大小和 SHA-256 与本地候选一致。核验记录位于 `target/releases/v1.3.8/published-verification.json`。
+
+# 1.3.8 本地测试构建
 
 - 2026-11-26 经用户授权编译独立 FBX 单面剔除修复测试版，进程和目标 EXE 占用检查通过。本地 Release 构建成功，文件及产品版本均为 1.3.8，大小 37605376 字节，SHA-256 `250de383318cde1e2f3660beede16e1b808af53b1ed6f0bde46715ce4b96f9e9`，已同步本地校验文件。构建日志为 `target/v1.3.8-cull-back-build.log`。
 

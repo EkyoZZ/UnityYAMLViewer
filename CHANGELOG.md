@@ -2,7 +2,7 @@
 
 各版本完整功能、修复、限制及验证状态分别记录在 [版本记录目录](docs/versions/README.md)。正式发布时从对应记录整理 Release 更新日志。
 
-- [1.3.8：独立 FBX 预览与关键帧优化（待发布）](docs/versions/1.3.8.md) · [发布说明](docs/releases/1.3.8.md)
+- [1.3.8：独立 FBX 预览与关键帧优化（已正式发布）](docs/versions/1.3.8.md) · [发布说明](docs/releases/1.3.8.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.8)
 
 - [1.3.7：像素 Tile 与 Prefab 动画预览（已正式发布）](docs/versions/1.3.7.md) · [发布说明](docs/releases/1.3.7.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.7)
 
