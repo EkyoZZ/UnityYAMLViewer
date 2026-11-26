@@ -512,6 +512,15 @@ fn preview_actions_ready(ui:&egui::Ui,complete:bool,paused:bool)->bool {
     });
     !complete && (paused || now-started>=5.0)
 }
+pub(crate) fn paint_pose_badge(painter: &egui::Painter, rect: egui::Rect, label: &str) -> egui::Rect {
+    let text = painter.layout_no_wrap(tr(label).to_owned(), egui::FontId::proportional(15.0), Color32::WHITE);
+    let padding = egui::vec2(9.0, 5.0);
+    let badge = egui::Rect::from_min_size(rect.min + Vec2::splat(8.0), text.size() + padding * 2.0);
+    painter.rect_filled(badge, 4.0, Color32::from_black_alpha(195));
+    painter.galley(badge.min + padding, text, Color32::WHITE);
+    badge
+}
+
 fn paint_zoom_badge(ui:&mut egui::Ui,painter:&egui::Painter,rect:egui::Rect,zoom:f64)->Option<f32> {
     let galley=painter.layout_no_wrap(format!("{} {:.0}%",tr("缩放"),zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE);
     let size=galley.size()+egui::vec2(24.0,12.0);
@@ -715,6 +724,14 @@ impl Preview {
         let documents=expanded.as_ref().map_or(documents,|data|data.documents.as_slice());
         let activation = self.preview_activation_documents(documents);
         let documents = activation.as_deref().map_or(documents, Vec::as_slice);
+        if let Some(workspace) = &mut self.animation {
+            if workspace.show_comparison(ui, documents, flags, catalog.as_ref(), &self.background,
+                self.background_rgb.unwrap_or([0; 3]), !self.three_dimensional) {
+                ui.label(tr("左右对比期间，原预览已暂停渲染。"));
+                return None;
+            }
+            workspace.compare_optimization(ui.ctx(), documents);
+        }
         // Hierarchy selects objects, while preview geometry is keyed by component.
         let selected_components=selection_components(documents,selected,expanded.as_deref());
         if let Some(data)=&expanded {
@@ -728,7 +745,9 @@ impl Preview {
         };
         let has_mesh = documents.iter().any(|doc| matches!(doc.type_name.as_str(), "MeshFilter" | "SkinnedMeshRenderer")
             && field(&doc.text, "m_Mesh").and_then(|value| reference(value, "fileID")).is_some_and(|id| id != "0"));
-        if self.three_dimensional || (!has_ui && has_mesh) {
+        let preview_label = self.animation.as_ref().and_then(|workspace| workspace.preview_label());
+        let compare_sprites = preview_label.is_some() && documents.iter().any(|doc| doc.type_name == "SpriteRenderer");
+        if self.three_dimensional || (!has_ui && (has_mesh || compare_sprites)) {
             use std::hash::{Hash,Hasher};
             let mut hash=std::collections::hash_map::DefaultHasher::new();
             for doc in documents {doc.text.as_ptr().hash(&mut hash);doc.text.len().hash(&mut hash);}
@@ -738,9 +757,12 @@ impl Preview {
             let mut key=hash.finish();
             if !self.scene3d.as_ref().is_some_and(|(_, preview)| preview.scene_pending()) {
                 let animated = self.animation.as_ref().and_then(|workspace| workspace.sample(documents));
+                let has_pose = animated.is_some();
+                let pose_label = animated.as_ref().and(preview_label);
                 if let Some(pose) = &animated {
                     let mut pose_hash = std::collections::hash_map::DefaultHasher::new();
                     key.hash(&mut pose_hash);
+                    pose_label.hash(&mut pose_hash);
                     for doc in pose {
                         doc.text.hash(&mut pose_hash);
                     }
@@ -749,12 +771,12 @@ impl Preview {
                 let catalog = catalog.unwrap_or_default();
                 if let Some((previous, preview)) = &mut self.scene3d {
                     if *previous != key && preview.update_scene(ui.ctx(),
-                        animated.unwrap_or_else(|| documents.to_vec()), flags.clone(), catalog) {
+                        animated.unwrap_or_else(|| documents.to_vec()), flags.clone(), catalog, pose_label, has_pose) {
                         *previous = key;
                     }
                 } else {
                     self.scene3d = Some((key, crate::model_preview::Preview::new_scene(ui.ctx(),
-                        animated.unwrap_or_else(|| documents.to_vec()), flags.clone(), catalog)));
+                        animated.unwrap_or_else(|| documents.to_vec()), flags.clone(), catalog, pose_label)));
                 }
             } else if self.animation.is_some() {
                 // The finished worker wakes the preview. Keep sampling the latest
@@ -1180,6 +1202,7 @@ impl Preview {
             painter.add(egui::Shape::closed_line(ui_rect_points(text.layout).map(screen).to_vec(),egui::Stroke::new(1.0_f32,Color32::from_rgb(70,155,235))));
         }
         if let Some(value)=paint_zoom_badge(ui,&painter,rect,self.zoom as f64){self.zoom=value;}
+        if let Some(label) = animated.as_ref().and(preview_label) { paint_pose_badge(&painter, rect, label); }
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
         picked.map(|id|expanded.as_ref().map_or_else(||id.clone(),|data|data.selection(id.clone())))
     }

@@ -77,6 +77,64 @@ fn apply(text:&str,mut changes:Vec<(usize,usize,String)>) -> String {
     let lines:Vec<_>=text.split_inclusive('\n').collect();let mut offsets=vec![0];for line in &lines {offsets.push(offsets.last().unwrap()+line.len())}
     changes.sort_by_key(|c|(c.0,c.1));let mut result=text.to_owned();for (start,end,value) in changes.into_iter().rev(){result.replace_range(offsets[start]..offsets[end],&value)}result
 }
+/// Reduce scalar curves whose interpolation is linear in this preview.
+pub(crate) fn optimize_linear_clip(text: &str, tolerance: f64) -> (String, usize, usize, f64) {
+    let parsed = blocks(text);
+    let lines: Vec<_> = text.split_inclusive('\n').collect();
+    let mut changes = Vec::new();
+    let mut worst = 0.0_f64;
+    for track in parsed.chunk_by(|a, b| a.parent == b.parent) {
+        if track.len() < 3 || track[0].parent == 0 { continue; }
+        let attribute = lines[track.last().unwrap().end..].iter().find_map(|line| {
+            if line.starts_with("    attribute:") { Some(line.trim().trim_start_matches("attribute:").trim()) }
+            else if line.starts_with("  -") || line.starts_with("  m_") { Some("") }
+            else { None }
+        });
+        if !attribute.is_some_and(|attribute| attribute.starts_with("m_LocalPosition.")
+            || attribute.starts_with("m_AnchoredPosition.") || attribute.starts_with("m_LocalScale.")) { continue; }
+        let values: Option<Vec<_>> = track.iter().map(|key| {
+            number(key, "value", None).filter(|value| value.is_finite())
+        }).collect();
+        let Some(values) = values else { continue; };
+        let implicit_linear = track.iter().all(|key| field(key, "inSlope").is_empty()
+            && field(key, "outSlope").is_empty() && field(key, "weightedMode").is_empty());
+        let exact_constant = values.iter().all(|value| *value == values[0])
+            && track.iter().all(|key| ["inSlope", "outSlope"].iter().all(|name| {
+                let value = field(key, name);
+                value.is_empty() || value.parse::<f64>().ok() == Some(0.0)
+            }));
+        if !implicit_linear && !exact_constant { continue; }
+        if track.windows(2).any(|keys| keys[0].time >= keys[1].time) { continue; }
+        let mut keep = vec![false; track.len()];
+        keep[0] = true;
+        keep[track.len() - 1] = true;
+        let mut pending = vec![(0, track.len() - 1)];
+        while let Some((first, last)) = pending.pop() {
+            if last <= first + 1 { continue; }
+            let duration = track[last].time - track[first].time;
+            let error = |i: usize| {
+                let t = (track[i].time - track[first].time) / duration;
+                (values[first] + t * (values[last] - values[first]) - values[i]).abs()
+            };
+            let (index, max) = (first + 1..last).map(|i| (i, error(i)))
+                .max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+            if max > tolerance {
+                keep[index] = true;
+                pending.extend([(first, index), (index, last)]);
+            } else {
+                worst = worst.max(max);
+            }
+        }
+        changes.extend(track.iter().zip(keep).filter(|(_, keep)| !keep).map(|(key, _)| {
+            // Only replace the key block itself. Preserve sibling YAML and import metadata.
+            (key.start, key.end.min(lines.len()), String::new())
+        }));
+    }
+    let before = parsed.len();
+    let after = before - changes.len();
+    (apply(text, changes), before, after, worst)
+}
+
 pub fn value_at(text:&str,binding:&AnimationBinding,time:f32)->Option<String> {
     let all=blocks(text);let keys:Vec<_>=binding.keyframes.iter().filter_map(|k|all.iter().find(|b|b.time_line==k.yaml_line)).collect();
     sample(&keys,time as f64,None).filter(|(v,_)|v.is_finite()).map(|(v,_)|(v as f32).to_string())
@@ -537,4 +595,20 @@ mod tests {
         session.lock().unwrap().undo();assert_eq!(session.lock().unwrap().rendered(),original);
     }
 
+}
+
+
+#[cfg(test)]
+mod optimization_tests {
+    #[test]
+    fn linear_reduction_preserves_endpoints_and_unrelated_tracks() {
+        let source = "AnimationClip:\n  m_FloatCurves:\n  - curve:\n      m_Curve:\n      - serializedVersion: 3\n        time: 0\n        value: 1\n      - serializedVersion: 3\n        time: 1\n        value: 2.0001\n      - serializedVersion: 3\n        time: 2\n        value: 3\n    attribute: m_LocalPosition.x\n    path: bone\n    classID: 4\n  m_StopTime: 2\n";
+        let (draft, before, after, error) = super::optimize_linear_clip(source, 0.001);
+        assert_eq!((before, after), (3, 2));
+        assert!(error > 0.0 && error <= 0.001);
+        assert!(draft.contains("time: 0\n") && draft.contains("time: 2\n"));
+        assert!(draft.contains("m_StopTime: 2"));
+        let rotation = source.replace("m_LocalPosition.x", "m_LocalRotation.x");
+        assert_eq!(super::optimize_linear_clip(&rotation, 1.0).0, rotation);
+    }
 }

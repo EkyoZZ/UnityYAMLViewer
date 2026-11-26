@@ -1,6 +1,7 @@
 //! Read-only static FBX/OBJ preview with bounded loading and depth-tested rendering.
 use std::{path::{Path,PathBuf},sync::{Arc,mpsc},collections::HashMap};
 use eframe::egui::{self,Color32};
+mod standalone;
 pub(crate) fn is_model(path:&Path)->bool {path.extension().and_then(|s|s.to_str()).is_some_and(|s|matches!(s.to_ascii_lowercase().as_str(),"fbx"|"obj"))}
 pub(crate) fn component_button(ui:&mut egui::Ui,text:&str) {
     let Some(reference)=crate::static_preview::field(text,"m_Mesh") else{return};
@@ -16,10 +17,10 @@ pub(crate) fn material_paths(text:&str,catalog:&HashMap<String,PathBuf>)->Vec<Op
 #[derive(Clone)]
 struct Triangle {points:[[f32;3];3],uv:[[f32;2];3],material:usize}
 #[derive(Clone)]
-struct Material {texture:Option<Arc<image::RgbaImage>>,scale:[f32;2],offset:[f32;2],color:[u8;4],pf:Option<PfColor>,sorting:(i64,i64),gpu_texture:Arc<std::sync::OnceLock<Arc<crate::render_system::scene::Texture>>>}
+struct Material {texture:Option<Arc<image::RgbaImage>>,scale:[f32;2],offset:[f32;2],color:[u8;4],pf:Option<PfColor>,sorting:(i64,i64),gpu_texture:Arc<std::sync::OnceLock<Arc<crate::render_system::scene::Texture>>>,opaque:bool,cull_back:bool}
 #[derive(Clone)]
 struct PfColor {main:[f32;4],tint:[f32;4],ambient:[f32;4],overlay:[f32;4],alpha:f32,brightness:f32,saturation:f32,contrast:f32}
-impl Default for Material {fn default()->Self{Self{texture:None,scale:[1.0;2],offset:[0.0;2],color:[200,200,200,255],pf:None,sorting:(0,0),gpu_texture:Default::default()}}}
+impl Default for Material {fn default()->Self{Self{texture:None,scale:[1.0;2],offset:[0.0;2],color:[200,200,200,255],pf:None,sorting:(0,0),gpu_texture:Default::default(),opaque:false,cull_back:false}}}
 struct Model {vertex_count:usize,triangles:Vec<Triangle>,materials:Vec<Material>,warnings:Vec<String>}
 pub(crate) struct ScenePlane {pub texture:Arc<crate::render_system::scene::Texture>,pub points:[[f32;3];4],pub uv:[[f32;2];4],pub tint:Color32,pub sorting:(i64,i64)}
 pub(crate) struct SceneParticle {
@@ -39,6 +40,8 @@ fn append_model(target:&mut Model,mut other:Model)->Result<(),String> {
 }
 #[derive(Default)]
 struct Resources {
+    preview_textures: HashMap<PathBuf, Material>,
+    action: Option<standalone::Action>,
     fbx: HashMap<(PathBuf, bool), (Arc<ufbx::SceneRoot>, f64)>,
     materials: HashMap<PathBuf, Material>,
     planes: crate::static_preview::ScenePlaneCache,
@@ -47,6 +50,24 @@ struct Resources {
 }
 
 impl Resources {
+    fn preview_texture(&mut self, path: &Path) -> Result<Material, String> {
+        if let Some(material) = self.preview_textures.get(path) { return Ok(material.clone()); }
+        let mut reader = image::ImageReader::open(path).map_err(|e| e.to_string())?
+            .with_guessed_format().map_err(|e| e.to_string())?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(8192);
+        limits.max_image_height = Some(8192);
+        limits.max_alloc = Some(64 * 1024 * 1024);
+        reader.limits(limits);
+        let texture = reader.decode().map_err(|e| e.to_string())?.into_rgba8();
+        let bytes = texture.as_raw().len();
+        let material = Material { texture: Some(Arc::new(texture)), color: [255; 4], ..Default::default() };
+        if self.texture_bytes + bytes <= 128 * 1024 * 1024 && self.preview_textures.len() < 64 {
+            self.preview_textures.insert(path.to_owned(), material.clone());
+            self.texture_bytes += bytes;
+        }
+        Ok(material)
+    }
     fn fbx(&mut self, path: &Path, skin: bool) -> Result<(Arc<ufbx::SceneRoot>, f64), String> {
         let key = (path.to_path_buf(), skin);
         if let Some(asset) = self.fbx.get(&key) { return Ok(asset.clone()); }
@@ -81,7 +102,7 @@ impl Resources {
     }
 }
 
-fn scene_model(documents:&[crate::Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:&Arc<HashMap<String,PathBuf>>, resources: &mut Resources)->Result<PreparedModel,String> {
+fn scene_model(documents:&[crate::Document],flags:&HashMap<String,crate::hierarchy_controls::Flags>,catalog:&Arc<HashMap<String,PathBuf>>, resources: &mut Resources, framing: Option<([f32; 3], f32)>)->Result<PreparedModel,String> {
     use crate::static_preview::{field,number,reference,world};
     let objects:HashMap<_,_>=documents.iter().filter(|d|d.type_name=="GameObject").map(|d|(d.file_id.as_str(),d)).collect();
     let transforms:HashMap<_,_>=documents.iter().filter(|d|matches!(d.type_name.as_str(),"Transform"|"RectTransform")).map(|d|(d.file_id.as_str(),d)).collect();
@@ -120,7 +141,7 @@ fn scene_model(documents:&[crate::Document],flags:&HashMap<String,crate::hierarc
         let radius = if model.triangles.is_empty() { particle.emitter.bounds_radius() as f32 } else { 0.0 };
         [particle.origin.map(|value| value - radius), particle.origin.map(|value| value + radius)]
     }));
-    let (center, scale) = world_bounds(bounds);
+    let (center, scale) = framing.unwrap_or_else(|| world_bounds(bounds));
     for point in model.triangles.iter_mut().flat_map(|tri| &mut tri.points) {
         for axis in 0..3 { point[axis] = (point[axis] - center[axis]) / scale; }
     }
@@ -130,6 +151,7 @@ type SortingKey = (i64, i64);
 type GpuModel = (Arc<crate::render_system::scene::Scene>, Arc<[usize]>, Vec<SortingKey>);
 
 struct PreparedModel {
+    standalone: Option<standalone::Info>,
     model: Model,
     gpu: GpuModel,
     particles: Vec<SceneParticle>,
@@ -137,9 +159,40 @@ struct PreparedModel {
     scale: f32,
 }
 
+#[derive(Default)]
+pub(crate) struct ComparisonRenderer {
+    resources: Resources,
+    framing: Option<([f32; 3], f32)>,
+}
+
+pub(crate) struct ComparisonScene {
+    gpu: GpuModel,
+    pub(crate) warnings: Vec<String>,
+    direction: f32,
+}
+
+impl ComparisonRenderer {
+    pub(crate) fn prepare(&mut self, documents: &[crate::Document], flags: &HashMap<String, crate::hierarchy_controls::Flags>,
+        catalog: &Arc<HashMap<String, PathBuf>>) -> Result<ComparisonScene, String> {
+        let prepared = scene_model(documents, flags, catalog, &mut self.resources, self.framing)?;
+        if prepared.gpu.0.draws.is_empty() {
+            return Err(crate::localization::tr("左右对比需要可显示的模型或精灵。").to_owned());
+        }
+        // Keep the first original pose's coordinate system for both sides and every subsequent frame.
+        self.framing.get_or_insert((prepared.center, prepared.scale));
+        Ok(ComparisonScene { gpu: prepared.gpu, warnings: prepared.model.warnings, direction: -1.0 })
+    }
+}
+
+impl ComparisonScene {
+    pub(crate) fn paint(&self, painter: &egui::Painter, rect: egui::Rect, camera: &Camera, error: Arc<std::sync::Mutex<Option<String>>>) {
+        painter.add(crate::render_system::model_callback(rect, self.gpu.0.clone(), self.gpu.1.clone(), camera.projection(rect, false, self.direction), 0.0, error));
+    }
+}
+
 fn prepare_gpu_model(model: Model, particles: Vec<SceneParticle>, center: [f32; 3], scale: f32) -> PreparedModel {
     let gpu = gpu_model(&model);
-    PreparedModel { model, gpu, particles, center, scale }
+    PreparedModel { standalone: None, model, gpu, particles, center, scale }
 }
 
 fn sorted_scene(mut draws: Vec<(SortingKey, crate::render_system::scene::Draw)>)
@@ -173,6 +226,7 @@ in vec2 uv;
 noperspective in vec3 barycentric;
 uniform sampler2D _MainTex;
 uniform float preview_mode;
+uniform float preview_opaque;
 uniform vec4 tint, pf_main, pf_tint, pf_ambient, pf_overlay, pf_adjust;
 out vec4 color;
 void main() {
@@ -189,6 +243,7 @@ void main() {
     }
     vec3 distance_px = barycentric / max(fwidth(barycentric), vec3(0.00001));
     float edge = 1.0 - smoothstep(0.25, 1.05, min(min(distance_px.x,distance_px.y),distance_px.z));
+    if (preview_opaque > 0.5) c.a = 1.0;
     if (preview_mode < 1.5 && c.a <= 0.0) discard;
     color = preview_mode < 1.5 ? vec4(c.rgb*c.a,c.a) : vec4(0.0);
     if (preview_mode > 0.5) {
@@ -221,6 +276,7 @@ void main() {
         let mut uniforms = std::collections::BTreeMap::from([
             ("tint".into(), rs::Uniform::Vector(color)),
             ("pf_adjust".into(), rs::Uniform::Vector([0.0, 0.0, 0.0, -1.0])),
+            ("preview_opaque".into(), rs::Uniform::Float(if source.opaque { 1.0 } else { 0.0 })),
         ]);
         if let Some(pf) = &source.pf {
             for (name, values) in [("pf_main", pf.main), ("pf_tint", pf.tint), ("pf_ambient", pf.ambient),
@@ -232,7 +288,7 @@ void main() {
             program: program.clone(), uniforms, textures: Default::default(),
             state: rs::RenderState {
                 source: rs::BlendFactor::One, destination: rs::BlendFactor::OneMinusSourceAlpha,
-                color_mask: [true; 4], depth_write: true, cull_back: false,
+                color_mask: [true; 4], depth_write: true, cull_back: source.cull_back,
             },
         });
         let vertices: Vec<_> = chunk.iter().flat_map(|tri| (0..3).map(move |i| rs::Vertex {
@@ -302,10 +358,23 @@ pub(crate) fn importer_scale(meta:&str,unit_meters:f64)->Result<f64,String> {
 fn load(path:&Path,paths:&[Option<PathBuf>],catalog:&HashMap<String,PathBuf>,pose:Option<(&HashMap<String,crate::static_preview::Matrix>,crate::static_preview::Matrix)>)->Result<Model,String> {
     load_evaluated(path,paths,catalog,pose,false,false,&mut Resources::default())
 }
+fn imported_material_paths(path: &Path, catalog: &HashMap<String, PathBuf>) -> Vec<Option<PathBuf>> {
+    std::fs::read_to_string(path.with_added_extension("meta")).ok().map(|text| {
+        text.lines().filter_map(|line| line.trim().strip_prefix("second:")
+            .and_then(|value| crate::static_preview::reference(value.trim(), "guid"))
+            .map(|guid| catalog.get(&guid.to_ascii_lowercase()).cloned())).collect()
+    }).unwrap_or_default()
+}
 fn load_evaluated(path:&Path,paths:&[Option<PathBuf>],catalog:&HashMap<String,PathBuf>,pose:Option<(&HashMap<String,crate::static_preview::Matrix>,crate::static_preview::Matrix)>,static_skin:bool,imported_pose:bool,resources:&mut Resources)->Result<Model,String> {
-    let imported_paths=if paths.is_empty(){std::fs::read_to_string(path.with_extension(format!("{}.meta",path.extension().and_then(|s|s.to_str()).unwrap_or("")))).ok().map(|s|s.lines().filter_map(|l|l.trim().strip_prefix("second:").and_then(|v|crate::static_preview::reference(v.trim(),"guid")).map(|g|catalog.get(&g.to_ascii_lowercase()).cloned())).collect::<Vec<_>>()).unwrap_or_default()}else{Vec::new()};
+    let imported_paths=if paths.is_empty(){imported_material_paths(path,catalog)}else{Vec::new()};
     let paths=if paths.is_empty(){imported_paths.as_slice()}else{paths};
     let (scene, import_scale) = resources.fbx(path, static_skin)?;
+    model_from_scene(&scene, import_scale, paths, catalog, pose, static_skin, imported_pose, resources, None)
+}
+
+fn model_from_scene(scene: &ufbx::Scene, import_scale: f64, paths: &[Option<PathBuf>], catalog: &HashMap<String, PathBuf>,
+    pose: Option<(&HashMap<String, crate::static_preview::Matrix>, crate::static_preview::Matrix)>, static_skin: bool,
+    imported_pose: bool, resources: &mut Resources, textures: Option<&HashMap<usize, PathBuf>>) -> Result<Model, String> {
     let mut triangles=Vec::new();let mut vertex_count=0;
     for node in &scene.nodes {
         let Some(mesh)=node.mesh.as_ref() else{continue};
@@ -349,17 +418,91 @@ fn load_evaluated(path:&Path,paths:&[Option<PathBuf>],catalog:&HashMap<String,Pa
                 if p.iter().flatten().any(|v|!v.is_finite()) {return Err("模型包含无效顶点".into());}
                 let uv=[t[0],t[1],t[2]].map(|i|if mesh.vertex_uv.exists {let v=mesh.vertex_uv[i as usize];[v.x as f32,v.y as f32]}else{[0.0;2]});
                 if uv.iter().flatten().any(|v|!v.is_finite()){return Err("模型包含无效 UV".into());}
-                triangles.push(Triangle{points:p,uv,material:mesh.face_material.get(face_index).copied().unwrap_or(0) as usize});
+                let local_slot = mesh.face_material.get(face_index).copied().unwrap_or(0) as usize;
+                let material = if textures.is_some() { node.materials.get(local_slot)
+                    .or_else(|| mesh.materials.get(local_slot)).map_or(0, |material| material.element.typed_id as usize) }
+                    else { local_slot };
+                triangles.push(Triangle{points:p,uv,material});
             }
         }
     }
     if triangles.is_empty(){return Err("模型没有可绘制网格".into());}
     let mut warnings=Vec::new();let mut bytes=0usize;
     if paths.is_empty(){warnings.push("没有解析到 Unity 材质引用，使用无光照灰色显示".into());}
-    let materials=paths.iter().map(|p|{let result=p.as_ref().ok_or("材质引用未找到".to_owned()).and_then(|p|resources.material(p,catalog));match result {Ok(m)=>{bytes+=m.texture.as_ref().map_or(0,|t|t.as_raw().len());if bytes>128*1024*1024 {warnings.push("模型贴图总量超过 128 MiB".into());Material::default()}else{m}},Err(e)=>{warnings.push(e);Material::default()}}}).collect();
+    if textures.is_some_and(|paths| !paths.is_empty()) && paths.is_empty() { warnings.clear(); }
+    let count = textures.map_or(paths.len(), |_| paths.len().max(scene.materials.len()).max(1));
+    let materials=(0..count).map(|index|{
+        let result = if let Some(path) = textures.and_then(|textures| textures.get(&index)) {
+            resources.preview_texture(path)
+        } else if let Some(path) = paths.get(index).and_then(Option::as_ref) {
+            resources.material(path,catalog)
+        } else {
+            if paths.get(index).is_some() { warnings.push("材质引用未找到".into()); }
+            return Material::default();
+        };
+        match result {Ok(m)=>{bytes+=m.texture.as_ref().map_or(0,|t|t.as_raw().len());if bytes>128*1024*1024 {warnings.push("模型贴图总量超过 128 MiB".into());Material::default()}else{m}},Err(e)=>{warnings.push(e);Material::default()}}}).collect();
     Ok(Model{vertex_count,triangles,materials,warnings})
 }
+#[derive(Clone, Copy)]
+pub(crate) struct Camera {
+    yaw: f32,
+    pitch: f32,
+    zoom: f32,
+    pan: egui::Vec2,
+}
+
+impl Default for Camera {
+    fn default() -> Self { Self { yaw: 0.3, pitch: 0.15, zoom: 1.0, pan: egui::Vec2::ZERO } }
+}
+
+impl Camera {
+    pub(crate) fn front() -> Self { Self { yaw: 0.0, pitch: 0.0, ..Self::default() } }
+
+    pub(crate) fn interact(&mut self, ui: &egui::Ui, response: &egui::Response, fixed_view: bool) {
+        let primary = response.dragged_by(egui::PointerButton::Primary);
+        let delta = ui.input(|input| input.pointer.delta());
+        if primary && !fixed_view {
+            self.yaw += delta.x * 0.01;
+            self.pitch = (self.pitch + delta.y * 0.01).clamp(-1.5, 1.5);
+        }
+        if response.dragged_by(egui::PointerButton::Secondary) || (primary && fixed_view) {
+            self.pan += delta;
+        }
+        if response.hovered() {
+            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+            if scroll != 0.0 {
+                let next = (self.zoom * (scroll * 0.002).exp()).clamp(0.01, 20.0);
+                if let Some(pointer) = ui.input(|input| input.pointer.hover_pos()) {
+                    self.pan = zoom_pan(self.pan, pointer - response.rect.center(), next / self.zoom);
+                }
+                self.zoom = next;
+            }
+        }
+    }
+
+    fn angles(&self, fixed_view: bool) -> [(f32, f32); 2] {
+        if fixed_view { [(0.0, 1.0); 2] } else { [self.yaw.sin_cos(), self.pitch.sin_cos()] }
+    }
+
+    fn projection(&self, rect: egui::Rect, fixed_view: bool, direction: f32) -> [[f32; 4]; 4] {
+        let [(sy, cy), (sp, cp)] = self.angles(fixed_view);
+        let scale = rect.width().min(rect.height()) * 1.5 * self.zoom;
+        let x = scale / rect.width().max(1.0);
+        let y = scale / rect.height().max(1.0);
+        // Keep depth order while expanding the orthographic clipping range.
+        // Motion can travel well beyond the bounds used to frame its first pose.
+        let z = -direction * 0.125 * self.zoom.min(1.0);
+        [
+            [cy*x, 0.0, sy*x, 2.0*self.pan.x/rect.width().max(1.0)],
+            [sy*sp*y, cp*y, -cy*sp*y, -2.0*self.pan.y/rect.height().max(1.0)],
+            [-sy*cp*z, sp*z, cy*cp*z, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    }
+}
+
 pub(crate) struct Preview {
+    standalone: Option<standalone::Setup>,
     resources: Arc<std::sync::Mutex<Resources>>,
     particles: Vec<SceneParticle>,
     particle_clock: Option<std::time::Instant>,
@@ -367,65 +510,149 @@ pub(crate) struct Preview {
     particle_center: [f32; 3],
     particle_scale: f32,
     camera_direction:f32,
+    pose_label: Option<&'static str>,
+    pending_label: Option<&'static str>,
     mode:RenderMode,
     pending:Option<mpsc::Receiver<Result<PreparedModel,String>>>,model:Option<Model>,error:Option<String>,
-    gpu:Option<GpuModel>,gpu_error:Arc<std::sync::Mutex<Option<String>>>,yaw:f32,pitch:f32,zoom:f32,pan:egui::Vec2,background:String,rgb:[u8;3],
+    gpu:Option<GpuModel>,gpu_error:Arc<std::sync::Mutex<Option<String>>>,camera:Camera,background:String,rgb:[u8;3],
 }
 impl Preview {
-    pub(crate) fn new_scene(ctx:&egui::Context,documents:Vec<crate::Document>,flags:HashMap<String,crate::hierarchy_controls::Flags>,catalog:Arc<HashMap<String,PathBuf>>)->Self {
+    pub(crate) fn new_scene(ctx:&egui::Context,documents:Vec<crate::Document>,flags:HashMap<String,crate::hierarchy_controls::Flags>,catalog:Arc<HashMap<String,PathBuf>>, label: Option<&'static str>)->Self {
         let (send,recv)=mpsc::channel();let ctx=ctx.clone();
         let resources = Arc::new(std::sync::Mutex::new(Resources::default()));
         let worker_resources = resources.clone();
-        std::thread::spawn(move||{let _=send.send(scene_model(&documents,&flags,&catalog,&mut worker_resources.lock().unwrap()));ctx.request_repaint();});
-        Self{resources,particles:Vec::new(),particle_clock:None,particles_paused:false,particle_center:[0.0;3],particle_scale:1.0,camera_direction:-1.0,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,gpu:None,gpu_error:Default::default(),yaw:0.3,pitch:0.15,zoom:1.0,pan:egui::Vec2::ZERO,background:"checker".into(),rgb:[0;3]}
+        std::thread::spawn(move||{let _=send.send(scene_model(&documents,&flags,&catalog,&mut worker_resources.lock().unwrap(),None));ctx.request_repaint();});
+        Self{standalone:None,resources,particles:Vec::new(),particle_clock:None,particles_paused:false,particle_center:[0.0;3],particle_scale:1.0,camera_direction:-1.0,pose_label:None,pending_label:label,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,gpu:None,gpu_error:Default::default(),camera:Camera::default(),background:"checker".into(),rgb:[0;3]}
     }
     pub(crate) fn update_scene(&mut self, ctx: &egui::Context, documents: Vec<crate::Document>,
-        flags: HashMap<String,crate::hierarchy_controls::Flags>, catalog: Arc<HashMap<String,PathBuf>>) -> bool {
+        flags: HashMap<String,crate::hierarchy_controls::Flags>, catalog: Arc<HashMap<String,PathBuf>>,
+        label: Option<&'static str>, animated: bool) -> bool {
         if self.pending.is_some() { return false; }
+        // Keep the last successful scene's framing as poses change. A newly
+        // opened scene establishes its framing on its first successful load.
+        let framing = (animated && self.model.is_some()).then_some((self.particle_center, self.particle_scale));
         let (send, recv) = mpsc::channel();
         let ctx = ctx.clone();
         let resources = self.resources.clone();
         std::thread::spawn(move || {
-            let _ = send.send(scene_model(&documents, &flags, &catalog, &mut resources.lock().unwrap()));
+            let _ = send.send(scene_model(&documents, &flags, &catalog, &mut resources.lock().unwrap(), framing));
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         });
         self.pending = Some(recv);
+        self.pending_label = label;
         true
     }
     pub(crate) fn new(ctx:&egui::Context,path:&Path)->Self {
         let catalog=catalog_for(ctx);let paths=ctx.data_mut(|d|d.get_temp::<Vec<Option<PathBuf>>>(egui::Id::new(("model_materials",path)))).unwrap_or_default();
+        let standalone = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("fbx"))
+            .then(|| {
+                let materials = if paths.is_empty() { imported_material_paths(path, &catalog) } else { paths.clone() };
+                standalone::Setup::new(path, materials)
+            });
         let (send,recv)=mpsc::channel();let path=path.to_owned();let ctx=ctx.clone();
-        std::thread::spawn(move||{let result=load(&path,&paths,&catalog,None).map(|mut m|{normalize(&mut m.triangles);prepare_gpu_model(m,Vec::new(),[0.0;3],1.0)});let _=send.send(result);ctx.request_repaint();});
-        Self{resources:Default::default(),particles:Vec::new(),particle_clock:None,particles_paused:false,particle_center:[0.0;3],particle_scale:1.0,camera_direction:1.0,mode:RenderMode::Solid,pending:Some(recv),model:None,error:None,gpu:None,gpu_error:Default::default(),yaw:0.3,pitch:0.15,zoom:1.0,pan:egui::Vec2::ZERO,background:"checker".into(),rgb:[0;3]}
+        let pending = if standalone.is_none() {
+            std::thread::spawn(move||{let result=load(&path,&paths,&catalog,None).map(|mut m|{normalize(&mut m.triangles);prepare_gpu_model(m,Vec::new(),[0.0;3],1.0)});let _=send.send(result);ctx.request_repaint();});
+            Some(recv)
+        } else { None };
+        Self{standalone,resources:Default::default(),particles:Vec::new(),particle_clock:None,particles_paused:false,particle_center:[0.0;3],particle_scale:1.0,camera_direction:1.0,pose_label:None,pending_label:None,mode:RenderMode::Solid,pending,model:None,error:None,gpu:None,gpu_error:Default::default(),camera:Camera::default(),background:"checker".into(),rgb:[0;3]}
     }
     pub(crate) fn scene_pending(&self) -> bool { self.pending.is_some() }
-    pub(crate) fn fit(&mut self){self.zoom=1.0;self.pan=egui::Vec2::ZERO;}
-    pub(crate) fn reset(&mut self){self.fit();self.yaw=0.3;self.pitch=0.15;}
+    pub(crate) fn fit(&mut self){self.camera.zoom=1.0;self.camera.pan=egui::Vec2::ZERO;}
+    pub(crate) fn reset(&mut self){self.camera=Camera::default();}
     pub(crate) fn show_scene(&mut self,ui:&mut egui::Ui,background:&str,rgb:[u8;3],continuous:bool,refresh_enabled:bool,fixed_view:bool)->bool {
         
         self.background=background.into();self.rgb=rgb;self.show_inner(ui,false,continuous,refresh_enabled,fixed_view)
     }
     pub(crate) fn show(&mut self,ui:&mut egui::Ui)->bool {
-        self.show_inner(ui,true,false,false,false)
+        let Some(setup) = &mut self.standalone else { return self.show_inner(ui,true,false,false,false); };
+        let (area, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        let width = if setup.expanded { (area.width() * 0.33).clamp(140.0, 265.0).min(area.width() * 0.5) } else { 0.0 };
+        let sidebar = egui::Rect::from_min_max(area.min,
+            egui::pos2(area.left() + width, area.bottom()));
+        let gap = if setup.expanded { 8.0 } else { 0.0 };
+        let canvas = egui::Rect::from_min_max(egui::pos2((sidebar.right() + gap).min(area.right()), area.top()), area.max);
+        if setup.expanded {
+            ui.painter().rect_filled(sidebar, 0.0, ui.visuals().faint_bg_color);
+            let mut panel = ui.new_child(egui::UiBuilder::new().id_salt("fbx_assets").max_rect(sidebar.shrink(5.0)));
+            panel.set_clip_rect(sidebar.intersect(ui.clip_rect()));
+            setup.panel(&mut panel, sidebar);
+        }
+        setup.tick(ui.ctx());
+        if !setup.comparing() && setup.dirty && self.pending.is_none() {
+            let request = setup.request();
+            let (send, receive) = mpsc::channel();
+            let ctx = ui.ctx().clone();
+            let catalog = catalog_for(&ctx);
+            let resources = self.resources.clone();
+            let framing = self.model.as_ref().map(|_| (self.particle_center, self.particle_scale));
+            std::thread::spawn(move || {
+                let result = standalone::render(request, &catalog, &mut resources.lock().unwrap(), framing);
+                let _ = send.send(result);
+                ctx.request_repaint();
+            });
+            self.pending = Some(receive);
+        }
+        let mut view = ui.new_child(egui::UiBuilder::new().id_salt("fbx_canvas").max_rect(canvas));
+        view.set_clip_rect(canvas.intersect(ui.clip_rect()));
+        let reload = if setup.comparing() {
+            view.label(crate::localization::tr("左右对比期间，原预览已暂停渲染。"));
+            false
+        } else {
+            self.show_inner(&mut view,true,false,false,false)
+        };
+        let setup = self.standalone.as_mut().unwrap();
+        if reload {
+            self.resources = Default::default();
+            self.pending = None;
+            setup.dirty = true;
+        }
+        setup.show_timeline(ui.ctx());
+        setup.show_comparison(ui.ctx(), &self.background, self.rgb,
+            self.model.as_ref().map(|_| (self.particle_center, self.particle_scale)));
+        if setup.dirty && self.pending.is_none() { ui.ctx().request_repaint(); }
+        false
+    }
+    pub(crate) fn drop_file(&mut self, point: egui::Pos2, path: &Path, batch: bool) -> bool {
+        self.standalone.as_mut().is_some_and(|setup| setup.drop_file(point, path, batch))
     }
     fn show_inner(&mut self,ui:&mut egui::Ui,controls:bool,continuous:bool,refresh_enabled:bool,fixed_view:bool)->bool {
         let mut reload=false;
         if controls {ui.horizontal_wrapped(|ui|{
+            if let Some(setup) = &mut self.standalone {
+                let label = crate::localization::tr("贴图与动作设置");
+                let button = ui.add_sized([24.0, 22.0], egui::Button::new("").frame(true)).on_hover_text(label);
+                let center = button.rect.center();
+                let direction = if setup.expanded { -1.0 } else { 1.0 };
+                let points = [egui::vec2(-3.5 * direction, -4.5), egui::vec2(3.5 * direction, 0.0),
+                    egui::vec2(-3.5 * direction, 4.5)];
+                ui.painter().add(egui::Shape::convex_polygon(points.map(|point| center + point).to_vec(),
+                    ui.style().interact(&button).fg_stroke.color, egui::Stroke::NONE));
+                if button.clicked() {
+                    setup.expanded = !setup.expanded;
+                    ui.ctx().request_repaint();
+                }
+            }
             egui::ComboBox::from_id_salt("model_render_mode").width(96.0).selected_text(self.mode.label()).show_ui(ui,|ui| {
                 for mode in [RenderMode::Solid,RenderMode::Overlay,RenderMode::Wire] {ui.selectable_value(&mut self.mode,mode,mode.label());}
             });
-            ui.label("静态模型");if ui.button("适应窗口").clicked(){self.zoom=1.0;self.pan=egui::Vec2::ZERO;}
-            if ui.button("重置视角").clicked(){self.yaw=0.3;self.pitch=0.15;self.pan=egui::Vec2::ZERO;self.zoom=1.0;}
+            if self.standalone.is_none() { ui.label("静态模型"); } if ui.button("适应窗口").clicked(){self.fit();}
+            if ui.button("重置视角").clicked(){self.reset();}
             crate::theme::shared_preview_background(ui,&mut self.background,&mut self.rgb);
             reload=ui.button("重载").clicked();
         });}
         ui.small(if fixed_view {
             crate::localization::tr("XY 正交视图 · 滚轮缩放 · 拖动平移")
-        } else if controls {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；无光照主贴图预览，暂不还原 Shader、骨骼动画及 Prefab 骨骼姿势。FBX 多网格显示整个模型。"} else {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；网格保留父级变换与静态骨骼姿势，精灵和Spine使用静态平面。"});
+        } else if self.standalone.is_some() {crate::localization::tr("左键旋转 · 右键平移 · 滚轮缩放")} else if controls {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；无光照主贴图预览，暂不还原 Shader、骨骼动画及 Prefab 骨骼姿势。FBX 多网格显示整个模型。"} else {"左键旋转 · 右键平移 · 滚轮围绕鼠标缩放；网格保留父级变换与静态骨骼姿势，精灵和Spine使用静态平面。"});
         if let Some(result) = self.pending.as_ref().and_then(|receiver| receiver.try_recv().ok()) {
             self.pending = None;
+            if self.standalone.as_ref().is_some_and(standalone::Setup::stale_result) {
+                ui.ctx().request_repaint();
+                return reload;
+            }
             match result {
                 Ok(prepared) => {
+                    if let Some(info) = prepared.standalone && let Some(setup) = &mut self.standalone { setup.loaded(info); }
+                    self.pose_label = self.pending_label;
                     let mut old: HashMap<_, _> = std::mem::take(&mut self.particles).into_iter()
                         .map(|particle| (particle.emitter.id.clone(), particle.emitter)).collect();
                     self.particles = prepared.particles;
@@ -441,7 +668,10 @@ impl Preview {
                     self.model = Some(prepared.model);
                     self.error = None;
                 }
-                Err(error) => self.error = Some(error),
+                Err(error) => {
+                    if let Some(setup) = &mut self.standalone { setup.failed(); }
+                    self.error = Some(error);
+                }
             }
         }
         if self.pending.is_some() && self.model.is_none(){ui.spinner();return reload;}if let Some(e)=&self.error{ui.colored_label(Color32::RED,e);return reload;}
@@ -472,42 +702,19 @@ impl Preview {
             self.particle_clock = None;
         }
         let (rect,response)=ui.allocate_exact_size(ui.available_size().max(egui::vec2(1.0,1.0)),egui::Sense::drag());
-        let primary_drag = response.dragged_by(egui::PointerButton::Primary);
-        if primary_drag && !fixed_view {
-            let delta = ui.input(|input| input.pointer.delta());
-            self.yaw += delta.x * 0.01;
-            self.pitch = (self.pitch + delta.y * 0.01).clamp(-1.5, 1.5);
-        }
-        if response.dragged_by(egui::PointerButton::Secondary) || (primary_drag && fixed_view) {
-            self.pan += ui.input(|input| input.pointer.delta());
-        }
-        if response.hovered(){let scroll=ui.input(|i|i.smooth_scroll_delta.y);if scroll!=0.0{
-            let next=(self.zoom*(scroll*0.002).exp()).clamp(0.05,20.0);
-            if let Some(pointer)=ui.input(|i|i.pointer.hover_pos()){self.pan=zoom_pan(self.pan,pointer-rect.center(),next/self.zoom);}
-            self.zoom=next;
-        }}
+        self.camera.interact(ui, &response, fixed_view);
         ui.painter().add(crate::static_preview::background_shape(rect,&self.background,self.rgb));
         if continuous {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
         }
         let painter=ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         if let Some((scene, depth_groups, sorting)) = &self.gpu {
-            let (sy, cy) = if fixed_view { (0.0, 1.0) } else { self.yaw.sin_cos() };
-            let (sp, cp) = if fixed_view { (0.0, 1.0) } else { self.pitch.sin_cos() };
-            let scale = rect.width().min(rect.height()) * 1.5 * self.zoom;
-            let x = scale / rect.width().max(1.0);
-            let y = scale / rect.height().max(1.0);
-            let z = -self.camera_direction * 0.5;
-            let projection = [
-                [cy*x, 0.0, sy*x, 2.0*self.pan.x/rect.width().max(1.0)],
-                [sy*sp*y, cp*y, -cy*sp*y, -2.0*self.pan.y/rect.height().max(1.0)],
-                [-sy*cp*z, sp*z, cy*cp*z, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ];
+            let projection = self.camera.projection(rect, fixed_view, self.camera_direction);
             let mode = match self.mode { RenderMode::Solid => 0.0, RenderMode::Overlay => 1.0, RenderMode::Wire => 2.0 };
             let (scene, depth_groups) = if self.particles.is_empty() {
                 (scene.clone(), depth_groups.clone())
             } else {
+                let [(sy, cy), (sp, cp)] = self.camera.angles(fixed_view);
                 let axes = [[cy, 0.0, sy], [sy*sp, cp, -cy*sp]];
                 let mut draws: Vec<_> = sorting.iter().copied().zip(scene.draws.iter().cloned()).collect();
                 let mut count = 0;
@@ -531,15 +738,17 @@ impl Preview {
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, error, egui::FontId::proportional(13.0), Color32::RED);
         }
         let stats=painter.layout_no_wrap(format!("顶点：{}\n三角面：{}",model.vertex_count,model.triangles.len()),egui::FontId::proportional(13.0),Color32::WHITE);
-        let stats_rect=egui::Rect::from_min_size(rect.min+egui::vec2(8.0,8.0),stats.size()+egui::vec2(24.0,12.0));
+        let stats_y = self.pose_label.map_or(rect.top() + 8.0, |label|
+            crate::static_preview::paint_pose_badge(&painter, rect, label).bottom() + 4.0);
+        let stats_rect=egui::Rect::from_min_size(egui::pos2(rect.left()+8.0,stats_y),stats.size()+egui::vec2(24.0,12.0));
         painter.rect_filled(stats_rect,6.0,Color32::from_black_alpha(128));
         painter.galley(stats_rect.min+egui::vec2(12.0,6.0),stats,Color32::WHITE);
-        let galley=painter.layout_no_wrap(format!("{:.0}%",self.zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE);
+        let galley=painter.layout_no_wrap(format!("{:.0}%",self.camera.zoom*100.0),egui::FontId::proportional(13.0),Color32::WHITE);
         let badge_size=galley.size()+egui::vec2(24.0,12.0);
         let badge=egui::Rect::from_center_size(egui::pos2(rect.center().x,rect.bottom()-8.0-badge_size.y*0.5),badge_size);
         painter.rect_filled(badge,6.0,Color32::from_black_alpha(128));
         painter.galley(badge.min+egui::vec2(12.0,6.0),galley,Color32::WHITE);
-        if let Some(value)=crate::theme::zoom_preset_menu(ui,badge,self.zoom,badge.right()-12.0){self.zoom=value;self.pan=egui::Vec2::ZERO;}
+        if let Some(value)=crate::theme::zoom_preset_menu(ui,badge,self.camera.zoom,badge.right()-12.0){self.camera.zoom=value;self.camera.pan=egui::Vec2::ZERO;}
         reload
     }
 }
@@ -725,6 +934,22 @@ mod tests {
         assert_eq!(composed.a(),255);
         assert!(composed.b()>200 && composed.r()<30);
     }
+    #[test]
+    fn comparison_framing_preserves_motion_between_sides_and_across_frames() {
+        let raw = "--- !u!1 &1\nGameObject:\n  m_Name: Root\n--- !u!4 &2\nTransform:\n  m_GameObject: {fileID: 1}\n  m_Father: {fileID: 0}\n--- !u!1 &3\nGameObject:\n  m_Name: Quad\n--- !u!4 &4\nTransform:\n  m_GameObject: {fileID: 3}\n  m_Father: {fileID: 2}\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n--- !u!33 &5\nMeshFilter:\n  m_GameObject: {fileID: 3}\n  m_Mesh: {fileID: 10210, guid: 0000000000000000e000000000000000, type: 0}\n--- !u!23 &6\nMeshRenderer:\n  m_GameObject: {fileID: 3}\n";
+        let mut docs = crate::parse_unity_yaml(raw);
+        let mut renderer = ComparisonRenderer::default();
+        let mut sample = |x: &str| {
+            let transform = docs.iter_mut().find(|doc| doc.file_id == "4").unwrap();
+            assert!(crate::static_preview::prefab::patch(transform, "m_LocalPosition.x", x));
+            let scene = renderer.prepare(&docs, &HashMap::new(), &Arc::default()).unwrap();
+            scene.gpu.0.draws[0].vertices[0].position[0]
+        };
+        let initial = sample("0");
+        assert!((sample("0.125") - initial - 0.125).abs() < 0.00001);
+        assert!((sample("0.25") - initial - 0.25).abs() < 0.00001);
+    }
+
     #[test]
     fn scene_local_triangle_mesh_needs_no_guid() {
         let source=include_str!("../tests/fixtures/l9584_river1.asset");

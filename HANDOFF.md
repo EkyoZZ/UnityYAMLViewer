@@ -1,6 +1,34 @@
-# 1.3.7 本地发布候选
+# 1.3.8 本地测试构建
 
-- 用户确认文字改色验证通过。发布候选 target/releases/v1.3.7/UnityYAMLViewer-v1.3.7-windows-x64.exe 与已验证 EXE 一致，36,965,376 字节，SHA-256 `ab7c79514b6807f2fa13d56e2527b87ee36bf7bffcb2cb2e068b978d324be629`，PE AMD64。发布说明位于 docs/releases/1.3.7.md。标签、推送及 GitHub Release 待正式发布。
+- 1.3.8 待发布。复用姜饼人单面渲染实测通过的构建，发布候选与本地校验文件已放入 `target/releases/v1.3.8/` 并核对 SHA-256。发布说明位于 `docs/releases/1.3.8.md`。待用户提交并推送后核对提交与发布候选。
+
+- 2026-11-26 经用户授权编译独立 FBX 单面剔除修复测试版，进程和目标 EXE 占用检查通过。本地 Release 构建成功，文件及产品版本均为 1.3.8，大小 37605376 字节，SHA-256 `250de383318cde1e2f3660beede16e1b808af53b1ed6f0bde46715ce4b96f9e9`，已同步本地校验文件。构建日志为 `target/v1.3.8-cull-back-build.log`。
+
+- 2026-11-26 经用户授权编译材质槽对齐测试版，进程与目标 EXE 占用检查通过。本地 Release 构建成功，文件及产品版本均为 1.3.8，大小 37602304 字节，SHA-256 `d74345cc0c7fb50fdbc97a69b9f5c11dcef0079d3e2e550e99a148579fd8d7d7`，已同步本地校验文件。构建日志为 `target/v1.3.8-material-alignment-build.log`。
+
+- 2026-11-26 经用户授权编译独立 FBX 左右对比测试版，进程和 EXE 占用检查通过，本地 Release 构建成功。文件及产品版本为 1.3.8，大小 37602304 字节，SHA-256 `f90d54ef2bbc0d15813735e1a2ab100227a632772067bf960b5742a8b8017b9e`，已同步本地校验文件。日志为 `target/v1.3.8-standalone-fbx-comparison-build.log`。
+
+- 2026-11-26 经用户授权编译材质槽按钮测试版，进程和 EXE 占用检查通过，本地 Release 构建成功。文件及产品版本为 1.3.8，大小 37,586,944 字节，SHA-256 `3b8fedb1c5e078d5223c129c6e5b106f196efb76c8205bd2837077996ea027ce`，已同步本地校验文件。日志为 `target/v1.3.8-material-slot-build.log`。
+
+- 2026-11-26 经用户授权构建独立 FBX 时间轴布局测试版。进程和目标 EXE 独占访问检查通过，`cargo build --release --locked --offline` 成功。产物 `target/release/unity_yaml_viewer.exe` 的文件和产品版本均为 1.3.8，大小 37,724,160 字节，SHA-256 `89aa55a6effaf70f1df95637e8d83a8752267581c489f658120d2e037880dd94`，已同步本地校验文件。构建日志为 `target/v1.3.8-timeline-layout-build.log`。时间轴布局及滚动操作待实测。
+
+- 2026-11-26 经用户授权构建独立 FBX 关键帧优化测试版。进程和目标 EXE 独占访问检查通过，`cargo build --release --locked --offline` 成功。产物 `target/release/unity_yaml_viewer.exe` 的文件和产品版本均为 1.3.8，大小 37,763,072 字节，SHA-256 `7814cff981ea6da8d7f5c5e01ceff7cdf4480b9d181b0bcdc690bfd341a0a65c`，已同步本地校验文件。构建日志为 `target/v1.3.8-standalone-fbx-optimization-build.log`。独立动作减键预览及保存待实测。
+
+- 2026-11-26 经用户授权构建独立 FBX 预览测试版。进程和目标 EXE 独占访问检查通过，`cargo build --release --locked --offline` 成功。产物 `target/release/unity_yaml_viewer.exe` 的文件和产品版本均为 1.3.8，大小 37,494,272 字节，SHA-256 `be8169d350ddac9137d584555b6405c601d26aca1cf20b3f64b2d6e30d1dd216`，已同步本地校验文件。日志为 `target/v1.3.8-standalone-fbx-build.log`。包含同目录自动识别及手动重新扫描，姜饼人的实际贴图、拖放、时间轴和蒙皮待测试。
+
+- 2026-11-26 经用户授权构建 FBX 保存测试版。进程及目标 EXE 独占访问检查通过，`cargo build --release --locked --offline` 成功。产物 `target/release/unity_yaml_viewer.exe` 的文件和产品版本均为 1.3.8，大小 37,353,984 字节，SHA-256 `a3ded0120fcd5cdb21d734d1dd2314606ad4c98f6f56b067cca1f3c399b1ec4d`，已同步本地校验文件。日志为 `target/v1.3.8-fbx-save-build.log`。用户将测试 children@listen 的保存及 Unity 重新导入后的引用。
+
+- 2026-11-26 经用户授权重编固定取景测试版。进程及 EXE 独占访问检查通过，`cargo build --release --locked --offline` 成功。产物 `target/release/unity_yaml_viewer.exe` 的文件和产品版本均为 1.3.8，大小 37,283,840 字节，SHA-256 `ff6e459ea2326b22943c2de9d0ea1a6a989fcfa3210f02665791c7a907e76651`，已同步本地校验文件。日志为 `target/v1.3.8-fixed-framing-build.log`。原预览 2D 和 3D 的固定取景及影子表现待实测。
+
+以下为上一轮构建记录。
+
+- 2026-11-26 经用户授权构建。主程序进程检查和目标 EXE 独占访问检查通过，`cargo build --release --locked --offline` 成功。
+- 产物为 `target/release/unity_yaml_viewer.exe`，文件及产品版本均为 1.3.8，大小为 37,328,384 字节。SHA-256 为 `3667161ef590395149f9f793ff7d540e5c037acd5f6b99716713906592c84af4`，已同步本地校验文件。构建日志位于 `target/v1.3.8-animation-comparison-build.log`。
+- 包含关键帧优化的左右同步对比窗口及单独预览的草稿标签。实际动作和界面待验证。
+
+# 1.3.7 正式发布
+
+- 用户确认文字改色验证通过。发布候选 target/releases/v1.3.7/UnityYAMLViewer-v1.3.7-windows-x64.exe 与已验证 EXE 一致，36,965,376 字节，SHA-256 `ab7c79514b6807f2fa13d56e2527b87ee36bf7bffcb2cb2e068b978d324be629`，PE AMD64。发布说明位于 docs/releases/1.3.7.md。已发布 [v1.3.7](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.7)，标签指向 `db6afaa43fbfc2a4bc37c16af4357c7cb78b0573`，附件哈希与大小及 Latest 已核对。
 
 # 最新PS安装器本地构建：0.1.0
 

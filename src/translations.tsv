@@ -706,6 +706,7 @@ RGBA 差异示例	RGBA 差異範例	RGBA difference example	RGBA 差分の例	RG
 已安全精简此方向。	已安全精簡此方向。	This axis was safely compacted.	この軸を安全に縮約しました。	해당 축을 안전하게 줄였습니다.	Diese Achse wurde sicher verkleinert.	Cet axe a été réduit sans perte.
 原位替换	原位替換	Replace in Place	元の場所で置換	원본 교체	Original ersetzen	Remplacer l’original
 另存为	另存為	Save As	名前を付けて保存	다른 이름으로 저장	Speichern unter	Enregistrer sous
+FBX 草稿可预览，FBX 写回暂未支持。	FBX 草稿可預覽，暫未支援寫回 FBX。	FBX drafts can be previewed. Saving to FBX is pending.	FBX の下書きはプレビューできます。FBX への保存は未対応です。	FBX 초안을 미리 볼 수 있습니다. FBX 저장은 아직 지원되지 않습니다.	FBX-Entwürfe sind in der Vorschau verfügbar. Das Speichern als FBX wird noch nicht unterstützt.	Les brouillons FBX sont disponibles en aperçu. L’enregistrement au format FBX reste à venir.
 边界	邊界	Borders	境界	테두리	Ränder	Bordures
 上	上	Top	上	위	Oben	Haut
 下	下	Bottom	下	아래	Unten	Bas
@@ -2531,6 +2532,22 @@ Tile	Tile	Tile	Tile	Tile	Tile	Tile
 仅在预览中激活	僅在預覽中啟用	Activate in preview only	プレビューでのみ有効化	미리보기에서만 활성화	Nur in der Vorschau aktivieren	Activer uniquement dans la prévisualisation
 实例覆盖	實例覆寫	Instance override	インスタンスのオーバーライド	인스턴스 오버라이드	Instanzüberschreibung	Remplacement sur cette instance
 动画预览	動畫預覽	Animation Preview	アニメーションプレビュー	애니메이션 미리보기	Animationsvorschau	Aperçu de la animation
+查看时间轴	檢視時間軸	View timeline	タイムラインを表示	타임라인 보기	Zeitleiste anzeigen	Afficher la chronologie
+贴图与动作设置	貼圖與動作設定	Texture and motion settings	テクスチャとモーションの設定	텍스처 및 동작 설정	Textur- und Animationseinstellungen	Paramètres de texture et de mouvement
+识别同目录素材	辨識同資料夾素材	Detect nearby assets	同じフォルダーの素材を検出	같은 폴더의 에셋 찾기	Ressourcen im Ordner erkennen	Détecter les ressources du dossier
+贴图	貼圖	Texture	テクスチャ	텍스처	Textur	Texture
+指定贴图	指定貼圖	Assign texture	テクスチャを指定	텍스처 지정	Textur zuweisen	Attribuer une texture
+动作	動作	Motions	モーション	동작	Animationen	Mouvements
+加载动作	載入動作	Load motion	モーションを読み込む	동작 불러오기	Animation laden	Charger un mouvement
+透明	透明	Transparent	透明	투명	Transparent	Transparent
+不透明	不透明	Opaque	不透明	불투명	Undurchsichtig	Opaque
+双面	雙面	Two-sided	両面	양면	Doppelseitig	Double face
+单面	單面	One-sided	片面	단면	Einseitig	Simple face
+左键旋转 · 右键平移 · 滚轮缩放	左鍵旋轉 · 右鍵平移 · 滾輪縮放	Left drag to orbit · Right drag to pan · Scroll to zoom	左ドラッグで回転 · 右ドラッグで移動 · ホイールで拡大縮小	왼쪽 드래그로 회전 · 오른쪽 드래그로 이동 · 휠로 확대 및 축소	Links ziehen zum Drehen · Rechts ziehen zum Verschieben · Scrollen zum Zoomen	Glisser à gauche pour pivoter · À droite pour déplacer · Molette pour zoomer
+FBX 中没有可播放的动作	FBX 中沒有可播放的動作	No playable motion in the FBX	FBX に再生できるモーションがありません	FBX에 재생할 수 있는 동작이 없습니다	Keine abspielbare Animation in der FBX-Datei	Aucun mouvement lisible dans le FBX
+动作与模型的坐标轴不匹配	動作與模型的座標軸不相符	Motion and model axes do not match	モーションとモデルの座標軸が一致しません	동작과 모델의 좌표축이 일치하지 않습니다	Koordinatenachsen von Animation und Modell stimmen nicht überein	Les axes du mouvement et du modèle diffèrent
+动作骨骼与模型不匹配	動作骨骼與模型不相符	Motion skeleton does not match the model	モーションの骨格がモデルと一致しません	동작의 스켈레톤이 모델과 일치하지 않습니다	Das Animationsskelett passt nicht zum Modell	Le squelette du mouvement ne correspond pas au modèle
+动作包含无效的骨骼变换	動作包含無效的骨骼變換	The motion contains an invalid bone transform	モーションに無効なボーン変換が含まれています	동작에 잘못된 본 변환이 있습니다	Die Animation enthält eine ungültige Knochentransformation	Le mouvement contient une transformation d’os invalide
 未找到可预览的动画资源	未找到可預覽的動畫資源	No previewable animation assets found	プレビュー可能なアニメーションが見つかりません	미리 볼 애니메이션 에셋이 없습니다	Keine Animation für die Vorschau gefunden	Aucune animation prévisualisable
 预览选中动画	預覽選取的動畫	Preview selected animation	選択したアニメーションをプレビュー	선택한 애니메이션 미리보기	Ausgewählte Animation anzeigen	Prévisualiser la sélection
 UI 布局层级无效	UI 版面層級無效	Invalid UI layout hierarchy	UI レイアウト階層が無効です	UI 레이아웃 계층이 잘못되었습니다	Ungültige UI-Layouthierarchie	Hiérarchie de mise en page UI invalide
@@ -2538,3 +2555,24 @@ UI 布局层级无效	UI 版面層級無效	Invalid UI layout hierarchy	UI レ�
 显示所有属性的关键帧	顯示所有屬性的關鍵影格	Show keyframes for all properties	すべてのプロパティのキーフレームを表示	모든 속성의 키프레임 표시	Keyframes aller Eigenschaften anzeigen	Afficher les images clés de toutes les propriétés
 上一关键帧	上一個關鍵影格	Previous keyframe	前のキーフレーム	이전 키프레임	Vorheriges Keyframe	Image clé précédente
 下一关键帧	下一個關鍵影格	Next keyframe	次のキーフレーム	다음 키프레임	Nächstes Keyframe	Image clé suivante
+关键帧优化	關鍵影格最佳化	Optimize Keyframes	キーフレーム最適化	키프레임 최적화	Keyframes optimieren	Optimiser les clés
+误差阈值	誤差閾值	Error tolerance	誤差の許容値	오차 허용치	Fehlertoleranz	Tolérance d’erreur
+生成优化草稿	產生最佳化草稿	Generate draft	下書きを生成	초안 생성	Entwurf erstellen	Générer le brouillon
+预览优化草稿	預覽最佳化草稿	Preview draft	下書きをプレビュー	초안 미리보기	Entwurf anzeigen	Afficher le brouillon
+放弃草稿	捨棄草稿	Discard draft	下書きを破棄	초안 버리기	Entwurf verwerfen	Ignorer le brouillon
+最大曲线误差	最大曲線誤差	Maximum curve error	最大カーブ誤差	최대 곡선 오차	Maximaler Kurvenfehler	Erreur de courbe maximale
+节点最大位置偏差	節點最大位置偏差	Maximum node displacement	ノードの最大位置差	최대 노드 위치 차이	Maximale Knotenabweichung	Écart de position maximal des nœuds
+对照节点	對照節點	Compared nodes	比較したノード	비교 노드	Verglichene Knoten	Nœuds comparés
+采样时间点	取樣時間點	Sample times	サンプル時刻	샘플 시간	Abtastzeitpunkte	Instants échantillonnés
+挂点最大位置偏差	掛點最大位置偏差	Maximum attachment displacement	アタッチメントの最大位置差	최대 부착점 위치 차이	Maximale Ankerabweichung	Écart de position maximal des attaches
+挂点	掛點	Attachments	アタッチメント	부착점	Anker	Attaches
+正在比较动画姿态…	正在比較動畫姿勢…	Comparing animation poses…	アニメーションの姿勢を比較中…	애니메이션 자세 비교 중…	Animationsposen werden verglichen…	Comparaison des poses…
+没有可对照的动画节点	沒有可對照的動畫節點	No animation nodes to compare	比較できるアニメーションノードがありません	비교할 애니메이션 노드가 없습니다	Keine Animationsknoten zum Vergleich	Aucun nœud d’animation à comparer
+左右同步对比	左右同步比較	Compare side by side	左右同期比較	좌우 동기 비교	Synchroner Direktvergleich	Comparaison côte à côte
+优化前	最佳化前	Before optimization	最適化前	최적화 전	Vor der Optimierung	Avant optimisation
+优化后	最佳化後	After optimization	最適化後	최적화 후	Nach der Optimierung	Après optimisation
+优化后 · 草稿	最佳化後 · 草稿	After optimization · Draft	最適化後 · 下書き	최적화 후 · 초안	Nach der Optimierung · Entwurf	Après optimisation · Brouillon
+左右对比期间，原预览已暂停渲染。	左右比較期間，原預覽已暫停繪製。	Preview rendering is paused during side-by-side comparison.	左右比較中は元のプレビューの描画を一時停止します。	좌우 비교 중에는 기존 미리보기 렌더링이 일시 정지됩니다.	Die Hauptvorschau pausiert während des Direktvergleichs.	Le rendu de l’aperçu principal est suspendu pendant la comparaison.
+对比预览准备失败	比較預覽準備失敗	Could not prepare the comparison preview	比較プレビューを準備できませんでした	비교 미리보기를 준비할 수 없습니다	Vergleichsvorschau konnte nicht vorbereitet werden	Impossible de préparer l’aperçu comparatif
+左右对比需要可显示的模型或精灵。	左右比較需要可顯示的模型或精靈。	Side-by-side comparison needs a visible model or sprite.	左右比較には表示可能なモデルまたはスプライトが必要です。	좌우 비교에는 표시할 수 있는 모델이나 스프라이트가 필요합니다.	Für den Direktvergleich wird ein sichtbares Modell oder Sprite benötigt.	La comparaison nécessite un modèle ou un sprite visible.
+重置视角	重設視角	Reset view	視点をリセット	시점 초기화	Ansicht zurücksetzen	Réinitialiser la vue

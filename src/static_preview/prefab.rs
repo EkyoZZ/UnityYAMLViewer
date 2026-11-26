@@ -453,7 +453,7 @@ fn model_hierarchy(
             .map_or(root, String::as_str);
         let local = node.local_transform;
         let name = node.element.name.as_ref().replace(['\r', '\n'], " ");
-        writeln!(text, "--- !u!1 &{object}\nGameObject:\n  m_Name: {name}\n  m_IsActive: 1\n--- !u!4 &{transform}\nTransform:\n  m_GameObject: {{fileID: {object}}}\n  m_Father: {{fileID: {parent}}}\n  m_LocalPosition: {{x: {}, y: {}, z: {}}}\n  m_LocalRotation: {{x: {}, y: {}, z: {}, w: {}}}\n  m_LocalScale: {{x: {}, y: {}, z: {}}}",
+        writeln!(text, "--- !u!1 &{object}\nGameObject:\n  m_Name: {name}\n  m_IsActive: 1\n--- !u!4 &{transform}\nTransform:\n  m_GameObject: {{fileID: {object}}}\n  m_Father: {{fileID: {parent}}}\n  preview_FbxNode: 1\n  m_LocalPosition: {{x: {}, y: {}, z: {}}}\n  m_LocalRotation: {{x: {}, y: {}, z: {}, w: {}}}\n  m_LocalScale: {{x: {}, y: {}, z: {}}}",
             -local.translation.x * scale, local.translation.y * scale, local.translation.z * scale,
             local.rotation.x, -local.rotation.y, -local.rotation.z, local.rotation.w,
             local.scale.x, local.scale.y, local.scale.z).unwrap();

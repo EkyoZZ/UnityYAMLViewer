@@ -319,6 +319,9 @@ pub struct Assets {
 
 }
 impl Assets {
+    pub(crate) fn drop_model_file(&mut self, model: &Path, point: egui::Pos2, file: &Path, batch: bool) -> bool {
+        self.models.get_mut(model).is_some_and(|preview| preview.drop_file(point, file, batch))
+    }
     pub fn open_pixel_tile(&mut self,ctx:&egui::Context) {
         self.tile_editor.open=true;
         crate::native_window::wake(ctx,egui::Id::new(("pixel_tile",Path::new(""))));

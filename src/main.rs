@@ -1751,7 +1751,14 @@ impl eframe::App for ViewerApp {
                     .filter_map(|file| file.path.clone())
                     .collect::<Vec<_>>()
             });
+            let batch = dropped_paths.len() > 1;
             for path in dropped_paths {
+                if let Some(point) = native_window::file_drop_position(ctx)
+                    && let Some(model) = &self.path
+                    && self.assets.drop_model_file(model, point, &path, batch) {
+                    ctx.request_repaint();
+                    continue;
+                }
                 self.open_file(path);
             }
         }
