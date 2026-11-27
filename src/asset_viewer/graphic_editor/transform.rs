@@ -170,9 +170,15 @@ fn drag_pose(d: Drag, p: Pos2, bounds: Rect, linked: bool) -> Pose {
     next
 }
 impl Editor {
-    fn transform_allowed(&self) -> bool {
-        let i = self.active_layer;
+    pub(super) fn transform_tool_available(&self) -> bool {
         matches!(self.tool, Tool::Move | Tool::Select)
+            || (self.tool == Tool::Shape && !self.mask_editing
+                && self.layers.get(self.active_layer).is_some_and(|layer| layer.settings.vector.is_some()))
+    }
+
+    pub(super) fn transform_allowed(&self) -> bool {
+        let i = self.active_layer;
+        self.transform_tool_available()
             && !self.elevated
             && self.position_editable(i)
             && self.ancestors_visible(i)
@@ -661,10 +667,10 @@ impl Editor {
     }
     pub(super) fn transform_switch(&mut self, ui: &mut egui::Ui) {
         ui.checkbox(&mut self.show_transform, tr("显示变换控件"))
-            .on_hover_text("Ctrl+H");
+            .on_hover_text(Shortcut::TransformControls.label_key());
         if ui
             .small_button(tr("自由变换"))
-            .on_hover_text("Ctrl+T")
+            .on_hover_text(Shortcut::Transform.label_key())
             .clicked()
         {
             self.begin_transform();
@@ -716,7 +722,7 @@ impl Editor {
         if self.confirm_transform_exit {
             return true;
         }
-        if (!self.show_transform || !matches!(self.tool, Tool::Move | Tool::Select))
+        if (!self.show_transform || !self.transform_tool_available())
             && self.transform.is_none()
         {
             self.path_tool.corner_drag = None;
@@ -741,7 +747,7 @@ impl Editor {
         let local = |p: Pos2| ((p - origin) / zoom).to_pos2();
         let start = ui.input(|i| i.pointer.press_origin()).unwrap_or(pointer);
         if !active
-            && self.tool == Tool::Move
+            && matches!(self.tool, Tool::Move | Tool::Shape)
             && self.corner_input(ui, response, local(start), local(pointer), zoom)
         {
             return true;
@@ -916,7 +922,7 @@ impl Editor {
         hit.is_some()
     }
     pub(super) fn transform_outline(&mut self, painter: &egui::Painter, origin: Pos2, zoom: f32) {
-        if !self.show_transform || !matches!(self.tool, Tool::Move | Tool::Select) {
+        if !self.show_transform || !self.transform_tool_available() {
             return;
         }
         let frame = self
@@ -943,7 +949,7 @@ impl Editor {
                 egui::StrokeKind::Inside,
             );
         }
-        if self.tool == Tool::Move
+        if matches!(self.tool, Tool::Move | Tool::Shape)
             && self.transform.is_none()
             && !self.mask_editing
             && let Some(vector::Geometry::Rectangle {

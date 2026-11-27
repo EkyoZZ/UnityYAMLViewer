@@ -69,11 +69,15 @@ pub(super) fn hotkey_editor(ui: &mut egui::Ui, id: &str, binding: &mut Hotkey) {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
+    pub camera: super::camera::Settings,
     pub fps: u32,
     pub quality: usize,
     pub mp4: bool,
     pub mouse: bool,
     pub system_audio: bool,
+    pub microphone: bool,
+    pub capture_diagnostics: bool,
+    pub microphone_device: String,
     pub minimize: bool,
     pub history_limit: usize,
     pub stop: Hotkey,
@@ -82,11 +86,15 @@ pub(super) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            camera: Default::default(),
             fps: 30,
             quality: 1,
             mp4: false,
             mouse: true,
             system_audio: true,
+            microphone: false,
+            capture_diagnostics: false,
+            microphone_device: String::new(),
             minimize: true,
             history_limit: super::history::DEFAULT_LIMIT,
             stop: Hotkey {
@@ -107,7 +115,10 @@ impl Preferences {
             .ok_or_else(|| tr("无法确定录屏设置目录。").to_owned())
     }
     pub fn validate(&self) -> Result<(), String> {
-        if !(1..=60).contains(&self.fps)
+        if self.microphone && (!cfg!(windows) || self.microphone_device.is_empty() || self.microphone_device.contains(['\0', '\r', '\n'])) {
+            return Err(tr("选择麦克风").into());
+        }
+        if !self.camera.valid() || !(1..=60).contains(&self.fps)
             || self.quality > 2
             || !(super::history::MIN_LIMIT..=super::history::MAX_LIMIT)
                 .contains(&self.history_limit)

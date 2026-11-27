@@ -12,6 +12,22 @@ pub(crate) fn command(program:impl AsRef<std::ffi::OsStr>) -> Command {
     command
 }
 
+pub(crate) fn video_thumbnail_png(
+    ffmpeg: &std::path::Path,
+    video: &std::path::Path,
+    width: u32,
+    height: u32,
+) -> Option<Vec<u8>> {
+    let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1");
+    let output = command(ffmpeg)
+        .args(["-nostdin", "-v", "error", "-i"])
+        .arg(video)
+        .args(["-map", "0:V:0", "-frames:v", "1", "-an", "-vf", &filter])
+        .args(["-c:v", "png", "-threads:v", "1", "-f", "image2pipe", "pipe:1"])
+        .output().ok()?;
+    output.status.success().then_some(output.stdout)
+}
+
 pub fn find_tool(name:&str) -> Option<PathBuf> {
     if name=="yt-dlp" {
         let selected=crate::component_paths::selected(name);

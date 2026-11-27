@@ -10,7 +10,9 @@ pub(super) struct Toolbar {
     pub selected: usize,
     pub stop_label: String,
     pub can_start: bool,
-    pub system_audio: bool,
+    pub system_audio: Option<bool>,
+    pub microphone: Option<bool>,
+    pub show_screen_region: bool,
     pub status: String,
     pub result: Option<PathBuf>,
     pub error: Option<String>,
@@ -19,6 +21,7 @@ pub(super) struct Toolbar {
 pub(super) enum Action {
     Toggle,
     ToggleSystemAudio,
+    ToggleMicrophone,
     Settings,
     Close,
     Choose(usize),
@@ -98,14 +101,25 @@ impl View {
             .collect();
         let max_width = work.iter().map(|area| area.width).max().unwrap_or(800) as f32 / scale;
         let previous_groups = self.row_group_widths;
-        let group_widths = if self.row_group_widths.iter().all(|width| *width > 0.0) {
+        let mut group_widths = if self.row_group_widths.iter().all(|width| *width > 0.0) {
             self.row_group_widths
         } else {
             [156.0, 64.0, 64.0, 132.0, 94.0]
         };
+        group_widths[4] = 62.0
+            + 32.0
+                * (u8::from(controls.system_audio.is_some())
+                    + u8::from(controls.microphone.is_some())) as f32;
         // Four inter-group gaps plus the frame's inner margin and stroke.
         // Measure the controls themselves, so result text cannot widen the toolbar.
-        let preferred_width = group_widths.iter().sum::<f32>() + 4.0 * 4.0 + 14.0;
+        if !controls.show_screen_region {
+            group_widths[0] = 122.0;
+        }
+        let preferred_width = if controls.show_screen_region {
+            group_widths.iter().sum::<f32>() + 4.0 * 4.0 + 14.0
+        } else {
+            group_widths[0] + group_widths[4] + 4.0 + 14.0
+        };
         let width = preferred_width.min((max_width - 40.0).max(260.0));
         const PAD: f32 = 12.0;
         let previous_height = if self.body_size.y > 0.0 {
@@ -119,7 +133,7 @@ impl View {
             ((previous_height + PAD * 2.0) * scale).ceil() as i32,
             &work,
         );
-        let menu_height = (controls.items.len() as f32 * 24.0 + 16.0).min(180.0);
+        let menu_height = controls.items.len() as f32 * 30.0 + 16.0;
         let (above, reserve) = popup_space(
             self.combo_open,
             anchor,
@@ -191,46 +205,85 @@ impl View {
                                         .items
                                         .get(controls.selected)
                                         .map_or(tr("指定区域"), String::as_str);
-                                    let combo = ui
-                                        .add_enabled_ui(!recording, |ui| {
-                                            egui::ComboBox::from_id_salt("recording_capture_mode")
-                                                .width(88.0)
-                                                .height((menu_height - 12.0).max(24.0))
-                                                .selected_text(label)
-                                                .show_ui(ui, |ui| {
-                                                    for (index, label) in
-                                                        controls.items.iter().enumerate()
+                                    let popup_id = ui.make_persistent_id("recording_capture_mode");
+                                    let direction = if above {
+                                        egui::AboveOrBelow::Above
+                                    } else {
+                                        egui::AboveOrBelow::Below
+                                    };
+                                    let font = egui::TextStyle::Button.resolve(ui.style());
+                                    let galley = ui.painter().layout_no_wrap(
+                                        label.to_owned(), font, egui::Color32::PLACEHOLDER,
+                                    );
+                                    let response = ui.add_enabled(
+                                        !recording,
+                                        egui::Button::new("")
+                                            .min_size(egui::vec2((galley.size().x + 30.0).max(88.0), 20.0)),
+                                    );
+                                    response.widget_info(|| egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button, !recording, label,
+                                    ));
+                                    let color = ui.style().interact(&response).fg_stroke.color;
+                                    let center = response.rect.center();
+                                    ui.painter().galley(
+                                        egui::pos2(response.rect.left() + 6.0, center.y - galley.size().y / 2.0),
+                                        galley,
+                                        color,
+                                    );
+                                    let arrow = egui::pos2(response.rect.right() - 10.0, center.y);
+                                    let flip = if above { -1.0 } else { 1.0 };
+                                    ui.painter().add(egui::Shape::convex_polygon(
+                                        vec![
+                                            arrow + egui::vec2(-3.5, -2.0 * flip),
+                                            arrow + egui::vec2(3.5, -2.0 * flip),
+                                            arrow + egui::vec2(0.0, 2.0 * flip),
+                                        ],
+                                        color,
+                                        egui::Stroke::NONE,
+                                    ));
+                                    if response.clicked() {
+                                        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+                                    }
+                                    if reserve > 0.0 && !recording {
+                                        popup_rect = egui::popup::popup_above_or_below_widget(
+                                            ui,
+                                            popup_id,
+                                            &response,
+                                            direction,
+                                            egui::popup::PopupCloseBehavior::CloseOnClick,
+                                            |ui| {
+                                                ui.style_mut().wrap_mode =
+                                                    Some(egui::TextWrapMode::Extend);
+                                                for (index, label) in
+                                                    controls.items.iter().enumerate()
+                                                {
+                                                    if ui
+                                                        .selectable_label(
+                                                            index == controls.selected,
+                                                            label,
+                                                        )
+                                                        .clicked()
                                                     {
-                                                        if ui
-                                                            .selectable_label(
-                                                                index == controls.selected,
-                                                                label,
-                                                            )
-                                                            .clicked()
-                                                        {
-                                                            actions.push(Action::Choose(index));
-                                                        }
+                                                        actions.push(Action::Choose(index));
                                                     }
-                                                    ui.min_rect()
-                                                })
-                                        })
-                                        .inner;
-                                    if let Some(rect) = combo.inner {
-                                        popup_rect = Some(
-                                            rect + egui::Frame::popup(ui.style()).total_margin(),
+                                                }
+                                                ui.min_rect()
+                                                    + egui::Frame::popup(ui.style()).total_margin()
+                                            },
                                         );
                                     }
                                     self.combo_open =
-                                        egui::ComboBox::is_open(child, combo.response.id);
+                                        ui.memory(|memory| memory.is_popup_open(popup_id));
                                     if child.input(|input| input.viewport().focused == Some(false))
                                         && self.combo_open
                                     {
                                         child.memory_mut(|memory| memory.close_popup());
                                         self.combo_open = false;
                                     }
-                                    if cross_button(ui, !recording)
-                                        .on_hover_text(tr("重新选择区域"))
-                                        .clicked()
+                                    if controls.show_screen_region
+                                        && cross_button(ui, !recording)
+                                            .on_hover_text(tr("重新选择区域"))
+                                            .clicked()
                                     {
                                         actions.push(Action::Choose(0));
                                         child.memory_mut(|memory| memory.close_popup());
@@ -249,87 +302,66 @@ impl View {
                             );
                             self.row_group_widths[0] =
                                 (group.response.rect.width() * scale).ceil() / scale;
-                            for (index, label) in ["X", "Y"].into_iter().enumerate() {
+                            if controls.show_screen_region {
+                                for (index, label) in ["X", "Y"].into_iter().enumerate() {
+                                    let group = ui.allocate_ui_with_layout(
+                                        egui::vec2(group_widths[index + 1], 30.0),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(egui::RichText::new(label).strong());
+                                            let (changed, apply) = coordinate_field(
+                                                ui,
+                                                &mut self.fields[index],
+                                                editable && !selecting && !recording,
+                                            );
+                                            self.dirty |= changed;
+                                            commit |= apply;
+                                        },
+                                    );
+                                    self.row_group_widths[index + 1] =
+                                        (group.response.rect.width() * scale).ceil() / scale;
+                                }
                                 let group = ui.allocate_ui_with_layout(
-                                    egui::vec2(group_widths[index + 1], 30.0),
+                                    egui::vec2(group_widths[3], 30.0),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        ui.label(egui::RichText::new(label).strong());
-                                        let (changed, apply) = coordinate_field(
-                                            ui,
-                                            &mut self.fields[index],
-                                            editable && !selecting && !recording,
-                                        );
-                                        self.dirty |= changed;
-                                        commit |= apply;
+                                        for index in [2, 3] {
+                                            if index == 3 {
+                                                ui.label("×");
+                                            }
+                                            let (changed, apply) = coordinate_field(
+                                                ui,
+                                                &mut self.fields[index],
+                                                editable && !selecting && !recording,
+                                            );
+                                            self.dirty |= changed;
+                                            commit |= apply;
+                                        }
+                                        ui.label("px");
                                     },
                                 );
-                                self.row_group_widths[index + 1] =
+                                self.row_group_widths[3] =
                                     (group.response.rect.width() * scale).ceil() / scale;
                             }
-                            let group = ui.allocate_ui_with_layout(
-                                egui::vec2(group_widths[3], 30.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    for index in [2, 3] {
-                                        if index == 3 {
-                                            ui.label("×");
-                                        }
-                                        let (changed, apply) = coordinate_field(
-                                            ui,
-                                            &mut self.fields[index],
-                                            editable && !selecting && !recording,
-                                        );
-                                        self.dirty |= changed;
-                                        commit |= apply;
-                                    }
-                                    ui.label("px");
-                                },
-                            );
-                            self.row_group_widths[3] =
-                                (group.response.rect.width() * scale).ceil() / scale;
                             let group = ui.allocate_ui_with_layout(
                                 egui::vec2(group_widths[4], 30.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    let response = ui
-                                        .add_enabled_ui(!recording && controls.can_start, |ui| {
-                                            let response = ui.add_sized(
-                                                [28.0, 28.0],
-                                                egui::Button::new("")
-                                                    .selected(controls.system_audio),
-                                            );
-                                            crate::icons::paint(
+                                    for (state, microphone, action) in [
+                                        (controls.system_audio, false, Action::ToggleSystemAudio),
+                                        (controls.microphone, true, Action::ToggleMicrophone),
+                                    ] {
+                                        if let Some(on) = state
+                                            && audio_button(
                                                 ui,
-                                                crate::icons::Icon::Microphone,
-                                                response.rect.shrink(6.0),
-                                                ui.visuals().text_color(),
-                                            );
-                                            if !controls.system_audio {
-                                                let rect = response.rect.shrink(4.0);
-                                                let stroke = Stroke::new(
-                                                    1.6_f32,
-                                                    Color32::from_rgb(230, 65, 75),
-                                                );
-                                                ui.painter().circle_stroke(
-                                                    rect.center(),
-                                                    rect.width() * 0.5,
-                                                    stroke,
-                                                );
-                                                ui.painter().line_segment(
-                                                    [rect.left_bottom(), rect.right_top()],
-                                                    stroke,
-                                                );
-                                            }
-                                            response.on_hover_text(if controls.system_audio {
-                                                tr("系统声音：开启（不采集麦克风）")
-                                            } else {
-                                                tr("系统声音：关闭")
-                                            })
-                                        })
-                                        .inner;
-                                    if response.clicked() {
-                                        actions.push(Action::ToggleSystemAudio);
+                                                on,
+                                                microphone,
+                                                controls.can_start || recording,
+                                            )
+                                            .clicked()
+                                        {
+                                            actions.push(action);
+                                        }
                                     }
                                     if record_button(
                                         ui,
@@ -635,7 +667,71 @@ fn close_button(ui: &mut egui::Ui) -> egui::Response {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(tr("关闭"))
 }
-fn record_button(ui: &mut egui::Ui, recording: bool, enabled: bool) -> egui::Response {
+pub(super) fn audio_button(
+    ui: &mut egui::Ui,
+    on: bool,
+    microphone: bool,
+    enabled: bool,
+) -> egui::Response {
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            let response = ui.add_sized([28.0, 28.0], egui::Button::new("").selected(on));
+            let ink = ui.style().interact(&response).text_color();
+            if microphone {
+                crate::icons::paint(
+                    ui,
+                    crate::icons::Icon::Microphone,
+                    response.rect.shrink(6.0),
+                    ink,
+                );
+            } else {
+                let center = response.rect.center();
+                let points = [
+                    (-7.0, -3.0),
+                    (-3.0, -3.0),
+                    (1.0, -6.0),
+                    (1.0, 6.0),
+                    (-3.0, 3.0),
+                    (-7.0, 3.0),
+                ];
+                ui.painter().add(egui::Shape::convex_polygon(
+                    points
+                        .into_iter()
+                        .map(|(x, y)| center + egui::vec2(x, y))
+                        .collect(),
+                    ink,
+                    Stroke::NONE,
+                ));
+                ui.painter().add(egui::Shape::line(
+                    vec![
+                        center + egui::vec2(4.0, -4.0),
+                        center + egui::vec2(6.0, 0.0),
+                        center + egui::vec2(4.0, 4.0),
+                    ],
+                    Stroke::new(1.4_f32, ink),
+                ));
+            }
+            if !on {
+                let rect = response.rect.shrink(4.0);
+                let stroke = Stroke::new(1.6_f32, Color32::from_rgb(230, 65, 75));
+                ui.painter()
+                    .circle_stroke(rect.center(), rect.width() * 0.5, stroke);
+                ui.painter()
+                    .line_segment([rect.left_bottom(), rect.right_top()], stroke);
+            }
+            response
+        })
+        .inner;
+    let label = tr(match (microphone, on) {
+        (false, true) => "系统声音已开启",
+        (false, false) => "系统声音已静音",
+        (true, true) => "麦克风已开启",
+        (true, false) => "麦克风已静音",
+    });
+    response.on_hover_text(label)
+}
+
+pub(super) fn record_button(ui: &mut egui::Ui, recording: bool, enabled: bool) -> egui::Response {
     let response = ui
         .add_enabled(
             enabled,

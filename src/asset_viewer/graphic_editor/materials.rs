@@ -31,24 +31,54 @@ impl Editor {
         self.record_layer_change();
         self.materials.push(Material { name: name.chars().take(64).collect(), pixels });
     }
-    pub(super) fn assign_material(&mut self, material: Option<usize>) {
-        let Some(base) = self.ensure_material_base() else { return; };
-        let pixels = match material {
-            Some(i) => match self.materials.get(i) { Some(m) => m.pixels.clone(), None => return },
-            None => RgbaImage::new(self.pixels.width(),self.pixels.height()),
-        };
-        self.set_cell_base(base, pixels);
+    pub(super) fn material_context_menu(&self, ui: &mut egui::Ui) -> Option<Option<usize>> {
+        let mut action = None;
+        if ui.button(tr("清空当前格素材")).clicked() {
+            action = Some(None);
+            ui.close_menu();
+        }
+        ui.menu_button(tr("导入素材"), |ui| {
+            if self.materials.is_empty() {
+                ui.label(tr("素材库为空，请先导入素材。"));
+            }
+            for (index, material) in self.materials.iter().enumerate() {
+                if ui.button(&material.name).clicked() {
+                    action = Some(Some(index));
+                    ui.close_menu();
+                }
+            }
+        });
+        action
     }
+
+    pub(super) fn assign_material(&mut self, material: Option<usize>) {
+        self.assign_material_to_tile(self.selected, material);
+    }
+
+    pub(super) fn assign_material_to_tile(&mut self, tile: usize, material: Option<usize>) {
+        let pixels = match material {
+            Some(index) => match self.materials.get(index) {
+                Some(material) => material.pixels.clone(),
+                None => return,
+            },
+            None => RgbaImage::new(self.pixels.width(), self.pixels.height()),
+        };
+        let Some(base) = self.ensure_material_base() else { return; };
+        self.set_cell_base(base, tile, pixels);
+    }
+
     pub(super) fn import_current_cell(&mut self, image: &RgbaImage) {
         let Some(base) = self.ensure_material_base() else { return; };
-        self.set_cell_base(base, self.centered_image(image.clone()));
+        self.set_cell_base(base, self.selected, self.centered_image(image.clone()));
     }
-    fn set_cell_base(&mut self, base: usize, pixels: RgbaImage) {
-        if self.layers[base].tiles[self.selected] == pixels { return; }
+
+    fn set_cell_base(&mut self, base: usize, tile: usize, pixels: RgbaImage) {
+        if self.layers[base].tiles[tile] == pixels { return; }
         self.record_layer_change();
-        self.layers[base].tiles[self.selected] = pixels;
+        self.layers[base].tiles[tile] = pixels;
         if self.active_layer == base {
-            self.tiles = self.layers[base].tiles.clone(); self.pixels = self.tiles[self.selected].clone();
+            self.tiles = self.layers[base].tiles.clone();
+            self.pixels = self.tiles[self.selected].clone();
         }
     }
     fn import_material_path(&mut self, path: &std::path::Path) -> Result<(),String> {

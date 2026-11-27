@@ -4795,6 +4795,7 @@ fn main() -> eframe::Result {
         },
         Box::new(move |creation_context| {
             render_system::initialize(creation_context.gl.as_ref());
+            creation_context.egui_ctx.options_mut(|options| options.zoom_with_keyboard = false);
             configure_system_fonts(&creation_context.egui_ctx);
             restore_theme(&creation_context.egui_ctx);
             let mut app = ViewerApp {

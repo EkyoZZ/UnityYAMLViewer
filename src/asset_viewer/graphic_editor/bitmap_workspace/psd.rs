@@ -1,6 +1,7 @@
 //! 8-bit RGB PSD pixel layers and masks. Unsupported native layer structures
 //! go through the existing merged preview and cannot overwrite their source.
 use super::super::layer_properties::{Blend, Properties, effects::Light};
+use super::super::vector::{Geometry, Vector};
 use super::*;
 use std::io::{self, Read, Write};
 const BLENDS: [(&[u8; 4], Blend); 20] = [
@@ -164,6 +165,7 @@ fn record(data: &mut Bytes, canvas: [u32; 2]) -> Result<Record> {
     let mut vector_mask = None;
     let mut vector_fill = None;
     let mut live_shape = None;
+    let mut vector_origination_version = false;
     let mut has_shape_stroke = false;
     while extra.0.len() >= 12 {
         if extra.take(4)? != b"8BIM" {
@@ -239,6 +241,9 @@ fn record(data: &mut Bytes, canvas: [u32; 2]) -> Result<Record> {
                 )?);
             }
             b"vogk" => live_shape = Some(block.0),
+            // Photoshop adds this version marker beside its shape origination data.
+            // Editable contours still come from vmsk/vsms, including compound shapes.
+            b"vowv" if block.0 == [0, 0, 0, 2] => vector_origination_version = true,
             b"vstk" => {
                 if !super::super::layer_properties::solid_shape_stroke_supported(block.0)? {
                     return Err("Unsupported PSD vector stroke or disabled fill".into());
@@ -277,26 +282,19 @@ fn record(data: &mut Bytes, canvas: [u32; 2]) -> Result<Record> {
     if !extra.0.iter().all(|v| *v == 0) {
         return Err("Invalid trailing layer data".into());
     }
+    if vector_origination_version && (vector_mask.is_none() || vector_fill.is_none()) {
+        return Err("PSD vector origination marker without a supported shape".into());
+    }
     if let Some(path) = vector_mask {
         if divider != 0 || settings.psd_native_text || (mask.is_some() && vector_fill.is_none()) {
             return Err(
                 "Unsupported PSD vector mask combined with another mask or layer type".into(),
             );
         }
-        let (mut vector, enabled, linked) =
-            super::super::vector::psd::decode(path, canvas, vector_fill)?;
-        if vector.fill.is_some()
-            && let Some(geometry) =
-                live_shape.and_then(super::super::layer_properties::read_live_rectangle)
-        {
-            let rectangle = super::super::vector::Vector {
-                geometry,
-                ..vector.clone()
-            };
-            if rectangle.valid() {
-                vector = rectangle;
-            }
-        }
+        let rectangles = live_shape.and_then(super::super::layer_properties::read_live_rectangles)
+            .unwrap_or_default();
+        let (vector, enabled, linked) =
+            super::super::vector::psd::decode(path, canvas, vector_fill, rectangles)?;
         if vector.fill.is_none() {
             settings.mask_enabled = enabled;
             settings.mask_linked = linked;
@@ -790,6 +788,54 @@ fn global_blocks(
     Ok(output)
 }
 
+fn expand_compound_shapes(layers: &[Layer], w: u32, h: u32) -> Result<Vec<Layer>> {
+    let mut group_id = layers.iter().map(|layer| layer.settings.group_id).max().unwrap_or(0);
+    let mut expanded = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let Some(Vector { geometry: Geometry::Compound(parts), .. }) = &layer.settings.vector else {
+            expanded.push(layer.clone());
+            continue;
+        };
+        let mut runs = parts.chunk_by(|a, b| a.vector.fill == b.vector.fill).peekable();
+        let first = runs.next().ok_or("Empty PSD compound shape")?;
+        if runs.peek().is_none() {
+            let mut layer = layer.clone();
+            layer.settings.vector.as_mut().unwrap().fill = first[0].vector.fill;
+            expanded.push(layer);
+            continue;
+        }
+
+        group_id = group_id.checked_add(1).ok_or("No available PSD group ID")?;
+        let mut settings = layer.settings.clone();
+        settings.group_id = group_id;
+        settings.vector = None;
+        settings.vector_origin = None;
+        settings.pass_through = false;
+        expanded.push(Layer { settings, tiles: Vec::new(), ..layer.clone() });
+        for (index, run) in std::iter::once(first).chain(runs).enumerate() {
+            let vector = if run.len() == 1 {
+                run[0].vector.clone()
+            } else {
+                Vector {
+                    geometry: Geometry::Compound(run.to_vec()),
+                    fill: run[0].vector.fill,
+                    inverted: false,
+                }
+            };
+            let raster = vector.raster(w, h).ok_or("Unable to render PSD shape")?;
+            expanded.push(Layer {
+                name: format!("{} {}", tr("形状"), index + 1),
+                settings: Properties { vector: Some(vector), parent: group_id, ..Default::default() },
+                visible: true,
+                material: false,
+                locked: false,
+                tiles: vec![raster],
+            });
+        }
+    }
+    Ok(expanded)
+}
+
 pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Result<()> {
     let (w, h) = merged.dimensions();
     let flat = Layer {
@@ -801,8 +847,12 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
         tiles: vec![],
     };
     let flat_only = needs_merged(e);
+    let expanded;
     let layers = if flat_only {
         std::slice::from_ref(&flat)
+    } else if e.layers.iter().any(|layer| layer.settings.vector.as_ref().is_some_and(Vector::is_compound)) {
+        expanded = expand_compound_shapes(&e.layers, w, h)?;
+        &expanded
     } else {
         &e.layers
     };
@@ -960,7 +1010,7 @@ pub(super) fn write(out: &mut impl Write, e: &Editor, merged: &RgbaImage) -> Res
                 let fill = super::super::layer_properties::write_solid_fill(color);
                 tag(&mut extra, b"SoCo", &fill);
                 if let Some(origination) =
-                    super::super::layer_properties::write_live_rectangle(&vector.geometry)
+                    super::super::layer_properties::write_live_rectangles(&vector.geometry)
                 {
                     tag(&mut extra, b"vogk", &origination);
                 }
@@ -1141,6 +1191,77 @@ mod tests {
         assert!(layers[0].settings.vector.as_ref() == Some(&vector));
         assert_eq!(layers[0].tiles[0], pixels);
         assert!(bytes.windows(4).any(|key| key == b"vogk"));
+    }
+
+    #[test]
+    fn compound_psd_preserves_operations_and_groups_color_runs_in_order() {
+        use super::super::super::vector::{PathOp, ShapePart};
+
+        let red = Some([170, 0, 0]);
+        let blue = Some([0, 0, 190]);
+        let shape = |x, fill, operation| ShapePart {
+            vector: Vector {
+                geometry: Geometry::Rectangle {
+                    min: [x, 2.],
+                    max: [x + 8., 9.],
+                    radii: [0.; 4],
+                    angle: 0.,
+                },
+                fill,
+                inverted: false,
+            },
+            operation,
+        };
+        let mut parts = vec![
+            shape(1., red, PathOp::Combine),
+            shape(3., red, PathOp::Subtract),
+            shape(3., red, PathOp::Intersect),
+            shape(5., red, PathOp::Exclude),
+        ];
+        parts[1].vector.geometry = Geometry::Path(parts[1].vector.knots());
+        if let Geometry::Rectangle { radii, .. } = &mut parts[2].vector.geometry {
+            *radii = [1., 2., 0., 3.];
+        }
+        for mixed in [false, true] {
+            if mixed {
+                parts.extend([
+                    shape(4., blue, PathOp::Combine),
+                    shape(6., red, PathOp::Combine),
+                ]);
+            }
+            let vector = Vector { geometry: Geometry::Compound(parts.clone()), fill: red, inverted: false };
+            let pixels = vector.raster(24, 16).unwrap();
+            let mut editor = Editor::default();
+            editor.init_image(&pixels);
+            editor.layers[0].settings.vector = Some(vector);
+            if !mixed {
+                tag(&mut editor.layers[0].settings.psd_metadata, b"vowv", &2_u32.to_be_bytes());
+            }
+            let mut bytes = Vec::new();
+            write(&mut bytes, &editor, &pixels).unwrap();
+            let (layers, _, _, _) = decode(&bytes, (24, 16)).unwrap();
+            let shapes: Vec<_> = layers.iter().filter(|l| l.settings.vector.is_some()).collect();
+            assert_eq!(shapes.len(), if mixed { 3 } else { 1 });
+            if mixed {
+                let group = layers.iter().find(|l| l.settings.group_id != 0).unwrap();
+                assert!(shapes.iter().all(|l| l.settings.parent == group.settings.group_id));
+                assert_eq!(shapes.iter().map(|l| l.settings.vector.as_ref().unwrap().fill).collect::<Vec<_>>(),
+                    vec![red, blue, red]);
+            }
+            let shape = shapes[0].settings.vector.as_ref().unwrap();
+            let Geometry::Compound(restored) = &shape.geometry else {
+                panic!("PSD must retain the subpaths");
+            };
+            assert_eq!(restored.len(), 4);
+            assert!(restored.iter().zip(&parts).all(|(actual, expected)| actual.operation == expected.operation));
+            for (actual, expected) in restored.iter().zip(&parts) {
+                if matches!(expected.vector.geometry, Geometry::Path(_)) {
+                    assert!(matches!(actual.vector.geometry, Geometry::Path(_)));
+                } else {
+                    assert!(actual.vector.geometry == expected.vector.geometry);
+                }
+            }
+        }
     }
 
     #[test]

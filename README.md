@@ -14,14 +14,14 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **资源查看与编辑**：浏览 Prefab、Scene、Asset 的层级和引用，编辑已识别属性，支持校验、保存与撤销。
 - **材质与场景预览**：查看材质、Shader、场景、模型、Spine 和部分粒子效果。独立 FBX 可搭配贴图和兼容动作预览，并支持对比减键效果及保存受支持的 FBX 和 Unity .anim 草稿。
 - **目录与图片浏览**：多根目录、同目录缩略图和快捷切图，自动恢复目录并保留页签修改。
-- **图片工具**：支持平滑或像素预览、通道查看、九宫格、Sprite Border、序列拆分合成、去底色、多格式导出及 PNG 批量优化。Image / Tile 支持图层、像素标尺和辅助线，Image 可绘制矢量形状和编辑闭合路径、调整尺寸、原位保存及读写保留受支持样式和横排文字的分层 PSD。
+- **图片工具**：支持平滑或像素预览、通道查看、九宫格、Sprite Border、序列拆分合成、去底色、多格式导出及 PNG 批量优化。Image / Tile 支持图层、像素标尺和辅助线，可绘制矢量形状、框选闭合路径的锚点，并将子路径单独分层。Image 支持调整尺寸、原位保存，并可读写保留受支持图层样式、横排文字和复合矢量形状的分层 PSD。
 
 **附加工具**
 
 - **文档阅读与编辑**：文本和代码高亮；Markdown／RTF 原生直读，支持常用 HTML 与富文本。Windows RTF 支持独立编辑、图片和表格。
 - **文件与表格预览**：预览 PDF、办公文档及常见图片，图片预览共用缩放模式、采样和通道选择；编辑 CSV／TSV／PSV，或只读查看 XLS／XLSX／ODS，支持查找复制与固定行列编号。
 - **音视频工具**：多文件编辑、转码与队列／合并导出，支持播放列表、多音轨与字幕、内嵌／外部音轨波形与试听、独立字幕预览、透明视频 GPU 播放及编辑预览、序列输出、画面比例和可续编／打包的工程。字幕支持生成与语言匹配、中英日韩离线／实时翻译及缓存回放、统一或原生 ASS 显示、ASS／SSA／SRT／WebVTT 编辑与字幕转换，以及内嵌字幕原格式提取、MKV 样式保留和画面烧录。
-- **录屏**：Windows 支持全屏、多屏及窗口吸附／拖拽选区录制，提供悬浮工具条、独立录屏历史与可保存的快捷键，按预设质量自动保存 MKV／MP4 到下载目录；可选录制系统声音，结束后可进入视频编辑。
+- **录屏**：Windows 支持屏幕、区域和摄像头录制，以及带实时预览的摄像头画中画。可录制系统声音、麦克风或两者混音，成品自动保存为 MKV／MP4。
 - **网络视频**：频道列表支持分组、台标和多源切换；网页 HLS 或视频提取支持格式选择、下载与缓存，Windows 提供浏览器助手。
 - **四方连续图**：提取最小循环、错位排列图案，在矩形、菱形或六边形 Tile 上分层绘制并回绕边缘。可将单张矩形或菱形图拆成独立格子、逐格或合并导出 PNG，也可保存含图层和素材库的工程，另提供独立 PS 插件。
 - **错误诊断**：共用日志记录录屏、后台任务失败和运行时错误，便于排查问题。
@@ -52,14 +52,14 @@ Inspect Unity assets, edit properties and preview materials without opening Unit
 - **Asset browsing and editing**: Inspect Prefab, Scene and Asset hierarchies and references; edit recognized properties with validation, saving and undo.
 - **Materials and scenes**: View materials, shaders, scenes, models, Spine and supported particle effects. Standalone FBX previews accept textures and compatible motions, and animation tools compare keyframe reduction and save supported FBX and Unity .anim drafts.
 - **Folders and images**: Browse multiple roots and same-folder thumbnails, switch images quickly, and restore folders while retaining tab edits.
-- **Image tools**: Preview images and channels, use nine-slice and Sprite Border, split or combine sequences, remove backgrounds, export formats and optimize PNGs in batches. Image and Tile support layers, pixel rulers and guides. Image also supports vector shapes, editable closed paths, resizing, in-place saves and layered PSD read/write with supported styles and horizontal type.
+- **Image tools**: Preview images and channels, use nine-slice and Sprite Border, split or combine sequences, remove backgrounds, export formats and optimize PNGs in batches. Image and Tile support layers, pixel rulers and guides, vector drawing, marquee selection of anchors on closed paths and extraction of subpaths to separate layers. Image supports resizing, in-place saves and layered PSD read/write with supported styles, horizontal type and compound vector shapes.
 
 **Additional tools**
 
 - **Documents**: Highlight text and code; read Markdown/RTF directly with common HTML and rich-text support. Edit RTF with images and tables on Windows.
 - **Files and tables**: Preview PDFs, Office documents and common images with shared image scale modes, sampling and channel selections; edit CSV/TSV/PSV or read XLS/XLSX/ODS, with search, copy and fixed row/column coordinates.
 - **Audio and video**: Edit and transcode multiple files, export queues or merged media, and use playlists, multiple tracks, subtitles, embedded/external audio waveforms with track switching and independent subtitle previews, GPU playback/editor previews including transparency, image sequences, display ratios and resumable or shareable projects. Subtitles support generation and language matching, offline/live translation among Chinese, English, Japanese and Korean, cached replay, unified or native ASS display, ASS/SSA/SRT/WebVTT editing, subtitle conversion, extraction in the embedded track's original format, style retention in MKV and burn-in.
-- **Screen recording**: On Windows, record screens or a snapped/custom-drawn region to MKV/MP4 in Downloads using quality presets, floating controls, recording history and saved shortcuts, optionally capturing system audio and opening the video editor afterward.
+- **Screen recording**: On Windows, record screens, regions or a webcam, with live picture-in-picture preview. Recordings save automatically as MKV/MP4 with optional system audio, microphone audio or a mix of both.
 - **Online video**: Channel lists support groups, logos and multiple sources; webpage HLS and video extraction support format selection, downloads and caching, with a browser assistant on Windows.
 - **Seamless repeats**: Extract repeat units, offset motifs, and paint layered rectangular, diamond or hexagonal tiles with edge wrapping. Split a rectangular or diamond image into editable cells, export individual cells or the assembled PNG, or save layers and materials together in a project. A standalone Photoshop plugin is also available.
 - **Diagnostics**: Shared logs record screen recording, failed background tasks and runtime errors to help troubleshoot problems.

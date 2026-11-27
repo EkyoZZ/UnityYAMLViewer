@@ -671,7 +671,7 @@ impl Live {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
         });
-        ui.add_enabled_ui(has_audio||self.enabled,|ui|{crate::theme::compact_toggle_switch_size(ui,"",&mut self.enabled,crate::theme::ToggleSwitchSize::Small).on_hover_text(tr("启用实时字幕"));});
+        ui.add_enabled_ui(has_audio||self.enabled,|ui|{crate::theme::small_toggle_switch(ui,"",&mut self.enabled).on_hover_text(tr("启用实时字幕"));});
         if self.enabled {
             ui.label(tr("翻译:"));
             let font=egui::TextStyle::Button.resolve(ui.style());
@@ -680,12 +680,12 @@ impl Live {
             egui::ComboBox::from_id_salt("live_translation_target").width(selector_width).selected_text(tr(auto_subtitle::LANGUAGES[self.translation.target].1)).show_ui(ui,|ui|{
                 for (index,(_,label)) in auto_subtitle::LANGUAGES.iter().take(4).enumerate(){ui.selectable_value(&mut self.translation.target,index,tr(label));}
             });
-            crate::theme::compact_toggle_switch_size(ui,"",&mut self.translation.enabled,crate::theme::ToggleSwitchSize::Small).on_hover_text(tr("翻译:"));
+            crate::theme::small_toggle_switch(ui,"",&mut self.translation.enabled).on_hover_text(tr("翻译:"));
             if self.translation.enabled&&!self.translation.backend.is_empty(){
                 ui.small(if self.translation.backend.starts_with("GPU"){"GPU"}else{"CPU"}).on_hover_text(&self.translation.backend);
             }
             let mut show_source=!self.translation.hide_source;
-            if crate::theme::compact_toggle_switch_size(ui,tr("显示源字幕"),&mut show_source,crate::theme::ToggleSwitchSize::Small).changed(){self.translation.hide_source=!show_source;}
+            if crate::theme::small_toggle_switch(ui,tr("显示源字幕"),&mut show_source).changed(){self.translation.hide_source=!show_source;}
         }else{self.translation.enabled=false;}
         if translation_before!=(self.translation.enabled,self.translation.target){self.translation.reset();self.translation.error=None;}
         if before

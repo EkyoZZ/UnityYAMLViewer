@@ -29,16 +29,25 @@ fn paint_alpha_swatch(ui: &egui::Ui, rect: Rect, rgba: [f64; 4], alpha_height: f
 }
 
 pub fn show(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
-    show_impl(ui, name, rgba, false, None, true, false)
+    show_impl(ui, name, rgba, false, None, true, false, false)
 }
 
 /// Editable drawing color using the shared native palette.
 pub fn show_editable(ui: &mut egui::Ui, name: &str, rgba: [f64; 4]) -> Option<[f64; 4]> {
-    show_impl(ui, name, rgba, true, None, true, false)
+    show_impl(ui, name, rgba, true, None, true, false, false)
 }
 
-pub(crate) fn show_editable_swatch(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], size: egui::Vec2) -> Option<[f64; 4]> {
-    show_impl(ui, name, rgba, true, Some(size), true, false)
+/// Drawing-toolbar swatch that updates the active foreground color as it is edited.
+pub(crate) fn edit_rgba_live(ui: &mut egui::Ui, name: &str, color: &mut [u8; 4]) {
+    let rgba = color.map(|value| f64::from(value) / 255.0);
+    if let Some(value) = show_impl(ui, name, rgba, true, None, true, false, true) {
+        *color = value.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+        ui.ctx().request_repaint();
+    }
+}
+
+pub(crate) fn show_live_swatch(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], size: egui::Vec2) -> Option<[f64; 4]> {
+    show_impl(ui, name, rgba, true, Some(size), true, false, true)
 }
 
 /// Editable RGB palette. A mixed value displays a question mark and requires confirmation.
@@ -54,9 +63,20 @@ pub fn show_editable_rgb(
     mixed: bool,
 ) -> Option<[u8; 3]> {
     let [r, g, b] = rgb.map(|value| f64::from(value) / 255.);
-    let color = show_impl(ui, name, [r, g, b, 1.], true, None, false, mixed)?;
+    let color = show_impl(ui, name, [r, g, b, 1.], true, None, false, mixed, false)?;
     Some([color[0], color[1], color[2]].map(|value| (value.clamp(0., 1.) * 255.).round() as u8))
 }
+pub(crate) fn edit_rgb_live(ui: &mut egui::Ui, name: &str, color: &mut [u8; 3], trigger: Option<&egui::Response>) -> bool {
+    let [r, g, b] = color.map(|value| f64::from(value) / 255.);
+    if let Some(value) = show_on(ui, name, [r, g, b, 1.], true, None, false, false, true, trigger) {
+        *color = [value[0], value[1], value[2]].map(|v| (v.clamp(0., 1.) * 255.).round() as u8);
+        ui.ctx().request_repaint();
+        true
+    } else {
+        false
+    }
+}
+
 pub fn edit_rgb(ui: &mut egui::Ui, name: &str, color: &mut [u8; 3]) -> bool {
     if let Some(value) = show_editable_rgb(ui, name, *color, false) {
         *color = value;
@@ -84,7 +104,7 @@ pub fn edit_color32(ui: &mut egui::Ui, name: &str, color: &mut Color32) {
 
 pub fn edit_rgb_float(ui: &mut egui::Ui, name: &str, color: &mut [f32; 3]) -> bool {
     let [r, g, b] = color.map(f64::from);
-    if let Some(value) = show_impl(ui, name, [r, g, b, 1.], true, None, false, false) {
+    if let Some(value) = show_impl(ui, name, [r, g, b, 1.], true, None, false, false, false) {
         *color = [value[0] as f32, value[1] as f32, value[2] as f32];
         true
     } else {
@@ -92,29 +112,41 @@ pub fn edit_rgb_float(ui: &mut egui::Ui, name: &str, color: &mut [f32; 3]) -> bo
     }
 }
 
-fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size: Option<egui::Vec2>, alpha_enabled: bool, mixed: bool) -> Option<[f64; 4]> {
-    let id = ui.id().with(("color_preview", name, alpha_enabled));
+fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size: Option<egui::Vec2>, alpha_enabled: bool, mixed: bool, live: bool) -> Option<[f64; 4]> {
+    show_on(ui, name, rgba, drawing, size, alpha_enabled, mixed, live, None)
+}
+
+fn show_on(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size: Option<egui::Vec2>, alpha_enabled: bool, mixed: bool, live: bool, trigger: Option<&egui::Response>) -> Option<[f64; 4]> {
+    let id = trigger.map_or(ui.id(), |response| response.id).with(("color_preview", name, alpha_enabled));
+    let id = if live { id.with("live") } else { id };
     let mut state = ui.ctx().data_mut(|data| data.get_temp::<Preview>(id))
         .unwrap_or(Preview { original: rgba, rgba, hue: 0.0, original_hue: 0.0, mode: 0, open: false });
-    if drawing && (!mixed || !state.open) {
-        if !state.open { state.original = rgba; }
+    if !state.open {
+        state.original = rgba;
         state.rgba = rgba;
-    } else if !state.open && state.original != rgba { state.original = rgba; state.rgba = rgba; }
+    } else if live {
+        state.rgba = rgba;
+    }
     let before = state.rgba;
     let available = ui.clip_rect().width() - (ui.cursor().min.x - ui.min_rect().left());
     let size = size.unwrap_or_else(|| egui::vec2(if drawing { 48.0 } else { available.clamp(80.0, 120.0) }, 19.0));
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    if alpha_enabled {
-        paint_swatch(ui, rect, rgba);
+    let response = if let Some(trigger) = trigger {
+        trigger.clone()
     } else {
-        ui.painter().rect_filled(rect, 0., if mixed { Color32::WHITE } else { rgb_color(rgba) });
-        ui.painter().rect_stroke(rect, 0., ui.visuals().widgets.inactive.bg_stroke, egui::StrokeKind::Inside);
-        if mixed {
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "?",
-                egui::FontId::proportional(14.), Color32::RED);
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        if alpha_enabled {
+            paint_swatch(ui, rect, rgba);
+        } else {
+            ui.painter().rect_filled(rect, 0., if mixed { Color32::WHITE } else { rgb_color(rgba) });
+            ui.painter().rect_stroke(rect, 0., ui.visuals().widgets.inactive.bg_stroke, egui::StrokeKind::Inside);
+            if mixed {
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "?",
+                    egui::FontId::proportional(14.), Color32::RED);
+            }
         }
-    }
-    if response.clicked() {
+        response
+    };
+    if response.clicked() && ui.is_enabled() {
         state.rgba = rgba;
         state.original = rgba;
         picker_hsv(rgba, &mut state.hue);
@@ -122,7 +154,9 @@ fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size:
         state.open = true;
         crate::native_window::wake(ui.ctx(), id.with("window"));
     }
-    response.on_hover_text(if drawing { name.to_owned() } else { crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]) });
+    if trigger.is_none() {
+        response.on_hover_text(if drawing { name.to_owned() } else { crate::lf!("RGB: {0}, {1}, {2}\nAlpha: {3}\n点击打开调色板（仅预览）", rgba[0], rgba[1], rgba[2], rgba[3]) });
+    }
     if !ui.is_enabled() { state.open = false; }
     let editable = drawing || crate::editing::active(ui);
     let mut apply = false;
@@ -208,7 +242,7 @@ fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size:
                     ui.small(crate::localization::tr("之前"));
                     if ui.add(egui::Button::new(egui::RichText::new(crate::localization::tr("恢复原始颜色")).small())).clicked() { state.rgba = state.original; state.hue = state.original_hue; }
                 });
-                if editable {
+                if editable && !live {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         let width = 86.0;
@@ -220,7 +254,7 @@ fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size:
                 }
             });
         state.open = open && !apply && !cancel;
-        if editable && !mixed && (cancel || !open) && !apply {
+        if !live && !apply && !state.open {
             state.rgba = state.original;
             state.hue = state.original_hue;
         }
@@ -229,7 +263,7 @@ fn show_impl(ui: &mut egui::Ui, name: &str, rgba: [f64; 4], drawing: bool, size:
         state.rgba = before;
         crate::editing::warning(ui, crate::localization::tr("颜色分量必须为有效浮点数，已恢复之前的颜色。"));
     }
-    let changed = (apply || (!mixed && before != state.rgba)).then_some(state.rgba);
+    let changed = (apply || (live && before != state.rgba)).then_some(state.rgba);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
     changed
 }

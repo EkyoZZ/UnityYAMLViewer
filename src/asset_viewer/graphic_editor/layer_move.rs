@@ -52,19 +52,13 @@ impl Editor {
                 else {
                     return true;
                 };
-                let step = match *modifiers {
-                    egui::Modifiers::NONE => 1.,
-                    egui::Modifiers::SHIFT => 10.,
-                    _ => return true,
-                };
-                let direction = match key {
-                    egui::Key::ArrowLeft => -Vec2::X,
-                    egui::Key::ArrowRight => Vec2::X,
-                    egui::Key::ArrowUp => -Vec2::Y,
-                    egui::Key::ArrowDown => Vec2::Y,
-                    _ => return true,
-                };
-                moves.push(direction * step);
+                let Some((_, direction)) = [
+                    (Shortcut::Left, -Vec2::X), (Shortcut::Right, Vec2::X),
+                    (Shortcut::Up, -Vec2::Y), (Shortcut::Down, Vec2::Y),
+                    (Shortcut::LeftFast, -10. * Vec2::X), (Shortcut::RightFast, 10. * Vec2::X),
+                    (Shortcut::UpFast, -10. * Vec2::Y), (Shortcut::DownFast, 10. * Vec2::Y),
+                ].into_iter().find(|(shortcut, _)| shortcut.matches_event(*key, *modifiers)) else { return true; };
+                moves.push(direction);
                 false
             })
         });
@@ -72,7 +66,7 @@ impl Editor {
             return;
         }
         let members = self.move_members(self.active_layer, false);
-        if members.is_empty() || members.iter().any(|&index| !self.move_allowed(index)) {
+        if members.is_empty() || members.iter().any(|&index| !self.position_editable(index)) {
             self.message = tr("图层已锁定移动或不可编辑。").into();
             return;
         }
@@ -510,7 +504,7 @@ impl Editor {
                         || self.layers[*i].settings.lock_position
                         || self.ancestor_move_locked(*i)
                 } else {
-                    !self.move_allowed(*i)
+                    !self.position_editable(*i)
                 }
             }) {
                 self.message = tr("图层已锁定移动或不可编辑。").into();

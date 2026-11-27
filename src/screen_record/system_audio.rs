@@ -60,15 +60,10 @@ impl Session {
     pub fn error(&self) -> Option<String> {
         self.error.lock().unwrap().clone()
     }
-    pub fn finish(&mut self) {
-        // Drain the short playout buffer before asking the encoder to finalize.
+    pub fn finish(&self) {
+        // The encoder can stop consuming PCM before it processes quit.
+        // Let the capture thread drain concurrently with encoder finalization.
         self.stop.store(true, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-        if let Some(socket) = self.socket.lock().unwrap().as_ref() {
-            let _ = socket.shutdown(Shutdown::Write);
-        }
     }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Release);
@@ -84,6 +79,14 @@ impl Drop for Session {
             let _ = thread.join();
         }
     }
+}
+
+#[cfg(windows)]
+fn normal_end_of_pcm(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(error.kind(), ErrorKind::BrokenPipe | ErrorKind::ConnectionReset
+        | ErrorKind::ConnectionAborted | ErrorKind::NotConnected | ErrorKind::WriteZero
+        | ErrorKind::TimedOut)
 }
 
 #[cfg(not(windows))]
@@ -312,7 +315,13 @@ fn capture(
                     written += frames as u64;
                 }
                 stage = "send pending PCM to encoder";
-                pending.pump(&mut stream).map_err(io_error)?;
+                if let Err(error) = pending.pump(&mut stream) {
+                    if stop.load(Ordering::Acquire) && normal_end_of_pcm(&error) {
+                        trace.note("audio.tail", format!("encoder stopped accepting final PCM: {error}"));
+                        return Ok(());
+                    }
+                    return Err(io_error(error));
+                }
                 std::thread::sleep(Duration::from_millis(3));
             }
             let remaining = (started.elapsed().as_secs_f64() * rate as f64) as u64;
@@ -325,17 +334,22 @@ fn capture(
             pending.push(&bytes).map_err(io_error)?;
             let drain_deadline = Instant::now() + Duration::from_secs(2);
             while !pending.is_empty() {
-                pending.pump(&mut stream).map_err(io_error)?;
-                if Instant::now() >= drain_deadline {
-                    return Err(io_error(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "PCM finalization exceeded 2 seconds",
-                    )));
+                if let Err(error) = pending.pump(&mut stream) {
+                    if !normal_end_of_pcm(&error) {
+                        return Err(io_error(error));
+                    }
+                    trace.note("audio.tail", format!("encoder stopped accepting final PCM: {error}"));
+                    break;
                 }
                 if !pending.is_empty() {
+                    if Instant::now() >= drain_deadline {
+                        trace.note("audio.tail", "encoder did not consume the remaining PCM before the drain deadline");
+                        break;
+                    }
                     std::thread::sleep(Duration::from_millis(3));
                 }
             }
+            let _ = stream.shutdown(Shutdown::Write);
             Ok(())
         }
     })();

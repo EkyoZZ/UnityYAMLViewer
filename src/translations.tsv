@@ -1938,6 +1938,39 @@ SSA 的描边与阴影共用背景颜色；透明度使用原格式 AlphaLevel�
 拖动调整字幕起点	拖曳調整字幕起點	Drag to adjust subtitle start	ドラッグして字幕開始点を調整	드래그하여 자막 시작점 조정	Ziehen, um den Untertitelstart anzupassen	Glisser pour régler le début du sous-titre
 拖动调整字幕终点	拖曳調整字幕終點	Drag to adjust subtitle end	ドラッグして字幕終了点を調整	드래그하여 자막 끝점 조정	Ziehen, um das Untertitelende anzupassen	Glisser pour régler la fin du sous-titre
 录屏	錄屏	Screen recording	画面録画	화면 녹화	Bildschirmaufnahme	Enregistrement d’écran
+录制来源	錄製來源	Recording source	録画ソース	녹화 소스	Aufnahmequelle	Source d’enregistrement
+选取屏幕	選取螢幕	Select screen	画面を選択	화면 선택	Bildschirm auswählen	Sélectionner un écran
+摄像头	攝影機	Camera	カメラ	카메라	Kamera	Caméra
+摄像头画中画	攝影機子母畫面	Camera picture-in-picture	カメラのピクチャーインピクチャー	카메라 화면 속 화면	Kamera-Bild-im-Bild	Incrustation de la caméra
+画中画录制屏幕	子母畫面錄製螢幕	Picture-in-picture screen	ピクチャーインピクチャーの画面	화면 속 화면 녹화 모니터	Bildschirm für Bild-im-Bild	Écran à enregistrer avec incrustation
+画中画实时预览	子母畫面即時預覽	Live picture-in-picture preview	ピクチャーインピクチャーのライブプレビュー	화면 속 화면 실시간 미리보기	Live-Vorschau für Bild-im-Bild	Aperçu en direct de l’incrustation
+无法从屏幕捕获排除画中画窗口	無法從螢幕擷取排除子母畫面視窗	Could not exclude the picture-in-picture window from screen capture	ピクチャーインピクチャーのウィンドウを画面キャプチャから除外できません	화면 속 화면 창을 화면 캡처에서 제외하지 못했습니다	Bild-im-Bild-Fenster konnte nicht von der Aufnahme ausgeschlossen werden	Impossible d’exclure la fenêtre d’incrustation de la capture
+录制诊断	錄製診斷	Recording diagnostics	録画診断	녹화 진단	Aufnahmediagnose	Diagnostic d’enregistrement
+在成片旁保存混音前音频和采集时间戳。	在成片旁儲存混音前音訊和擷取時間戳記。	Save unmixed audio and capture timestamps alongside the recording.	録画と同じ場所にミックス前の音声とキャプチャ時刻を保存します。	녹화 파일 옆에 믹싱 전 오디오와 캡처 타임스탬프를 저장합니다.	Speichert ungemischtes Audio und Aufnahmezeitstempel neben der Aufnahme.	Enregistre l’audio non mixé et les horodatages de capture à côté de la vidéo.
+录制系统声音	錄製系統聲音	Record system audio	システム音声を録音	시스템 소리 녹음	Systemton aufnehmen	Enregistrer le son système
+录制麦克风	錄製麥克風	Record microphone	マイクを録音	마이크 녹음	Mikrofon aufnehmen	Enregistrer le microphone
+选择麦克风	選擇麥克風	Select a microphone	マイクを選択	마이크 선택	Mikrofon auswählen	Sélectionner un microphone
+扫描麦克风	掃描麥克風	Scan for microphones	マイクを検索	마이크 검색	Nach Mikrofonen suchen	Rechercher des microphones
+未找到摄像头或麦克风	找不到攝影機或麥克風	No camera or microphone found	カメラまたはマイクが見つかりません	카메라 또는 마이크를 찾지 못했습니다	Keine Kamera oder kein Mikrofon gefunden	Aucune caméra ni aucun microphone trouvé
+系统声音已开启	系統聲音已開啟	System audio on	システム音声オン	시스템 소리 켜짐	Systemton an	Son système activé
+系统声音已静音	系統聲音已靜音	System audio muted	システム音声をミュート	시스템 소리 음소거	Systemton stumm	Son système en sourdine
+麦克风已开启	麥克風已開啟	Microphone on	マイクオン	마이크 켜짐	Mikrofon an	Microphone activé
+麦克风已静音	麥克風已靜音	Microphone muted	マイクをミュート	마이크 음소거	Mikrofon stumm	Microphone en sourdine
+屏幕	螢幕	Screen	画面	화면	Bildschirm	Écran
+仅摄像头	僅攝影機	Camera only	カメラのみ	카메라만	Nur Kamera	Caméra seule
+屏幕和摄像头	螢幕和攝影機	Screen and camera	画面とカメラ	화면과 카메라	Bildschirm und Kamera	Écran et caméra
+选择摄像头	選擇攝影機	Select a camera	カメラを選択	카메라 선택	Kamera auswählen	Sélectionner une caméra
+扫描摄像头	掃描攝影機	Scan for cameras	カメラを検索	카메라 검색	Nach Kameras suchen	Rechercher des caméras
+未找到摄像头	找不到攝影機	No camera found	カメラが見つかりません	카메라를 찾지 못했습니다	Keine Kamera gefunden	Aucune caméra trouvée
+摄像头预览	攝影機預覽	Camera preview	カメラプレビュー	카메라 미리보기	Kameravorschau	Aperçu de la caméra
+显示摄像头	顯示攝影機	Show camera	カメラを表示	카메라 표시	Kamera zeigen	Afficher la caméra
+隐藏摄像头	隱藏攝影機	Hide camera	カメラを非表示	카메라 숨기기	Kamera ausblenden	Masquer la caméra
+摄像头画面比例	攝影機畫面比例	Camera aspect ratio	カメラのアスペクト比	카메라 화면 비율	Kamera-Seitenverhältnis	Format de l’image de la caméra
+摄像头录制分辨率	攝影機錄製解析度	Camera recording resolution	カメラ録画の解像度	카메라 녹화 해상도	Kamera-Aufnahmeauflösung	Résolution d’enregistrement de la caméra
+设备默认	裝置預設	Device default	デバイスの既定値	장치 기본값	Gerätestandard	Valeur par défaut du périphérique
+竖向	直向	Vertical	縦方向	세로	Vertikal	Vertical
+摄像头录制中	攝影機錄製中	Camera recording	カメラで録画中	카메라 녹화 중	Kameraaufnahme läuft	Enregistrement de la caméra en cours
+摄像头预览已中断	攝影機預覽已中斷	Camera preview disconnected	カメラプレビューが中断されました	카메라 미리보기가 중단되었습니다	Kameravorschau wurde unterbrochen	Aperçu de la caméra interrompu
 直接压缩保存视频，不缓存序列帧图片。当前仅录制画面，不包含声音。	直接壓縮儲存影片，不快取序列影格圖片。目前僅錄製畫面，不含聲音。	Compress directly to video without caching frame images. Video only; no audio.	連番画像を保存せず動画に直接圧縮します。現在は映像のみで音声は含みません。	프레임 이미지를 캐시하지 않고 동영상으로 직접 압축합니다. 현재 영상만 녹화하며 소리는 포함하지 않습니다.	Direkt als Video komprimieren, ohne Einzelbildcache. Derzeit nur Bild, ohne Ton.	Compression directe en vidéo, sans cache d’images. Image uniquement, sans son.
 Ctrl+Shift+F9 停止录制（其他窗口中也可使用）。	Ctrl+Shift+F9 停止錄製（其他視窗中也可使用）。	Ctrl+Shift+F9 stops recording, even in other windows.	Ctrl+Shift+F9 で録画停止（他のウィンドウでも使用可能）。	Ctrl+Shift+F9로 녹화를 중지합니다. 다른 창에서도 사용할 수 있습니다.	Ctrl+Shift+F9 beendet die Aufnahme, auch in anderen Fenstern.	Ctrl+Shift+F9 arrête l’enregistrement, même dans une autre fenêtre.
 录屏已取消	錄屏已取消	Recording canceled	録画をキャンセルしました	녹화 취소됨	Aufnahme abgebrochen	Enregistrement annulé
@@ -2509,6 +2542,7 @@ Tile	Tile	Tile	Tile	Tile	Tile	Tile
 添加色标	新增色標	Add color stop	カラーストップを追加	색상 정지점 추가	Farbstopp hinzufügen	Ajouter un point de couleur
 
 删除色标	刪除色標	Remove color stop	カラーストップを削除	색상 정지점 삭제	Farbstopp entfernen	Supprimer le point de couleur
+使用前景色	使用前景色	Use Foreground Color	前景色を使用	전경색 사용	Vordergrundfarbe verwenden	Utiliser la couleur de premier plan
 锁定比例	鎖定比例	Lock aspect ratio	縦横比を固定	비율 잠금	Seitenverhältnis sperren	Verrouiller les proportions
 联动圆角	連動圓角	Link corner radii	角の半径を連動	모서리 반경 연결	Eckenradien koppeln	Lier les rayons des angles
 左右翻转	水平翻轉	Flip horizontally	水平方向に反転	좌우 반전	Horizontal spiegeln	Retourner horizontalement
@@ -2576,3 +2610,43 @@ UI 布局层级无效	UI 版面層級無效	Invalid UI layout hierarchy	UI レ�
 对比预览准备失败	比較預覽準備失敗	Could not prepare the comparison preview	比較プレビューを準備できませんでした	비교 미리보기를 준비할 수 없습니다	Vergleichsvorschau konnte nicht vorbereitet werden	Impossible de préparer l’aperçu comparatif
 左右对比需要可显示的模型或精灵。	左右比較需要可顯示的模型或精靈。	Side-by-side comparison needs a visible model or sprite.	左右比較には表示可能なモデルまたはスプライトが必要です。	좌우 비교에는 표시할 수 있는 모델이나 스프라이트가 필요합니다.	Für den Direktvergleich wird ein sichtbares Modell oder Sprite benötigt.	La comparaison nécessite un modèle ou un sprite visible.
 重置视角	重設視角	Reset view	視点をリセット	시점 초기화	Ansicht zurücksetzen	Réinitialiser la vue
+合并图层	合併圖層	Merge layers	レイヤーを結合	레이어 병합	Ebenen zusammenführen	Fusionner les calques
+合并到新图层	合併到新圖層	Merge into new layer	新規レイヤーに結合	새 레이어로 병합	In neuer Ebene zusammenführen	Fusionner dans un nouveau calque
+合并底图以上图层	合併底圖以上圖層	Merge layers above base	ベースより上のレイヤーを結合	기본 레이어 위 병합	Ebenen über der Basis zusammenführen	Fusionner les calques au-dessus de la base
+请选中同一组内的图层进行合并。	請選取同一群組內的圖層進行合併。	Select layers in the same group to merge.	同じグループのレイヤーを選択してください。	같은 그룹의 레이어를 선택하세요.	Zum Zusammenführen Ebenen derselben Gruppe auswählen.	Sélectionnez les calques du même groupe à fusionner.
+请先解锁受保护的图层，或将其移出合并选区。	請先解鎖受保護的圖層，或將其移出合併選取範圍。	Unlock protected layers or remove them from the merge selection.	保護されたレイヤーのロックを解除するか、結合対象から外してください。	보호된 레이어의 잠금을 풀거나 병합 선택에서 제외하세요.	Geschützte Ebenen entsperren oder aus der Auswahl entfernen.	Déverrouillez les calques protégés ou retirez-les de la sélection.
+请同时选择剪贴蒙版及其底层进行合并。	請同時選取剪裁遮色片及其底層進行合併。	Select both the clipping mask and its base layer to merge.	クリッピングマスクとそのベースを一緒に選択してください。	클리핑 마스크와 기본 레이어를 함께 선택하세요.	Schnittmaske und zugehörige Basisebene gemeinsam auswählen.	Sélectionnez ensemble le masque d’écrêtage et son calque de base.
+放大画布	放大畫布	Zoom in	キャンバスを拡大	캔버스 확대	Zeichenfläche vergrößern	Agrandir le canevas
+缩小画布	縮小畫布	Zoom out	キャンバスを縮小	캔버스 축소	Zeichenfläche verkleinern	Réduire le canevas
+平移画布	平移畫布	Pan canvas	キャンバスを移動	캔버스 이동	Zeichenfläche verschieben	Déplacer le canevas
+确认文字编辑	確認文字編輯	Apply text editing	テキスト編集を適用	텍스트 편집 적용	Textbearbeitung anwenden	Appliquer la modification du texte
+填充前景色	填滿前景色	Fill with foreground color	描画色で塗りつぶす	전경색으로 채우기	Mit Vordergrundfarbe füllen	Remplir avec la couleur de premier plan
+填充背景色	填滿背景色	Fill with background color	背景色で塗りつぶす	배경색으로 채우기	Mit Hintergrundfarbe füllen	Remplir avec la couleur d’arrière-plan
+减小笔尖尺寸	縮小筆尖尺寸	Decrease brush size	ブラシサイズを小さくする	브러시 크기 줄이기	Pinselgröße verringern	Réduire la taille du pinceau
+增大笔尖尺寸	放大筆尖尺寸	Increase brush size	ブラシサイズを大きくする	브러시 크기 늘리기	Pinselgröße erhöhen	Augmenter la taille du pinceau
+选区	選取範圍	Selection	選択範囲	선택 영역	Auswahl	Sélection
+吸管	滴管	Eyedropper	スポイト	스포이드	Pipette	Pipette
+橡皮	橡皮擦	Eraser	消しゴム	지우개	Radierer	Gomme
+文字	文字	Text	文字	문자	Text	Texte
+新建图层	新增圖層	New Layer	新規レイヤー	새 레이어	Neue Ebene	Nouveau calque
+减去顶层形状	減去頂層形狀	Subtract Front Shape	前面シェイプを削除	앞쪽 모양 빼기	Vordere Form subtrahieren	Soustraire la forme avant
+与形状区域相交	與形狀區域相交	Intersect Shape Areas	シェイプ範囲を交差	모양 영역 교차	Formbereiche schneiden	Intersection des formes
+排除重叠形状	排除重疊形狀	Exclude Overlapping Shapes	重なるシェイプを除外	겹치는 모양 제외	Überlappende Formen ausschließen	Exclure les formes se chevauchant
+合并形状	合併形狀	Combine Shapes	シェイプを結合	모양 결합	Formen kombinieren	Combiner les formes
+无法合并矢量形状	無法合併向量形狀	Unable to combine vector shapes	ベクターシェイプを結合できません	벡터 모양을 결합할 수 없습니다	Vektorformen lassen sich nicht kombinieren	Impossible de combiner les formes vectorielles
+形状	形狀	Shape	シェイプ	모양	Form	Forme
+路径	路徑	Path	パス	패스	Pfad	Tracé
+图层左移	圖層左移	Move layer left	レイヤーを左へ移動	레이어 왼쪽으로 이동	Ebene nach links verschieben	Déplacer le calque à gauche
+图层右移	圖層右移	Move layer right	レイヤーを右へ移動	레이어 오른쪽으로 이동	Ebene nach rechts verschieben	Déplacer le calque à droite
+图层上移	圖層上移	Move layer up	レイヤーを上へ移動	레이어 위로 이동	Ebene nach oben verschieben	Déplacer le calque vers le haut
+图层下移	圖層下移	Move layer down	レイヤーを下へ移動	레이어 아래로 이동	Ebene nach unten verschieben	Déplacer le calque vers le bas
+图层快速左移	圖層快速左移	Move layer left by 10 px	レイヤーを左へ10 px移動	레이어 왼쪽으로 10 px 이동	Ebene 10 px nach links verschieben	Déplacer le calque de 10 px à gauche
+图层快速右移	圖層快速右移	Move layer right by 10 px	レイヤーを右へ10 px移動	레이어 오른쪽으로 10 px 이동	Ebene 10 px nach rechts verschieben	Déplacer le calque de 10 px à droite
+图层快速上移	圖層快速上移	Move layer up by 10 px	レイヤーを上へ10 px移動	레이어 위로 10 px 이동	Ebene 10 px nach oben verschieben	Déplacer le calque de 10 px vers le haut
+图层快速下移	圖層快速下移	Move layer down by 10 px	レイヤーを下へ10 px移動	레이어 아래로 10 px 이동	Ebene 10 px nach unten verschieben	Déplacer le calque de 10 px vers le bas
+快捷键设置	快捷鍵設定	Keyboard shortcuts	キーボードショートカット	키보드 단축키	Tastenkürzel	Raccourcis clavier
+恢复默认设置	還原預設設定	Restore defaults	既定値に戻す	기본값 복원	Standardeinstellungen wiederherstellen	Rétablir les valeurs par défaut
+按下新快捷键	按下新的快捷鍵	Press a new shortcut	新しいショートカットを押す	새 단축키를 누르세요	Neues Tastenkürzel drücken	Appuyez sur un nouveau raccourci
+{0} 已被「{1}」占用，再次点击按钮撤销。	{0} 已被「{1}」使用，再次點擊按鈕撤銷。	{0} is assigned to {1}. Click the button again to cancel this reassignment.	{0} は「{1}」に割り当て済みです。ボタンをもう一度クリックすると変更を取り消せます。	{0} 키는 이미 ‘{1}’에 지정되어 있습니다. 버튼을 다시 클릭하면 변경을 취소합니다.	{0} ist bereits „{1}“ zugewiesen. Klicken Sie erneut auf die Schaltfläche, um die Neuzuweisung abzubrechen.	{0} est déjà attribué à « {1} ». Cliquez de nouveau sur le bouton pour annuler la réattribution.
+无法保存快捷键设置。	無法儲存快捷鍵設定。	Could not save keyboard shortcuts.	ショートカットを保存できませんでした。	단축키를 저장할 수 없습니다.	Tastenkürzel konnten nicht gespeichert werden.	Impossible d’enregistrer les raccourcis clavier.
+镜像	鏡像	Mirror	ミラー	미러링	Spiegeln	Miroir

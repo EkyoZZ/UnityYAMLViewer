@@ -150,7 +150,7 @@ fn monitor_work_area(_: egui::Rect) -> Option<egui::Rect> {
 
 #[derive(Clone, Default)]
 struct Placement {
-    last_pass: Option<u64>,
+    initialized: bool,
     pending: bool,
     attempts: u8,
     stable: u8,
@@ -182,6 +182,7 @@ pub struct Window<'a> {
     solid_scroll: bool,
     scrollable: bool,
     retain_on_close_request: bool,
+    block_close_request: bool,
 }
 
 impl<'a> Window<'a> {
@@ -192,6 +193,7 @@ impl<'a> Window<'a> {
             title,
             open: None,
             retain_on_close_request: false,
+            block_close_request: false,
             width: 380.0,
             height: 480.0,
             resizable: true,
@@ -284,13 +286,17 @@ impl<'a> Window<'a> {
         self
     }
 
+    pub fn block_close_request(mut self, block: bool) -> Self {
+        self.block_close_request = block;
+        self
+    }
+
     pub fn show(mut self, ctx: &egui::Context, contents: impl FnOnce(&mut egui::Ui)) {
         if self.open.as_deref() == Some(&false) {
             return;
         }
         let viewport_id = egui::ViewportId(self.id);
         let state_id = self.id.with("native_dialog_placement");
-        let pass = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
         let main = ctx
             .data(|data| data.get_temp::<MainBounds>(egui::Id::new("native_dialog_main_bounds")));
         let mut placement = ctx
@@ -300,20 +306,16 @@ impl<'a> Window<'a> {
         let requested_wake = ctx
             .data_mut(|data| data.remove_temp::<bool>(self.id.with("native_dialog_wake")))
             .unwrap_or(false);
-        let fresh = requested_wake
-            || placement.closed
-            || placement
-                .last_pass
-                .is_none_or(|last| pass.saturating_sub(last) > 1)
-            || !exists;
+        // A live viewport can skip root passes while another window is drawing.
+        // Only reopen for actual lifecycle changes or an explicit wake request.
+        let fresh = requested_wake || placement.closed || !placement.initialized || !exists;
         if fresh {
             placement = Placement {
                 pending: true,
-                last_pass: Some(pass),
+                initialized: true,
                 ..Default::default()
             };
         }
-        placement.last_pass = Some(pass);
         if self.modal && !ctx.embed_viewports() {
             // Keep the parent's original input protection while the native confirmation is open.
             egui::Modal::new(self.id.with("parent_blocker"))
@@ -396,9 +398,11 @@ impl<'a> Window<'a> {
                     child_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 if child_ctx.input(|input| input.viewport().close_requested()) {
-                    open = false;
-                    if self.open.is_none() {
+                    if self.block_close_request || self.open.is_none() {
                         child_ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    }
+                    if !self.block_close_request {
+                        open = false;
                     }
                 }
                 let mut target_inner = child_ctx.input(|input| input.screen_rect().size());

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 mod legacy;
 mod psd;
 pub(in crate::asset_viewer::graphic_editor) use psd::{
-    read_live_rectangle, read_solid_fill, solid_shape_stroke_supported, write_live_rectangle,
+    read_live_rectangles, read_solid_fill, solid_shape_stroke_supported, write_live_rectangles,
     write_solid_fill,
 };
 mod render;

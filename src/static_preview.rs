@@ -562,7 +562,7 @@ impl Preview {
     pub(crate) fn activation_control(&mut self, ui: &mut egui::Ui, object: &str, saved_active: bool) {
         if !self.open { return; }
         let mut active = self.preview_active_overrides.get(object).copied().unwrap_or(saved_active);
-        if crate::theme::compact_toggle_switch_size(ui, tr("仅在预览中激活"), &mut active, crate::theme::ToggleSwitchSize::Small).changed() {
+        if crate::theme::small_toggle_switch(ui, tr("仅在预览中激活"), &mut active).changed() {
             if active == saved_active { self.preview_active_overrides.remove(object); }
             else { self.preview_active_overrides.insert(object.to_owned(), active); }
             self.activation_documents = None;

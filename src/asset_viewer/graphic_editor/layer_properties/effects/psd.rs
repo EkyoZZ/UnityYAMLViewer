@@ -400,20 +400,31 @@ pub(in crate::asset_viewer::graphic_editor) fn solid_shape_stroke_supported(
     Ok(!style.boolean(b"strokeEnabled", false)? && style.boolean(b"fillEnabled", true)?)
 }
 
-pub(in crate::asset_viewer::graphic_editor) fn read_live_rectangle(
+use super::super::super::vector::Geometry;
+
+pub(in crate::asset_viewer::graphic_editor) fn read_live_rectangles(
     bytes: &[u8],
-) -> Option<super::super::super::vector::Geometry> {
+) -> Option<std::collections::BTreeMap<u32, Geometry>> {
     let mut reader = Reader(bytes);
-    if reader.u32().ok()? != 1 || reader.u32().ok()? != 16 {
-        return None;
-    }
+    if reader.u32().ok()? != 1 || reader.u32().ok()? != 16 { return None; }
     let root = reader.object(0).ok()?;
-    let Value::List(list) = root.get(b"keyDescriptorList")? else {
-        return None;
-    };
-    let [Value::Object(shape)] = list.as_slice() else {
-        return None;
-    };
+    let Value::List(list) = root.get(b"keyDescriptorList")? else { return None };
+    let mut rectangles = std::collections::BTreeMap::new();
+    for (position, item) in list.iter().enumerate() {
+        let Value::Object(shape) = item else { continue };
+        let index = match shape.get(b"keyOriginIndex") {
+            Some(Value::Integer(n)) if *n >= 0 => *n as u32,
+            None => position as u32,
+            _ => continue,
+        };
+        if let Some(rectangle) = read_rectangle(shape) {
+            rectangles.insert(index, rectangle);
+        }
+    }
+    Some(rectangles)
+}
+
+fn read_rectangle(shape: &Descriptor) -> Option<Geometry> {
     if shape.boolean(b"keyShapeInvalidated", false).ok()? {
         return None;
     }
@@ -461,7 +472,7 @@ pub(in crate::asset_viewer::graphic_editor) fn read_live_rectangle(
         max = [max[0] + dx, max[1] + dy];
         angle = s.atan2(c).to_degrees();
     }
-    Some(super::super::super::vector::Geometry::Rectangle {
+    Some(Geometry::Rectangle {
         min,
         max,
         radii,
@@ -469,18 +480,28 @@ pub(in crate::asset_viewer::graphic_editor) fn read_live_rectangle(
     })
 }
 
-pub(in crate::asset_viewer::graphic_editor) fn write_live_rectangle(
-    geometry: &super::super::super::vector::Geometry,
-) -> Option<Vec<u8>> {
-    let super::super::super::vector::Geometry::Rectangle {
-        min,
-        max,
-        radii,
-        angle,
-    } = *geometry
-    else {
-        return None;
+pub(in crate::asset_viewer::graphic_editor) fn write_live_rectangles(geometry: &Geometry) -> Option<Vec<u8>> {
+    let list = match geometry {
+        Geometry::Compound(parts) => {
+            if !parts.iter().any(|part| matches!(part.vector.geometry, Geometry::Rectangle { .. })) {
+                return None;
+            }
+            parts.iter().enumerate().map(|(index, part)| {
+                let shape = rectangle_descriptor(&part.vector.geometry).unwrap_or_else(||
+                    Descriptor::new(b"null").with(b"keyShapeInvalidated", Value::Bool(true)));
+                Value::Object(shape.with(b"keyOriginIndex", Value::Integer(index as i32)))
+            }).collect()
+        }
+        _ => vec![Value::Object(rectangle_descriptor(geometry)?
+            .with(b"keyOriginIndex", Value::Integer(0)))],
     };
+    let mut out = vec![0, 0, 0, 1, 0, 0, 0, 16];
+    Descriptor::new(b"null").with(b"keyDescriptorList", Value::List(list)).write(&mut out);
+    Some(out)
+}
+
+fn rectangle_descriptor(geometry: &Geometry) -> Option<Descriptor> {
+    let Geometry::Rectangle { min, max, radii, angle } = *geometry else { return None };
     let px = |v: f32| Value::Unit(*b"#Pxl", f64::from(v));
     let quad =
         |class: &[u8]| Descriptor::new(class).with(b"unitValueQuadVersion", Value::Integer(1));
@@ -491,7 +512,6 @@ pub(in crate::asset_viewer::graphic_editor) fn write_live_rectangle(
         .with(b"Btom", px(max[1]));
     let rounded = radii.iter().any(|&radius| radius > 0.);
     let mut shape = Descriptor::new(b"null")
-        .with(b"keyOriginIndex", Value::Integer(0))
         .with(
             b"keyOriginType",
             Value::Integer(if rounded { 2 } else { 1 }),
@@ -526,13 +546,7 @@ pub(in crate::asset_viewer::graphic_editor) fn write_live_rectangle(
         }
         shape = shape.with(b"keyOriginRRectRadii", Value::Object(corners));
     }
-    let root = Descriptor::new(b"null").with(
-        b"keyDescriptorList",
-        Value::List(vec![Value::Object(shape)]),
-    );
-    let mut out = vec![0, 0, 0, 1, 0, 0, 0, 16];
-    root.write(&mut out);
-    Some(out)
+    Some(shape)
 }
 
 fn parse_common(d: &Descriptor) -> Result<(bool, Blend, u8, [u8; 3])> {

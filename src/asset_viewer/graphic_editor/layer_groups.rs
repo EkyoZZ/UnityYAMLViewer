@@ -2,6 +2,13 @@
 //! Reference: PhotoCraft crates/compose/src/composite.rs (group isolation semantics).
 //! Independent implementation for this editor's per-cell storage.
 use super::*;
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MergeLayers {
+    Selected,
+    Copy,
+    All,
+}
+
 pub(super) fn valid_tree<'a>(
     items: impl Iterator<Item = (&'a layer_properties::Properties, bool)>,
 ) -> bool {
@@ -624,6 +631,16 @@ impl Editor {
             .filter(|(i, l)| *i < end && l.settings.parent == parent)
             .map(|(i, _)| i)
             .collect();
+        self.composite_siblings(&siblings, tile, out, depth);
+    }
+
+    fn composite_siblings(
+        &self,
+        siblings: &[usize],
+        tile: usize,
+        out: &mut RgbaImage,
+        depth: usize,
+    ) {
         let mut cursor = 0;
         while cursor < siblings.len() {
             let base = siblings[cursor];
@@ -738,17 +755,36 @@ impl Editor {
                     *pixel = Rgba([0; 4]);
                 }
             }
-            let frames = self.layer_gradient_frames(layer, p, index == self.active_layer && draft.is_none(), tile);
+            let frames = self.layer_gradient_frames(
+                layer,
+                p,
+                index == self.active_layer && draft.is_none(),
+                tile,
+            );
             let text_gradient = if p.has_aligned_gradient_overlay() {
-                p.text.as_ref().and_then(|text| self.wrapped_text_gradient(text, tile))
-            } else { None };
-            p.composite_with_gradient_frames(out, &clipped, tile, self.fx_light, frames, text_gradient.as_ref());
+                p.text
+                    .as_ref()
+                    .and_then(|text| self.wrapped_text_gradient(text, tile))
+            } else {
+                None
+            };
+            p.composite_with_gradient_frames(
+                out,
+                &clipped,
+                tile,
+                self.fx_light,
+                frames,
+                text_gradient.as_ref(),
+            );
         } else {
             p.composite(out, source, tile, self.fx_light);
         }
     }
     fn layer_gradient_frames(
-        &self, layer: &Layer, settings: &layer_properties::Properties, active: bool,
+        &self,
+        layer: &Layer,
+        settings: &layer_properties::Properties,
+        active: bool,
         tile: usize,
     ) -> Option<[[f32; 4]; 2]> {
         if self.plain_image || !self.multiple || self.elevated || !settings.has_gradient_overlay() {
@@ -769,17 +805,26 @@ impl Editor {
                     return None;
                 }
                 let min = self.mapped_center(col as i32, row as i32, w, h) - size * 0.5;
-                if at == tile { origin = Some(min); }
+                if at == tile {
+                    origin = Some(min);
+                }
                 canvas = canvas.union(Rect::from_min_size(min.to_pos2(), size));
                 slots.push((at, min));
             }
         }
         for (at, min) in slots {
             let image = if active {
-                if at == self.selected { &self.pixels } else { self.tiles.get(at)? }
-            } else { layer.tiles.get(at)? };
+                if at == self.selected {
+                    &self.pixels
+                } else {
+                    self.tiles.get(at)?
+                }
+            } else {
+                layer.tiles.get(at)?
+            };
             for (x, y, pixel) in image.enumerate_pixels() {
-                if pixel[3] != 0 && self.inside_tile(x as i32, y as i32, w, h)
+                if pixel[3] != 0
+                    && self.inside_tile(x as i32, y as i32, w, h)
                     && settings.mask_value(at, (y * w + x) as usize) > 0.
                 {
                     let corner = (min + egui::vec2(x as f32, y as f32)).to_pos2();
@@ -788,10 +833,16 @@ impl Editor {
             }
         }
         let origin = origin?;
-        if !content.is_positive() { return None; }
+        if !content.is_positive() {
+            return None;
+        }
         Some([content, canvas].map(|rect| {
-            [rect.left() - origin.x, rect.top() - origin.y,
-                rect.right() - origin.x - 1., rect.bottom() - origin.y - 1.]
+            [
+                rect.left() - origin.x,
+                rect.top() - origin.y,
+                rect.right() - origin.x - 1.,
+                rect.bottom() - origin.y - 1.,
+            ]
         }))
     }
     fn next_group_id(&self) -> u64 {
@@ -927,6 +978,153 @@ impl Editor {
         self.tiles = self.layers[0].tiles.clone();
         self.pixels = self.tiles[self.selected].clone();
     }
+    pub(super) fn merge_layers(&mut self, mode: MergeLayers) {
+        if self.layers.is_empty() {
+            return;
+        }
+        let base = self
+            .layers
+            .iter()
+            .position(|layer| layer.material)
+            .or_else(|| {
+                self.layers
+                    .iter()
+                    .position(|layer| self.plain_image && layer.settings.parent == 0)
+            });
+        let mut roots = if mode == MergeLayers::All {
+            self.layers
+                .iter()
+                .enumerate()
+                .filter(|(index, layer)| layer.settings.parent == 0 && Some(*index) != base)
+                .map(|(index, _)| index)
+                .collect()
+        } else {
+            self.selected_roots()
+        };
+        roots.sort_unstable();
+        roots.dedup();
+        let Some(top) = roots.last().copied() else {
+            return;
+        };
+        if roots.len() < 2 && (mode != MergeLayers::All || self.layers[top].settings.group_id == 0)
+        {
+            return;
+        }
+        let parent = self.layers[top].settings.parent;
+        if roots
+            .iter()
+            .any(|&index| self.layers[index].settings.parent != parent)
+        {
+            self.message = tr("请选中同一组内的图层进行合并。").into();
+            return;
+        }
+        let members: Vec<_> = roots
+            .iter()
+            .flat_map(|&index| self.direct_move_members(index, false))
+            .collect();
+        if mode != MergeLayers::Copy
+            && members.iter().any(|&index| {
+                self.layers[index].material
+                    || self.layers[index].locked
+                    || self.ancestor_locked(index)
+            })
+        {
+            self.message = tr("请先解锁受保护的图层，或将其移出合并选区。").into();
+            return;
+        }
+        if self.layers.iter().enumerate().any(|(index, layer)| {
+            layer.settings.parent == parent
+                && layer.settings.clipped
+                && self
+                    .clipping_base(index)
+                    .is_some_and(|base| roots.contains(&base) != roots.contains(&index))
+        }) {
+            self.message = tr("请同时选择剪贴蒙版及其底层进行合并。").into();
+            return;
+        }
+        if mode == MergeLayers::Copy {
+            let bytes = self.tiles.iter().map(|tile| tile.as_raw().len()).sum();
+            if !self.can_add_layers(&[], bytes) {
+                self.message = tr("图层数量或内存已达上限，无法导入新图层。").into();
+                return;
+            }
+        }
+        let origin = self.vector_origin(self.layers[top].settings.vector_origin);
+        let sources: Option<Vec<_>> = roots.iter().map(|&index| {
+            let layer = &self.layers[index];
+            let settings = &layer.settings;
+            if !layer.visible || settings.group_id != 0 || settings.clipped
+                || settings.blend != layer_properties::Blend::Normal
+                || settings.opacity != 100 || settings.fill != 100
+                || settings.has_effects() || settings.mask.is_some() || settings.adjustment.is_some()
+            {
+                return None;
+            }
+            let vector = settings.vector.as_ref()?;
+            (vector.fill.is_some() && !vector.inverted)
+                .then(|| (vector, self.vector_origin(settings.vector_origin)))
+        }).collect();
+        let vector = match sources {
+            Some(sources) if sources.len() >= 2 => {
+                let Some(vector) = super::vector::Vector::combine(sources, origin) else {
+                    self.message = tr("无法合并矢量形状").into();
+                    return;
+                };
+                Some(vector)
+            }
+            _ => None,
+        };
+        let tiles = if let Some(vector) = &vector {
+            let Some(tiles) = self.render_vector_tiles(vector, origin) else {
+                self.message = tr("无法合并矢量形状").into();
+                return;
+            };
+            tiles
+        } else {
+            self.tiles.iter().enumerate().map(|(index, tile)| {
+                let mut pixels = RgbaImage::new(tile.width(), tile.height());
+                self.composite_siblings(&roots, index, &mut pixels, 0);
+                pixels
+            }).collect()
+        };
+        self.record_layer_change();
+        let mut insert = top + 1;
+        if mode != MergeLayers::Copy {
+            insert -= members.iter().filter(|&&index| index <= top).count();
+            let mut index = 0;
+            self.layers.retain(|_| {
+                let keep = !members.contains(&index);
+                index += 1;
+                keep
+            });
+            self.cleanup_single_links();
+        }
+        self.layers.insert(
+            insert,
+            Layer {
+                name: tr("合并图层").into(),
+                settings: layer_properties::Properties {
+                    parent,
+                    vector_origin: vector.as_ref().and(origin),
+                    vector,
+                    ..Default::default()
+                },
+                material: false,
+                visible: true,
+                locked: false,
+                tiles,
+            },
+        );
+        self.active_layer = insert;
+        self.selected_layers = vec![insert];
+        self.layer_anchor = insert;
+        self.mask_editing = false;
+        self.layer_detail = None;
+        self.tiles = self.layers[insert].tiles.clone();
+        self.pixels = self.tiles[self.selected].clone();
+        self.message.clear();
+    }
+
     pub(super) fn duplicate_selected_layers(&mut self, index: usize, all_cells: bool) {
         let mut roots = if index == self.active_layer {
             self.selected_roots()
@@ -1152,6 +1350,73 @@ pub(super) fn mix_group(before: Rgba<u8>, after: Rgba<u8>, k: f32) -> Rgba<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn merge_layers_preserves_the_base_and_undo_restores_the_sources() {
+        let mut editor = Editor::default();
+        editor.plain_image = true;
+        editor.diamond = false;
+        editor.init_image(&RgbaImage::from_pixel(4, 4, Rgba([0, 0, 100, 255])));
+        for (x, color) in [(0, Rgba([200, 0, 0, 255])), (1, Rgba([0, 200, 0, 255]))] {
+            assert!(editor.insert_empty_layer(true));
+            editor.write_pixel(0, x, 0, color);
+        }
+        editor.selected_layers = vec![1, 2];
+        let before = editor.composite(0);
+        let base = editor.layers[0].tiles.clone();
+
+        editor.merge_layers(MergeLayers::Copy);
+        assert_eq!(editor.layers.len(), 4);
+        assert_eq!(editor.composite(0), before);
+        editor.history(false);
+        assert_eq!(editor.selected_layers, vec![1, 2]);
+
+        editor.merge_layers(MergeLayers::Selected);
+        assert_eq!(editor.layers.len(), 2);
+        assert_eq!(editor.composite(0), before);
+        editor.history(false);
+
+        editor.merge_layers(MergeLayers::All);
+        assert_eq!(editor.layers.len(), 2);
+        assert_eq!(editor.layers[0].tiles, base);
+        assert_eq!(editor.composite(0), before);
+    }
+
+    #[test]
+    fn merging_shape_layers_keeps_editable_components_and_top_fill() {
+        use super::super::vector::{Geometry, Vector};
+
+        let mut editor = Editor::default();
+        editor.plain_image = true;
+        editor.init_image(&RgbaImage::new(8, 8));
+        for (x, color) in [(1., [255, 0, 0]), (3., [0, 255, 0])] {
+            assert!(editor.insert_empty_layer(true));
+            editor.update_vector(editor.active_layer, Vector {
+                geometry: Geometry::Rectangle {
+                    min: [x, 1.],
+                    max: [x + 4., 5.],
+                    radii: [0.; 4],
+                    angle: 0.,
+                },
+                fill: Some(color),
+                inverted: false,
+            }, false);
+        }
+        editor.selected_layers = vec![1, 2];
+        editor.merge_layers(MergeLayers::Selected);
+        assert_eq!(editor.layers.len(), 2);
+        let vector = editor.layers[1].settings.vector.as_ref().unwrap();
+        let Geometry::Compound(parts) = &vector.geometry else {
+            panic!("merged shapes should remain editable");
+        };
+        assert_eq!(parts.len(), 2);
+        let rendered = editor.render_vector_tiles(vector, None).unwrap();
+        assert_eq!(rendered[0].get_pixel(1, 2).0, [0, 255, 0, 255]);
+        assert_eq!(rendered[0].get_pixel(3, 2).0, [0, 255, 0, 255]);
+        assert_eq!(rendered, editor.layers[1].tiles);
+        editor.history(false);
+        assert_eq!(editor.layers.len(), 3);
+    }
+
     #[test]
     fn drag_into_out_of_group_preserves_tree_pixels_and_undo() {
         let mut e = Editor::default();

@@ -602,7 +602,7 @@ impl Drop for SequenceSource {fn drop(&mut self){let _=std::fs::remove_dir_all(&
 pub fn open_sequence_editor(source:Arc<SequenceSource>,ctx:&egui::Context){
     let Some(info)=source.info.clone()else{return};let path=source.path.clone();
     let mut player=Preview::default();player.trim.open(info.duration);player.frame_times=Some(Arc::new(source.times()));player.position=0.;player.current_frame=Some(0);
-    if let Some(frame)=source.first_frame.clone(){player.poster=Some(preview_poster(&frame));player.cache.lock().unwrap().insert(0,frame.clone());present_playback_frame(&mut player.texture,&mut player.video_frame,PlaybackFrame::Rgba(frame),player.gpu_video,ctx);}
+    if let Some(frame)=source.first_frame.clone(){player.poster=Some(frame.clone());player.cache.lock().unwrap().insert(0,frame.clone());present_playback_frame(&mut player.texture,&mut player.video_frame,PlaybackFrame::Rgba(frame),player.gpu_video,ctx);}
     player.trim.keep_sequence_source(source);player.info=Some(info);
     TRIM_EDITORS.with(|editors|{editors.borrow_mut().insert(path.clone(),TrimEditor::new(path.clone(), player));});
     crate::native_window::wake(ctx,egui::Id::new(("media_trim",path)));ctx.request_repaint();
@@ -666,7 +666,7 @@ impl TrimEditor {
         if self.saved_edit_state.is_none() { self.saved_edit_state=self.edit_fingerprint(); }
         let (path, player) = &mut self.players[active];
         if self.queue.items[active].thumbnail.is_none() {
-            self.queue.items[active].thumbnail = player.poster.as_ref().map(|poster|ctx.load_texture(format!("editor-thumbnail:{}",path.display()),poster.clone(),egui::TextureOptions::LINEAR)).or_else(||player.texture.clone());
+            self.queue.items[active].thumbnail = player.poster.as_ref().map(|poster|ctx.load_texture(format!("editor-thumbnail:{}",path.display()),preview_poster(poster),egui::TextureOptions::LINEAR)).or_else(||player.texture.clone());
         }
         let mut host=egui::Ui::new(ctx.clone(),egui::Id::new(("trim_host",root)),egui::UiBuilder::new().max_rect(ctx.screen_rect()));
         player.show_trim_editor(&mut host, path, root, &mut self.queue);
@@ -731,10 +731,8 @@ impl TrimEditor {
                         let info = probe(&path, None, None, false)?;
                         if info.video.is_some() != video { return Err(crate::localization::tr("请添加同类音频或视频文件。").into()); }
                         let thumbnail = if video {
-                            let output = command(&info.ffmpeg).args(["-nostdin", "-v", "error", "-i"]).arg(&path)
-                                .args(["-map", "0:V:0", "-frames:v", "1", "-an", "-vf", "scale=240:240:force_original_aspect_ratio=decrease", "-c:v", "png", "-f", "image2pipe", "pipe:1"])
-                                .output().ok();
-                            output.filter(|output| output.status.success()).and_then(|output| image::load_from_memory(&output.stdout).ok())
+                            crate::media_tools::video_thumbnail_png(&info.ffmpeg, &path, 240, 240)
+                                .and_then(|png| image::load_from_memory(&png).ok())
                                 .map(|image| { let image = image.to_rgba8(); egui::ColorImage::from_rgba_unmultiplied([image.width() as usize, image.height() as usize], image.as_raw()) })
                         } else { None };
                         Ok((path, info, thumbnail))
@@ -1105,7 +1103,7 @@ impl Preview {
         self.video_gesture=None;
         self.stop_playback();
         self.save_position();
-        if let Some(frame)=self.current_frame.and_then(|index|self.cache.lock().unwrap().get(index)){self.poster=Some(preview_poster(&frame));}
+        if let Some(frame)=self.current_frame.and_then(|index|self.cache.lock().unwrap().get(index)){self.poster=Some(frame.clone());}
         self.texture=None;self.video_frame=None;self.wave_job=None;self.index_job=None;self.frame_job=None;self.cache=Arc::new(Mutex::new(FrameCache::default()));}
     fn show_trim_editor(&mut self,ui:&mut egui::Ui,path:&Path,window_path:&Path,queue:&mut crate::media_edit_queue::Panel) {
         let render_error=self.yuv_error.lock().unwrap().take();
@@ -1148,7 +1146,7 @@ impl Preview {
             Err(mpsc::TryRecvError::Disconnected)=>{self.index_job=None;self.index_error=Some("视频帧索引失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
         if let Some(job)=&self.frame_job {match job.receiver.try_recv(){
-            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(preview_poster(&frame));self.video_frame=None;self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ui.ctx());},Err(error)=>{self.trim_scrub=None;self.error=Some(error);}}},
+            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(frame.clone());self.video_frame=None;self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ui.ctx());},Err(error)=>{self.trim_scrub=None;self.error=Some(error);}}},
             Err(mpsc::TryRecvError::Disconnected)=>{self.frame_job=None;self.trim_scrub=None;self.error=Some("逐帧解码失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
 
@@ -1409,7 +1407,7 @@ impl Preview {
             Err(mpsc::TryRecvError::Disconnected)=>{self.index_job=None;self.index_error=Some("视频帧索引失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
         if let Some(job)=&self.frame_job {match job.receiver.try_recv(){
-            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(preview_poster(&frame));self.video_frame=None;self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ui.ctx());},Err(error)=>self.error=Some(error)}},
+            Ok(result)=>{self.frame_job=None;match result {Ok((index,frame))=>{self.poster=Some(frame.clone());self.video_frame=None;self.current_frame=Some(index);self.position=self.initial_seek.unwrap_or_else(||self.frame_times.as_ref().and_then(|times|times.get(index)).copied().unwrap_or(self.position));present_playback_frame(&mut self.texture,&mut self.video_frame,PlaybackFrame::Rgba(frame),self.gpu_video,ui.ctx());},Err(error)=>self.error=Some(error)}},
             Err(mpsc::TryRecvError::Disconnected)=>{self.frame_job=None;self.error=Some("逐帧解码失败".into());},Err(mpsc::TryRecvError::Empty)=>{}
         }}
         if !hls && info.video.is_none() && self.waveform.is_none() && self.wave_job.is_none() && self.wave_error.is_none() {
@@ -1852,7 +1850,7 @@ impl Preview {
             self.position=0.0;
         }
         let source = path;
-        if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(if let Some(source)=self.trim.sequence_source(){start_sequence_playback(source,self.position,first,self.cache.clone(),self.trim_preview_end,ctx)}else{start(info,source,self.position,first,self.volume,&self.decoder,self.selected_audio.filter(|_|!self.trim.is_open()||!self.edit_audio_muted),self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),self.trim_preview_end,info.video.map(|size|{let screen=ctx.screen_rect();playback_frame_size(size,self.scale_mode=="fit",[screen.width(),screen.height()],ctx.pixels_per_point())}),self.gpu_video,self.trim.is_open(),self.edit_audio.as_ref().filter(|_|!self.edit_audio_muted),ctx)});self.started=None;}
+        if let Some(info)=&self.info {let first=self.frame_times.as_ref().map_or_else(||(self.position*info.fps).round() as usize,|times|times.partition_point(|time|*time<self.position));self.playback_origin=self.position;self.playback=Some(if let Some(source)=self.trim.sequence_source(){start_sequence_playback(source,self.position,first,self.cache.clone(),self.trim_preview_end,ctx)}else{start(info,source,self.position,first,self.volume,&self.decoder,self.selected_audio.filter(|_|!self.trim.is_open()||!self.edit_audio_muted),self.frame_times.clone(),self.cache.clone(),self.subtitles.render(),self.trim_preview_end,info.video.map(|size|{let screen=ctx.screen_rect();if !remote_input(source,info.network_video.as_ref()) && size[0].max(size[1])<=1920 && size[0].min(size[1])<=1080 {size}else{playback_frame_size(size,self.scale_mode=="fit",[screen.width(),screen.height()],ctx.pixels_per_point())}}),self.gpu_video,self.trim.is_open(),self.edit_audio.as_ref().filter(|_|!self.edit_audio_muted),ctx)});self.started=None;}
     }
 
 }

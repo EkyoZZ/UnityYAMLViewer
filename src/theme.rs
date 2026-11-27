@@ -106,42 +106,13 @@ pub fn compact_selector<const N:usize>(ui:&mut egui::Ui,value:&mut String,labels
     let previous=value.clone();selector_inner(ui,value,true,labels);*value!=previous
 }
 
+/// Small variant of the shared joined tabs, used in timelines and preview controls.
 pub fn small_selector<const N: usize>(ui: &mut egui::Ui, value: &mut String, labels: [(&str, &str); N]) -> bool {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let widths = labels.map(|(_, label)| {
-        ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 10.0
-    });
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(widths.iter().sum(), 20.0), egui::Sense::hover());
-    let mut left = rect.left();
-    let mut changed = false;
-    let mut segments = Vec::with_capacity(N);
-    for (index, ((key, label), width)) in labels.into_iter().zip(widths).enumerate() {
-        let segment = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(left + width, rect.bottom()));
-        let segment_response = ui.interact(segment, response.id.with(index), egui::Sense::click());
-        if segment_response.clicked() && value != key { *value = key.into(); changed = true; }
-        segment_response.widget_info(|| egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel, ui.is_enabled(), value == key, crate::localization::tr(label),
-        ));
-        segments.push((segment, key, label));
-        left += width;
-    }
-    let painter = ui.painter();
-    painter.rect_filled(rect, 3.0, ui.visuals().window_fill);
-    for (index, (segment, key, label)) in segments.into_iter().enumerate() {
-        let selected = value == key;
-        if selected {
-            painter.rect_filled(segment, egui::CornerRadius {
-                nw: if index == 0 { 3 } else { 0 }, sw: if index == 0 { 3 } else { 0 },
-                ne: if index + 1 == N { 3 } else { 0 }, se: if index + 1 == N { 3 } else { 0 },
-            }, BLUE);
-        }
-        if index != 0 { painter.vline(segment.left(), rect.y_range(), Stroke::new(1.0_f32, BLUE)); }
-        painter.text(segment.center(), egui::Align2::CENTER_CENTER, crate::localization::tr(label),
-            font.clone(), if selected { Color32::WHITE } else { BLUE });
-    }
-    painter.rect_stroke(rect, 3.0, Stroke::new(1.0_f32, BLUE), egui::StrokeKind::Inside);
-    changed
+    let previous = value.clone();
+    selector_inner_sized(ui, value, SelectorSize::Small, labels, 1.0);
+    *value != previous
 }
+
 
 pub(crate) fn size_link(ui: &mut egui::Ui, linked: &mut bool) -> bool {
     use crate::localization::tr;
@@ -215,18 +186,43 @@ fn selector_inner<const N:usize>(ui: &mut egui::Ui, preference: &mut String, com
 // Font sizes are supplied by the caller's style; scale the remaining geometry
 // explicitly for controls embedded in a zoomable node canvas.
 fn selector_inner_scaled<const N:usize>(ui: &mut egui::Ui, preference: &mut String, compact: bool, labels: [(&str, &str); N], scale: f32) -> bool {
+    let size = if compact { SelectorSize::Compact } else { SelectorSize::Regular };
+    selector_inner_sized(ui, preference, size, labels, scale)
+}
+
+enum SelectorSize {
+    Regular,
+    Compact,
+    Small,
+}
+
+fn selector_inner_sized<const N: usize>(
+    ui: &mut egui::Ui,
+    preference: &mut String,
+    size: SelectorSize,
+    labels: [(&str, &str); N],
+    scale: f32,
+) -> bool {
+    let (height, radius, padding) = match size {
+        SelectorSize::Regular => (30.0, 4.0, None),
+        SelectorSize::Compact => (24.0, 4.0, Some(egui::vec2(6.0, 2.0))),
+        SelectorSize::Small => (20.0, 3.0, Some(egui::vec2(5.0, 1.0))),
+    };
     let font = egui::TextStyle::Button.resolve(ui.style());
-    let widths = labels.map(|(_, label)| if compact {
-        ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE).size().x.ceil() + 12.0 * scale
-    } else { 208.0 * scale / N as f32 });
-    let height = (if compact { 24.0 } else { 30.0 }) * scale;
+    let widths = labels.map(|(_, label)| {
+        padding.map_or(208.0 * scale / N as f32, |padding| {
+            ui.painter().layout_no_wrap(crate::localization::tr(label).to_owned(), font.clone(), BLUE)
+                .size().x.ceil() + 2.0 * padding.x * scale
+        })
+    });
+    let height = height * scale;
+    let radius = (radius * scale).round() as u8;
     ui.allocate_ui_with_layout(egui::vec2(widths.iter().sum(), height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        if compact { ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0) * scale; }
+        if let Some(padding) = padding { ui.spacing_mut().button_padding = padding * scale; }
         let mut clicked = false;
         for (index, (value, label)) in labels.into_iter().enumerate() {
             let selected = preference == value;
-            let radius = (4.0 * scale).round() as u8;
             let rounding = egui::CornerRadius {
                 nw: if index == 0 { radius } else { 0 }, sw: if index == 0 { radius } else { 0 },
                 ne: if index == N-1 { radius } else { 0 }, se: if index == N-1 { radius } else { 0 },
@@ -235,7 +231,7 @@ fn selector_inner_scaled<const N:usize>(ui: &mut egui::Ui, preference: &mut Stri
                 .fill(if selected { BLUE } else { ui.visuals().window_fill })
                 .stroke(Stroke::new(scale, BLUE)).corner_radius(rounding);
             let response = ui.add_sized([widths[index], height], button.wrap());
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, crate::localization::tr(label)));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, response.enabled(), selected, crate::localization::tr(label)));
             if response.clicked() { *preference = value.into(); clicked = true; }
         }
         clicked
@@ -343,38 +339,42 @@ pub fn preview_toggle(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Reusable switch sizes. Small follows the text height for inline toolbars.
 #[derive(Clone, Copy)]
-pub enum ToggleSwitchSize { Normal, Small }
+enum ToggleSwitchSize { Normal, Small }
 
-/// Content-sized labeled switch; existing callers retain the normal appearance.
-pub fn compact_toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
-    compact_toggle_switch_size(ui,label,value,ToggleSwitchSize::Normal)
+/// Content-sized switch for regular controls.
+pub fn compact_toggle_switch(ui: &mut egui::Ui, label: &str, value: &mut bool) -> egui::Response {
+    toggle_switch_inner(ui, label, value, None, ToggleSwitchSize::Normal)
 }
 
-pub fn compact_toggle_switch_size(ui:&mut egui::Ui,label:&str,value:&mut bool,size:ToggleSwitchSize) -> egui::Response {
-    let font=egui::TextStyle::Button.resolve(ui.style());
-    let text=ui.painter().layout_no_wrap(label.to_owned(),font,ui.visuals().text_color());
-    let rail_height=match size {ToggleSwitchSize::Normal=>24.0,ToggleSwitchSize::Small=>text.size().y.clamp(14.0,18.0)};
-    let rail_width=match size {ToggleSwitchSize::Normal=>40.0,ToggleSwitchSize::Small=>rail_height*1.75};
-    let gap=match size{ToggleSwitchSize::Normal=>8.0,ToggleSwitchSize::Small=>if label.is_empty(){0.0}else{4.0}};
-    let width=text.size().x+rail_width+gap;
-    toggle_switch_width(ui,label,value,width,size)
+/// Small variant of the shared switch for dense toolbars.
+pub fn small_toggle_switch(ui: &mut egui::Ui, label: &str, value: &mut bool) -> egui::Response {
+    toggle_switch_inner(ui, label, value, None, ToggleSwitchSize::Small)
 }
 
-pub fn toggle_switch(ui:&mut egui::Ui,label:&str,value:&mut bool) -> egui::Response {
-    let width=ui.available_width().max(48.0);
-    toggle_switch_width(ui,label,value,width,ToggleSwitchSize::Normal)
+pub fn toggle_switch(ui: &mut egui::Ui, label: &str, value: &mut bool) -> egui::Response {
+    let width = ui.available_width().max(48.0);
+    toggle_switch_inner(ui, label, value, Some(width), ToggleSwitchSize::Normal)
 }
 
-fn toggle_switch_width(ui:&mut egui::Ui,label:&str,value:&mut bool,width:f32,size:ToggleSwitchSize) -> egui::Response {
-    let color=ui.visuals().text_color();
-    let font=egui::TextStyle::Button.resolve(ui.style());
-    let text_height=ui.text_style_height(&egui::TextStyle::Button);
-    let (rail_width,rail_height,padding,gap)=match size{
-        ToggleSwitchSize::Normal=>(40.0,24.0,2.0,8.0),
-        ToggleSwitchSize::Small=>{let h=text_height.clamp(14.0,18.0);(h*1.75,h,1.5,4.0)},
+fn toggle_switch_inner(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut bool,
+    width: Option<f32>,
+    size: ToggleSwitchSize,
+) -> egui::Response {
+    let color = ui.visuals().text_color();
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let rail_height = ui.text_style_height(&egui::TextStyle::Button).clamp(14.0, 18.0);
+    let (rail_width, rail_height, padding, gap) = match size {
+        ToggleSwitchSize::Normal => (40.0, 24.0, 2.0, 8.0),
+        ToggleSwitchSize::Small => (rail_height * 1.75, rail_height, 1.5, if label.is_empty() { 0.0 } else { 4.0 }),
     };
+    let width = width.unwrap_or_else(|| {
+        let text = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), color);
+        text.size().x + rail_width + gap
+    });
     let label_width=(width-rail_width-if label.is_empty(){0.0}else{gap}).max(1.0);
     let galley=ui.painter().layout(label.to_owned(),font,color,label_width);
     let height=match size{ToggleSwitchSize::Normal=>galley.size().y.max(26.0),ToggleSwitchSize::Small=>galley.size().y.max(rail_height)};

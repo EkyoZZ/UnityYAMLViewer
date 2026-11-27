@@ -34,6 +34,7 @@ pub(super) struct Selection {
     edges:Vec<[Pos2;2]>,
     contours:Vec<Vec<Pos2>>,
     combine:Combine,
+    proportional:bool,
     moving:Option<MoveDrag>,
     cut_layer:Option<usize>,
     floating:Option<Floating>,
@@ -58,6 +59,20 @@ impl Selection {
     fn path(&self, diamond: Option<[u32; 2]>)->Vec<Pos2> {
         if self.draft.len()<2 {return self.draft.clone();}
         let a=self.draft[0];let b=*self.draft.last().unwrap();
+        if self.proportional && matches!(self.mode, Mode::Rectangle | Mode::Ellipse) {
+            let delta = proportional_drag_delta(b - a, 1.0);
+            let bounds = Rect::from_two_pos(a, a + delta);
+            let bounds = Rect::from_min_max(bounds.min, bounds.max + Vec2::splat(1.0));
+            if self.mode == Mode::Ellipse {
+                return ellipse_points(bounds);
+            }
+            if diamond.is_some() {
+                let center = bounds.center();
+                return vec![Pos2::new(center.x, bounds.top()), Pos2::new(bounds.right(), center.y),
+                    Pos2::new(center.x, bounds.bottom()), Pos2::new(bounds.left(), center.y)];
+            }
+            return vec![bounds.left_top(), bounds.right_top(), bounds.right_bottom(), bounds.left_bottom()];
+        }
         match self.mode {
             Mode::Rectangle if let Some(footprint) = diamond => {
                 let delta = b - a;
@@ -199,13 +214,14 @@ impl Editor {
                     if self.selection.polygon_close_at(pointer,origin,scale,ui.ctx().pixels_per_point()){commit=true;}
                     else if self.selection.draft.last()!=Some(&point){self.selection.draft.push(point);}
                 }
-                if self.selection.draft.len()>=3&&ui.input(|i|i.key_pressed(egui::Key::Enter)) {commit=true;}
+                if self.selection.draft.len()>=3&&Shortcut::Confirm.take(ui.ctx(), false) {commit=true;}
             }
             mode=>{
-                if dragging {self.selection.draft=vec![start,point];}
+                if dragging {self.selection.draft=vec![start,point]; self.selection.proportional=false;}
                 if !self.selection.draft.is_empty() && (response.dragged_by(egui::PointerButton::Primary) || stopped) {
+                    self.selection.proportional = modifiers.shift && matches!(mode, Mode::Rectangle | Mode::Ellipse);
                     if mode==Mode::Lasso {if self.selection.draft.last()!=Some(&point){self.selection.draft.push(point);}}
-                    else if mode == Mode::Rectangle && self.diamond && !self.plain_image {
+                    else if self.selection.proportional || (mode == Mode::Rectangle && self.diamond && !self.plain_image) {
                         // The pointer no longer reports a press origin on release.
                         // Keep the anchor captured when the drag started.
                         *self.selection.draft.last_mut().unwrap() = point;
@@ -248,6 +264,7 @@ impl Editor {
     fn commit_selection(&mut self,layout:bool,infinite:bool) {
         let diamond = (self.diamond && !self.plain_image).then_some(self.footprint);
         let path=self.selection.path(diamond);
+        self.selection.proportional = false;
         if path.len()<3 {self.selection.draft.clear();return;}
         let bounds=Rect::from_points(&path);
         let width=bounds.width().ceil() as usize;let height=bounds.height().ceil() as usize;
@@ -386,7 +403,7 @@ impl Editor {
 
     pub(super) fn delete_selection_pixels(&mut self) {
         let revision = self.revision;
-        self.fill_selection_with_color([0; 4]);
+        self.fill_selection_pixels([0; 4], false);
         if self.revision != revision {
             self.message = tr("已清空选区。").into();
         }
@@ -397,6 +414,10 @@ impl Editor {
     }
 
     pub(super) fn fill_selection_with_color(&mut self, ink: [u8; 4]) {
+        self.fill_selection_pixels(ink, self.soft_brush);
+    }
+
+    fn fill_selection_pixels(&mut self, ink: [u8; 4], soften_edges: bool) {
         if !self.layer_editable() || !self.selection.draft.is_empty() {
             return;
         }
@@ -407,9 +428,27 @@ impl Editor {
         let (w, h) = self.pixels.dimensions();
         let tile_count = self.tiles.len();
         let mut fill = |tile, x, y| {
-            if self.inside_tile(x as i32, y as i32, w, h) {
-                self.write_pixel(tile, x, y, Rgba(ink));
+            if !self.inside_tile(x as i32, y as i32, w, h) {
+                return;
             }
+            let mut color = Rgba(ink);
+            if soften_edges && let Some(mask) = &selection {
+                // A one-pixel weighted edge transition derived from the final selection mask.
+                let mut weight = 0;
+                for (dy, wy) in [(-1, 1), (0, 2), (1, 1)] {
+                    for (dx, wx) in [(-1, 1), (0, 2), (1, 1)] {
+                        let nx = (x as i32 + dx).clamp(0, w as i32 - 1) as u32;
+                        let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+                        if mask.contains(&(tile, nx, ny)) {
+                            weight += wx * wy;
+                        }
+                    }
+                }
+                if weight < 16 {
+                    color = layer_groups::mix_group(self.before_edit_pixel(tile, x, y), color, weight as f32 / 16.0);
+                }
+            }
+            self.write_pixel(tile, x, y, color);
         };
         if let Some(mask) = &selection {
             for &(tile, x, y) in mask {
@@ -434,6 +473,22 @@ impl Editor {
         self.finish_stroke();
     }
 }
+#[cfg(test)]
+#[test]
+fn brush_fill_softens_selected_edges_without_affecting_the_outside() {
+    let mut editor = Editor::default();
+    editor.init_image(&RgbaImage::new(5, 5));
+    editor.selection.mask = Some((1..4).flat_map(|y| (1..4).map(move |x| (0, x, y))).collect());
+    editor.color = [40, 80, 120, 255];
+    editor.soft_brush = true;
+    editor.fill_selection_color();
+    assert_eq!(editor.pixels.get_pixel(2, 2)[3], 255);
+    assert!((1..255).contains(&editor.pixels.get_pixel(1, 1)[3]));
+    assert_eq!(editor.pixels.get_pixel(0, 0)[3], 0);
+    editor.history(false);
+    assert!(editor.pixels.pixels().all(|pixel| pixel[3] == 0));
+}
+
 #[cfg(test)]mod fill_tests{use super::*;#[test]fn fill_preserves_selection_opacity_and_undo(){let mut e=Editor::default();e.diamond=false;e.reset_document(RgbaImage::new(4,4));let mask:std::collections::HashSet<_>=[(0,1,1),(0,2,1)].into_iter().collect();e.selection.mask=Some(mask.clone());e.color=[80,120,160,128];e.fill_selection_color();assert_eq!(e.pixels.get_pixel(1,1).0,[80,120,160,128]);assert_eq!(e.pixels.get_pixel(0,0)[3],0);assert_eq!(e.selection.mask.as_ref(),Some(&mask));e.history(false);assert!(e.pixels.pixels().all(|p|p[3]==0));assert_eq!(e.selection.mask.as_ref(),Some(&mask));e.layers[e.active_layer].settings.lock_pixels=true;e.fill_selection_color();assert!(e.pixels.pixels().all(|p|p[3]==0));}}
 
 #[cfg(test)]

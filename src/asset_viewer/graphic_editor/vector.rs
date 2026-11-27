@@ -3,6 +3,7 @@ use super::*;
 use resvg::tiny_skia as sk;
 use serde::{Deserialize, Serialize};
 pub(super) mod psd;
+mod selection;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct Knot {
@@ -179,18 +180,21 @@ fn draw_path(
     } else {
         knots.len().saturating_sub(1)
     };
-    for (a, b) in knots.iter().zip(knots.iter().cycle().skip(1)).take(count) {
-        painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
-            [
-                to_screen(a.point),
-                to_screen(a.outgoing),
-                to_screen(b.incoming),
-                to_screen(b.point),
-            ],
-            false,
-            Color32::TRANSPARENT,
-            stroke,
-        ));
+    let backing = egui::Stroke::new(stroke.width + 2.0, Color32::from_white_alpha(230));
+    for stroke in [backing, stroke] {
+        for (a, b) in knots.iter().zip(knots.iter().cycle().skip(1)).take(count) {
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                [
+                    to_screen(a.point),
+                    to_screen(a.outgoing),
+                    to_screen(b.incoming),
+                    to_screen(b.point),
+                ],
+                false,
+                Color32::TRANSPARENT,
+                stroke,
+            ));
+        }
     }
 }
 
@@ -286,6 +290,7 @@ pub(super) enum Geometry {
         inset: u8,
     },
     Path(Vec<Knot>),
+    Compound(Vec<ShapePart>),
 }
 
 fn deserialize_radii<'de, D: serde::Deserializer<'de>>(input: D) -> Result<[f32; 4], D::Error> {
@@ -308,19 +313,106 @@ pub(super) struct Vector {
     pub(super) inverted: bool,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) enum PathOp {
+    #[default]
+    Combine,
+    Subtract,
+    Intersect,
+    Exclude,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "StoredShapePart")]
+pub(super) struct ShapePart {
+    pub(super) vector: Vector,
+    pub(super) operation: PathOp,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredShapePart {
+    Current { vector: Vector, operation: PathOp },
+    Legacy(Vector),
+}
+
+impl From<StoredShapePart> for ShapePart {
+    fn from(value: StoredShapePart) -> Self {
+        match value {
+            StoredShapePart::Current { vector, operation } => Self { vector, operation },
+            StoredShapePart::Legacy(vector) => Self { vector, operation: PathOp::Combine },
+        }
+    }
+}
+
 impl Vector {
+    pub(super) fn is_compound(&self) -> bool {
+        matches!(self.geometry, Geometry::Compound(_))
+    }
+
+    pub(super) fn shared_fill(&self) -> Option<[u8; 3]> {
+        if let Geometry::Compound(parts) = &self.geometry {
+            let fill = parts.first()?.vector.fill?;
+            parts.iter().all(|part| part.vector.fill == Some(fill)).then_some(fill)
+        } else {
+            self.fill
+        }
+    }
+
+    fn set_fill(&mut self, fill: [u8; 3]) {
+        self.fill = Some(fill);
+        if let Geometry::Compound(parts) = &mut self.geometry {
+            for part in parts {
+                part.vector.fill = Some(fill);
+            }
+        }
+    }
+
+    pub(super) fn combine<'a>(
+        sources: impl IntoIterator<Item = (&'a Self, Option<[i32; 2]>)>,
+        origin: Option<[i32; 2]>,
+    ) -> Option<Self> {
+        let [x, y] = origin.unwrap_or_default();
+        let mut parts = Vec::new();
+        for (vector, source) in sources {
+            let [sx, sy] = source.unwrap_or_default();
+            let offset = egui::vec2(sx as f32 - x as f32, sy as f32 - y as f32);
+            let source = match &vector.geometry {
+                Geometry::Compound(parts)
+                    if parts.iter().all(|part| part.operation == PathOp::Combine) => parts.clone(),
+                Geometry::Compound(_) => return None,
+                _ => vec![ShapePart { vector: vector.clone(), operation: PathOp::Combine }],
+            };
+            parts.extend(source.into_iter().map(|mut part| {
+                if offset != Vec2::ZERO {
+                    part.vector = part.vector.transformed(|p| p + offset, Vec2::splat(1.), 0.);
+                }
+                part
+            }));
+        }
+        let fill = parts.last()?.vector.fill?;
+        let mut vector = Self {
+            geometry: Geometry::Compound(parts),
+            fill: Some(fill),
+            inverted: false,
+        };
+        vector.set_fill(fill);
+        vector.valid().then_some(vector)
+    }
+
     pub(super) fn property_label(&self) -> &'static str {
         match self.geometry {
             Geometry::Rectangle { .. } | Geometry::Triangle { .. } | Geometry::Polygon { .. } => {
                 "形状属性"
             }
             Geometry::Path(_) => "路径属性",
+            Geometry::Compound(_) => "形状属性",
         }
     }
 
     pub(super) fn layer_icon(&self) -> crate::icons::Icon {
         match self.geometry {
-            Geometry::Rectangle { .. } => crate::icons::Icon::VectorShape,
+            Geometry::Rectangle { .. } | Geometry::Compound(_) => crate::icons::Icon::VectorShape,
             Geometry::Triangle { .. } => crate::icons::Icon::VectorTriangle,
             Geometry::Polygon { .. } => crate::icons::Icon::SelectionPolygon,
             Geometry::Path(_) => crate::icons::Icon::VectorPath,
@@ -359,6 +451,15 @@ impl Vector {
                     && (0. ..=8192.).contains(radius)
                     && (1..=100).contains(inset)
             }
+            Geometry::Compound(parts) => {
+                self.fill.is_some() && !self.inverted
+                    && (2..=512).contains(&parts.len())
+                    && parts.chunk_by(|a, b| a.vector.fill == b.vector.fill)
+                        .all(|run| run[0].operation == PathOp::Combine)
+                    && parts.iter().all(|part| {
+                        !part.vector.is_compound() && part.vector.fill.is_some() && !part.vector.inverted && part.vector.valid()
+                    })
+            }
             Geometry::Path(knots) => {
                 (2..=512).contains(&knots.len())
                     && knots
@@ -371,6 +472,7 @@ impl Vector {
     pub(super) fn knots(&self) -> Vec<Knot> {
         match &self.geometry {
             Geometry::Path(knots) => knots.clone(),
+            Geometry::Compound(_) => Vec::new(),
             Geometry::Triangle { points, radius } => rounded_polygon(points, *radius),
             Geometry::Polygon {
                 center,
@@ -489,6 +591,9 @@ impl Vector {
     }
 
     pub(super) fn bounds(&self) -> Option<Rect> {
+        if let Geometry::Compound(parts) = &self.geometry {
+            return parts.iter().filter_map(|part| part.vector.bounds()).reduce(|a, b| a.union(b));
+        }
         let bounds = self.path()?.compute_tight_bounds()?;
         Some(Rect::from_min_max(
             egui::pos2(bounds.left(), bounds.top()),
@@ -497,6 +602,20 @@ impl Vector {
     }
 
     pub(super) fn transformed(&self, map: impl Fn(Pos2) -> Pos2, scale: Vec2, angle: f32) -> Self {
+        self.transformed_with(&map, scale, angle)
+    }
+
+    fn transformed_with(&self, map: &dyn Fn(Pos2) -> Pos2, scale: Vec2, angle: f32) -> Self {
+        if let Geometry::Compound(parts) = &self.geometry {
+            return Self {
+                geometry: Geometry::Compound(parts.iter()
+                    .map(|part| ShapePart {
+                        vector: part.vector.transformed_with(map, scale, angle),
+                        operation: part.operation,
+                    }).collect()),
+                ..self.clone()
+            };
+        }
         let point = |p: [f32; 2]| {
             let p = map(egui::pos2(p[0], p[1]));
             [p.x, p.y]
@@ -564,7 +683,34 @@ impl Vector {
         }
     }
 
+    fn render_parts(
+        parts: &[ShapePart],
+        output: &mut [RgbaImage],
+        mut render: impl FnMut(&Vector) -> Option<Vec<RgbaImage>>,
+    ) -> Option<()> {
+        let settings = layer_properties::Properties::default();
+        for run in parts.chunk_by(|a, b| a.vector.fill == b.vector.fill) {
+            let mut images = render(&run.first()?.vector)?;
+            for part in &run[1..] {
+                for (image, source) in images.iter_mut().zip(render(&part.vector)?) {
+                    apply_path_operation(image, &source, part.operation);
+                }
+            }
+            for (index, (dest, source)) in output.iter_mut().zip(images).enumerate() {
+                settings.composite(dest, &source, index, Default::default());
+            }
+        }
+        Some(())
+    }
+
     pub(super) fn raster(&self, w: u32, h: u32) -> Option<RgbaImage> {
+        if let Geometry::Compound(parts) = &self.geometry {
+            let mut image = RgbaImage::new(w, h);
+            Self::render_parts(parts, std::slice::from_mut(&mut image), |part| {
+                Some(vec![part.raster(w, h)?])
+            })?;
+            return Some(image);
+        }
         let mut image = sk::Pixmap::new(w, h)?;
         if let Some(path) = self.path() {
             let mut paint = sk::Paint::default();
@@ -590,15 +736,43 @@ impl Vector {
     }
 }
 
+fn shape_operation_label(operation: Option<PathOp>) -> &'static str {
+    match operation {
+        None => "新建图层",
+        Some(PathOp::Combine) => "合并形状",
+        Some(PathOp::Subtract) => "减去顶层形状",
+        Some(PathOp::Intersect) => "与形状区域相交",
+        Some(PathOp::Exclude) => "排除重叠形状",
+    }
+}
+
+fn apply_path_operation(dest: &mut RgbaImage, source: &RgbaImage, operation: PathOp) {
+    for (dest, src) in dest.pixels_mut().zip(source.pixels()) {
+        let a = u32::from(dest[3]);
+        let b = u32::from(src[3]);
+        let coverage = match operation {
+            PathOp::Combine => a * 255 + b * (255 - a),
+            PathOp::Subtract => a * (255 - b),
+            PathOp::Intersect => a * b,
+            PathOp::Exclude => a * (255 - b) + b * (255 - a),
+        };
+        let color = if a == 0 { src.0 } else { dest.0 };
+        *dest = Rgba([color[0], color[1], color[2], ((coverage + 127) / 255) as u8]);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct PathTool {
     start: Option<Pos2>,
     path_mode: usize,
     shape_mode: usize,
+    shape_operation: Option<PathOp>,
     polygon_sides: Option<u8>,
+    new_shape_fill: Option<[u8; 3]>,
     pen_mode: usize,
     pen: Vec<[f32; 2]>,
-    drag: Option<(usize, usize, u8, Pos2, Vector)>,
+    drag: Option<selection::Drag>,
+    selection: selection::PathSelection,
     conversion: Option<(usize, Vector)>,
     pub(super) corner_drag: Option<CornerDrag>,
     pub(super) corner_unlinked: bool,
@@ -653,7 +827,7 @@ impl PathTool {
             return;
         }
         match tool {
-            Tool::Path => self.path_mode = mode,
+            Tool::Path => { self.path_mode = mode; self.clear_selection(); }
             Tool::Shape => self.shape_mode = mode,
             Tool::Pen => self.pen_mode = mode,
             _ => return,
@@ -713,6 +887,11 @@ impl Editor {
         origin: Option<[i32; 2]>,
     ) -> Option<Vec<RgbaImage>> {
         let (w, h) = self.pixels.dimensions();
+        if let Geometry::Compound(parts) = &vector.geometry {
+            let mut tiles = vec![RgbaImage::new(w, h); self.tiles.len()];
+            Vector::render_parts(parts, &mut tiles, |part| self.render_vector_tiles(part, origin))?;
+            return Some(tiles);
+        }
         let Some([ox, oy]) = origin else {
             return Some(vec![vector.raster(w, h)?; self.tiles.len()]);
         };
@@ -755,7 +934,9 @@ impl Editor {
             return;
         };
         if record {
+            let selection = std::mem::take(&mut self.path_tool.selection);
             self.record_layer_change();
+            self.path_tool.selection = selection;
         }
         let layer = &mut self.layers[index];
         if vector.fill.is_some() {
@@ -776,6 +957,42 @@ impl Editor {
     }
 
     fn add_vector(&mut self, vector: Vector) {
+        let index = self.active_layer;
+        if self.tool == Tool::Shape && let Some(operation) = self.path_tool.shape_operation
+            && self.vector_unlocked(index)
+            && let Some(layer) = self.layers.get(index)
+            && layer.visible
+            && let Some(existing) = layer.settings.vector.as_ref()
+                .filter(|vector| vector.fill.is_some() && !vector.inverted)
+        {
+            let origin = self.vector_origin(layer.settings.vector_origin);
+            let current = self.vector_origin(None).unwrap_or_default();
+            let target = origin.unwrap_or_default();
+            let offset = egui::vec2(current[0] as f32 - target[0] as f32,
+                                    current[1] as f32 - target[1] as f32);
+            let mut vector = if offset == Vec2::ZERO {
+                vector
+            } else {
+                vector.transformed(|point| point + offset, Vec2::splat(1.), 0.)
+            };
+            let mut parts = match &existing.geometry {
+                Geometry::Compound(parts) => parts.clone(),
+                _ => vec![ShapePart { vector: existing.clone(), operation: PathOp::Combine }],
+            };
+            vector.fill = parts.last().and_then(|part| part.vector.fill);
+            parts.push(ShapePart { vector, operation });
+            let combined = Vector {
+                geometry: Geometry::Compound(parts),
+                fill: existing.fill,
+                inverted: false,
+            };
+            if combined.valid() {
+                self.apply_vector(index, combined);
+            } else {
+                self.message = tr("无法合并矢量形状").into();
+            }
+            return;
+        }
         let (w, h) = self.pixels.dimensions();
         let tile_count = self.tiles.len();
         if !self.can_add_layers(&[], w as usize * h as usize * 4 * tile_count) {
@@ -800,6 +1017,10 @@ impl Editor {
             },
         });
         self.select_layer(index);
+    }
+
+    fn new_shape_fill(&self) -> [u8; 3] {
+        self.path_tool.new_shape_fill.unwrap_or([self.color[0], self.color[1], self.color[2]])
     }
 
     pub(super) fn vector_options(&mut self, ui: &mut egui::Ui) {
@@ -830,6 +1051,17 @@ impl Editor {
                 }
             }
         });
+        if self.tool == Tool::Shape {
+            egui::ComboBox::from_id_salt("shape_operation")
+                .selected_text(tr(shape_operation_label(self.path_tool.shape_operation)))
+                .show_ui(ui, |ui| {
+                    for operation in [None, Some(PathOp::Combine), Some(PathOp::Subtract),
+                        Some(PathOp::Intersect), Some(PathOp::Exclude)] {
+                        ui.selectable_value(&mut self.path_tool.shape_operation, operation,
+                            tr(shape_operation_label(operation)));
+                    }
+                });
+        }
         if self.tool == Tool::Shape && self.path_tool.shape_mode == 3 {
             ui.label(tr("边数"));
             ui.add(
@@ -842,11 +1074,23 @@ impl Editor {
             .get(index)
             .and_then(|l| l.settings.vector.clone())
         else {
+            if self.tool == Tool::Shape {
+                let mut fill = self.new_shape_fill();
+                ui.label(tr("填充"));
+                if crate::color_property::edit_rgb_live(ui, tr("填充"), &mut fill, None) {
+                    self.path_tool.new_shape_fill = Some(fill);
+                }
+                if self.path_tool.new_shape_fill.is_some() && ui.small_button(tr("使用前景色")).clicked() {
+                    self.path_tool.new_shape_fill = None;
+                }
+            }
             return;
         };
         ui.add_enabled_ui(self.vector_unlocked(index), |ui| {
             let mut changed = false;
-            if let Geometry::Rectangle { min, max, .. } = &mut vector.geometry {
+            if self.tool == Tool::Path {
+                changed |= self.path_selection_options(ui, index, &mut vector);
+            } else if let Geometry::Rectangle { min, max, .. } = &mut vector.geometry {
                 for (axis, label) in ["宽度", "高度"].into_iter().enumerate() {
                     ui.label(tr(label));
                     let mut size = max[axis] - min[axis];
@@ -863,14 +1107,80 @@ impl Editor {
                     }
                 }
             }
-            if let Some(fill) = &mut vector.fill {
+            if let Some(mut fill) = vector.shared_fill() {
                 ui.label(tr("填充"));
-                changed |= crate::color_property::edit_rgb(ui, tr("填充"), fill);
+                if crate::color_property::edit_rgb_live(ui, tr("填充"), &mut fill, None) {
+                    vector.set_fill(fill);
+                    changed = true;
+                }
             }
-            if changed {
+            if changed && vector.valid() {
                 self.apply_vector(index, vector);
             }
         });
+    }
+
+    fn path_selection_options(&mut self, ui: &mut egui::Ui, layer: usize, vector: &mut Vector) -> bool {
+        let mut changed = false;
+        let target = if let Geometry::Compound(parts) = &mut vector.geometry {
+            let current = self.path_tool.component(layer).filter(|&i| i < parts.len());
+            let mut selected = current.unwrap_or(0);
+            egui::ComboBox::from_id_salt(("selected_subpath", layer))
+                .selected_text(current.map_or_else(|| tr("形状").to_owned(),
+                    |index| format!("{} {}", tr("形状"), index + 1)))
+                .show_ui(ui, |ui| {
+                    for index in 0..parts.len() {
+                        if ui.selectable_label(current == Some(index), format!("{} {}", tr("形状"), index + 1)).clicked() {
+                            selected = index;
+                            self.path_tool.select_component(layer, index);
+                        }
+                    }
+                });
+            if self.path_tool.component(layer).is_none() { return false; }
+            let can_change_operation = selected > 0
+                && parts[selected - 1].vector.fill == parts[selected].vector.fill;
+            let part = &mut parts[selected];
+            if can_change_operation {
+                egui::ComboBox::from_id_salt(("selected_subpath_operation", layer))
+                    .selected_text(tr(shape_operation_label(Some(part.operation))))
+                    .show_ui(ui, |ui| {
+                        for operation in [PathOp::Combine, PathOp::Subtract, PathOp::Intersect, PathOp::Exclude] {
+                            let label = tr(shape_operation_label(Some(operation)));
+                            changed |= ui.selectable_value(&mut part.operation, operation, label).changed();
+                        }
+                    });
+            }
+            &mut part.vector
+        } else {
+            vector
+        };
+
+        ui.checkbox(&mut self.transform_linked, tr("锁定比例"));
+        for (axis, label) in ["宽度", "高度"].into_iter().enumerate() {
+            if let Geometry::Rectangle { min, max, .. } = &mut target.geometry {
+                let mut size = max[axis] - min[axis];
+                ui.label(tr(label));
+                if ui.add(egui::DragValue::new(&mut size).range(1. ..=8192.).suffix(" px")).changed() {
+                    resize_rectangle(*min, max, axis, size, self.transform_linked);
+                    changed = true;
+                }
+                continue;
+            }
+            let Some(bounds) = target.bounds() else { break };
+            let original = bounds.size()[axis];
+            if original <= f32::EPSILON {
+                continue;
+            }
+            let mut size = original;
+            ui.label(tr(label));
+            if ui.add(egui::DragValue::new(&mut size).range(1. ..=8192.).suffix(" px")).changed() {
+                let mut scale = if self.transform_linked { Vec2::splat(size / original) } else { Vec2::splat(1.) };
+                scale[axis] = size / original;
+                *target = target.transformed(|point| bounds.min + (point - bounds.min) * scale, scale, 0.);
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(super) fn vector_detail_ui(
@@ -906,6 +1216,24 @@ impl Editor {
                         );
                         ui.strong(tr(vector.property_label()));
                     });
+                    let compound = vector.is_compound();
+                    let vector = if let Geometry::Compound(parts) = &mut vector.geometry {
+                        let id = ui.id().with(("vector_component", index));
+                        let mut selected = self.path_tool.component(index).unwrap_or(0).min(parts.len() - 1);
+                        egui::ComboBox::from_id_salt(id)
+                            .selected_text(format!("{} {}", tr("形状"), selected + 1))
+                            .show_ui(ui, |ui| {
+                                for component in 0..parts.len() {
+                                    if ui.selectable_value(&mut selected, component,
+                                        format!("{} {}", tr("形状"), component + 1)).clicked() {
+                                        self.path_tool.select_component(index, component);
+                                    }
+                                }
+                            });
+                        &mut parts[selected].vector
+                    } else {
+                        &mut vector
+                    };
                     if let Geometry::Rectangle {
                         min,
                         max,
@@ -1048,14 +1376,14 @@ impl Editor {
                                 )
                                 .changed();
                         });
-                    } else {
+                    } else if !compound {
                         edit_path = ui.button(tr("编辑路径锚点")).clicked();
                     }
-                    if let Some(fill) = &mut vector.fill {
+                    if !compound && let Some(fill) = &mut vector.fill {
                         ui.separator();
                         ui.horizontal(|ui| {
                             ui.label(tr("填充"));
-                            changed |= crate::color_property::edit_rgb(ui, tr("填充"), fill);
+                            changed |= crate::color_property::edit_rgb_live(ui, tr("填充"), fill, None);
                         });
                     }
                 });
@@ -1071,6 +1399,24 @@ impl Editor {
         if !open {
             self.layer_detail = None;
         }
+    }
+
+    pub(super) fn vector_thumbnail_fill(
+        &self, ui: &mut egui::Ui, index: usize, response: &egui::Response,
+    ) -> Option<Vector> {
+        let mut vector = self.layers[index].settings.vector.clone()?;
+        let mut fill = vector.shared_fill()?;
+        let enabled = self.vector_unlocked(index) && self.transform.is_none() && self.pending_open.is_none()
+            && !ui.input(|input| input.modifiers.command || input.modifiers.shift)
+            && (self.active_layer == index || response.clicked());
+        let changed = ui.add_enabled_ui(enabled, |ui| {
+            crate::color_property::edit_rgb_live(ui, tr("填充"), &mut fill, Some(response))
+        }).inner;
+        if changed && self.active_layer == index {
+            vector.set_fill(fill);
+            return Some(vector);
+        }
+        None
     }
 
     fn vector_unlocked(&self, i: usize) -> bool {
@@ -1100,11 +1446,16 @@ impl Editor {
             .interact_pointer_pos()
             .map(|p| ((p - image.min) / scale).to_pos2());
         let to_screen = |p: [f32; 2]| image.min + egui::vec2(p[0], p[1]) * scale;
-        let outline = egui::Stroke::new(1_f32, Color32::from_rgb(95, 175, 255));
+        let outline = egui::Stroke::new(2.0_f32, Color32::from_rgb(25, 112, 196));
+        if self.tool == Tool::Path {
+            self.path_canvas(ui, response, painter, image, scale, blocked, outline);
+            return;
+        }
+        self.path_tool.drag = None;
         let pen_mode = self.path_tool.pen_mode;
         if self.tool == Tool::Pen && pen_mode < 3 {
             let mut close = !blocked
-                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                && Shortcut::Confirm.take(ui.ctx(), false);
             if pen_mode == 1 && !blocked {
                 if response.drag_started_by(egui::PointerButton::Primary) {
                     self.path_tool.clear_pen();
@@ -1190,6 +1541,20 @@ impl Editor {
                 } else {
                     b.round()
                 };
+                let b = if self.path_tool.shape_mode != 4 && ui.input(|input| input.modifiers.shift) {
+                    let aspect = if self.path_tool.shape_mode == 2 { 2.0 / 3.0_f32.sqrt() } else { 1.0 };
+                    let delta = proportional_drag_delta(b - a, aspect);
+                    let factor = if self.plain_image && delta != Vec2::ZERO {
+                        let limit = (image.size() / scale).to_pos2();
+                        let bounded = (a + delta).clamp(Pos2::ZERO, limit) - a;
+                        (bounded.x / delta.x).abs().min((bounded.y / delta.y).abs()).min(1.0)
+                    } else {
+                        1.0
+                    };
+                    a + delta * factor
+                } else {
+                    b
+                };
                 let vector = shape_geometry(
                     self.path_tool.shape_mode,
                     a,
@@ -1198,7 +1563,7 @@ impl Editor {
                 )
                 .map(|geometry| Vector {
                     geometry,
-                    fill: Some([self.color[0], self.color[1], self.color[2]]),
+                    fill: Some(self.new_shape_fill()),
                     inverted: false,
                 });
                 if let Some(vector) = &vector {
@@ -1258,6 +1623,12 @@ impl Editor {
             .interact_pointer_pos()
             .map(|p| ((p - image.min) / scale).to_pos2());
         let to_screen = |p: [f32; 2]| image.min + egui::vec2(p[0], p[1]) * scale;
+        if self.tool == Tool::Pen && let Geometry::Compound(parts) = &vector.geometry {
+            for part in parts {
+                draw_path(painter, &part.vector.knots(), to_screen, outline, true);
+            }
+            return;
+        }
         let mut displayed = vector.clone();
         if self.tool == Tool::Pen
             && !blocked
@@ -1277,134 +1648,14 @@ impl Editor {
                 }
             }
         }
-        if !blocked
-            && self.tool == Tool::Path
-            && self.path_tool.conversion.is_none()
-            && self.vector_unlocked(index)
-            && response.drag_started_by(egui::PointerButton::Primary)
-            && let Some(press) = ui.input(|i| i.pointer.press_origin())
-        {
-            let handles = |k: &Knot| [(0, k.point), (1, k.incoming), (2, k.outgoing)];
-            let closest = vector
-                .knots()
-                .iter()
-                .enumerate()
-                .flat_map(|(i, k)| handles(k).into_iter().map(move |(part, p)| (i, part, p)))
-                .filter(|(_, _, p)| to_screen(*p).distance(press) <= 7.)
-                .min_by(|a, b| {
-                    to_screen(a.2)
-                        .distance(press)
-                        .total_cmp(&to_screen(b.2).distance(press))
-                });
-            let candidate = if self.path_tool.path_mode == 0 {
-                let local = (press - image.min) / scale;
-                let inside = image.contains(press)
-                    && self.layers[index].tiles[self.selected]
-                        .get_pixel_checked(local.x as u32, local.y as u32)
-                        .is_some_and(|p| p[3] != 0);
-                (inside || closest.is_some()).then_some((0, 3, [0.; 2]))
-            } else {
-                closest
-            };
-            if let Some((knot, part, _)) = candidate {
-                self.path_tool.drag = Some((
-                    index,
-                    knot,
-                    part,
-                    ((press - image.min) / scale).to_pos2(),
-                    vector.clone(),
-                ));
-            }
-        }
-        if let (Some((owner, knot, part, start, original)), Some(point)) =
-            (&self.path_tool.drag, point)
-            && *owner == index
-        {
-            let delta = point - *start;
-            let mut knots = original.knots();
-            let k = &mut knots[*knot];
-            let shift = |p: &mut [f32; 2]| {
-                p[0] += delta.x;
-                p[1] += delta.y;
-            };
-            match part {
-                0 => {
-                    shift(&mut k.point);
-                    shift(&mut k.incoming);
-                    shift(&mut k.outgoing);
-                }
-                1 => {
-                    shift(&mut k.incoming);
-                    k.linked = false;
-                }
-                2 => {
-                    shift(&mut k.outgoing);
-                    k.linked = false;
-                }
-                _ => {}
-            }
-            if *part == 3 {
-                match &mut displayed.geometry {
-                    Geometry::Rectangle { min, max, .. } => {
-                        shift(min);
-                        shift(max);
-                    }
-                    Geometry::Triangle { points, .. } => {
-                        for point in points {
-                            shift(point);
-                        }
-                    }
-                    Geometry::Polygon { center, .. } => shift(center),
-                    Geometry::Path(knots) => {
-                        for knot in knots {
-                            shift(&mut knot.point);
-                            shift(&mut knot.incoming);
-                            shift(&mut knot.outgoing);
-                        }
-                    }
-                }
-            } else {
-                displayed.geometry = Geometry::Path(knots);
-            }
-            if response.drag_stopped_by(egui::PointerButton::Primary) {
-                let convert = *part != 3 && !matches!(original.geometry, Geometry::Path(_));
-                self.path_tool.drag = None;
-                if delta.length_sq() > 0. && displayed.valid() {
-                    if convert {
-                        self.path_tool.conversion = Some((index, displayed.clone()));
-                    } else {
-                        self.apply_vector(index, displayed.clone());
-                    }
-                }
-            }
-        }
         let knots = displayed.knots();
-        for (a, b) in knots.iter().zip(knots.iter().cycle().skip(1)) {
-            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
-                [
-                    to_screen(a.point),
-                    to_screen(a.outgoing),
-                    to_screen(b.incoming),
-                    to_screen(b.point),
-                ],
-                false,
-                Color32::TRANSPARENT,
-                outline,
-            ));
-            if self.tool == Tool::Path && self.path_tool.path_mode == 0 {
-                continue;
+        draw_path(painter, &knots, to_screen, outline, true);
+        for knot in knots {
+            for handle in [knot.incoming, knot.outgoing].into_iter().filter(|p| *p != knot.point) {
+                painter.line_segment([to_screen(knot.point), to_screen(handle)], outline);
+                painter.circle_filled(to_screen(handle), 3., outline.color);
             }
-            for p in [a.incoming, a.outgoing] {
-                if p != a.point {
-                    painter.line_segment([to_screen(a.point), to_screen(p)], outline);
-                    painter.circle_filled(to_screen(p), 3., outline.color);
-                }
-            }
-            painter.rect_filled(
-                Rect::from_center_size(to_screen(a.point), Vec2::splat(6.)),
-                1.,
-                outline.color,
-            );
+            painter.rect_filled(Rect::from_center_size(to_screen(knot.point), Vec2::splat(6.)), 1., outline.color);
         }
     }
 

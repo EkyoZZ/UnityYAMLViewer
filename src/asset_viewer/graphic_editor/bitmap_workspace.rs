@@ -274,6 +274,7 @@ impl Workspace {
 
 impl Editor {
     pub(super) fn init_image(&mut self, im: &RgbaImage) {
+        self.path_tool.clear_selection();
         self.psd_patterns.clear();
         self.guides.clear();
         self.inline_text = None;

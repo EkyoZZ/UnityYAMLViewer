@@ -717,13 +717,13 @@ impl Editor {
             }).response;
         edit.focus = false;
         edit.input_rect = Some(response.rect);
-        if ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        if Shortcut::Cancel.take(ui.ctx(), false) {
             if edit.preview.is_some() {
                 self.invalidate_textures();
             }
             return;
         }
-        let confirmed = ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Enter));
+        let confirmed = Shortcut::CommitText.take(ui.ctx(), false);
         if !confirmed && (first || popup_was_open || ui.memory(|memory| memory.any_popup_open()) || !response.clicked_elsewhere()) {
             self.refresh_inline_preview(ui.ctx(), &mut edit);
             self.inline_text = Some(edit);

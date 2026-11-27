@@ -2,7 +2,7 @@
 use super::*;
 pub(super) mod effects;
 pub(super) use effects::{
-    read_live_rectangle, read_solid_fill, solid_shape_stroke_supported, write_live_rectangle,
+    read_live_rectangles, read_solid_fill, solid_shape_stroke_supported, write_live_rectangles,
     write_solid_fill,
 };
 pub(super) const DETAIL_WIDTH: f32 = 240.;
@@ -1721,8 +1721,8 @@ impl Editor {
                 effects::detail_ui(ui,&mut effects,&mut self.fx_page,&mut light,editable,self.plain_image || self.layers[index].settings.text.is_some());
                 pointer_down = ui.input(|i| i.pointer.primary_down());
                 if !ui.ctx().wants_keyboard_input() && !pointer_down {
-                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL,egui::Key::Z)) {history=Some(false);}
-                    else if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL,egui::Key::Y)) {history=Some(true);}
+                    if Shortcut::Undo.take(ui.ctx(), true) {history=Some(false);}
+                    else if Shortcut::Redo.take(ui.ctx(), true) {history=Some(true);}
                 }
             });
         if let Some(redo)=history {

@@ -27,31 +27,49 @@ const THREE: &[Curve] = &[
 ];
 
 fn digit_shapes(number: u8, center: egui::Pos2, height: f32) -> Vec<egui::Shape> {
-    let curves = match number { 1 => ONE, 2 => TWO, _ => THREE };
-    let paths: Vec<Vec<egui::Pos2>> = curves.iter().map(|curve| {
-        (0..=32).map(|step| {
-            let t = step as f32 / 32.0;
-            let u = 1.0 - t;
-            let weights = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
-            let mut point = egui::Pos2::ZERO;
-            for (control, weight) in curve.iter().zip(weights) {
-                point.x += control[0] * weight;
-                point.y += control[1] * weight;
-            }
-            point
-        }).collect()
-    }).collect();
+    let curves = match number {
+        1 => ONE,
+        2 => TWO,
+        _ => THREE,
+    };
+    let paths: Vec<Vec<egui::Pos2>> = curves
+        .iter()
+        .map(|curve| {
+            (0..=32)
+                .map(|step| {
+                    let t = step as f32 / 32.0;
+                    let u = 1.0 - t;
+                    let weights = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+                    let mut point = egui::Pos2::ZERO;
+                    for (control, weight) in curve.iter().zip(weights) {
+                        point.x += control[0] * weight;
+                        point.y += control[1] * weight;
+                    }
+                    point
+                })
+                .collect()
+        })
+        .collect();
     // Center the visible ink, including rounded caps, rather than a font layout box.
     let mut bounds = egui::Rect::NOTHING;
-    for point in paths.iter().flatten() { bounds.extend_with(*point); }
+    for point in paths.iter().flatten() {
+        bounds.extend_with(*point);
+    }
     let bounds = bounds.expand(DIGIT_STROKE * 0.5);
     let scale = height / bounds.height();
     let stroke = egui::Stroke::new(DIGIT_STROKE * scale, egui::Color32::WHITE);
     let mut shapes = Vec::with_capacity(paths.len() * 3);
     for path in paths {
-        let points: Vec<_> = path.into_iter().map(|point| center + (point - bounds.center()) * scale).collect();
+        let points: Vec<_> = path
+            .into_iter()
+            .map(|point| center + (point - bounds.center()) * scale)
+            .collect();
         for point in [points[0], *points.last().unwrap()] {
-            shapes.push(egui::Shape::circle_filled(point, stroke.width * 0.5, stroke.color));
+            shapes.push(egui::Shape::circle_filled(
+                point,
+                stroke.width * 0.5,
+                stroke.color,
+            ));
         }
         shapes.push(egui::Shape::line(points, stroke));
     }
@@ -74,6 +92,22 @@ impl Request {
         self.deadline
             .map_or(DURATION, |end| end.saturating_duration_since(now))
     }
+    pub fn paint(&mut self, ui: &egui::Ui, area: egui::Rect) {
+        let now = Instant::now();
+        let remaining = self.remaining(now);
+        if remaining.is_zero() {
+            return;
+        }
+        let number = (remaining.as_secs_f64().ceil() as u8).clamp(1, 3);
+        let center = area.center();
+        let side = 140.0_f32.min(area.width()).min(area.height()).max(1.0);
+        let painter = ui.painter_at(area);
+        painter.circle_filled(center, side * 0.44, egui::Color32::from_black_alpha(185));
+        painter.extend(digit_shapes(number, center, side * 0.6));
+        self.presented(now);
+        ui.ctx().request_repaint_after(Duration::from_millis(50));
+    }
+
     fn presented(&mut self, now: Instant) {
         if let Some(ready) = self.ready.take() {
             let deadline = now + DURATION;
@@ -160,7 +194,8 @@ impl Countdown {
                             side * 0.44,
                             egui::Color32::from_black_alpha(185),
                         );
-                        ui.painter().extend(digit_shapes(number, center, side * 0.6));
+                        ui.painter()
+                            .extend(digit_shapes(number, center, side * 0.6));
                     });
                 child.request_repaint_after(Duration::from_millis(50));
             },

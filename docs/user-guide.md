@@ -905,7 +905,7 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 - 工具条显示停止快捷键、时间与文件体积。全屏／全部屏幕开始后隐藏，区域录制保留停止按钮；录制时区域、参数及快捷键锁定，线框与区域内部不拦截鼠标。结束后恢复工具条，下方显示本次视频地址及编辑／打开目录按钮，绿框继续保持鼠标穿透，可以操作框内软件；点击圆圈十字“重新选择区域”后才恢复线框拖动及手柄缩放。工具条坐标输入仍可使用，修改数值不会重新拦截框内鼠标。不提供“完成”，用 × 退出。录制中 × 会先正常收尾再退出；Esc 不用于中止正在进行的录制。
 - 重新进入录屏或重新选区时，不在下方展示上次的保存结果。工具条“历史记录”打开独立录屏历史窗口，与主程序“最近打开”分开保存和计数，按成功录制顺序保留最新记录。选中存在的文件可进入视频编辑或打开目录；不存在的标红并禁用这两个操作。红色“移除记录”只移除条目，任何情况下都不删除视频文件；调整上限淘汰旧记录也不删除视频。
 - 选区、倒计时和启动准备时显示绿框，实际开始录制后变为红框；点击停止、使用停止快捷键或异常结束后恢复绿框。停止后仍保持鼠标穿透，再次选区才恢复调整。
-- 录屏线框、选区交互层、工具条和屏幕选择菜单均设置捕获排除，要求 Windows 10 2004+；设置失败禁止开始。实际输出仍需在目标捕获环境核对。可录制默认播放设备的系统声音，不采集麦克风，不支持暂停续录；受保护画面、独占全屏、安全桌面与远程／特殊合成环境不保证兼容。
+- 录屏线框、选区交互层、工具条和屏幕选择菜单均设置捕获排除，要求 Windows 10 2004+；设置失败禁止开始。实际输出仍需在目标捕获环境核对。可录制默认播放设备的系统声音和选定麦克风，暂停续录暂未支持；受保护画面、独占全屏、安全桌面与远程／特殊合成环境不保证兼容。
 - English: Open File → Screen recording to select a region. The crosshair snaps to visible windows; click to confirm or hold the left button to draw a rectangle and release. Right-click cancels the current selection; before recording, Esc closes both region and toolbar, whether drawing or already confirmed. Movement beyond the system tolerance (at least four physical pixels) switches to drawing. All directions and negative origins are supported, with a 16×16 minimum inside the virtual desktop.
 - Inside a confirmed region the pointer becomes a four-way move cursor; left-drag to move without resizing. Corner handles change both dimensions, top/bottom middle handles change height, left/right middle handles change width. The top middle segment still moves the region; Ctrl+drag the top edge adjusts upward. Fields and geometry stay synchronized. The region does not follow subsequent movement of its original window.
 - The toolbar uses the app’s controls/theme: screen selector, circled cross to reselect, the same settings icon as the main window, X/Y, width × height px, red start circle/stop square and × close. Settings opens separately. Choose Fullscreen for one monitor or individual/all screens for multiple monitors. Placement prefers below, then above or beside the region within monitor work areas, falling inside a screen only if no outside space exists.
@@ -914,11 +914,16 @@ Final interaction: single-clicking a list cue selects/reveals it in the timeline
 - The toolbar shows the stop shortcut, elapsed time and file size. Fullscreen/all-screen recording hides it; region recording retains Stop. Recording locks geometry/settings/shortcuts and makes the border/interior click-through. Completion restores the toolbar and shows the current output path plus editor/folder actions below it. The green frame remains click-through so you can operate the software beneath it; use the crosshair-in-a-circle button to select a region again and restore frame dragging and resize handles. Toolbar coordinate fields remain available, and changing them does not restore mouse interception. There is no Done button; × exits, gracefully finalizing first if recording. Esc does not stop an active recording.
 - Reopening recording or selecting a new region hides the previous completion result. History opens a separate recording history window, with storage/count independent of Recent files. It keeps the newest successful recordings. Select an existing file to edit or open its folder. Missing files appear red and disable these actions. The red Remove entry button only removes metadata; it never deletes a video. Trimming to a new limit likewise keeps all video files.
 - The frame is green during selection, countdown and startup, and turns red when recording actually begins. Stop, the stop shortcut or an error restores green. It remains click-through after stopping until you select a region again.
-- Border, selection interaction layer, toolbar and screen menu use capture exclusion, requiring Windows 10 version 2004+. Failure disables starting; recorded output still needs checking in the target environment. System audio from the default playback device is supported; microphone capture and pause/resume are not. Protected content, exclusive fullscreen, secure desktops and remote/unusual composition environments are not guaranteed compatible.
+- Border, selection interaction layer, toolbar and screen menu use capture exclusion, requiring Windows 10 version 2004+. Failure disables starting; recorded output still needs checking in the target environment. Record system audio from the default playback device, a selected microphone, or both. Pause and resume are unavailable. Protected content, exclusive fullscreen, secure desktops and remote/unusual composition environments are not guaranteed compatible.
 
-- 工具条录制按钮前的麦克风形状按钮控制系统声音，默认开启；点击关闭后显示红色禁止标记，保存并记住选择。它不访问麦克风；录制过程中不可切换。采集默认播放设备（多声道转立体声），没有播放内容时保留静音；受保护音频可能无法捕获，更换系统播放设备需停止后重新开始。初始化或中途失败会提示，不悄悄改为无声录制。
+- 单摄像头预览的画面边框标识实际录入范围。横向或竖向切换后，预览与成片使用同一裁切，边框外的窗口底色不会录入。画中画预览按所选屏幕的比例显示合成结果。
+- 在录制来源菜单选择「摄像头画中画」，默认录主屏。独立实时预览会直接打开。在预览窗口下方可切换录制屏幕，也可拖动摄像头区域或右下角手柄设置位置和大小。录制中锁定屏幕，摄像头画面仍可移动。
+- 工具条按录制设置显示扬声器和麦克风图标，可在录制前或录制中分别临时静音。两项都启用时保存为一条混合音轨。
+- 排查掉帧或音画偏差时，可在录制前开启「录制诊断」。成片旁的同名 `.diagnostics` 文件夹会保存 `timestamps.log`，以及已启用音源的混音前 WAV。WAV 包含倒计时预热阶段。此选项默认关闭。
 - 工具条输入框和标准下拉框保持较矮并与图标垂直居中；停止提示简写为“停止: 快捷键”，使用正常字号。保存结果紧接工具条，不加分割线。透明圆角及投影由程序绘制。
-- The microphone-shaped button before Record controls system playback audio, enabled by default and remembered. A red prohibition mark means disabled. It never accesses the microphone and is locked during recording. The default output device is captured, downmixed to stereo, with silence during idle playback. Protected audio may be unavailable; stop and restart after changing output devices. Initialization/capture failures are reported rather than silently falling back to silent video.
+- Select Camera picture-in-picture in the recording source menu to open the live preview. The primary screen is selected by default. Choose a display below the preview, then drag the camera or its lower-right handle to position or resize it. You can still move the camera while recording.
+- The toolbar shows the configured speaker and microphone controls. Each can be muted before or during recording. When both sources are enabled, they are mixed into one audio track.
+- To investigate dropped frames or audio sync, enable Recording diagnostics before starting. The matching `.diagnostics` folder beside the video contains `timestamps.log` and a pre-mix WAV file for each enabled audio source. The WAV files include the countdown warmup. Diagnostics are off by default.
 - Compact fields and the standard dropdown are vertically centered beside icons. Stop/status text uses the normal font size; saved results follow directly without a divider. Rounded transparent corners and shadows are drawn by the app.
 
 - 工具条按第一排控件实际宽度自动收紧，关闭图标直接绘制圆头矢量交叉线，适应当前显示缩放。长保存路径在原宽度内横向浏览。
@@ -1084,11 +1089,11 @@ Both orientations support honeycomb repeats, wrapped drawing, transparent backgr
 
 单格和多格模式均显示缩略图素材库，可从文件导入或拖入本地图片；尺寸必须等于单格尺寸，可一次拖入多张加入库，不会自动排列。点击缩略图填入当前选中格；右键“移除素材库”只移除库条目，已填格子保留。“当前合成存为素材”将当前格可见素材与绘画结果按当前模式裁切后加入库。素材库最多64项、像素总量16 MiB，随 .uytile 工程保存。
 
-BaseLayer固定在最底部，不可删除、改名、解锁或拖动；右键“设置为空”清除当前格素材，“导入素材”从库中选择当前格素材。以上操作不清除上方普通绘画层；绘画层仍独立编辑与导出合成。删除最后一个绘画层会补一个空绘画层。旧工程已有的锁定 BaseLayer 可继续使用。
+BaseLayer固定在最底部，不可删除、改名、解锁或拖动；右键“清空当前格素材”清除素材，“导入素材”从库中选择素材。也可直接右键左侧 Slot，操作所点格子的素材。以上操作不清除上方普通绘画层；绘画层仍独立编辑与导出合成。删除最后一个绘画层会补一个空绘画层。旧工程已有的锁定 BaseLayer 可继续使用。
 
 Both single- and multi-cell modes provide a thumbnail material library. Import files or drop local images of the exact cell dimensions; multiple dropped files enter the library without automatic arrangement. Click a thumbnail to fill the selected cell. Right-click Remove from Library preserves all placed copies. Save Current Composite as Material captures the visible cell composition with the active shape clip. The library is embedded in .uytile, limited to 64 items and 16 MiB of pixels.
 
-BaseLayer is pinned at the bottom and cannot be deleted, renamed, unlocked or reordered. Its context menu offers Set Empty and Import Material for the current cell. Overlaid drawing layers remain intact and are composited on export. Deleting the last drawing layer creates a blank replacement. Existing locked BaseLayer content is preserved.
+BaseLayer is pinned at the bottom and cannot be deleted, renamed, unlocked or reordered. Use Clear Material or Import Material from the BaseLayer context menu for the selected cell, or right-click a Slot to change that cell directly. Overlaid drawing layers remain intact and are composited on export. Deleting the last drawing layer creates a blank replacement. Existing locked BaseLayer content is preserved.
 
 ### 统一绘制视图 / Unified drawing view
 
@@ -1192,6 +1197,14 @@ Opening .uytile creates a project-preview tab with its filename and a Tile Paint
 工程素材库和图层之间的“子组绕回”默认关闭，仅支持多格矩形／菱形。子组行列必须整除整体布局，例如4×4工程可设2×2子组；选中Slot决定当前子组。开启后，跨子组边缘的笔触在抬笔时绕回并联动其他组的对应边缘，内部绘制独立；只影响当前绘画层，一笔可整体撤销，选区仍限制目标写入。请先选中正确子组内的Slot；在该组外绘制会按其周期映射。六边形暂不支持；子组设置随工程保存，尺寸不整除时恢复1×1。
 
 Subgroup wrap sits between the project library and layers, off by default, for multi-cell rectangle/diamond layouts. Group dimensions must divide the overall layout, such as 2×2 groups within 4×4. The selected Slot determines the active group. Crossing strokes wrap and link equivalent edges of all groups on release, while interiors stay independent. Only the active drawing layer changes, with one-stroke undo and selection-constrained destinations. Select a Slot in the intended group first; drawing outside it follows that group’s period. Hexagons are unsupported. Projects save subgroup settings; incompatible dimensions reset to 1×1.
+
+打开 Image 或绘 Tile 顶部的「快捷键设置」，点击命令对应的按键后输入新的组合键。点击「确定」保存，两个编辑器共用配置。「恢复默认设置」可还原整套按键，点击「确定」后生效。
+
+Open Keyboard Shortcuts at the top of the Image or Tile editor. Click the key next to a command, then press its new shortcut. Select OK to save the shared settings. Restore Defaults resets the shortcuts after you confirm.
+
+多选图层后，Ctrl+E 用合成结果替换所选层，Ctrl+Alt+E 在所选层上方生成合成层并保留源层。Ctrl+Shift+E 保留 BaseLayer 并合并其余层，在 Image 模式下保留最底层。合并使用可见像素、支持撤销。所选层须在同一父组，剪贴蒙版和对应底层须一并选中。画布缩放可用 Ctrl++（或 Ctrl+=）、Ctrl+- 和 Ctrl+0。
+
+Use Ctrl+E to replace the selected layers with their composite or Ctrl+Alt+E to add the composite above them and preserve the source layers. Ctrl+Shift+E retains BaseLayer, or the bottom layer in Image mode, and merges the other layers. Merging uses visible pixels and supports undo. Selected layers must share a parent, and clipping masks must be selected with their base. Use Ctrl++ (or Ctrl+=), Ctrl+- and Ctrl+0 to control canvas zoom.
 
 图层快捷键：Delete删除当前未锁定普通层；BaseLayer不能删除，只能右键“清空当前格素材”。Ctrl+J按选区拷贝新层；Ctrl+Shift+J在有选区时剪切到新层，同时清除原层选区内容，一次撤销恢复。BaseLayer、锁定／隐藏层不允许剪切，无选区不执行剪切。
 
@@ -1393,7 +1406,9 @@ Image 和 Tile 的主绘制区支持像素标尺。按 **Ctrl+R** 开关标尺�
 
 画布文字沿基线输入。新建点文字按 **Enter** 手动换行，多行使用段落对齐设置。文字层的整个内容外框都可以点击，包括字间空白。
 
-Image 中按 **U** 拖出矢量矩形，可调整宽高、统一圆角和填充颜色。按 **A** 选择整条路径或直接选择锚点。首次拖动参数化形状的锚点时会提示转换，确认后可编辑路径，取消会保留形状。按 **P** 点击放置钢笔锚点，点回第一个锚点或按 Enter 闭合。**K** 用于像素框画，Image 拖矩形，菱形 Tile 拖菱形。
+Image 中按 **U** 拖出矢量矩形，可调整宽高、统一圆角和填充颜色。按 **A** 切换「路径选择」和「直接选择」。用路径选择点中一个形状，从内部、边缘或锚点拖动可平移整条子路径。同层有多个形状时，**Ctrl+J** 将选中形状原位复制到新层，**Ctrl+Shift+J** 将它从原层剪切到新层。
+
+用直接选择单击一个锚点，或从锚点外拖框选择多个。实心点表示已选，按住 **Shift** 可加选。拖动任一已选点可一起移动这些点。单独改变参数矩形的部分锚点或曲线手柄时会提示转换；取消可保留矩形和圆角。按 **P** 点击放置钢笔锚点，点回第一个锚点或按 Enter 闭合。**K** 用于像素框画，Image 拖矩形，菱形 Tile 拖菱形。
 
 Open an ordinary bitmap or PSD and choose **Edit Image**. **Image / Tile** keeps each tab’s edits and undo history. A `.uytile` project opens only in Tile. Image uses the original canvas size and clips text at its edges. Use a rectangular Tile to make a seamless watermark.
 
@@ -1417,4 +1432,6 @@ Press **T** and click the canvas to enter text at that position, or click existi
 
 Type along the baseline on the canvas. Press **Enter** to add a line to point text. Paragraph alignment applies to multiple lines. Click anywhere inside a text layer’s content bounds, including the spaces between letters, to edit it.
 
-In Image, press **U** to draw a vector rectangle with adjustable width, height, corner radius and fill color. Press **A** to select the whole path or edit anchors directly. Dragging an anchor on a live shape asks for confirmation before converting it to a path. Press **P** to place Pen anchors and click the first anchor or press Enter to close the path. **K** draws pixel rectangles in Image and pixel diamonds in diamond Tile mode.
+In Image, press **U** to draw a vector rectangle with adjustable width, height, corner radius and fill color. Press **A** to switch between Path Selection and Direct Selection. With Path Selection, drag inside a shape, on its edge or from an anchor to move that subpath. In a layer with several shapes, **Ctrl+J** copies the selected shape in place to a new layer. **Ctrl+Shift+J** cuts it to a new layer.
+
+With Direct Selection, click an anchor or drag a box from outside an anchor to select several. Selected anchors are solid, and **Shift** adds to the selection. Drag any selected anchor to move the selected set. Editing part of a live rectangle or dragging a curve handle asks for confirmation before conversion. Cancel to keep its rectangle properties. Press **P** to place Pen anchors and click the first anchor or press Enter to close the path. **K** draws pixel rectangles in Image and pixel diamonds in diamond Tile mode.

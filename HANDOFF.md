@@ -1,3 +1,22 @@
+# 1.3.9 主程序待发布
+
+- 用户已确认发布 1.3.9，将自行提交 Git 后通知。发布标签和显示标题均使用 `v1.3.9`。仓库说明在 [docs/releases/1.3.9.md](docs/releases/1.3.9.md)，供 GitHub 使用的功能更新和修复正文在 `target/releases/v1.3.9/release-notes.md`。
+- Windows x64 候选附件为 `target/releases/v1.3.9/UnityYAMLViewer-v1.3.9-windows-x64.exe`，与画中画实测通过的 EXE 逐字节一致。大小 38,572,544 字节，SHA-256 为 `89C05055B50EBA20EAE00FAA7A7B5F0AA5E07A83FFBAA071ED38A424D417A305`。GitHub 附件只上传该 EXE，同目录的 `SHA256SUMS.txt` 用于本地核对。
+
+# 1.3.9 本地测试构建
+
+- 2026-11-26 用户授权后检查进程与目标 EXE 独占均通过，1.3.9 本地 Release 构建成功。文件与产品版本均为 1.3.9，大小 38206464 字节，SHA-256 31252c5c23b03afd59721c8e42625839401e3afb6a4a39f37a2ce4a3279d2897，已同步本地校验文件。包含纯摄像头画内倒计时、画中画录制切换保留画面及录制链路调整。实际设备帧率和首帧耗时待实测。
+
+- 2026-11-26 编译前通过进程及目标 EXE 独占检查，1.3.9 本地 Release 构建成功。文件及产品版本均为 1.3.9，大小 38120960 字节，SHA-256 f0dd9a45fab8079cf4d0db3dfd34ac37d1717ddd01cfc018d0a344a05a71bbff，已同步本地校验文件。包含绘 Tile 窗口闪烁修复、录屏历史缩略图与待机画中画 GPU 叠放。界面和设备待实测。
+
+- 2026-11-26 用户授权编译，进程和目标 EXE 独占检查通过。包含预览布局修复、设备设置分组和绘图快捷键的本地 Release 构建成功。文件及产品版本均为 1.3.9，大小 37908992 字节，SHA-256 0e8ac561c4628f517c42c76295cf50adff131b06e7c340b2110e579028fdc28f，本地校验文件已同步。预览画面、改键和 Wacom 待实测。
+
+- 2026-11-26 用户关闭应用后，进程及目标 EXE 独占检查通过。摄像头预览画布测试版 Release 构建成功。文件和产品版本均为 1.3.9，大小 38022656 字节，SHA-256 b7fd2e48d7f1314b6752698597901b96c67f0c20437cdcef96e32ac16d1a7611，已同步本地校验文件。USB 摄像头、预览窗口及成片画面待实测。
+
+- 2026-11-26 经用户关闭主程序并授权，目标 EXE 独占检查通过，录制控件测试版 Release 构建成功。文件及产品版本均为 1.3.9，大小 37895168 字节，SHA-256 `52cd7037f1fb3a27b96b9b88dcf8aaa554d112e9ef08b21201d9efa49e4ca524`，已同步本地校验文件。日志为 `target/v1.3.9-camera-controls-build.log`。录制方式切换、实时静音及画中画摄像头开关待实测。
+
+- 2026-11-26 经用户授权编译摄像头、麦克风和画中画测试版，进程和目标 EXE 占用检查通过。本地 Release 构建成功，文件及产品版本均为 1.3.9，大小 37905920 字节，SHA-256 `7d5e9af2b24cc551053e56b446ef9c7de824bbea41d2988d87fef39f27ff3111`，已同步本地校验文件。构建日志为 `target/v1.3.9-camera-pip-build.log`。实体 USB 摄像头、麦克风、录制期间移动及捕获排除待实测。
+
 # 1.3.8 正式发布
 
 - GitHub Release 459136897 已于北京时间 2026-11-26 16:33:35 正式发布。标题和标签均为 v1.3.8，标签指向 `0bdf18a04f2d0b8b142aced27f8599f175862f8e`，已核对 Latest。仅上传已实测的 Windows x64 EXE，远端大小和 SHA-256 与本地候选一致。核验记录位于 `target/releases/v1.3.8/published-verification.json`。
@@ -4890,3 +4909,84 @@ mask_enabled=false时缩略图加红色斜线，启用即移除，不改数据�
 
 
 - AnimationClip 的 IsActive 粒子启停、Image Alpha 曲线及布尔复选框已纳入 1.3.7 测试版。产物 target/release/unity_yaml_viewer.exe · 36995072 bytes · SHA-256 E29BB4C4385930F860B6989813831BF109B349D996A8A5D8905267328A46D653。实际 Prefab 与界面待验证。
+
+## 2026-11-26 1.3.9 画中画录屏测试构建
+
+- 已在确认目标 EXE 无占用后完成 Release 构建。产物 target/release/unity_yaml_viewer.exe，文件版本 1.3.9，产品版本 1.3.9，38166016 字节，SHA-256 7CA76811600D2311A7B05AC645570D26F6684447B4012D8AC3083C3AA6EA691F。构建日志 target/pip-1.3.9-release-build.log。
+- 用于 USB 摄像头及画中画录屏实测。本包基于上次通过检查的矢量功能，PSD 多子路径和异色分组写回仍待实现和 Photoshop 往返验证。
+
+## 2026-11-26 1.3.9 镜像预览及复合形状 PSD 验证
+
+- Release EXE 文件及产品版本均为 1.3.9，大小 38,437,376 字节，SHA-256 775E083C8CEBE95214F7076A0CD8934DCBC144426EA204E711EF77596195318E。产物 target/release/unity_yaml_viewer.exe，日志 target/mirror-psd-1.3.9-release-build.log。
+- PSD 回归测试通过。Photoshop 2024 25.3.1 对同色、异色样例分别打开、移动可编辑形状层、另存、重开。同色保留一个形状层，异色保留一个组内的三段形状层，移动保留。另存前后 PSD 路径操作码 1、2、3、0 一致。样例与日志在 target/psd-1.3.9-qa。
+- 摄像头和画中画镜像切换待用户实测。画中画录制掉帧未解决，镜像预览的修复与此独立。
+
+## 2026-11-26 1.3.9 画中画时钟修复实测
+
+- Release 已构建。产物 target/release/unity_yaml_viewer.exe，版本 1.3.9，38,402,560 字节，SHA-256 1FE33C94A0CFFBAA4E20CFAC052FCE2D5EB149C507E7FB51E2664A185185C97F，日志 target/pip-timing-1.3.9-build.log。
+- USB 摄像头、系统声音和麦克风全开启，1080p 30 FPS。样本 recording-1795702824766322100.mp4，347 帧、视频 11.588 秒、平均 29.94 FPS、最长帧间隔 54.7 毫秒，首帧从 0 秒可正常解码。NVENC 实时编码，停止后约 2.6 秒完成。倒计时结束到首次编码报告仍约 4.6 秒。
+
+## 2026-11-26 1.3.9 画中画预热及全屏播放测试构建
+
+- Release 构建通过，产物 target/release/unity_yaml_viewer.exe，文件版本 1.3.9，产品版本 1.3.9，38401024 字节，SHA-256 B5EE04F3F221B8959ECD1FD7C26CD1070324743A4B442567B7A9B988143E838C。日志 target/pip-warmup-1.3.9-build.log。
+- 画中画预热、倒计时结束到首帧时间、黄边及本地 1080p 视频从窗口切换全屏的清晰度由用户实测。本轮未启动 Computer Use 截图。
+
+## 2026-11-26 1.3.9 仅屏幕录制预热测试构建
+
+- Release 构建通过。文件及产品版本分别为 1.3.9 与 1.3.9，产物 target/release/unity_yaml_viewer.exe，38178816 字节，SHA-256 F4F375148E13945320741083DC9C0825754ACBF91AE7FD3843F0B67B1C5B1BF6。日志 target/screen-warmup-1.3.9-build.log。
+- FFmpeg 合成源验证仅屏幕预热支路可在成片通道开启前收到帧，开启后输出从 0 秒开始。实际屏幕录制、悬浮窗箭头和音频收尾待用户实测。
+
+## 2026-11-26 1.3.9 画中画音频同步测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38179328 字节，SHA-256 886AE0D5E76BF050920CAADD528A4D851C4E8ABADFB8626A75872E67D4DB2D60。日志 target/pip-audio-1.3.9-build.log。
+- 双路音频合成源验证通过。实际 USB 摄像头 1080p 30 FPS、系统声音加麦克风的口型同步及人声清晰度待用户验证。
+
+## 2026-11-26 1.3.9 录制诊断测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38226944 字节，SHA-256 4F50535B017EA7FB3695000C32F635DAFC864BA08D6EC153A60628BF96D3FE35。日志 target/pip-diagnostics-1.3.9-build.log。
+- FFmpeg 模拟源验证正常混音成片、两条 WAV 和输入时间戳可同时输出。实际 USB 双音源拍手样本待用户录制。
+
+## 2026-11-26 1.3.9 画中画音频预热测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38005760 字节，SHA-256 AC3934F5E22CE9FC29A45B155C076FAFD933FD38B57368C747B3BDF29D579A7C。日志 target/pip-audio-warmup-1.3.9-build.log。
+- 合成双音源验证两路放行命令成功，输出音画均从零开始。真实 USB 双音源拍手样本待用户录制核对。
+
+## 2026-11-26 1.3.9 画中画合成时钟测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38030848 字节，SHA-256 B17824D67DF82F84E6E01DDC314FB8056BFF7CF7696094F822CCCDBB7BC089DD。日志 target/pip-composite-clock-1.3.9-build.log。
+- 合成双视频和双音源验证通过。实际 USB 1080p 30 FPS 诊断拍手样本待用户录制。
+
+## 2026-11-26 1.3.9 画中画混音前预热测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38024704 字节，SHA-256 219CA40D178888CEE66DD4BD89DC2EAD426F4B457350E52F8E461E78DA178B93。日志 target/pip-premix-clock-1.3.9-build.log。
+- 合成双音源验证三路放行命令成功。实际 USB 摄像头 1080p 30 FPS 两次拍手复测待用户录制。
+
+## 2026-11-26 1.3.9 Photoshop 同层多矩形读取测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38350336 字节，SHA-256 D9DEDBF611FF665EDBBC5E6CB366446E7C4C50E3E3B4F9B0E9676EFF36AFE345。日志 target/psd-vowv-1.3.9-build.log。
+- 已用样本核对 vowv 版本 2 和两条 vsms 闭合矩形路径。实际应用重开、编辑与 Photoshop 往返待用户实测。
+
+## 2026-11-26 1.3.9 矢量缩略图色板修复测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38351360 字节，SHA-256 45CBD3DD79563578F12282BC5B03937945AFB5C84F93B2724E20874D63BD55EF。日志 target/vector-fill-1.3.9-build.log。
+- 修复选色时在列表遍历中清空缩略图导致的越界，移除缩略图的填充悬浮提示。界面待实测。
+
+## 2026-11-27 1.3.9 矢量锚点和填充测试构建
+
+- Release 构建通过。文件版本 1.3.9，产品版本 1.3.9，产物 target/release/unity_yaml_viewer.exe，38395904 字节，SHA-256 D1CA96A59134D2F2D7219B19EBBD410BF69E6EC5F92E4587BE900600D5B5B0D9。日志 target/vector-anchor-fill-1.3.9-build.log。
+- 新建矢量默认填充、已有形状独立填充与复合形状锚点选取待用户实测。
+
+## 2026-11-27 1.3.9 路径选择、锚点框选与子路径分层测试构建
+
+- 主程序 Release 构建完成，用时 1 分 42 秒。文件版本和产品版本均为 1.3.9。产物 `target/release/unity_yaml_viewer.exe` 为 38,371,840 字节，SHA-256 为 `9347F4B86159E1AB0D5CC4A5DBCE92C06FD81FFF969FBD46BAF3A0AD3A328D98`。相邻校验文件已更新，构建日志在 `target/path-selection-1.3.9-build.log`。
+- 2026-11-27 用户确认路径选取、框选锚点及两个分层快捷键实测通过。Ctrl+J 复制选中形状并保留原形状，Ctrl+Shift+J 将选中形状剪切到新层并从原层移除。
+
+## 2026-11-27 1.3.9 画中画录屏 CPU 优化测试构建
+
+- 主程序 Release 构建完成，用时 1 分 42 秒。文件版本和产品版本均为 1.3.9。产物 `target/release/unity_yaml_viewer.exe` 为 38,407,680 字节，SHA-256 为 `1FB344473BFF13A957E3021CB32587487287F0A5766B4532CFBE126BE9C593FA`，已核对相邻校验文件。构建日志在 `target/pip-cpu-1.3.9-build.log`。
+- 已在 EXE 中核对单像素预热滤镜和 FFmpeg CPU 诊断日志标记。G HUB 运行与退出两种状态下的画中画实际帧率及 CPU 用时待用户对照实测。
+
+## 2026-11-27 1.3.9 画中画掉帧修复测试构建
+
+- 用户关闭主程序后，进程和固定 EXE 独占检查通过。Release 构建用时 1 分 33 秒。产物 `target/release/unity_yaml_viewer.exe` 的文件版本和产品版本均为 1.3.9，大小为 38,572,544 字节，SHA-256 为 `89C05055B50EBA20EAE00FAA7A7B5F0AA5E07A83FFBAA071ED38A424D417A305`。相邻校验文件已更新，构建日志位于 `target/pip-capture-pacing-1.3.9-build.log`。
+- 已在产物中核对独立采集滤镜标记。用户确认双音源画中画实录流畅、开销低、拍手音画同步，实时预览无可感延迟。此次 1080p NVENC 成片为 9.575 秒、261 帧，首个帧间隔为 142 毫秒，之后最长约 67 毫秒。详细测量见 `docs/versions/1.3.9.md`。
