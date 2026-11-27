@@ -1,7 +1,7 @@
-# 1.3.9 主程序待发布
+# 1.3.9 主程序正式发布
 
-- 用户已确认发布 1.3.9，将自行提交 Git 后通知。发布标签和显示标题均使用 `v1.3.9`。仓库说明在 [docs/releases/1.3.9.md](docs/releases/1.3.9.md)，供 GitHub 使用的功能更新和修复正文在 `target/releases/v1.3.9/release-notes.md`。
-- Windows x64 候选附件为 `target/releases/v1.3.9/UnityYAMLViewer-v1.3.9-windows-x64.exe`，与画中画实测通过的 EXE 逐字节一致。大小 38,572,544 字节，SHA-256 为 `89C05055B50EBA20EAE00FAA7A7B5F0AA5E07A83FFBAA071ED38A424D417A305`。GitHub 附件只上传该 EXE，同目录的 `SHA256SUMS.txt` 用于本地核对。
+- 北京时间 2026-11-27 15:22:42 已正式发布主程序 [v1.3.9](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.9)。GitHub Release ID 为 460274759，标题与标签一致。已核对标签指向用户提交 `05ff1295b151f608dd288ce01603c858fad9d929`，Latest 指向此正式版。[仓库发布说明](docs/releases/1.3.9.md)
+- 唯一公开附件为 `UnityYAMLViewer-v1.3.9-windows-x64.exe`。GitHub 返回的 38,572,544 字节和 SHA-256 `89C05055B50EBA20EAE00FAA7A7B5F0AA5E07A83FFBAA071ED38A424D417A305` 与实测 EXE 一致。本地核验记录位于 `target/releases/v1.3.9/published-verification.json`。
 
 # 1.3.9 本地测试构建
 

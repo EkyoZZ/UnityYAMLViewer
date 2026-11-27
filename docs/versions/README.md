@@ -4,7 +4,7 @@
 
 | 版本 | 记录 |
 | --- | --- |
-| 1.3.9 | [摄像头与画中画录制、矢量路径与图层编辑（待发布）](1.3.9.md) · [发布说明](../releases/1.3.9.md) |
+| 1.3.9 | [摄像头与画中画录制、矢量路径与图层编辑（已正式发布）](1.3.9.md) · [发布说明](../releases/1.3.9.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.9) |
 | 1.3.8 | [独立 FBX 预览与关键帧优化（已正式发布）](1.3.8.md) · [发布说明](../releases/1.3.8.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.8) |
 | 1.3.7 | [像素 Tile 与 Prefab 动画预览（已正式发布）](1.3.7.md) · [发布说明](../releases/1.3.7.md) | · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.7)
 | 1.3.6 | [字幕生成／翻译／编辑、Windows 录屏与播放优化（已正式发布）](1.3.6.md) · [发布说明](../releases/1.3.6.md) · [GitHub Release](https://github.com/EkyoZZ/UnityYAMLViewer/releases/tag/v1.3.6) |
